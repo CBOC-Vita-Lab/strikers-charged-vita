@@ -1,0 +1,362 @@
+#include "Game/Task/GameTaskState.h"
+#include "NL/nlDLListContainer.inl"
+#include "Game/BasicStadium.h"
+#include "Game/Render/StadiumWorldObjects.h"
+#include "Game/Render/StadiumPhysicsObject.h"
+#include "Game/Render/SolarFlareEffect.h"
+#include "Game/World/WorldObjectLoadContext.h"
+#include "Game/World/WorldObject.inl"
+#include "Game/TweakBindingInline.h"
+
+#include "Game/Effects/EmissionManager.h"
+#include "Game/Drawable/DrawableObj.h"
+#include "Game/GL/GLInventory.h"
+#include "Game/Render/Frustum.h"
+#include "Game/Render/ImpostorManager.h"
+#include "Game/Render/Warble.h"
+#include "Game/Render/WorldNPC.h"
+#include "Game/World/WorldEffect.h"
+#include "Game/Render/RLView.h"
+#include "NL/gl/gl.h"
+#include "NL/gl/glMemory.h"
+#include "NL/gl/glTarget.h"
+#include "NL/gl/glModel.h"
+#include "NL/nlMath.h"
+#include "NL/nlMemory.h"
+#include "NL/nlTask.h"
+#include "Game/Render/HighRange.h"
+#include "Game/TweakValue.inl"
+#include "np/framepace.h"
+
+#include "Game/SharedStaticStorage.h"
+
+extern "C"
+{
+    float fn_80184AF8(float antiFlimmer);
+    float fn_80184B08();
+}
+
+template <class T>
+static inline DrawableObject* LoadStadiumObject(WorldObjectLoadContext* context,
+    unsigned long recordSize)
+{
+    T* object = (T*)context->m_pObject;
+    new (object) T;
+    object->Initialize(context);
+    context->m_pObject += recordSize;
+    ++context->m_uNumObjectsLoaded;
+    return (DrawableObject*)object;
+}
+
+/**
+ * Address/Size: 0x80278A2C | size: 0x284
+ */
+BasicStadium::BasicStadium(GLResourcePool* pResource)
+    : World(pResource)
+{
+    m_shadowHeight = 0.0f;
+    m_fTime = 0.0f;
+
+    GetEmissionManager()->SetShadowHeight(0.0f);
+    fn_80184B08();
+
+    m_shadowLightPosition.x = 10.0f;
+    m_shadowLightPosition.y = -10.0f;
+    m_shadowLightPosition.z = 40.0f;
+
+    m_pStadiumHighRangeTweaks = new (
+        nlMalloc(sizeof(HighRangeTweaks), 8, false)) HighRangeTweaks();
+    BindHighRangeTweaks(m_pStadiumHighRangeTweaks, "/Rendering/Effects/HighRange/Stadium");
+
+    m_pMegastrikeHighRangeTweaks = new (
+        nlMalloc(sizeof(HighRangeTweaks), 8, false)) HighRangeTweaks();
+    BindHighRangeTweaks(
+        m_pMegastrikeHighRangeTweaks, "/Rendering/Effects/HighRange/Megastrike");
+
+    m_pHighRangeTweaks = m_pStadiumHighRangeTweaks;
+}
+
+/**
+ * Address/Size: 0x80277E28 | size: 0x3A8
+ */
+DrawableObject* BasicStadium::HandleObjectCreation(
+    unsigned long uType, WorldObjectLoadContext* pContext)
+{
+    DrawableObject* pObject = 0;
+    switch (uType)
+    {
+    case WORLD_OBJECT_STADIUM_PHYSICS:
+        pObject = LoadStadiumObject<StadiumPhysicsObject>(pContext, 0x90);
+        break;
+    case WORLD_OBJECT_CUP_TROPHY:
+        pObject = LoadStadiumObject<StadiumCupTrophyDrawable>(pContext, 0x80);
+        break;
+    case WORLD_OBJECT_STADIUM_DRAWABLE:
+        pObject = LoadStadiumObject<StadiumWorldDrawable>(pContext, 0x90);
+        break;
+    case WORLD_OBJECT_STADIUM_LIGHT:
+        pObject = LoadStadiumObject<StadiumLight>(pContext, 0x90);
+        break;
+    case WORLD_OBJECT_ATTACK_SIDE_INDICATOR:
+        pObject = LoadStadiumObject<StadiumAttackSideIndicator>(pContext, 0x80);
+        break;
+    case WORLD_OBJECT_SOLAR_FLARE:
+        pObject = LoadStadiumObject<SolarFlareDrawable>(pContext, 0x80);
+        break;
+    case WORLD_OBJECT_FE_MODEL_MARKER:
+        pObject = LoadStadiumObject<StadiumFEModelMarker>(pContext, 0x70);
+        break;
+    case WORLD_OBJECT_SHADOW_HEIGHT_MARKER:
+        pObject = LoadStadiumObject<StadiumShadowHeightMarker>(pContext, 0x70);
+        break;
+    case WORLD_OBJECT_TOGGLE:
+        pObject = LoadStadiumObject<StadiumToggleDrawable>(pContext, 0x80);
+        break;
+    case WORLD_OBJECT_SHADOW_VOLUME:
+        pObject = LoadStadiumObject<StadiumShadowVolumeDrawable>(pContext, 0x80);
+        break;
+    case WORLD_OBJECT_HIGH_RANGE:
+        pObject = LoadStadiumObject<StadiumHighRangeDrawable>(pContext, 0x90);
+        break;
+    default:
+        break;
+    }
+    return pObject;
+}
+
+/**
+ * Address/Size: 0x802781D0 | size: 0x39C
+ */
+BasicStadium::~BasicStadium()
+{
+    typedef nlAVLTreeIterator<unsigned long, DrawableObject*,
+        DefaultKeyCompare<unsigned long> > DrawableIterator;
+    DrawableIterator* pIterator = m_registeredDrawables.GetIterator();
+    while (pIterator->IsValid())
+    {
+        pIterator->Current()->value->ReleaseResources();
+        if ((pIterator->Current()->value->m_uObjectCreationFlags & 1) == 0)
+        {
+            delete pIterator->Current()->value;
+        }
+        pIterator->Next();
+    }
+    if (pIterator != 0)
+    {
+        delete pIterator;
+    }
+    delete m_pStadiumHighRangeTweaks;
+    delete m_pMegastrikeHighRangeTweaks;
+}
+
+/**
+ * Address/Size: 0x8027856C | size: 0x90
+ */
+void BasicStadium::Update(float fDeltaT, bool bUpdateState, bool bUpdateNPCs)
+{
+    m_fTime += fDeltaT;
+    World::Update(fDeltaT, bUpdateState);
+
+    if (gpWorldNPCManager != 0 && bUpdateNPCs)
+    {
+        gpWorldNPCManager->Update(fDeltaT);
+    }
+
+    ImpostorManager::GetInstance()->UpdateAnimations(fDeltaT);
+    UpdateWarblePhase(&gWarbleEnabled, fDeltaT);
+    glGetCurrentResourcePool()->m_inventory->Update(fDeltaT);
+}
+
+static inline float GetWorldEffectBaseInterval(const WorldEffect* pEffect)
+{
+    return pEffect->m_fEmissionInterval;
+}
+
+/**
+ * Address/Size: 0x802785FC | size: 0x170
+ */
+void fn_802785FC(BasicStadium* pStadium, float fDeltaT)
+{
+    pStadium->m_fTime += fDeltaT;
+    pStadium->World::UpdateAnimations(fDeltaT);
+
+    if (nlTaskManager::m_pInstance->mCurrentState == TASK_NIS)
+    {
+        pStadium->UpdateEffects(fDeltaT);
+
+        for (nlListIterator<WorldEffect*> iterator
+                 = pStadium->m_worldEffects.Begin();
+             iterator.IsValid(); iterator.Next())
+        {
+            WorldEffect* pEffect = iterator.Current();
+            if (pEffect->m_nTimingMode != 0x37U)
+            {
+                continue;
+            }
+            if (pEffect->m_nRemainingEmissions <= 0
+                && pEffect->m_nRemainingEmissions != -1)
+            {
+                continue;
+            }
+
+            float fNextTime = pEffect->m_fPreviousEmissionTime - fDeltaT;
+            if (fNextTime <= 0.0f)
+            {
+                // MSP: one roll per original frame this drawn frame covers, until one succeeds (np/framepace.h)
+                bool roll = false;
+                for (int step = NpPaceSteps(NP_PACE_ROLLS); step > 0 && !roll; --step)
+                {
+                    NpPaceCountRoll();
+                    roll = nlRandom(100, &nlDefaultSeed) < pEffect->m_uProbability;
+                }
+                if (roll)
+                {
+                    pEffect->Emit();
+                    if (-1.0f != pEffect->m_fEmissionIntervalOffset)
+                    {
+                        float fBaseInterval = GetWorldEffectBaseInterval(pEffect);
+                        fNextTime = fBaseInterval + pEffect->m_fEmissionIntervalOffset;
+                    }
+                    else
+                    {
+                        fNextTime = GetWorldEffectBaseInterval(pEffect);
+                    }
+                }
+            }
+            pEffect->m_fPreviousEmissionTime = fNextTime;
+        }
+    }
+
+    if (gpWorldNPCManager != 0)
+    {
+        gpWorldNPCManager->Update(fDeltaT);
+    }
+
+    ImpostorManager::GetInstance()->UpdateAnimations(fDeltaT);
+    UpdateWarblePhase(&gWarbleEnabled, fDeltaT);
+    glGetCurrentResourcePool()->m_inventory->Update(fDeltaT);
+}
+
+/**
+ * Address/Size: 0x8027876C | size: 0x40
+ */
+void fn_8027876C(BasicStadium* pStadium, DrawableObject* pObject)
+{
+    unsigned long uKey = pObject->m_uHashID;
+    pStadium->m_registeredDrawables.Add(uKey, pObject);
+}
+
+/**
+ * Address/Size: 0x802787AC | size: 0x6C
+ */
+DrawableObject* fn_802787AC(BasicStadium* pStadium, unsigned long uHashID)
+{
+    DrawableObject** ppObject;
+    if (!pStadium->m_registeredDrawables.FindGet(uHashID, &ppObject))
+    {
+        return 0;
+    }
+    return *ppObject;
+}
+
+/**
+ * Address/Size: 0x80278818 | size: 0x48
+ */
+void fn_80278818(BasicStadium* pStadium, nlVector4* corners)
+{
+    GetFrustumCorners(
+        pStadium->m_pOpaqueView->m_Interface->GetShadowMatrix(),
+        corners);
+}
+
+static inline void SetWorldEffectsActive(
+    nlListIterator<WorldEffect*> iterator, int active)
+{
+    while (iterator.IsValid())
+    {
+        iterator.Current()->m_bActive = active;
+        iterator.Next();
+    }
+}
+
+/**
+ * Address/Size: 0x80278860 | size: 0x5C
+ */
+void fn_80278860(BasicStadium* pStadium, int active)
+{
+    if (EmissionManager::Instance() == 0)
+    {
+        return;
+    }
+
+    SetWorldEffectsActive(pStadium->m_worldEffects.Begin(), active);
+}
+
+/**
+ * Address/Size: 0x802788BC | size: 0x50
+ */
+void SetStadiumShadowHeight(BasicStadium* pStadium, float fHeight)
+{
+    pStadium->m_shadowHeight = fHeight;
+    fn_80184AF8(pStadium->m_shadowHeight);
+    GetEmissionManager()->SetShadowHeight(pStadium->m_shadowHeight);
+}
+
+/**
+ * Address/Size: 0x8027890C | size: 0x94
+ */
+void fn_8027890C(BasicStadium* pStadium, const char* effects, unsigned long uType)
+{
+    EmissionManager* pManager = EmissionManager::Instance();
+    EffectsGroup* pGroup = pManager->GetEffectsGroup(effects);
+
+    for (nlListIterator<WorldEffect*> iterator = pStadium->m_worldEffects.Begin();
+         iterator.IsValid(); iterator.Next())
+    {
+        WorldEffect* pEffect = iterator.Current();
+        if (uType == (unsigned long)pEffect->m_nTimingMode && pGroup != 0)
+        {
+            pManager->Kill((unsigned long)pEffect, pGroup);
+        }
+    }
+}
+
+/**
+ * Address/Size: 0x802789A0 | size: 0x8
+ */
+float fn_802789A0(BasicStadium* pStadium)
+{
+    return pStadium->m_fTime;
+}
+
+/**
+ * Address/Size: 0x802789A8 | size: 0x58
+ */
+void fn_802789A8(BasicStadium* pStadium, unsigned long uType)
+{
+    for (nlListIterator<WorldEffect*> iterator = pStadium->m_worldEffects.Begin();
+         iterator.IsValid(); iterator.Next())
+    {
+        WorldEffect* pEffect = iterator.Current();
+        if (uType == (unsigned long)pEffect->m_nTimingMode)
+        {
+            pEffect->Emit();
+        }
+    }
+}
+
+/**
+ * Address/Size: 0x80278A00 | size: 0x2C
+ */
+void BasicStadium::SetEffectsActive(unsigned long uType, int active)
+{
+    for (nlListIterator<WorldEffect*> iterator = m_worldEffects.Begin();
+         iterator.IsValid(); iterator.Next())
+    {
+        WorldEffect* pEffect = iterator.Current();
+        if (uType == (unsigned long)pEffect->m_nTimingMode)
+        {
+            pEffect->m_bActive = active;
+        }
+    }
+}

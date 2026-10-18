@@ -1,0 +1,26 @@
+# W5-CAM: boot to the main menu (the save is loaded or created there), open Options > Visual (scene 15, the game's own
+# OptionsVisualMenuV2: Auto Zoom on/off and Zoom Level 1..5) and stay on it: the picture shows the level the game holds.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+scene 13
+idle 60
+log STATE options
+scene 15
+idle 90
+log STATE visual options
+idle 4
+log STATE script end
+exit

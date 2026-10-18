@@ -1,0 +1,9 @@
+# Vita3K (container, software GL): boot -> menus -> kick-off -> open play with the oracle's nav_kickoff.txt (copied next to this file by FILES=).
+# The renderer draws at a fraction of the screen (MSC_VITA_RENDER) because llvmpipe is the bottleneck here; the control flow is what is checked.
+MSC_INPUT_SCRIPT=nav_kickoff.txt
+MSC_MAX_FRAMES=3700
+MSC_WATCH=1
+MSC_WATCH_EVERY=120
+MSC_FRAME_TIMING=300
+MSC_VITA_RENDER=320x224
+NP_DATA_DIR=ux0:data/mscharged/np-data

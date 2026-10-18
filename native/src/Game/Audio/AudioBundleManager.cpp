@@ -1,0 +1,99 @@
+#include "revolution/types.h"
+#include "NL/nlDLListContainer.inl"
+#include "Game/Audio/AudioBackend.h"
+#include "Game/Audio/AudioCalculation.h"
+#include "Game/Audio/AudioBundleManager.h"
+#include "Game/Audio/AudioBankTable.h"
+#include "Game/Audio/AudioSlider.h"
+
+#include "Game/Audio/AudioSystem.h"
+#include "Game/Audio/RegistryPools.h"
+
+#include "NL/nlChunk.h"
+#include "NL/nlFile.h"
+#include "NL/nlMemory.h"
+#include "NL/nlPrint.h"
+
+AudioBundleManager::AudioBundleManager()
+    : m_Backend(0)
+    , m_Initialized(false)
+    , m_SliderTable(0)
+    , m_CalculationTable(0)
+    , m_BankTable(0)
+{
+    m_Loaded = false;
+    m_Backend = new (8, false) AudioBackend;
+}
+
+void AudioBundleManager::Load(const char* path)
+{
+    char fileName[128];
+    nlSNPrintf(fileName, sizeof(fileName), "%s%s", path, "nlxgs.bun");
+
+    if (g_pAudioSystem->IsAsyncLoading())
+    {
+        nlLoadEntireFileAsync(fileName, OnBundleLoaded, this, 0x20, AllocateStart, 0, 0, 0);
+        return;
+    }
+
+    unsigned long size;
+    void* data = nlLoadEntireFile(
+        fileName, &size, 0x20, AllocateStart, 0, 0, 0);
+    OnBundleLoaded(data, size, this);
+}
+
+bool AudioBundleManager::Initialize()
+{
+    return m_Backend->Initialize();
+}
+
+void AudioBundleManager::OnBundleLoaded(
+    void* data, unsigned long, void* manager)
+{
+    nlChunk* chunk = (nlChunk*)data;
+    AudioBundleManager* self = (AudioBundleManager*)manager;
+    self->m_LoadedData = data;
+
+    nlChunk* end = chunk->GetLastChunk();
+    chunk = chunk->GetFirstChunk();
+    while (chunk != end)
+    {
+        self->ParseChunk(chunk);
+        chunk = chunk->GetNextChunk();
+    }
+    self->OnLoadComplete();
+}
+
+void AudioBundleManager::ParseChunk(nlChunk* chunk)
+{
+    switch (chunk->GetID())
+    {
+    case 0x80023800:
+        break;
+    case 0x80023500:
+        m_BankTable = AudioBankTable::ParseChunk(chunk);
+        m_BankTable->Initialize();
+        break;
+    case 0x80023400:
+        m_CalculationTable = ParseAudioCalculationTable(chunk);
+        break;
+    case 0x80023100:
+        m_SliderTable = ParseAudioSliderTable(chunk);
+        break;
+    case 0x1200:
+        if (m_Runtime.m_Registry.Load(
+                chunk->GetData(),
+                chunk->GetDataSize(),
+                false))
+        {
+            m_Runtime.m_ConfigRoot
+                = (AudioConfigNode*)m_Runtime.m_Registry.GetRoot();
+        }
+        break;
+    case 0x23704:
+        m_Runtime.LoadScriptData(
+            chunk->GetData(),
+            chunk->GetDataSize());
+        break;
+    }
+}

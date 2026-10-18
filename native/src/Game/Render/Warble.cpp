@@ -1,0 +1,340 @@
+#include "Game/Render/Warble.h"
+#include "Game/GL/GLWarbleMeshWriter.h"
+#include "Game/Render/RLView.h"
+#include "Game/TweakValueFloat.h"
+#include "Game/SharedStaticStorage.h"
+#include "NL/gl/gl.h"
+#include "NL/gl/glState.h"
+#include "NL/gl/glView.h"
+#include "NL/glx/glxTexture.h"
+#include "types.h"
+#ifdef NP_NATIVE
+#include "port/endian.h"
+#include "np/framesend.h"
+#endif
+
+static char sWarbleBlobTexture[] = "global/warble_blob";
+static char sWarbleTexture[] = "target/warbletexture";
+static char sWarbleColourTexture[] = "target/warblecolour";
+
+static int sWarbleOutputExtent = 400;
+static float sWarbleDisplacementScale = 128.0f;
+static float sWarbleAmplitude = 0.85f;
+
+static float sWarbleBlob[64][64];
+
+static float sWarbleLeft;
+static float sWarbleTop;
+static int sWarbleInputExtent;
+bool gWarbleEnabled;
+static float sWarblePhase;
+
+static TweakValueFloat sWarbleFrequency(
+    "gfWarbleFreq", "/Rendering/Effects/Warble", 60.0f);
+static TweakValueFloat sWarbleRate(
+    "gfWarbleRate", gLastTweakCategory, 10.0f);
+
+enum WarbleByteRow
+{
+    WarbleByteRow0 = 0,
+    WarbleByteRow1 = 8,
+    WarbleByteRow2 = 16,
+    WarbleByteRow3 = 24
+};
+
+struct WarbleBlobRow
+{
+    const PlatTexture* texture;
+    int blockRow;
+    float* output;
+    int byteRow;
+
+    WarbleByteRow ByteRow() const { return (WarbleByteRow)byteRow; }
+};
+
+struct WarbleCI8Column
+{
+    const u8* data;
+    u8 Pixel(int block, WarbleByteRow row) const
+    {
+        return (data + row)[block << 5];
+    }
+};
+
+static inline WarbleCI8Column WarbleColumn(const PlatTexture* texture, int x)
+{
+    WarbleCI8Column result = {
+        static_cast<const u8*>(texture->m_SwizzledData) + (x & 7)
+    };
+    return result;
+}
+
+struct WarblePalette
+{
+    u16* data;
+    u16 Colour(u8 index) const
+    {
+#ifdef NP_NATIVE
+        return port_be16(&data[index]);   // GX palette: big-endian in memory (port/endian.h)
+#else
+        return data[index];
+#endif
+    }
+};
+
+static inline WarblePalette BlobPalette(const PlatTexture* texture)
+{
+    WarblePalette result = { texture->m_PaletteData };
+    return result;
+}
+
+static inline u8 ReadWarbleBlobValue(const WarbleBlobRow& row, int x)
+{
+    const WarblePalette palette = BlobPalette(row.texture);
+    int block = row.blockRow * (row.texture->m_Width >> 3) + (x >> 3);
+    const WarbleByteRow byteRow = row.ByteRow();
+    const WarbleCI8Column column = WarbleColumn(row.texture, x);
+    u8 paletteIndex = column.Pixel(block, byteRow);
+    const u16 colour = palette.Colour(paletteIndex);
+    if (colour & 0x8000)
+    {
+        unsigned int component = (colour >> 10) & 0x1F;
+        return component * 255 / 31;
+    }
+
+    unsigned int component = (colour >> 8) & 0x0F;
+    return component * 255 / 15;
+}
+
+void LoadWarbleBlob()
+{
+    PlatTexture* texture = glx_GetTex(glGetTexture(sWarbleBlobTexture));
+    int x;
+    int y;
+
+    for (y = 0; y < 64; ++y)
+    {
+        const WarbleBlobRow row = {
+            texture, y >> 2, sWarbleBlob[(unsigned int)y], (y & 3) << 3
+        };
+        for (x = 0; x < 64; ++x)
+        {
+            const u8 value = ReadWarbleBlobValue(row, x);
+            row.output[(unsigned int)x] = (float)value / 255.0f;
+        }
+    }
+
+    for (y = 0; y < 64; ++y)
+        for (x = 0; x < 64; ++x)
+            sWarbleBlob[y][x] *= 127.0f;
+
+    sWarbleBlob[y >> 1][x >> 1] = 0.0f;
+}
+
+static inline int IA8TilePixelIndex(unsigned int x, unsigned int y)
+{
+    return ((y & 3) << 2) | (x & 3);
+}
+
+static inline int IA8TileRowIndex(int y, int pixel)
+{
+    return ((y & ~3) << 6) | pixel;
+}
+
+struct WarbleIA8Pixel
+{
+    u8 channels[2];
+    WarbleIA8Pixel& operator=(const WarbleIA8Pixel& source)
+    {
+        for (int channel = 0; channel < 2; ++channel)
+            channels[channel] = source.channels[channel];
+        return *this;
+    }
+};
+
+static inline WarbleIA8Pixel& IA8PixelAt(u8* output, int offset)
+{
+    return *reinterpret_cast<WarbleIA8Pixel*>(output + offset);
+}
+
+union IA8PackedRow
+{
+    unsigned int word;
+    struct
+    {
+        unsigned int tileRow : 24;
+        unsigned int tileColumn : 4;
+        unsigned int pixelY : 2;
+        unsigned int pixelX : 2;
+    } fields;
+};
+
+static inline int IA8RowBits(int y)
+{
+    IA8PackedRow row;
+    row.word = (y & ~3) << 6;
+    // NP: was `row.fields.pixelY = y`, a store into bits 2..3 of the word on the console (the first
+    // declared field is the most significant); on a little-endian target pixelY is bits 28..29.
+    row.word |= (y & 3) << 2;
+    return row.word;
+}
+
+static inline int IA8ColumnBits(int x)
+{
+    return (x & 3) | ((x >> 2) << 4);
+}
+
+static inline IA8PackedRow CopyIA8PixelToRow(u8* output, int y, int column,
+    const WarbleIA8Pixel& source)
+{
+    IA8PackedRow row;
+    row.word = (y & 3) << 2;
+    row.word |= (y & ~3) << 6;
+    IA8PixelAt(output, (row.word | column) << 1) = source;
+    return row;
+}
+
+static inline void MirrorWarblePixel(u8* output, int x, int y)
+{
+    const int row = IA8RowBits(y);
+    const int column = IA8ColumnBits(x);
+    const int reflectedColumn = IA8ColumnBits(63 - x);
+    const WarbleIA8Pixel& source = IA8PixelAt(output, (row | column) << 1);
+    const int mirrorX = (row | reflectedColumn) << 1;
+    IA8PixelAt(output, mirrorX) = source;
+    const IA8PackedRow reflectedRow = CopyIA8PixelToRow(output, 63 - y, column, source);
+    const int mirrorXY = (reflectedRow.word | reflectedColumn) << 1;
+    IA8PixelAt(output, mirrorXY) = source;
+}
+
+struct WarbleRowGenerator
+{
+    static void Apply(u8* output, int& x, const int& y, float dy, float phase, float frequency, float amplitude)
+    {
+        for (x = 0; x < 32; ++x)
+        {
+            const float source = sWarbleBlob[y][x];
+            int displacement;
+            if (source == 0.0f)
+            {
+                displacement = 124;
+            }
+            else
+            {
+                const float dx = (float)x * (1.0f / 64.0f) - 0.5f;
+                const float radius = nlSqrt(dx * dx + dy * dy, false);
+                const float inverseRadius = 1.0f / radius;
+                const float radialY = dy * inverseRadius;
+                const float wave = nlSin(
+                    (u16)(s32)((radius * frequency + phase) * 10430.378f));
+                float scaledWave = radialY * wave;
+                scaledWave = sWarbleDisplacementScale * scaledWave;
+                displacement = (int)(amplitude * scaledWave + 128.0f);
+            }
+
+            const int pixel = IA8TilePixelIndex(x, y);
+            const int rowPixel = IA8TileRowIndex(y, pixel);
+            const int offset = (rowPixel | ((x >> 2) << 4)) << 1;
+            const float normalized = (float)(u8)(int)source / 255.0f;
+            const int inputExtent = sWarbleInputExtent;
+            const int mapped = (int)((float)inputExtent + normalized * (float)(sWarbleOutputExtent - inputExtent));
+            output[offset] = (u8)mapped;
+            output[offset + 1] = (u8)displacement;
+        }
+    }
+};
+
+struct WarbleRowMirror
+{
+    static void Apply(u8* output, int& x, int y)
+    {
+        for (x = 0; x < 32; ++x)
+            MirrorWarblePixel(output, x, y);
+    }
+};
+
+static inline void ProcessWarbleQuadrant(u8* output, int& x, int& y,
+    float phase, float frequency, float amplitude, bool generate)
+{
+    for (y = 0; y < 32; ++y)
+    {
+        const float dy = (float)y * (1.0f / 64.0f) - 0.5f;
+        if (generate)
+            WarbleRowGenerator::Apply(output, x, y, dy, phase, frequency, amplitude);
+        else
+            WarbleRowMirror::Apply(output, x, y);
+    }
+}
+
+void GenerateWarbleTexture(float phase, float frequency, float amplitude)
+{
+    int y;
+    int x;
+#ifdef NP_NATIVE
+    NpFsGate("texwrite");   // NP (pipeline): the send reads this texture's data, and the data is rewritten in place every frame the warble runs
+#endif
+    PlatTexture* texture = glx_GetTex(glGetTexture(sWarbleTexture));
+    u8* output = static_cast<u8*>(texture->m_SwizzledData);
+    ProcessWarbleQuadrant(output, x, y, phase, frequency, amplitude, true);
+    ProcessWarbleQuadrant(output, x, y, phase, frequency, amplitude, false);
+}
+
+void UpdateWarbleTexture(bool*)
+{
+    GenerateWarbleTexture(
+        sWarblePhase, sWarbleFrequency.value, sWarbleAmplitude);
+}
+
+void UpdateWarblePhase(bool*, float dt)
+{
+    float phase = sWarblePhase;
+    float rate = sWarbleRate.value;
+    float scaled = dt * rate;
+    sWarblePhase = phase - scaled;
+}
+
+void RenderWarbleQuad(bool*)
+{
+    static u32 sWarbleColourHandle = glGetTexture(sWarbleColourTexture);
+
+    GLWarbleMeshWriter writer;
+    glSetDefaultState(false);
+
+    const float left = sWarbleLeft;
+    const float top = sWarbleTop;
+    const float right = sWarbleLeft + glGetOrthographicWidth();
+    const float bottom = sWarbleTop + glGetOrthographicHeight();
+
+    if (writer.Begin(4, 3, 0))
+    {
+        writer.Colour(0xFF, 0xFF, 0xFF, 0xFF);
+        writer.Texcoord(0, 0);
+        writer.Position(left, top, 0.0f);
+
+        writer.Colour(0xFF, 0xFF, 0xFF, 0xFF);
+        writer.Texcoord(0, 0x400);
+        writer.Position(left, bottom, 0.0f);
+
+        writer.Colour(0xFF, 0xFF, 0xFF, 0xFF);
+        writer.Texcoord(0x400, 0x400);
+        writer.Position(right, bottom, 0.0f);
+
+        writer.Colour(0xFF, 0xFF, 0xFF, 0xFF);
+        writer.Texcoord(0x400, 0);
+        writer.Position(right, top, 0.0f);
+
+        writer.Texture(0, sWarbleColourHandle);
+
+        if (writer.End())
+            GetLayerView(eCLV_WarbleBlend)->AttachModel(writer.model, 0);
+    }
+}
+
+void InitializeWarbleRendering(bool*)
+{
+    LoadWarbleBlob();
+}
+
+void ShutdownWarbleRendering(bool*)
+{
+}

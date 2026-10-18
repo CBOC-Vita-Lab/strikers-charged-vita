@@ -1,0 +1,174 @@
+# W5-SEED generated script: main menu item 3 (challenge): A until the next state
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+mash 100 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu, pointer on item 0
+idle 30
+
+mash 4 30 onctx == 3 900
+idle 20
+log STATE main menu item 3 under the pointer
+press 100
+idle 300
+mash 100 45 ingame == 1 12000
+log STATE match object
+mash 100 30 gs == 5 8000
+log STATE open play
+hold 8 800 63 -34
+hold 10 100 27 -66
+hold 10 0 20 -68
+hold 6 0 66 -27
+hold 14 800 -2 71
+hold 20 0 -72 0
+hold 4 0 66 -27
+hold 8 10 -58 -41
+hold 20 20 56 -45
+hold 10 0 3 71
+hold 4 200 -51 -50
+hold 30 410 71 8
+hold 14 800 -71 6
+hold 8 10 37 61
+hold 14 0 -72 0
+hold 8 0 16 -69
+hold 14 20 42 -58
+hold 4 400 39 -60
+hold 8 0 72 0
+hold 8 0 71 -11
+hold 4 10 72 0
+hold 10 40 -72 0
+hold 20 0 72 0
+hold 8 0 72 0
+hold 6 0 -72 0
+hold 14 100 72 0
+hold 6 440 -72 0
+hold 8 0 -68 -21
+hold 14 800 71 7
+hold 10 0 -4 71
+hold 20 200 -72 0
+hold 14 400 -32 64
+hold 14 10 -71 2
+hold 30 40 -25 -67
+hold 10 0 -68 21
+hold 14 0 72 0
+hold 20 100 -71 11
+hold 6 0 70 16
+hold 30 800 -69 20
+hold 8 100 56 44
+hold 20 20 -61 37
+hold 30 400 5 71
+hold 10 200 -72 0
+hold 14 200 72 0
+hold 4 0 72 0
+hold 8 400 72 0
+hold 8 0 72 0
+hold 6 0 -59 -39
+hold 6 20 50 51
+hold 20 0 23 68
+hold 14 40 25 67
+hold 8 100 -71 3
+hold 4 820 70 12
+hold 30 200 -72 0
+hold 6 40 -57 42
+hold 20 0 -22 68
+hold 30 0 55 -45
+hold 6 50 54 47
+hold 8 100 -66 27
+hold 10 0 72 0
+hold 30 40 5 71
+hold 8 0 -72 0
+hold 14 200 72 0
+hold 6 0 -72 0
+hold 30 0 -63 33
+hold 30 0 69 19
+hold 8 400 -63 34
+hold 14 0 -71 4
+hold 6 0 67 25
+hold 14 410 -61 -37
+hold 10 0 72 0
+hold 14 10 -72 0
+hold 4 0 72 0
+hold 10 0 72 0
+hold 4 0 -17 -69
+hold 14 0 -71 11
+hold 4 20 72 0
+hold 8 40 54 47
+hold 30 0 -60 -39
+hold 14 400 71 5
+hold 20 0 -72 0
+hold 4 0 72 0
+hold 8 10 72 0
+hold 14 200 26 -67
+hold 14 0 72 0
+hold 8 400 -65 30
+hold 6 0 -72 0
+hold 4 0 54 46
+hold 4 0 -61 37
+hold 14 0 -72 0
+hold 4 0 -71 11
+hold 14 0 36 -61
+hold 14 400 29 65
+hold 4 0 72 0
+hold 4 0 -25 67
+hold 14 0 -59 40
+hold 4 0 -24 67
+hold 30 40 -69 18
+hold 20 100 -66 -27
+hold 10 0 72 0
+hold 14 0 51 50
+hold 10 0 72 0
+hold 30 0 -69 -17
+hold 14 0 32 64
+hold 14 10 -33 -63
+hold 6 800 -23 -67
+hold 10 200 72 0
+hold 6 400 61 -38
+hold 4 0 72 0
+hold 8 20 72 0
+hold 20 0 -46 -55
+hold 4 100 -72 0
+hold 4 40 -1 71
+hold 4 0 0 71
+hold 6 200 -8 -71
+hold 20 100 72 0
+hold 8 0 72 0
+hold 8 0 72 0
+hold 30 120 -68 -22
+hold 4 0 72 0
+hold 8 40 -72 0
+hold 6 0 72 0
+hold 14 300 13 70
+hold 8 0 -72 0
+hold 6 900 72 0
+hold 14 240 72 0
+hold 30 40 47 54
+hold 14 100 -9 71
+hold 6 800 -33 63
+hold 8 800 -71 7
+hold 30 0 -72 0
+hold 30 0 72 0
+hold 8 0 12 70
+hold 20 400 -72 0
+hold 14 30 35 -62
+hold 6 20 -70 -12
+hold 14 400 34 -63
+hold 10 0 -23 -68
+hold 30 400 -70 14
+hold 20 20 -72 0
+hold 10 0 72 0
+hold 6 10 -47 54
+hold 14 20 -72 0
+hold 14 0 67 -24
+log STATE script end
+exit

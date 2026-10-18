@@ -1,0 +1,63 @@
+# W5-ITEM generated script: giant bobomb (GIANT cheat)
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=15 home=4 away=9 hsk=0,1,2 ask=5,6,7 human=0 time=300 skill=0 powerup=4
+wait ingame == 1 4000
+log STATE match object
+mash 100 30 gs == 1 4000
+log STATE kick-off
+wait gs == 5 6000
+log STATE open play
+idle 20
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+log ITEM gi_bobomb phase open
+tap 100 20 task == 2 && ctl >= 0 900
+item me bobomb 1 set
+tap 0 1 item0 == 5 120
+aim opp 0 dopp < 4.5 240
+log ITEM gi_bobomb use open
+tap 100 20 task == 2 && ctl >= 0 900
+tap 400 12 item0 != 5 240
+idle 180
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+log ITEM gi_bobomb phase goal
+tap 100 20 task == 2 && ctl >= 0 900
+aim goal 0 dgoal < 13 420
+item me bobomb 1 set
+tap 0 1 item0 == 5 120
+aim keeper 0 dkeep < 9 60
+log ITEM gi_bobomb use keeper
+aim keeper 400 item0 != 5 30
+tap 100 20 task == 2 && ctl >= 0 900
+tap 400 12 item0 != 5 240
+idle 180
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+log ITEM gi_bobomb phase cycle
+tap 100 20 task == 2 && ctl >= 0 900
+item me bobomb 1 set
+item me mushroom 1 add
+tap 0 1 item0b == 7 120
+log ITEM gi_bobomb cycle press Z
+press 10 3 10
+tap 0 1 item0 == 7 60
+log ITEM gi_bobomb cycled: mushroom in front
+tap 100 20 task == 2 && ctl >= 0 900
+tap 400 12 item0 != 7 240
+idle 90
+tap 0 1 item0 == 5 60
+aim opp 0 dopp < 4.5 240
+log ITEM gi_bobomb use after cycle
+tap 100 20 task == 2 && ctl >= 0 900
+tap 400 12 item0 != 5 240
+idle 180
+log STATE script end
+idle 60
+exit

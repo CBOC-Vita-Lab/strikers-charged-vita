@@ -1,0 +1,19 @@
+# VRS (wave 4): the timed scripted match (nav/match60.txt) with the render thread's profile and the call census, for two packages (vitaGL strict / perf deps).
+# MSC_VGX_PROF=2: every 100 presented frames "[vgx] prof ..." (back end ms per frame by command type, then "| thread: period idle rest") and "[vgx] per frame:" (the census).
+# MSC_VGX_GLSTATS / MSC_VGX_FRAMESTATS: per-frame csv files next to the log (GL call census; front-end draws, vertices, triangles, texture uploads, render hash).
+# Run: RUNS_DIR=.../VRS/v3k-runs PROFILE_DIR=.../VRS/v3k FILES=platform/vita/session/nav/match60.txt platform/vita/tools/job_v3k.sh <tag> 840 <this file> "script end" <vpk>
+MSC_INPUT_SCRIPT=match60.txt
+MSC_MAX_FRAMES=12000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=300
+MSC_VITA_MEMSTATS=1
+MSC_VITA_RENDER=320x224
+MSC_VGX_PROF=2
+MSC_VGX_GLSTATS=ux0:data/mscharged/glstats.csv
+MSC_VGX_FRAMESTATS=ux0:data/mscharged/vgx_frames.csv
+NP_DATA_DIR=ux0:data/mscharged/np-data
+# VRS: only the back end on its own thread (the frame-send worker stays on core 2).
+MSC_VGX_BACKEND_THREAD=1
+# VRS: stage numbers and hand-shake counters of the three threads (needs a package built from vgx VRS 'MSC_VGX_ASYNCLOG' on)
+MSC_VGX_ASYNCLOG=1

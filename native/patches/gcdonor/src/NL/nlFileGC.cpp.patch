@@ -1,0 +1,54 @@
+diff --git a/src/NL/nlFileGC.cpp b/src/NL/nlFileGC.cpp
+index bf4b8d7..8c32920 100644
+--- a/src/NL/nlFileGC.cpp
++++ b/src/NL/nlFileGC.cpp
+@@ -119,6 +119,8 @@ public:
+ 
+ static AsyncManager* s_pAsyncManager;
+ static bool sServicingReads;
++// NP: how many AsyncManager::Service calls are active (a completion callback can queue another read).
++static int sNpServiceDepth;
+ 
+ bool IsAsyncReadBusy(AsyncEntry* entry);
+ 
+@@ -156,7 +158,11 @@ nlFile* nlOpen(const char* fileName)
+     }
+     else
+     {
+-        file = new DolphinFile(FileEntrynum);
++        // NP: DolphinFile::operator new hands out one of 96 static slots and returns null when they
++        // are all taken; a compiler may assume a replaceable new never returns null and run the
++        // constructor on it, so take the slot first and construct only if there is one.
++        void* slot = DolphinFile::sAllocator.Allocate();
++        file = slot != 0 ? ::new (slot) DolphinFile(FileEntrynum) : 0;
+     }
+     return file;
+ }
+@@ -255,6 +261,15 @@ AsyncEntry* AsyncManager::AddEntry(DolphinFile* pFile, ReadAsyncCallback pFunc,
+     void* pBuffer, unsigned long position, unsigned long uSize, unsigned long uParam,
+     AsyncReadPhase phase)
+ {
++    // NP: the queue holds 64 entries and a refused one is a read that never happens while the caller
++    // has already advanced the file position (strikersVita found the same hole in the GameCube
++    // port). Wait for outstanding reads instead; not from inside Service itself, where servicing
++    // again would walk the list under the outer loop.
++    for (unsigned long spins = 0; m_freeEntryList == 0 && sNpServiceDepth == 0 && spins < 1000000; spins++)
++    {
++        OSYieldThread();
++        Service();
++    }
+     if (m_freeEntryList == 0)
+     {
+         return 0;
+@@ -280,6 +295,11 @@ AsyncEntry* AsyncManager::AddEntry(DolphinFile* pFile, ReadAsyncCallback pFunc,
+ 
+ void AsyncManager::Service()
+ {
++    struct NpServiceDepth
++    {
++        NpServiceDepth() { ++sNpServiceDepth; }
++        ~NpServiceDepth() { --sNpServiceDepth; }
++    } npServiceDepth;
+     AsyncEntry* entry = m_activeEntryList == 0 ? 0 : m_activeEntryList->m_next;
+     bool stop = false;
+ 

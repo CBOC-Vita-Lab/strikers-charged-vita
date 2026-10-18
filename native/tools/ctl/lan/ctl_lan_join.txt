@@ -1,0 +1,252 @@
+# W5 CTL generated (tools/ctl/gen_scripts.py) from tools/mp/lan/lan_join.txt: the match part in Vita buttons
+# LAN joiner: boot to the main menu, Multiplayer, Join Game, wait for the host to start.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 24 2400
+log STATE lobby
+idle 400
+press 4
+idle 30
+press 100
+log joining
+wait peers >= 2 7200
+log STATE joined
+wait scene != 24 7200
+log STATE launched
+# Draft, captains, sidekicks, stadium: accept whatever is highlighted until the match is loaded.
+mash 100 45 ingame == 1 12000
+log STATE in match
+wait gs == 5 6000
+log STATE open play
+vhold 60 none 72 0
+vpress cross 3 20
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vpress cross 3 20
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vhold 60 none 72 0
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vhold 60 none 72 0
+vpress cross 3 20
+vhold 60 none 72 0
+vpress cross 3 20
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vpress cross 3 20
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vhold 60 none 72 0
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vhold 60 none 72 0
+vpress cross 3 20
+vhold 60 none 72 0
+vpress cross 3 20
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vpress cross 3 20
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vhold 60 none 72 0
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+vhold 60 none 72 0
+vpress cross 3 20
+vhold 60 none 72 0
+vpress cross 3 20
+vhold 40 none 0 72
+vpress square 3 30
+vpress circle 12 30
+vhold 30 none -60 -40
+vpress l 3 20
+vpress r 3 30
+rtouch 720 272 3 20
+vpress triangle 3 20
+vhold 40 r 72 0
+vpress r+circle 6 30
+rtouch 220 272 3 20
+vpress select 3 20
+vhold 4 none 0 0 72 0
+vhold 30 none 50 50
+vpress square 3 20
+vhold 20 l
+idle 20
+vhold 3 right
+idle 20
+log STATE played
+exit

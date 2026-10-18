@@ -1,0 +1,436 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/HBMManager.h"
+
+#include "Game/SH/SHPause.h"
+#include "NL/nlPrint.h"
+#include "Game/FE/feHelpFuncs_decl.h"
+
+#include "Game/GameSceneManager.h"
+#include "Game/DB/StatsTracker.h"
+#include "Game/DB/GameProgress.h"
+#include "Game/FE/FEAudio.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feFinder_impl.h"
+#include "Game/FE/feManager.h"
+#include "Game/FE/fePackage.h"
+#include "Game/FE/fePopupMenu.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/feSceneManager.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/Game.h"
+#include "Game/GameInfo.h"
+#include "Game/Render/ShootToScoreArrow.h"
+#include "Game/SH/SHPausePostGame.h"
+#include "Game/Task/GameRenderTask.h"
+#include "Game/main.h"
+#include "NL/glx/glxSwap.h"
+#include "NL/nlBind.h"
+#include "NL/nlFunction.inl"
+#include "Game/FE/feDPD.h"
+#include "Game/FE/tlDefault.h"
+
+
+static const char* MENU_NAMES[7] = {
+    "btn_0", "btn_1", "btn_2", "btn_3", "btn_4", "btn_5", "btn_6"
+};
+
+eFEINPUT_PAD PauseMenuScene::mControllingInput = FE_ALL_PADS;
+float PauseMenuScene::mDelayBeforeUnpause = 0.1f;
+s32 PauseMenuScene::mLastSelectedIndex;
+
+/**
+ * Offset/Address/Size: 0x0 | 0x80239454 | size: 0x114
+ */
+PauseMenuScene::PauseMenuScene()
+    : mGameIsOver(false)
+    , mQuitDelay(0.0f)
+    , mQuittingController(FE_ALL_PADS)
+    , mInitialized(false)
+    , mTransitionTo(TT_IN)
+    , mIsInTransition(false)
+    , mStartAnimAtEnd(false)
+    , mSelectionMade(false)
+    , mIntroSoundPlayed(false)
+{
+    mDelayBeforeUnpause = 0.1f;
+    for (int i = 0; i < 7; ++i)
+    {
+        mOptionButtons[i].mContext = (void*)i;
+        // Retail also clears three words beyond the four controller counts.
+        mHoverCounts[i] = 0;
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x114 | 0x80239568 | size: 0x88
+ */
+PauseMenuScene::~PauseMenuScene()
+{
+    g_bRenderWorld = true;
+}
+
+void PauseMenuScene::OnSelectRESUME(TLComponentInstance* instance)
+{
+    TransitionOut(TT_OUT);
+    g_pFEInput->Reset();
+    mSelectionMade = true;
+    mLastSelectedIndex = 0;
+    FEAudio::PlayAnimAudioEvent(0xDF52130F, 0, 0, 1);
+}
+
+/**
+ * Offset/Address/Size: 0x19C | 0x802395F0 | size: 0x6E0
+ */
+void PauseMenuScene::OnSelectQUIT()
+{
+    mSelectionMade = true;
+    if (FrontEnd::m_bGameOver)
+    {
+        g_pOverlayManager->Pop();
+        g_pOverlayManager->Pop();
+    }
+    else
+    {
+        FEPopupMenu* popup = (FEPopupMenu*)g_pOverlayManager->Push(SCENE_POPUP_MENU, SCREEN_NOTHING, false);
+        popup->mControlInput = mQuittingController;
+        popup->mAllPointersActive = true;
+        WorldDarkening::Instance().Fade(100.0f, 1.0f);
+        if (GameInfoManager::Instance()->mIsInStrikers101Mode)
+        {
+            popup->Create(POPUP_STRIKERS_101_QUITTING,
+                Bind<void>(MemFun(&PauseMenuScene::OnSelectPopupYESFORFEIT), this),
+                Bind<void>(MemFun(&PauseMenuScene::OnSelectPopupNOFORFEIT), this));
+        }
+        else if (GameInfoManager::Instance()->mCurrentMode == GameInfoManager::GM_FRIENDLY
+            || GameInfoManager::Instance()->IsInMode4() || g_pGame->m_eGameState == GS_END_GAME)
+        {
+            popup->Create(POPUP_QUIT,
+                Bind<void>(MemFun(&PauseMenuScene::OnSelectPopupYESFORFEIT), this),
+                Bind<void>(MemFun(&PauseMenuScene::OnSelectPopupNOFORFEIT), this));
+        }
+        else if (GameInfoManager::Instance()->IsInMode3()
+            || (GameInfoManager::Instance()->IsInMode1()
+                && GameInfoManager::Instance()->GetPlayingSide((unsigned short)mQuittingController) != -1))
+        {
+            popup->Create(POPUP_FORFEIT,
+                Bind<void>(MemFun(&PauseMenuScene::OnSelectPopupYESFORFEIT), this),
+                Bind<void>(MemFun(&PauseMenuScene::OnSelectPopupNOFORFEIT), this));
+        }
+        else
+        {
+            popup->Create(POPUP_FORFEIT_NO_TEAM,
+                Bind<void>(MemFun(&PauseMenuScene::OnSelectPopupNOFORFEIT), this));
+        }
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x87C | 0x80239CD0 | size: 0x40
+ */
+void PauseMenuScene::OnSelectPopupNOFORFEIT()
+{
+    WorldDarkening::Instance().Fade(100.0f, 0.0f);
+    mSelectionMade = false;
+}
+
+/**
+ * Offset/Address/Size: 0x8BC | 0x80239D10 | size: 0x204
+ */
+void PauseMenuScene::OnSelectPopupYESFORFEIT()
+{
+    FEFinder<TLInstance, 2>::Find<>(mPresentation->m_currentSlide, InlineHasher("Layer"))->m_bVisible = false;
+    mSelectionMade = true;
+    GameInfoManager* gameInfoManager = GameInfoManager::Instance();
+    CupManager* cupManager = CupManager::s_pInstance;
+    if (gameInfoManager->mIsInStrikers101Mode)
+    {
+        gpHBMManager->mBlocked = true;
+        mQuitDelay = 1.0f;
+        return;
+    }
+    if (g_pGame->m_eGameState != GS_END_GAME)
+    {
+        s32 quittingSide = -1;
+        if (gameInfoManager->IsInMode3())
+        {
+            int userTeam = cupManager->GetUserSelectedCupTeam();
+            if (userTeam == gameInfoManager->GetTeam(0))
+                quittingSide = 0;
+            else if (userTeam == gameInfoManager->GetTeam(1))
+                quittingSide = 1;
+        }
+        else if (gameInfoManager->IsInMode1())
+        {
+            quittingSide = gameInfoManager->GetPlayingSide((unsigned short)mQuittingController);
+        }
+        if (gameInfoManager->IsInOddCupMode())
+        {
+            if (quittingSide == 0)
+                StatsTracker::Instance()->TrackWinner(0);
+            else if (quittingSide == 1)
+                StatsTracker::Instance()->TrackWinner(1);
+        }
+    }
+    gpHBMManager->mBlocked = true;
+    mQuitDelay = 1.0f;
+}
+
+/**
+ * Offset/Address/Size: 0xAC0 | 0x80239F14 | size: 0x394
+ */
+void PauseMenuScene::SceneCreated()
+{
+    FEAudio::EnableSounds(false);
+    FEPresentation* presentation = mFEScene->m_pFEPackage->GetPresentation();
+    for (int i = 0; i < 7; ++i)
+    {
+        mOptionInstances[i] = FEFinder<TLComponentInstance, 4>::FindOrDefault(
+            presentation->m_currentSlide, "Layer", MENU_NAMES[i]);
+    }
+    FEAudio::EnableSounds(true);
+    if (GameInfoManager::Instance()->IsInMode4())
+    {
+        if (GetRegion() == GAME_REGION_EU)
+        {
+            FEFinder<TLTextInstance, 3>::FindOrDefault(mOptionInstances[4], "off", "option")->SetStringId("CHALLENGES_OBJECTIVES_BUTTON");
+            FEFinder<TLTextInstance, 3>::FindOrDefault(mOptionInstances[4], "over", "option")->SetStringId("CHALLENGES_OBJECTIVES_BUTTON");
+            FEFinder<TLTextInstance, 3>::FindOrDefault(mOptionInstances[4], "down", "option")->SetStringId("CHALLENGES_OBJECTIVES_BUTTON");
+        }
+        else
+        {
+            const char* string = g_pStrikerChallenge->mCurrentChallenge < 10
+                ? "101_OBJECTIVES_BUTTON" : "CHALLENGES_OBJECTIVES_BUTTON";
+            FEFinder<TLTextInstance, 3>::FindOrDefault(mOptionInstances[4], "off", "option")->SetStringId(string);
+            FEFinder<TLTextInstance, 3>::FindOrDefault(mOptionInstances[4], "over", "option")->SetStringId(string);
+            FEFinder<TLTextInstance, 3>::FindOrDefault(mOptionInstances[4], "down", "option")->SetStringId(string);
+        }
+    }
+}
+
+/**
+ * Offset/Address/Size: 0xE54 | 0x8023A2A8 | size: 0x5B4
+ */
+void PauseMenuScene::Update(float fDeltaT)
+{
+    if (mQuitDelay > 0.0f)
+    {
+        mQuitDelay -= fDeltaT;
+        if (!g_pOverlayManager->IsOnStack(SCENE_POPUP_MENU))
+            glxSwapSetBlack(true);
+        if (mQuitDelay <= 0.0f)
+        {
+            mQuitDelay = 0.0f;
+            FrontEnd::ReturnToFE();
+        }
+        return;
+    }
+    if (mStartAnimAtEnd && mPresentation->m_currentSlide != 0)
+    {
+        mPresentation->m_fadeDuration = 999.9f;
+        mStartAnimAtEnd = false;
+    }
+    if (!mIntroSoundPlayed)
+    {
+        mIntroSoundPlayed = true;
+        FEAudio::PlayAnimAudioEvent(0xBB142B94, 0, 0, 1);
+    }
+    BaseSceneHandler::Update(fDeltaT);
+    if (!mInitialized)
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() < slide->GetStartTime() + slide->GetDuration())
+            return;
+        InitializePointerButtons();
+        mInitialized = true;
+        for (int i = 0; i < 4; ++i)
+            GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+    if (mIsInTransition)
+    {
+        for (int i = 0; i < 4; ++i)
+            GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+        TLSlide* slide = mPresentation->m_currentSlide;
+        float currentTime = slide->GetCurrentTime();
+        float endTime = slide->GetStartTime() + slide->GetDuration();
+        if (!(currentTime >= endTime))
+            return;
+        switch (mTransitionTo)
+        {
+        case TT_OUT:
+            FrontEnd::ExitMenuState();
+            break;
+        case TT_CHOOSE_SIDES:
+            mSelectionMade = true;
+            g_pOverlayManager->Push(SCENE_PAUSE_CHOOSE_SIDES, SCREEN_FORWARD, true);
+            break;
+        case TT_AUDIO_OPTIONS:
+            mSelectionMade = true;
+            g_pOverlayManager->Push(SCENE_PAUSE_AUDIO_OPTIONS, SCREEN_FORWARD, true);
+            break;
+        case TT_VISUAL_OPTIONS:
+            mSelectionMade = true;
+            g_pOverlayManager->Push(SCENE_PAUSE_VISUAL_OPTIONS, SCREEN_FORWARD, true);
+            break;
+        case TT_CHALLENGE_PREVIEW:
+            mSelectionMade = true;
+            g_pOverlayManager->Push(OVERLAY_CHALLENGE_PREVIEW, SCREEN_NOTHING, true);
+            break;
+        case TT_STATISTICS:
+        {
+            mSelectionMade = true;
+            PausePostGameScene* scene = static_cast<PausePostGameScene*>(g_pOverlayManager->Push(OVERLAY_POST_GAME_STATISTICS, SCREEN_FORWARD, true));
+            scene->mControllingInput = mControllingInput;
+            scene->SetDisplayMode(NEWS_PAUSE_STATISTICS);
+            break;
+        }
+        case TT_CONTROLLER_MAP:
+            mSelectionMade = true;
+            g_pOverlayManager->Push(OVERLAY_CONTROLLER_MAP, SCREEN_NOTHING, true);
+            break;
+        }
+        mIsInTransition = false;
+        mTransitionTo = TT_IN;
+        return;
+    }
+    u8 goToChooseSides = 0;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (mSelectionMade)
+            return;
+        bool curConnected = g_pFEInput->IsConnected((eFEINPUT_PAD)i) && IsFreeStylePad(i);
+        if (!curConnected && GameInfoManager::Instance()->GetPlayingSide((unsigned short)i) != -1)
+        {
+            if (!goToChooseSides)
+            {
+                while (g_pOverlayManager->GetCurrentScene() != this)
+                {
+                    g_pOverlayManager->Pop();
+                    FESceneManager::Instance()->ForceImmediateStackProcessing();
+                }
+                mSelectionMade = true;
+                g_pOverlayManager->Push(SCENE_PAUSE_CHOOSE_SIDES, SCREEN_FORWARD, true);
+            }
+            goToChooseSides = 1;
+        }
+        FrontEnd::m_ctrlConnectedState[i] = curConnected;
+        if (g_pFEInput->JustPressed((eFEINPUT_PAD)i, 47, true, 0))
+        {
+            OnSelectRESUME(0);
+            return;
+        }
+        u8 valid = true;
+        FEPointerEvent event;
+        event.mIndex = i;
+        event.mPosition = GetPointerPosition(i, &valid);
+        event.mPressed = g_pFEInput->JustPressed((eFEINPUT_PAD)i, 30, true, 0);
+        TLComponentInstance* cursor = GetPointerInstance(i);
+        for (int j = 0; j < 7; ++j)
+            mOptionButtons[j].HandlePointerEvent(&event);
+        if (mHoverCounts[i] > 0)
+            cursor->SetActiveSlide("A", true, false);
+        else
+            cursor->SetActiveSlide("cursor", true, false);
+    }
+    if (goToChooseSides)
+        return;
+    mDelayBeforeUnpause = mDelayBeforeUnpause - fDeltaT;
+    if (mDelayBeforeUnpause > 0.0f)
+        return;
+    mDelayBeforeUnpause = 0.0f;
+}
+
+void PauseMenuScene::TransitionOut(TransitionType newtype)
+{
+    mIsInTransition = true;
+    mTransitionTo = newtype;
+    FEPresentation* presentation = mFEScene->m_pFEPackage->GetPresentation();
+    presentation->SetActiveSlide("menu out", true);
+    presentation->Update(0.0f);
+}
+
+/**
+ * Offset/Address/Size: 0x1408 | 0x8023A85C | size: 0x338
+ */
+void PauseMenuScene::InitializePointerButtons()
+{
+    typedef Detail::MemFunImpl<void, void (PauseMenuScene::*)(unsigned int, void*)> PointerMethod;
+    typedef BindExp3<void, PointerMethod, PauseMenuScene*, Placeholder<0>, Placeholder<1> > PointerBinding;
+
+    FEPointerListener::Callback callback0(PointerBinding(MemFun(&PauseMenuScene::OnOptionPointerEnter), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback callback1(PointerBinding(MemFun(&PauseMenuScene::OnOptionPointerLeave), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback callback2(PointerBinding(MemFun(&PauseMenuScene::OnOptionPointerPress), this, Placeholder<0>(), Placeholder<1>()));
+    for (int i = 0; i < 7; ++i)
+    {
+        mOptionButtons[i].SetInstanceBounds(mOptionInstances[i], true, 0.0f, 0.0f, 1.0f, 0.5f);
+        mOptionButtons[i].SetPointerEnterCallback(callback0);
+        mOptionButtons[i].SetPointerLeaveCallback(callback1);
+        mOptionButtons[i].SetPointerPressCallback(callback2);
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x1740 | 0x8023AB94 | size: 0xC4
+ */
+void PauseMenuScene::OnOptionPointerEnter(unsigned int index, void* context)
+{
+    unsigned int which = (unsigned int)context;
+    ++mHoverCounts[index];
+    if (!mOptionButtons[which].HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        FEAudio::PlayAnimAudioEvent(0xF6EB899E, 0, 0, 1);
+        mOptionInstances[which]->SetActiveSlide("over", true, false);
+    }
+    mOptionButtons[which].SetPointerState(POINTER_BUTTON_HOVER, index);
+}
+
+/**
+ * Offset/Address/Size: 0x1804 | 0x8023AC58 | size: 0xAC
+ */
+void PauseMenuScene::OnOptionPointerLeave(unsigned int index, void* context)
+{
+    unsigned int which = (unsigned int)context;
+    --mHoverCounts[index];
+    if (!mOptionButtons[which].HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+        mOptionInstances[which]->SetActiveSlide("off", true, false);
+    mOptionButtons[which].SetPointerState(POINTER_BUTTON_NORMAL, index);
+}
+
+/**
+ * Offset/Address/Size: 0x18B0 | 0x8023AD04 | size: 0x280
+ */
+void PauseMenuScene::OnOptionPointerPress(unsigned int index, void* context)
+{
+    if (mSelectionMade)
+        return;
+    mSelectionMade = true;
+    FEAudio::PlayAnimAudioEvent(0xF0AFD586, 0, 0, 1);
+    switch ((unsigned int)context)
+    {
+    case PAUSE_RESUME:
+        OnSelectRESUME(0);
+        break;
+    case PAUSE_CHOOSE_SIDES:
+        TransitionOut(TT_CHOOSE_SIDES);
+        break;
+    case PAUSE_AUDIO_OPTIONS:
+        TransitionOut(TT_AUDIO_OPTIONS);
+        break;
+    case PAUSE_VISUAL_OPTIONS:
+        TransitionOut(TT_VISUAL_OPTIONS);
+        break;
+    case PAUSE_MATCH_INFO:
+        if (GameInfoManager::Instance()->IsInMode4())
+            TransitionOut(TT_CHALLENGE_PREVIEW);
+        else
+            TransitionOut(TT_STATISTICS);
+        break;
+    case PAUSE_QUIT:
+        mQuittingController = (eFEINPUT_PAD)index;
+        OnSelectQUIT();
+        break;
+    case PAUSE_CONTROLLER_MAP:
+        TransitionOut(TT_CONTROLLER_MAP);
+        break;
+    }
+}

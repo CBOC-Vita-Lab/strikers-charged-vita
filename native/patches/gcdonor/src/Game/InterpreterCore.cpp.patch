@@ -1,0 +1,81 @@
+diff --git a/src/Game/InterpreterCore.cpp b/src/Game/InterpreterCore.cpp
+index 411e18c..8c66fe5 100644
+--- a/src/Game/InterpreterCore.cpp
++++ b/src/Game/InterpreterCore.cpp
+@@ -11,6 +11,8 @@
+ 
+ #include <string.h>
+ 
++#include "port/endian.h"
++
+ #include "Game/UnidentifiedStaticStorage.h"
+ 
+ struct InterpreterTweakStorage
+@@ -95,24 +97,26 @@ void InterpreterCore::InitializeTweaks()
+             u32 value1 = 0;
+             u32 value2 = 0;
+             u32 value3 = 0;
++            // NP: big-endian and not 4-byte aligned (they follow a flag byte and a name string); the
++            // blob is shared by every interpreter that loads this bytecode, so it is read, not swapped.
+             if (flags & 1)
+             {
+-                value0 = *(u32*)data;
++                value0 = port_disc32(data);
+                 data += 4;
+             }
+             if (flags & 2)
+             {
+-                value1 = *(u32*)data;
++                value1 = port_disc32(data);
+                 data += 4;
+             }
+             if (flags & 4)
+             {
+-                value2 = *(u32*)data;
++                value2 = port_disc32(data);
+                 data += 4;
+             }
+             if (flags & 8)
+             {
+-                value3 = *(u32*)data;
++                value3 = port_disc32(data);
+                 data += 4;
+             }
+ 
+@@ -127,6 +131,8 @@ static void RelocateStringReferences(InterpreterCore* core)
+     {
+         core->m_Globals = (u32*)nlMalloc(core->m_Header->globalDataSize, 8, false);
+         memcpy(core->m_Globals, core->m_Header->m_GlobalInitData, core->m_Header->globalDataSize);
++        // NP: big-endian words; the copy is converted so the shared init data stays as it is.
++        port_disc32_array(core->m_Globals, core->m_Header->globalDataSize / 4);
+ 
+         u32* relocatedValue = core->m_Globals;
+         for (unsigned int i = 0; i < core->m_Header->numStringRefs; i++)
+@@ -158,6 +164,10 @@ void InterpreterCore::LoadByteCode(void* data)
+     if (m_Header->m_CodeSegment == 0)
+     {
+         ByteCodeHeader* header = m_Header;
++        // NP: big-endian on disc. The twelve words of counts and sizes first (the pointer slots behind
++        // them are zero in the file and set below; a non-zero code segment is the "already loaded" test, so
++        // this conversion runs once per buffer), then the tables.
++        port_disc32_array(header, 12);
+         header->m_FunctionTable = (FunctionEntryPoint*)(header + 1);
+         header->m_TweakData = (u8*)(header->m_FunctionTable + header->numFunctions);
+         header->m_GlobalInitData = header->m_TweakData + header->tweakDataSize;
+@@ -165,6 +175,16 @@ void InterpreterCore::LoadByteCode(void* data)
+         header->m_CodeSegment = (u16*)((u8*)header->m_DataSegment + header->dataSegmentSize);
+         header->m_StringSegment = (u8*)header->m_CodeSegment + header->codeSegmentSize;
+ 
++        // NP: function table entries are hash, code offset (words) and frameSize u16 + numArgs u8 + flags u8;
++        // the data segment is u32 constants and string offsets; the code segment is a stream of u16 instructions.
++        for (unsigned int i = 0; i < header->numFunctions; i++)
++        {
++            port_disc32_array(&header->m_FunctionTable[i].hash, 2);
++            port_disc16_array(&header->m_FunctionTable[i].frameSize, 1);
++        }
++        port_disc32_array(header->m_DataSegment, header->dataSegmentSize / 4);
++        port_disc16_array(header->m_CodeSegment, header->codeSegmentSize / 2);
++
+         for (unsigned int i = 0; i < m_Header->numFunctions; i++)
+         {
+             m_Header->m_FunctionTable[i].offset = (u32)((u8*)m_Header->m_CodeSegment + m_Header->m_FunctionTable[i].offset);

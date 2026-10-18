@@ -1,0 +1,371 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/FE/fePointer.h"
+
+#include "Game/FE/feInput.h"
+#include "Game/FE/feText.h"
+#include "Game/FE/tlComponent.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlSlide.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/FE/fePointerManager.h"
+#include "Game/Font/fontmanager.h"
+#include "Game/MathHelpers.h"
+#include "NL/gl/glStruct.h"
+#include "NL/nlBasicString.h"
+#include "NL/nlFont.h"
+#include "NL/nlstring_tmpl.h"
+
+nlVector2 MeasurePointerText(TLTextInstance* text);
+nlVector2 MeasurePointerInstanceList(TLInstance* first);
+
+FEPointerListener::FEPointerListener(void* context)
+    : mContext(context)
+    , mDisabled(false)
+    , mIgnoreInputLock(false)
+{
+    g_pFEPointerManager->RegisterListener(this);
+}
+
+FEPointerListener::~FEPointerListener()
+{
+    g_pFEPointerManager->UnregisterListener(this);
+}
+
+void FEPointerListener::ProcessPointerEvent(const FEPointerEvent* event)
+{
+    if (mDisabled || (g_pFEInput->m_InputLockDepth != 0 && !mIgnoreInputLock))
+    {
+        return;
+    }
+
+    if (ContainsPoint(event->mPosition))
+    {
+        if (!ContainsPoint(mPreviousEvents[event->mIndex].mPosition))
+        {
+            OnPointerEnter(event->mIndex, mContext);
+        }
+
+        OnPointerUpdate(event->mIndex, mContext);
+        OnPointerInside(event->mIndex, mContext);
+
+        if (event->mPressed)
+        {
+            OnPointerPress(event->mIndex, mContext);
+        }
+
+        if (event->mAuxiliaryTriggered)
+        {
+            OnPointerAuxiliaryAction(event->mIndex, mContext);
+        }
+    }
+    else if (ContainsPoint(mPreviousEvents[event->mIndex].mPosition))
+    {
+        OnPointerLeave(event->mIndex, mContext);
+    }
+
+    if (event->mReleased)
+    {
+        OnPointerRelease(event->mIndex, mContext);
+    }
+
+    mPreviousEvents[event->mIndex] = *event;
+}
+
+void FEPointerListener::SetPointerEnterCallback(Function2<void, int, void*>& callback)
+{
+    mEnterCallback = callback;
+}
+
+void FEPointerListener::SetPointerLeaveCallback(Function2<void, int, void*>& callback)
+{
+    mLeaveCallback = callback;
+}
+
+void FEPointerListener::SetPointerInsideCallback(Function2<void, int, void*>& callback)
+{
+    mInsideCallback = callback;
+}
+
+void FEPointerListener::SetPointerPressCallback(Function2<void, int, void*>& callback)
+{
+    mPressCallback = callback;
+}
+
+void FEPointerListener::SetPointerReleaseCallback(Function2<void, int, void*>& callback)
+{
+    mReleaseCallback = callback;
+}
+
+FEPointerRegion::FEPointerRegion(void* context)
+    : FEPointerListener(context)
+    , mMinX(0.0f)
+    , mMaxX(0.0f)
+    , mMaxY(0.0f)
+    , mMinY(0.0f)
+    , mRotation(0.0f)
+{
+}
+
+FEPointerRegion::~FEPointerRegion()
+{
+}
+
+static inline nlVector2 MeasurePointerBoundsSize(TLInstance* instance)
+{
+    nlVector2 defaultSize;
+    switch (instance->m_type)
+    {
+    case TLAT_LAYER:
+        return MeasurePointerInstanceList(instance->pChildren);
+    case TLAT_IMAGE:
+    {
+        float height = instance->GetScale().f.y * 100.0f;
+        nlVector2 size;
+        size.x = instance->GetScale().f.x * 100.0f;
+        size.y = height;
+        return size;
+    }
+    case TLAT_TEXT:
+    {
+        TLTextInstance* text = (TLTextInstance*)instance;
+        const FEFontResource* fontResource = ((const FEText*)text->m_component)->m_pFeFontResource;
+        nlFont* font;
+        if (fontResource == 0)
+        {
+            font = FontManager::Instance()->GetFontByHashID(0);
+        }
+        else
+        {
+            font = fontResource->m_pFontReference;
+        }
+
+        float width;
+        {
+            BasicString<unsigned short, Detail::TempStringAllocator> string(text->GetString());
+            unsigned long stringWidth;
+            {
+                FontCharString fontString(string.c_str(), font, (unsigned short*)0);
+                stringWidth = font->GetStringWidth(fontString, false, 640, true);
+            }
+            width = stringWidth;
+        }
+        nlTextBox::StringDrawInfo drawInfo = text->m_DrawInfo;
+        nlVector2 textSize;
+        textSize.x = width;
+        textSize.y = (float)(font->m_Metrics.Height * drawInfo.RowCount);
+        return textSize;
+    }
+    case TLAT_COMPONENT:
+        return MeasurePointerInstanceList(((TLComponentInstance*)instance)->GetActiveSlide()->pChildren);
+    case TLAT_GROUP:
+        return MeasurePointerInstanceList(instance->pChildren);
+    default:
+    {
+        nlVec2Set(defaultSize, 0.0f, 0.0f);
+        return defaultSize;
+    }
+    }
+}
+
+void FEPointerRegion::SetInstanceBounds(TLInstance* instance, bool useRotation, float offsetX, float offsetY, float scaleX, float scaleY)
+{
+    nlVector2 measuredSize = MeasurePointerBoundsSize(instance);
+    nlVector2 size;
+    size.x = measuredSize.x * scaleX;
+    size.y = measuredSize.y * scaleY;
+
+    feVector3 position = instance->GetAssetPosition();
+    float x = position.f.x + offsetX;
+    float y = position.f.y + offsetY;
+    mMinX = x - size.x / 2.0f;
+    mMaxX = x + size.x / 2.0f;
+    mMaxY = y + size.y / 2.0f;
+    mMinY = y - size.y / 2.0f;
+
+    if (useRotation)
+    {
+        mRotation = instance->GetAssetRotation().f.z;
+        nlVec2Set(mPivot, position.f.x, position.f.y);
+    }
+    else
+    {
+        mRotation = 0.0f;
+    }
+}
+
+bool FEPointerRegion::ContainsPoint(nlVector2 position) const
+{
+    if (mRotation == 0.0f)
+    {
+        return position.x >= mMinX && position.x <= mMaxX && position.y >= mMinY && position.y <= mMaxY;
+    }
+
+    nlVector3 local;
+    nlVec3Set(local, position.x - mPivot.x, position.y - mPivot.y, 0.0f);
+
+    float cosine = nlSin((unsigned short)(RadToAng16(mRotation) + 0x4000));
+    float sineForY = nlSin(RadToAng16(mRotation));
+    float rotatedY = local.x * -sineForY + local.y * cosine;
+    float sine = nlSin(RadToAng16(mRotation));
+    cosine = nlSin((unsigned short)(RadToAng16(mRotation) + 0x4000));
+    float rotatedX = local.x * cosine + local.y * sine;
+    nlVec3Set(local, rotatedX, rotatedY, 0.0f);
+    nlVec3Set(local, local.x + mPivot.x, local.y + mPivot.y, 0.0f);
+
+    return local.x >= mMinX && local.x <= mMaxX && local.y >= mMinY && local.y <= mMaxY;
+}
+
+nlVector2 MeasurePointerText(TLTextInstance* text)
+{
+    const FEFontResource* fontResource = ((const FEText*)text->m_component)->m_pFeFontResource;
+    nlFont* font;
+    if (fontResource == 0)
+    {
+        font = FontManager::Instance()->GetFontByHashID(0);
+    }
+    else
+    {
+        font = fontResource->m_pFontReference;
+    }
+
+    nlVector2 size;
+    float width;
+    {
+        BasicString<unsigned short, Detail::TempStringAllocator> string(text->GetString());
+        unsigned long stringWidth;
+        {
+            FontCharString fontString(string.c_str(), font, (unsigned short*)0);
+            stringWidth = font->GetStringWidth(fontString, false, 640, true);
+        }
+        width = stringWidth;
+    }
+    nlTextBox::StringDrawInfo drawInfo = text->m_DrawInfo;
+    size.x = width;
+    size.y = (float)(font->m_Metrics.Height * drawInfo.RowCount);
+    return size;
+}
+
+static inline nlVector2 MeasurePointerInstance(TLInstance* instance)
+{
+    switch (instance->m_type)
+    {
+    case TLAT_LAYER:
+        return MeasurePointerInstanceList(instance->pChildren);
+    case TLAT_IMAGE:
+    {
+        float height = instance->GetScale().f.y * 100.0f;
+        nlVector2 size;
+        size.x = instance->GetScale().f.x * 100.0f;
+        size.y = height;
+        return size;
+    }
+    case TLAT_TEXT:
+        return MeasurePointerText((TLTextInstance*)instance);
+    case TLAT_COMPONENT:
+        return MeasurePointerInstanceList(((TLComponentInstance*)instance)->GetActiveSlide()->pChildren);
+    case TLAT_GROUP:
+        return MeasurePointerInstanceList(instance->pChildren);
+    default:
+    {
+        nlVector2 size;
+        nlVec2Set(size, 0.0f, 0.0f);
+        return size;
+    }
+    }
+}
+
+nlVector2 MeasurePointerInstanceList(TLInstance* first)
+{
+    if (first == 0)
+    {
+        nlVector2 size;
+        nlVec2Set(size, 0.0f, 0.0f);
+        return size;
+    }
+
+    gl_ScreenInfo* screen = glGetScreenInfo();
+    int screenWidth = 854;
+    float minX = (float)(screenWidth / 2);
+    float minY = (float)(screen->ScreenHeight / 2);
+    float maxX = -minX;
+    float maxY = -minY;
+
+    TLInstance* end = first;
+    do
+    {
+        nlVector2 size = MeasurePointerInstance(first);
+
+        feVector3 position = first->GetAssetPosition();
+        float left = position.f.x - size.x / 2.0f;
+        float bottom = position.f.y - size.y / 2.0f;
+        float right = position.f.x + size.x / 2.0f;
+        float top = position.f.y + size.y / 2.0f;
+
+        minX = left < minX ? left : minX;
+        minY = bottom < minY ? bottom : minY;
+        maxX = right > maxX ? right : maxX;
+        maxY = top > maxY ? top : maxY;
+
+        first = first->m_next;
+    } while (first != end);
+
+    nlVector2 size;
+    nlVec2Set(size, maxX - minX, maxY - minY);
+    return size;
+}
+
+void FEPointerListener::OnPointerEnter(int index, void* context)
+{
+    if (mEnterCallback)
+    {
+        mEnterCallback(index, context);
+    }
+}
+
+void FEPointerListener::OnPointerUpdate(int index, void* context)
+{
+    if (mUpdateCallback)
+    {
+        mUpdateCallback(index, context);
+    }
+}
+
+void FEPointerListener::OnPointerInside(int index, void* context)
+{
+    if (mInsideCallback)
+    {
+        mInsideCallback(index, context);
+    }
+}
+
+void FEPointerListener::OnPointerPress(int index, void* context)
+{
+    if (mPressCallback)
+    {
+        mPressCallback(index, context);
+    }
+}
+
+void FEPointerListener::OnPointerAuxiliaryAction(int index, void* context)
+{
+    if (mAuxiliaryCallback)
+    {
+        mAuxiliaryCallback(index, context);
+    }
+}
+
+void FEPointerListener::OnPointerLeave(int index, void* context)
+{
+    if (mLeaveCallback)
+    {
+        mLeaveCallback(index, context);
+    }
+}
+
+void FEPointerListener::OnPointerRelease(int index, void* context)
+{
+    if (mReleaseCallback)
+    {
+        mReleaseCallback(index, context);
+    }
+}

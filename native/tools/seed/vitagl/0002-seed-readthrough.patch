@@ -1,0 +1,81 @@
+--- a/source/custom_shaders.c	2026-10-16 19:16:10.421392196 -0400
++++ b/source/custom_shaders.c	2026-10-16 19:16:10.459638893 -0400
+@@ -35,6 +35,18 @@
+ #include "utils/xxhash_utils.h"
+ #ifdef HAVE_SHADER_CACHE
+ char vgl_shader_cache_path[256];
++#ifdef HAVE_SHADER_CACHE
++// W5 SEED: a second, READ-ONLY cache folder (the package's seed: app0:shadercache/<key>/v<magic>), tried when the writable cache has no file for a shader.
++// With it a package can carry every compiled shader without copying them to the memory card at the first start (about 75 ms per file or folder there).
++char vgl_shader_seed_path[256];
++static SceUID vgl_open_seed(const char *kind, uint8_t subdir_hash, uint64_t hash) {
++	if (!vgl_shader_seed_path[0])
++		return -1;
++	char fname[256];
++	sprintf(fname, "%s/%s/%02X/%llX.gxp", vgl_shader_seed_path, kind, subdir_hash, hash);
++	return sceIoOpen(fname, SCE_O_RDONLY, 0777);
++}
++#endif
+ #endif
+ #ifdef HAVE_TEX_CACHE
+ char vgl_file_cache_path[256];
+@@ -2009,6 +2021,8 @@
+ 	uint8_t subdir_hash = hash >> 56;
+ 	sprintf(fname, "%s/%s/%02X/%llX.gxp", vgl_shader_cache_path, s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
+ 	SceUID f = sceIoOpen(fname, SCE_O_RDONLY, 0777);
++	if (f < 0)
++		f = vgl_open_seed(s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
+ 	if (f >= 0) {
+ 		vgl_free(s->source);
+ 		s->source = NULL;
+@@ -2410,6 +2424,8 @@
+ 			uint8_t subdir_hash = hash >> 56;
+ 			sprintf(vert_fname, "%s/v/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+ 			SceUID f = sceIoOpen(vert_fname, SCE_O_RDONLY, 0777);
++			if (f < 0)
++				f = vgl_open_seed("v", subdir_hash, hash);
+ 			if (f >= 0) {
+ 				size_t sz = sceIoLseek(f, 0, SCE_SEEK_END);
+ 				sceIoLseek(f, 0, SCE_SEEK_SET);
+@@ -2425,6 +2441,8 @@
+ 			uint8_t subdir_hash = hash >> 56;
+ 			sprintf(frag_fname, "%s/f/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+ 			SceUID f = sceIoOpen(frag_fname, SCE_O_RDONLY, 0777);
++			if (f < 0)
++				f = vgl_open_seed("f", subdir_hash, hash);
+ 			if (f >= 0) {
+ 				size_t sz = sceIoLseek(f, 0, SCE_SEEK_END);
+ 				sceIoLseek(f, 0, SCE_SEEK_SET);
+--- a/source/vgl.c	2026-10-16 19:16:10.426958664 -0400
++++ b/source/vgl.c	2026-10-16 19:16:10.463290366 -0400
+@@ -984,6 +984,20 @@
+ #endif
+ }
+ 
++#ifdef HAVE_SHADER_CACHE
++extern char vgl_shader_seed_path[256];
++#endif
++// W5 SEED: the read-only second cache folder (see custom_shaders.c); "" or NULL = none
++void vglSetShaderSeedPath(const char *path) {
++#ifdef HAVE_SHADER_CACHE
++	if (path) {
++		strncpy(vgl_shader_seed_path, path, sizeof(vgl_shader_seed_path) - 1);
++		vgl_shader_seed_path[sizeof(vgl_shader_seed_path) - 1] = 0;
++	} else
++		vgl_shader_seed_path[0] = 0;
++#endif
++}
++
+ void vglSetShaderAssociationPath(const char *path) {
+ 	shark_set_shader_association_path(path);
+ }
+--- a/source/vitaGL.h	2026-10-16 19:16:10.430129774 -0400
++++ b/source/vitaGL.h	2026-10-16 19:16:10.463477778 -0400
+@@ -1258,6 +1258,7 @@
+ 
+ // Overloads the shader cache path when HAVE_SHADER_CACHE=1 is used. Must be called before vglInit*. Default value: ux0:data/shader_cache.
+ void vglSetShaderCachePath(const char *path);
++void vglSetShaderSeedPath(const char *path); // W5 SEED: read-only second shader cache folder (<path>/{v,f}/HH/hash.gxp), tried when the first has no file
+ 
+ // Change the lifetime for a texture to be considered cacheable. Requires HAVE_TEXTURE_CACHE.
+ void vglSetTextureCacheFrequency(GLuint freq);

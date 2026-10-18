@@ -1,0 +1,16 @@
+# GLB (wave 5), CONSOLE A/B: the timed scripted match (nav/match60.txt), render thread profile PROF=3 (the clock is read three times per frame; PROF=2 cost 5.6 ms of the 17.4 ms it measured).
+# No MSC_VGX_GLSTATS / MSC_VGX_FRAMESTATS here: they add per-draw work (the pair census, the detailed front-end statistics) to a timing run.
+# Read in log.txt, every 100 presented frames: '[vgx] prof (... PROF=3 ...): all= stream= clock= net=' (back end ms per frame; stream = the vertex/index upload alone), the '[vgx] per frame:' census (draws,
+# streamBytes) and '[vgx] vitaGL: ...' (pool/arena/ring peaks and overruns, programs, patcher, skipped sceGxm sets). Compare windows with the same draws= and streamBytes=.
+# S1: sceGxm sets (vertex/fragment program, vertex stream, texture) that the context already has are not forwarded.
+# Needs the glb package (build/np/W5GLB: libvitaGL cdbba42-glb). Run: bash session_np2.sh with ENVFILE=<this file>, or put it as env.txt and start the match script.
+MSC_INPUT_SCRIPT=match60.txt
+MSC_MAX_FRAMES=12000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=300
+MSC_VITA_MEMSTATS=1
+MSC_VITA_RENDER=320x224
+MSC_VGX_PROF=3
+NP_DATA_DIR=ux0:data/mscharged/np-data
+MSC_VITA_VGL_SKIP=1

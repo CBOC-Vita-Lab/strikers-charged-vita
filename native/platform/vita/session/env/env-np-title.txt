@@ -1,0 +1,11 @@
+# native check 3: the nav script presses A through the ESRB screen and the intro movie and stops at the title screen (NPB2's boot_title.txt:
+# `mash 100 20 scene == 0`, then idles 120 frames and exits). Proves the pad path on the console: script -> NpHarnessFillPad -> raw pad -> the SDK's
+# emulated Wii Remote -> the game. Expect "[script] ... STATE title screen" and scene sms2_start in the [nav] lines (host: movieplayer at f=829, title at f=841).
+# Upload nav-native/boot_title.txt next to this file (vitalab.py cycle ... --input nav-native/boot_title.txt).
+MSC_INPUT_SCRIPT=boot_title.txt
+MSC_WATCH=1
+MSC_WATCH_EVERY=120
+MSC_FRAME_TIMING=300
+MSC_MAX_FRAMES=6000
+MSC_VITA_SHOT=430-470/10,600,900,1200,1500
+NP_DATA_DIR=ux0:data/mscharged/np-data

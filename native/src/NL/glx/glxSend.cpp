@@ -1,0 +1,258 @@
+#include <revolution/gx.h>
+#include <revolution/mtx.h>
+
+#include "NL/gl/glMatrix.h"
+#include "NL/gl/glState.h"
+#include "NL/gl/glView.h"
+#include "NL/gl/glMaterialProgram.h"
+#include "NL/gl/glModel.h"
+#include "NL/glx/glxGX.h"
+#include "NL/glx/glxMatrix.h"
+#include "NL/glx/glxSend.h"
+#include "NL/platvmath.h"
+#ifdef NP_NATIVE
+#include "np/skingpu.h"
+#endif
+
+static GXCompare gx_DepthFunc[] = {
+    GX_ALWAYS,
+    GX_LEQUAL,
+    GX_EQUAL,
+    GX_LESS,
+};
+
+static GXCullMode gx_Culling[] = {
+    GX_CULL_NONE,
+    GX_CULL_FRONT,
+    GX_CULL_BACK,
+    GX_CULL_ALL,
+};
+
+static s32 glx_Matrix = -1;
+static bool glx_AllowAlphaUpdate = true;
+
+static GXCompare gx_AlphaTest[] = {
+    GX_ALWAYS,
+    GX_GREATER,
+};
+
+static GLView* prev_view;
+static GLMaterialProgram* glx_program;
+static unsigned long glx_DirtyFlags;
+
+static nlMatrix4 mview;
+static nlMatrix4 mproj;
+static nlMatrix4 viewproj;
+static nlMatrix4 modelview;
+
+static void glx_SwitchViews(GLView* view);
+static void glx_SwitchRaster(const glModelPacket* p);
+
+static inline bool glx_HasNormals(const glModelPacket* p)
+{
+    glModelStream* stream = p->streams;
+    glModelStream* end = stream + p->numStreams;
+    while (stream < end)
+    {
+        if ((char)stream->id == 2)
+        {
+            return true;
+        }
+        ++stream;
+    }
+    return false;
+}
+
+void glx_SendEnd()
+{
+    if (glx_program != 0)
+    {
+        glx_program->Deactivate();
+    }
+    glx_program = 0;
+    glx_AllowAlphaUpdate = true;
+    glx_DirtyFlags = 0;
+}
+
+void glx_SendFrame_cb(
+    GLView* view, unsigned long flags, const glModelPacket* p)
+{
+    flags |= glx_DirtyFlags;
+    glx_DirtyFlags = 0;
+
+    if (p != 0)
+    {
+        GLMaterialProgram* program
+            = (GLMaterialProgram*)p->materialProgram;
+        if (glx_program != program)
+        {
+            if (glx_program != 0)
+            {
+                glx_program->Deactivate();
+                gxSetTevColourOp(0, 0, 0, 0, true, 0);
+                gxSetTevAlphaOp(0, 0, 0, 0, true, 0);
+                gxSetTexCoordGen(0, 1, 4, 0x3C);
+                gxSetNumTexGens(1);
+                gxSetNumChans(0);
+                gxSetNumTevStages(1);
+                gxSetTevOrder(0, 0, 0, 0xFF);
+                gxSetTevColourIn(0, 15, 12, 8, 15);
+                gxSetTevAlphaIn(0, 7, 6, 4, 7);
+            }
+            program->Activate(prev_view);
+            glx_program = program;
+            glx_Matrix = -1;
+        }
+
+        if ((flags & 4) != 0)
+        {
+            Mtx inverse;
+            nlMatrix4 matrix;
+            Mtx source;
+
+            unsigned long Matrix = p->matrix;
+            if (glx_Matrix != Matrix)
+            {
+                glx_Matrix = Matrix;
+                glGetMatrix(Matrix, matrix);
+                nlMultMatrices(modelview, matrix, mview);
+            }
+
+            glxCopyMatrix(source, modelview);
+            GXLoadPosMtxImm(source, 0);
+
+            if (glx_HasNormals(p))
+            {
+                PSMTXInvXpose(source, inverse);
+                GXLoadNrmMtxImm(inverse, 0);
+            }
+            gxSetCurrentMtx(0, false);
+        }
+
+        if ((flags & 2) != 0)
+        {
+            glx_SwitchRaster(p);
+        }
+        if ((flags & 0x80) != 0)
+        {
+#ifdef NP_NATIVE
+            // W5 SKIN (np/skingpu.h): a packet skinned on the GPU hands its bone matrices to the renderer for exactly the draws of its Draw
+            // (several display-list calls for the multi-pass programs), in command order; MSC_SKIN_STATS tags the draws for the census.
+            const NpSkinGpuRec* sk = p->skinnedVertices != 0 ? NpSkinGpuOf(p) : 0;
+            const int diag = NpSkinDiagOn();
+            if (diag)
+                np_gx_diag_tag(((GLMaterialProgram*)p->materialProgram)->programHash, (p->skinnedVertices != 0 ? 1u : 0u) | (sk != 0 ? 2u : 0u));
+            if (sk != 0)
+                np_gx_skin_begin(&sk->mats[0][0], sk->nBones, sk->weights, sk->indices, sk->nVerts);
+            ((GLMaterialProgram*)p->materialProgram)->Draw(p);
+            if (sk != 0)
+                np_gx_skin_end();
+            if (diag)
+                np_gx_diag_tag(0, 0);
+#else
+            ((GLMaterialProgram*)p->materialProgram)->Draw(p);
+#endif
+        }
+    }
+    else
+    {
+        glx_SwitchViews(view);
+        glx_DirtyFlags |= 2;
+    }
+}
+
+static void glx_SwitchViews(GLView* view)
+{
+    prev_view = view;
+    glx_AllowAlphaUpdate = view->m_Enabled;
+    view->m_Interface->GetViewMatrix(mview);
+    view->m_Interface->GetProjectionMatrix(mproj);
+    nlMultMatrices(viewproj, mview, mproj);
+
+    Mtx gx_mview;
+    Mtx44 gx_proj;
+    glxCopyMatrix(gx_mview, mview);
+    glxCopyMatrix(gx_proj, mproj);
+    if (mproj.m43 == -1.0f)
+    {
+        GXSetProjection(gx_proj, GX_PERSPECTIVE);
+    }
+    else
+    {
+        GXSetProjection(gx_proj, GX_ORTHOGRAPHIC);
+    }
+
+    if (glx_program != 0)
+    {
+        glx_program->Deactivate();
+    }
+    glx_program = 0;
+    glx_Matrix = -1;
+}
+
+static void glx_SwitchRaster(const glModelPacket* p)
+{
+    unsigned long raster = p->rasterState;
+    bool DepthTest = glGetRasterState(raster, GLS_DepthTest) != 0;
+    bool DepthWrite = glGetRasterState(raster, GLS_DepthWrite) != 0;
+    int DepthFunc = glGetRasterState(raster, GLS_DepthFunc);
+    gxSetZMode(DepthTest, gx_DepthFunc[DepthFunc], DepthWrite);
+
+    int Culling = glGetRasterState(raster, GLS_Culling);
+    gxSetCullMode(gx_Culling[Culling]);
+
+    int AlphaTest = glGetRasterState(raster, GLS_AlphaTest);
+    unsigned long AlphaTestRef = glGetRasterState(raster, GLS_AlphaTestRef);
+    gxSetAlphaCompare(gx_AlphaTest[AlphaTest], (unsigned char)AlphaTestRef);
+    gxSetZCompLoc(AlphaTest == 0);
+
+    unsigned long AlphaBlend = glGetRasterState(raster, GLS_AlphaBlend);
+    switch (AlphaBlend)
+    {
+    case 0:
+        gxSetBlendMode(false, 1, 0, false);
+        break;
+    case 1:
+        gxSetBlendMode(true, 4, 5, false);
+        break;
+    case 2:
+        gxSetBlendMode(true, 1, 1, false);
+        break;
+    case 3:
+        gxSetBlendMode(true, 4, 1, false);
+        break;
+    case 4:
+        gxSetBlendMode(true, 2, 0, false);
+        break;
+    case 5:
+        gxSetBlendMode(true, 3, 1, false);
+        break;
+    case 6:
+        gxSetBlendMode(true, 1, 0, false);
+        break;
+    case 7:
+        gxSetBlendMode(true, 2, 0, true);
+        break;
+    }
+
+    int ColourWrite = glGetRasterState(raster, GLS_ColourWrite);
+    switch (ColourWrite)
+    {
+    case 0:
+        gxSetColourUpdate(false);
+        gxSetAlphaUpdate(false);
+        break;
+    case 1:
+        gxSetColourUpdate(true);
+        gxSetAlphaUpdate(false);
+        break;
+    case 2:
+        gxSetColourUpdate(false);
+        gxSetAlphaUpdate(true);
+        break;
+    case 3:
+        gxSetColourUpdate(true);
+        gxSetAlphaUpdate(glx_AllowAlphaUpdate);
+        break;
+    }
+}

@@ -1,0 +1,456 @@
+#include <revolution/pad.h>
+#include "Game/DetInput.h"
+
+#include "Game/PadMonkey.h"
+#include "NL/globalpad.h"
+#include "NL/platpad.h"
+#include "NL/plat/WiiPad.h"
+#include "NL/plat/WiiRemotePad.h"
+#include "NL/plat/WiiFreestylePad.h"
+#include "NL/plat/GameCubePad.h"
+#include "Game/NetworkPeer.h"
+
+static u8 PadPressureToByte(float pressure)
+{
+    return (u8)(255.0f * pressure);
+}
+
+u16 gDetInputDebugType = 0xFFFF;
+int lbl_806E2130;
+
+u8 DetInput::GetConnectionStatus()
+{
+    return m_nConnected;
+}
+
+int DetInput::GetControllerType()
+{
+    return m_nConnected;
+}
+
+nlVector3* DetInput::GetRemoteAcceleration()
+{
+    return &m_v3RevRemoteAccel;
+}
+
+nlVector3* DetInput::GetFreestyleAcceleration()
+{
+    return &m_v3RevFreeStyleAccel;
+}
+
+bool DetInput::IsPressed(int button, bool remap)
+{
+    if (remap)
+    {
+        int* pArray;
+        switch (m_nConnected)
+        {
+        case DET_CONTROLLER_DISCONNECTED:
+        case DET_CONTROLLER_GAMECUBE:
+            pArray = gGameCubePadButtonMap;
+            break;
+        case DET_CONTROLLER_WII_REMOTE:
+            pArray = gWiiRemoteButtonRemap;
+            break;
+        case DET_CONTROLLER_WII_FREESTYLE:
+            pArray = gWiiFreestyleButtonRemap;
+            break;
+        default:
+            pArray = gGameCubePadButtonMap;
+            break;
+        }
+        button = pArray[button];
+    }
+    return (m_ButtonBitfield & button) != 0;
+}
+
+bool DetInput::JustPressed(int button, bool remap)
+{
+    if (remap)
+    {
+        int* pArray;
+        switch (m_nConnected)
+        {
+        case DET_CONTROLLER_DISCONNECTED:
+        case DET_CONTROLLER_GAMECUBE:
+            pArray = gGameCubePadButtonMap;
+            break;
+        case DET_CONTROLLER_WII_REMOTE:
+            pArray = gWiiRemoteButtonRemap;
+            break;
+        case DET_CONTROLLER_WII_FREESTYLE:
+            pArray = gWiiFreestyleButtonRemap;
+            break;
+        default:
+            pArray = gGameCubePadButtonMap;
+            break;
+        }
+        button = pArray[button];
+    }
+    bool result = (m_ButtonBitfield & button) != 0;
+    if (result)
+    {
+        result = (m_pPrevInput->m_ButtonBitfield & button) == 0;
+    }
+    return result;
+}
+
+bool DetInput::JustReleased(int button, bool remap)
+{
+    if (remap)
+    {
+        int* pArray;
+        switch (m_nConnected)
+        {
+        case DET_CONTROLLER_DISCONNECTED:
+        case DET_CONTROLLER_GAMECUBE:
+            pArray = gGameCubePadButtonMap;
+            break;
+        case DET_CONTROLLER_WII_REMOTE:
+            pArray = gWiiRemoteButtonRemap;
+            break;
+        case DET_CONTROLLER_WII_FREESTYLE:
+            pArray = gWiiFreestyleButtonRemap;
+            break;
+        default:
+            pArray = gGameCubePadButtonMap;
+            break;
+        }
+        button = pArray[button];
+    }
+    bool result = (m_ButtonBitfield & button) == 0;
+    if (result)
+    {
+        result = (m_pPrevInput->m_ButtonBitfield & button) != 0;
+    }
+    return result;
+}
+
+void DetInput::UpdatePolarAnalog()
+{
+    nlCartesianToPolar(m_PolarAnalogLeft, AnalogLeftX(), AnalogLeftY());
+    nlCartesianToPolar(m_PolarAnalogRight, AnalogRightX(), AnalogRightY());
+}
+
+void DetInput::UpdateButtonStateTicks()
+{
+    for (int i = 0; i < 13; ++i)
+    {
+        int button;
+        switch (m_nConnected)
+        {
+        case DET_CONTROLLER_DISCONNECTED:
+        case DET_CONTROLLER_GAMECUBE:
+            button = GetPadButtonMask(i);
+            break;
+        case DET_CONTROLLER_WII_REMOTE:
+        case DET_CONTROLLER_WII_FREESTYLE:
+            button = GetWiiButtonMask(i);
+            break;
+        }
+
+        bool result = JustReleased(button, false);
+        if (!result)
+        {
+            result = JustPressed(button, false);
+        }
+
+        if (result)
+        {
+            m_buttonStateTicks[i] = 0;
+        }
+        else
+        {
+            ++m_buttonStateTicks[i];
+        }
+    }
+}
+
+int DetInput::GetButtonStateTicks(int button, bool remap)
+{
+    if (remap)
+    {
+        int* pArray;
+        switch (m_nConnected)
+        {
+        case DET_CONTROLLER_DISCONNECTED:
+        case DET_CONTROLLER_GAMECUBE:
+            pArray = gGameCubePadButtonMap;
+            break;
+        case DET_CONTROLLER_WII_REMOTE:
+            pArray = gWiiRemoteButtonRemap;
+            break;
+        case DET_CONTROLLER_WII_FREESTYLE:
+            pArray = gWiiFreestyleButtonRemap;
+            break;
+        default:
+            pArray = gGameCubePadButtonMap;
+            break;
+        }
+        button = pArray[button];
+    }
+
+    switch (m_nConnected)
+    {
+    case DET_CONTROLLER_DISCONNECTED:
+    case DET_CONTROLLER_GAMECUBE:
+        return m_buttonStateTicks[GetPadButtonIndex(button)];
+    case DET_CONTROLLER_WII_REMOTE:
+    case DET_CONTROLLER_WII_FREESTYLE:
+        return m_buttonStateTicks[GetWiiButtonIndex(button)];
+    default:
+        return 0;
+    }
+}
+
+void DetInput::ResetButtonStateTicks(int button, bool remap)
+{
+    if (remap)
+    {
+        int* pArray;
+        switch (m_nConnected)
+        {
+        case DET_CONTROLLER_DISCONNECTED:
+        case DET_CONTROLLER_GAMECUBE:
+            pArray = gGameCubePadButtonMap;
+            break;
+        case DET_CONTROLLER_WII_REMOTE:
+            pArray = gWiiRemoteButtonRemap;
+            break;
+        case DET_CONTROLLER_WII_FREESTYLE:
+            pArray = gWiiFreestyleButtonRemap;
+            break;
+        default:
+            pArray = gGameCubePadButtonMap;
+            break;
+        }
+        button = pArray[button];
+    }
+
+    switch (m_nConnected)
+    {
+    case DET_CONTROLLER_DISCONNECTED:
+    case DET_CONTROLLER_GAMECUBE:
+    {
+        int buttonIndex = GetPadButtonIndex(button);
+        m_buttonStateTicks[buttonIndex] = 0;
+        break;
+    }
+    case DET_CONTROLLER_WII_REMOTE:
+    case DET_CONTROLLER_WII_FREESTYLE:
+    {
+        int buttonIndex = GetWiiButtonIndex(button);
+        m_buttonStateTicks[buttonIndex] = 0;
+        break;
+    }
+    }
+}
+
+void DetInput::Reset()
+{
+    m_AnalogLeftX = 0.0f;
+    m_AnalogLeftY = 0.0f;
+    m_AnalogRightX = 0.0f;
+    m_AnalogRightY = 0.0f;
+    m_nConnected = DET_CONTROLLER_WII_FREESTYLE;
+    m_ButtonBitfield = 0;
+    m_LeftTrigger = 0;
+    m_RightTrigger = 0;
+    m_v3RevRemoteAccel.x = 0.0f;
+    m_v3RevRemoteAccel.y = 0.0f;
+    m_v3RevRemoteAccel.z = 0.0f;
+    m_v3RevFreeStyleAccel.x = 0.0f;
+    m_v3RevFreeStyleAccel.y = 0.0f;
+    m_v3RevFreeStyleAccel.z = 0.0f;
+    m_nRevDPDNumTargets = 0;
+    m_v2RevDPDCoord.x = 0.0f;
+    m_v2RevDPDCoord.y = 0.0f;
+    m_buttonStateTicks[0] = 0;
+    m_buttonStateTicks[1] = 0;
+    m_buttonStateTicks[2] = 0;
+    m_buttonStateTicks[3] = 0;
+    m_buttonStateTicks[4] = 0;
+    m_buttonStateTicks[5] = 0;
+    m_buttonStateTicks[6] = 0;
+    m_buttonStateTicks[7] = 0;
+    m_buttonStateTicks[8] = 0;
+    m_buttonStateTicks[9] = 0;
+    m_buttonStateTicks[10] = 0;
+    m_buttonStateTicks[11] = 0;
+    m_buttonStateTicks[12] = 0;
+    m_pMyUser = 0;
+    m_pPrevInput = 0;
+    m_PolarAnalogLeft.a = 0;
+    m_PolarAnalogLeft.r = 0.0f;
+    m_PolarAnalogRight.a = 0;
+    m_PolarAnalogRight.r = 0.0f;
+    m_aRemapAngle = 0;
+}
+
+void DetInput::CopyState(DetInput& input)
+{
+    m_AnalogLeftX = input.m_AnalogLeftX;
+    m_AnalogLeftY = input.m_AnalogLeftY;
+    m_AnalogRightX = input.m_AnalogRightX;
+    m_AnalogRightY = input.m_AnalogRightY;
+    m_nConnected = input.m_nConnected;
+    m_ButtonBitfield = input.m_ButtonBitfield;
+    m_LeftTrigger = input.m_LeftTrigger;
+    m_RightTrigger = input.m_RightTrigger;
+    m_v3RevRemoteAccel = input.m_v3RevRemoteAccel;
+    m_v3RevFreeStyleAccel = input.m_v3RevFreeStyleAccel;
+    m_nRevDPDNumTargets = input.m_nRevDPDNumTargets;
+    m_v2RevDPDCoord = input.m_v2RevDPDCoord;
+    m_PolarAnalogLeft = input.m_PolarAnalogLeft;
+    m_PolarAnalogRight = input.m_PolarAnalogRight;
+    m_buttonStateTicks[0] = input.m_buttonStateTicks[0];
+    m_buttonStateTicks[1] = input.m_buttonStateTicks[1];
+    m_buttonStateTicks[2] = input.m_buttonStateTicks[2];
+    m_buttonStateTicks[3] = input.m_buttonStateTicks[3];
+    m_buttonStateTicks[4] = input.m_buttonStateTicks[4];
+    m_buttonStateTicks[5] = input.m_buttonStateTicks[5];
+    m_buttonStateTicks[6] = input.m_buttonStateTicks[6];
+    m_buttonStateTicks[7] = input.m_buttonStateTicks[7];
+    m_buttonStateTicks[8] = input.m_buttonStateTicks[8];
+    m_buttonStateTicks[9] = input.m_buttonStateTicks[9];
+    m_buttonStateTicks[10] = input.m_buttonStateTicks[10];
+    m_buttonStateTicks[11] = input.m_buttonStateTicks[11];
+    m_buttonStateTicks[12] = input.m_buttonStateTicks[12];
+    m_aRemapAngle = input.m_aRemapAngle;
+}
+
+void DetInput::ReadFromPad(cGlobalPad* pad)
+{
+    m_AnalogLeftX = pad->AnalogLeftX();
+    m_AnalogLeftY = pad->AnalogLeftY();
+    m_AnalogRightX = pad->AnalogRightX();
+    m_AnalogRightY = pad->AnalogRightY();
+
+    PadBackend* backend = pad->mBackend;
+    if (backend == 0 || !backend->IsConnected())
+    {
+        m_nConnected = DET_CONTROLLER_DISCONNECTED;
+        m_LeftTrigger = 0;
+        m_RightTrigger = 0;
+        m_ButtonBitfield = 0;
+        m_v3RevRemoteAccel.x = 0.0f;
+        m_v3RevRemoteAccel.y = 0.0f;
+        m_v3RevRemoteAccel.z = 0.0f;
+        m_v3RevFreeStyleAccel.x = 0.0f;
+        m_v3RevFreeStyleAccel.y = 0.0f;
+        m_v3RevFreeStyleAccel.z = 0.0f;
+        m_nRevDPDNumTargets = 0;
+        m_v2RevDPDCoord.x = 0.0f;
+        m_v2RevDPDCoord.y = 0.0f;
+    }
+    else
+    {
+        int classID = backend->GetClassID();
+        if (classID == gWiiRemotePadClassID)
+        {
+            m_nConnected = DET_CONTROLLER_WII_REMOTE;
+            WPADStatus* status;
+            WiiRemotePad* remote = static_cast<WiiRemotePad*>(pad->mBackend);
+            status = &remote->mCurrentStatus->wpad;
+            m_ButtonBitfield = status->button;
+            m_LeftTrigger = 0;
+            m_RightTrigger = 0;
+            const float scale = 0.0048780488f;
+            m_v3RevRemoteAccel.x = scale * status->accX;
+            m_v3RevRemoteAccel.y = scale * status->accY;
+            m_v3RevRemoteAccel.z = scale * status->accZ;
+            m_v3RevFreeStyleAccel.x = 0.0f;
+            m_v3RevFreeStyleAccel.y = 0.0f;
+            m_v3RevFreeStyleAccel.z = 0.0f;
+            KPADStatus* kpad = &remote->mCurrentStatus->kpad;
+            m_nRevDPDNumTargets = kpad->dpd_valid_fg;
+            m_v2RevDPDCoord.x = kpad->pos.x;
+            m_v2RevDPDCoord.y = kpad->pos.y;
+        }
+        else
+        {
+            classID = backend->GetClassID();
+            if (classID == gWiiFreestylePadClassID)
+            {
+                m_nConnected = DET_CONTROLLER_WII_FREESTYLE;
+                WPADFSStatus* status;
+                WiiFreestylePad* nunchuk = static_cast<WiiFreestylePad*>(pad->mBackend);
+                status = &nunchuk->mCurrentStatus->wpad;
+                m_ButtonBitfield = status->button;
+                m_LeftTrigger = 0;
+                m_RightTrigger = 0;
+                const float scale = 0.0048780488f;
+                m_v3RevRemoteAccel.x = scale * status->accX;
+                m_v3RevRemoteAccel.y = scale * status->accY;
+                m_v3RevRemoteAccel.z = scale * status->accZ;
+                m_v3RevFreeStyleAccel.x = scale * status->fsAccX;
+                m_v3RevFreeStyleAccel.y = scale * status->fsAccY;
+                m_v3RevFreeStyleAccel.z = scale * status->fsAccZ;
+                KPADStatus* kpad = &nunchuk->mCurrentStatus->kpad;
+                m_nRevDPDNumTargets = kpad->dpd_valid_fg;
+                m_v2RevDPDCoord.x = kpad->pos.x;
+                m_v2RevDPDCoord.y = kpad->pos.y;
+            }
+            else
+            {
+                PadMonkey* monkey;
+                GameCubePad* gameCube;
+                classID = backend->GetClassID();
+                if (classID == gGameCubePadClassID)
+                {
+                    m_nConnected = DET_CONTROLLER_GAMECUBE;
+                    gameCube = static_cast<GameCubePad*>(pad->mBackend);
+                    PADStatus* status = gameCube->mCurrentStatus;
+                    m_ButtonBitfield = status->button;
+                    m_LeftTrigger = PadPressureToByte(gameCube->GetPressure(0x40, false));
+                    m_RightTrigger = PadPressureToByte(gameCube->GetPressure(0x20, false));
+                    m_v3RevRemoteAccel.x = 0.0f;
+                    m_v3RevRemoteAccel.y = 0.0f;
+                    m_v3RevRemoteAccel.z = 0.0f;
+                    m_v3RevFreeStyleAccel.x = 0.0f;
+                    m_v3RevFreeStyleAccel.y = 0.0f;
+                    m_v3RevFreeStyleAccel.z = 0.0f;
+                    m_nRevDPDNumTargets = 0;
+                    m_v2RevDPDCoord.x = 0.0f;
+                    m_v2RevDPDCoord.y = 0.0f;
+                }
+                else
+                {
+                    classID = backend->GetClassID();
+                    if (classID == PadMonkey::sClassID)
+                    {
+                        m_nConnected = DET_CONTROLLER_GAMECUBE;
+                        monkey = static_cast<PadMonkey*>(pad->mBackend);
+                        m_ButtonBitfield = 0;
+                        for (int button = 1; button < (1 << monkey->GetButtonCount()); button <<= 1)
+                        {
+                            if (monkey->IsPressed(button, false))
+                            {
+                                m_ButtonBitfield |= button;
+                            }
+                        }
+                        m_LeftTrigger = PadPressureToByte(monkey->GetPressure(0x40, false));
+                        m_RightTrigger = PadPressureToByte(monkey->GetPressure(0x20, false));
+                        m_v3RevRemoteAccel.x = 0.0f;
+                        m_v3RevRemoteAccel.y = 0.0f;
+                        m_v3RevRemoteAccel.z = 0.0f;
+                        m_v3RevFreeStyleAccel.x = 0.0f;
+                        m_v3RevFreeStyleAccel.y = 0.0f;
+                        m_v3RevFreeStyleAccel.z = 0.0f;
+                        m_nRevDPDNumTargets = 0;
+                        m_v2RevDPDCoord.x = 0.0f;
+                        m_v2RevDPDCoord.y = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+
+    UpdatePolarAnalog();
+    UpdateButtonStateTicks();
+}
+
+int DetInput::GetPadID() const
+{
+    return ((NetworkPeerChannel*)m_pMyUser)->GetNetworkPeerChannelId();
+}

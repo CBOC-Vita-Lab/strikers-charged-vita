@@ -1,0 +1,448 @@
+# W5-ITEM generated script: natural acquisition (hits and slides on the ball carrier)
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=8 home=5 away=1 hsk=0,1,2 ask=5,6,7 human=0 time=300 skill=2
+wait ingame == 1 4000
+log STATE match object
+mash 100 30 gs == 1 4000
+log STATE kick-off
+wait gs == 5 6000
+log STATE open play
+idle 20
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 800 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim owner 0 downer < 2.5 150
+press 200 3 6
+idle 20
+if item0 >= 0 && ctl >= 0
+log ITEM nat use
+press 400 3 20
+endif
+if item0b >= 0
+log ITEM nat cycle
+press 10 3 10
+endif
+log STATE script end
+idle 60
+exit

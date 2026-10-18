@@ -1,0 +1,13 @@
+src/Game/AI/FuzzyVariant.cpp
+src/Game/AI/tu_8030EDB0.cpp
+src/Game/AI/AIContext.cpp
+src/Game/AI/ScriptActionQueue.cpp
+src/Game/AI/tu_803115F4.cpp
+src/Game/AI/Scripts/ScriptCaching.cpp
+src/Game/AI/FuzzyRuntimeBase.cpp
+src/Game/AI/TransitionFunc.cpp
+src/Game/AI/shdStateMachine.cpp
+src/Game/AI/ScriptMachine.cpp
+src/Game/AI/Variant.cpp
+src/Game/AI/Scripts/FuzzyAIRuntime.cpp
+src/ode/

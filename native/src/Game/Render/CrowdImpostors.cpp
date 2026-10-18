@@ -1,0 +1,559 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/Render/CrowdImpostors.h"
+#include "Game/Render/ImpostorLighting.h"
+#include "NL/gl/glMemory.h"
+#include "Game/Camera/CameraMan.h"
+#include "NL/gl/glTexture.h"
+#include "Game/BasicStadium.h"
+#include "Game/World/WorldObjectLoadContext.h"
+#include "Game/Drawable/DrawableObj.h"
+#include "Game/World.h"
+#include "Game/DB/CharacterInfo.h"
+#include "Game/Field.h"
+#include "Game/GameInfo.h"
+#include "Game/Render/ImpostorManager.h"
+#include "Game/Render/RLView.h"
+#include "Game/Render/CrowdImpostorManager.h"
+#include "Game/TweakRegistry.h"
+#include "Game/SharedStaticStorage.h"
+
+#include "Game/TweakConfig.h"
+#include "NL/gl/glTextureManager.h"
+#include "NL/gl/glMaterialParameters.h"
+#include "NL/nlMath.h"
+#include "NL/nlDLRing.h"
+#include "NL/nlString.h"
+#include "NL/nlstring_tmpl.h"
+
+#include <math.h>
+#include "Game/TweakValue.inl"
+
+static CrowdCharacterDefinition sCrowdCharacterDefinitions[36] = {
+    { "birdo", "art/animation/crowdbirdo.sanim.zlib",
+        "art/animation/crowdbirdo.shier", "crowdbirdo",
+        "Art/Characters/Crowdbirdo/crowdbirdo.rlt",
+        "Art/Characters/Crowdbirdo/crowdbirdo.rlg" },
+    { "birdoblack", "art/animation/crowdbirdoblack.sanim.zlib",
+        "art/animation/crowdbirdoblack.shier", "crowdbirdoblack",
+        "Art/Characters/Crowdbirdoblack/crowdbirdoblack.rlt",
+        "Art/Characters/Crowdbirdoblack/crowdbirdoblack.rlg" },
+    { "birdoblue", "art/animation/crowdbirdoblue.sanim.zlib",
+        "art/animation/crowdbirdoblue.shier", "crowdbirdoblue",
+        "Art/Characters/Crowdbirdoblue/crowdbirdoblue.rlt",
+        "Art/Characters/Crowdbirdoblue/crowdbirdoblue.rlg" },
+    { "birdogreen", "art/animation/crowdbirdogreen.sanim.zlib",
+        "art/animation/crowdbirdogreen.shier", "crowdbirdogreen",
+        "Art/Characters/Crowdbirdogreen/crowdbirdogreen.rlt",
+        "Art/Characters/Crowdbirdogreen/crowdbirdogreen.rlg" },
+    { "birdolightblue", "art/animation/crowdbirdolightblue.sanim.zlib",
+        "art/animation/crowdbirdolightblue.shier", "crowdbirdolightblue",
+        "Art/Characters/Crowdbirdolightblue/crowdbirdolightblue.rlt",
+        "Art/Characters/Crowdbirdolightblue/crowdbirdolightblue.rlg" },
+    { "birdoorange", "art/animation/crowdbirdoorange.sanim.zlib",
+        "art/animation/crowdbirdoorange.shier", "crowdbirdoorange",
+        "Art/Characters/Crowdbirdoorange/crowdbirdoorange.rlt",
+        "Art/Characters/Crowdbirdoorange/crowdbirdoorange.rlg" },
+    { "birdopink", "art/animation/crowdbirdopink.sanim.zlib",
+        "art/animation/crowdbirdopink.shier", "crowdbirdopink",
+        "Art/Characters/Crowdbirdopink/crowdbirdopink.rlt",
+        "Art/Characters/Crowdbirdopink/crowdbirdopink.rlg" },
+    { "birdored", "art/animation/crowdbirdored.sanim.zlib",
+        "art/animation/crowdbirdored.shier", "crowdbirdored",
+        "Art/Characters/Crowdbirdored/crowdbirdored.rlt",
+        "Art/Characters/Crowdbirdored/crowdbirdored.rlg" },
+    { "birdowhite", "art/animation/crowdbirdowhite.sanim.zlib",
+        "art/animation/crowdbirdowhite.shier", "crowdbirdowhite",
+        "Art/Characters/Crowdbirdowhite/crowdbirdowhite.rlt",
+        "Art/Characters/Crowdbirdowhite/crowdbirdowhite.rlg" },
+    { "birdoyellow", "art/animation/crowdbirdoyellow.sanim.zlib",
+        "art/animation/crowdbirdoyellow.shier", "crowdbirdoyellow",
+        "Art/Characters/Crowdbirdoyellow/crowdbirdoyellow.rlt",
+        "Art/Characters/Crowdbirdoyellow/crowdbirdoyellow.rlg" },
+    { "shyguy", "art/animation/crowdshyguy.sanim.zlib",
+        "art/animation/crowdshyguy.shier", "crowdshyguy",
+        "Art/Characters/Crowdshyguy/crowdshyguy.rlt",
+        "Art/Characters/Crowdshyguy/crowdshyguy.rlg" },
+    { "shyguyblack", "art/animation/crowdshyguyblack.sanim.zlib",
+        "art/animation/crowdshyguyblack.shier", "crowdshyguyblack",
+        "Art/Characters/Crowdshyguyblack/crowdshyguyblack.rlt",
+        "Art/Characters/Crowdshyguyblack/crowdshyguyblack.rlg" },
+    { "shyguyblue", "art/animation/crowdshyguyblue.sanim.zlib",
+        "art/animation/crowdshyguyblue.shier", "crowdshyguyblue",
+        "Art/Characters/Crowdshyguyblue/crowdshyguyblue.rlt",
+        "Art/Characters/Crowdshyguyblue/crowdshyguyblue.rlg" },
+    { "shyguygreen", "art/animation/crowdshyguygreen.sanim.zlib",
+        "art/animation/crowdshyguygreen.shier", "crowdshyguygreen",
+        "Art/Characters/Crowdshyguygreen/crowdshyguygreen.rlt",
+        "Art/Characters/Crowdshyguygreen/crowdshyguygreen.rlg" },
+    { "shyguylightblue", "art/animation/crowdshyguylightblue.sanim.zlib",
+        "art/animation/crowdshyguylightblue.shier", "crowdshyguylightblue",
+        "Art/Characters/Crowdshyguylightblue/crowdshyguylightblue.rlt",
+        "Art/Characters/Crowdshyguylightblue/crowdshyguylightblue.rlg" },
+    { "shyguypink", "art/animation/crowdshyguypink.sanim.zlib",
+        "art/animation/crowdshyguypink.shier", "crowdshyguypink",
+        "Art/Characters/Crowdshyguypink/crowdshyguypink.rlt",
+        "Art/Characters/Crowdshyguypink/crowdshyguypink.rlg" },
+    { "shyguyred", "art/animation/crowdshyguyred.sanim.zlib",
+        "art/animation/crowdshyguyred.shier", "crowdshyguyred",
+        "Art/Characters/Crowdshyguyred/crowdshyguyred.rlt",
+        "Art/Characters/Crowdshyguyred/crowdshyguyred.rlg" },
+    { "shyguywhite", "art/animation/crowdshyguywhite.sanim.zlib",
+        "art/animation/crowdshyguywhite.shier", "crowdshyguywhite",
+        "Art/Characters/Crowdshyguywhite/crowdshyguywhite.rlt",
+        "Art/Characters/Crowdshyguywhite/crowdshyguywhite.rlg" },
+    { "shyguyyellow", "art/animation/crowdshyguyyellow.sanim.zlib",
+        "art/animation/crowdshyguyyellow.shier", "crowdshyguyyellow",
+        "Art/Characters/Crowdshyguyyellow/crowdshyguyyellow.rlt",
+        "Art/Characters/Crowdshyguyyellow/crowdshyguyyellow.rlg" },
+    { "pianta", "art/animation/crowdpianta.sanim.zlib",
+        "art/animation/crowdpianta.shier", "crowdpianta",
+        "Art/Characters/Crowdpianta/crowdpianta.rlt",
+        "Art/Characters/Crowdpianta/crowdpianta.rlg" },
+    { "piantablue", "art/animation/crowdpiantablue.sanim.zlib",
+        "art/animation/crowdpiantablue.shier", "crowdpiantablue",
+        "Art/Characters/Crowdpiantablue/crowdpiantablue.rlt",
+        "Art/Characters/Crowdpiantablue/crowdpiantablue.rlg" },
+    { "piantapink", "art/animation/crowdpiantapink.sanim.zlib",
+        "art/animation/crowdpiantapink.shier", "crowdpiantapink",
+        "Art/Characters/Crowdpiantapink/crowdpiantapink.rlt",
+        "Art/Characters/Crowdpiantapink/crowdpiantapink.rlg" },
+    { "piantayellow", "art/animation/crowdpiantayellow.sanim.zlib",
+        "art/animation/crowdpiantayellow.shier", "crowdpiantayellow",
+        "Art/Characters/Crowdpiantayellow/crowdpiantayellow.rlt",
+        "Art/Characters/Crowdpiantayellow/crowdpiantayellow.rlg" },
+    { "toad", "art/animation/crowdtoad.sanim.zlib",
+        "art/animation/crowdtoad.shier", "crowdtoad",
+        "Art/Characters/Crowdtoad/crowdtoad.rlt",
+        "Art/Characters/Crowdtoad/crowdtoad.rlg" },
+    { "toadblue", "art/animation/crowdtoadblue.sanim.zlib",
+        "art/animation/crowdtoadblue.shier", "crowdtoadblue",
+        "Art/Characters/Crowdtoadblue/crowdtoadblue.rlt",
+        "Art/Characters/Crowdtoadblue/crowdtoadblue.rlg" },
+    { "toadgreen", "art/animation/crowdtoadgreen.sanim.zlib",
+        "art/animation/crowdtoadgreen.shier", "crowdtoadgreen",
+        "Art/Characters/Crowdtoadgreen/crowdtoadgreen.rlt",
+        "Art/Characters/Crowdtoadgreen/crowdtoadgreen.rlg" },
+    { "toadpink", "art/animation/crowdtoadpink.sanim.zlib",
+        "art/animation/crowdtoadpink.shier", "crowdtoadpink",
+        "Art/Characters/Crowdtoadpink/crowdtoadpink.rlt",
+        "Art/Characters/Crowdtoadpink/crowdtoadpink.rlg" },
+    { "toadred", "art/animation/crowdtoadred.sanim.zlib",
+        "art/animation/crowdtoadred.shier", "crowdtoadred",
+        "Art/Characters/Crowdtoadred/crowdtoadred.rlt",
+        "Art/Characters/Crowdtoadred/crowdtoadred.rlg" },
+    { "toadyellow", "art/animation/crowdtoadyellow.sanim.zlib",
+        "art/animation/crowdtoadyellow.shier", "crowdtoadyellow",
+        "Art/Characters/Crowdtoadyellow/crowdtoadyellow.rlt",
+        "Art/Characters/Crowdtoadyellow/crowdtoadyellow.rlg" },
+    { "boo", "art/animation/crowdboo.sanim.zlib",
+        "art/animation/crowdboo.shier", "crowdboo",
+        "Art/Characters/Crowdboo/crowdboo.rlt",
+        "Art/Characters/Crowdboo/crowdboo.rlg" },
+    { "goomba", "art/animation/crowdgoomba.sanim.zlib",
+        "art/animation/crowdgoomba.shier", "crowdgoomba",
+        "Art/Characters/Crowdgoomba/crowdgoomba.rlt",
+        "Art/Characters/Crowdgoomba/crowdgoomba.rlg" },
+    { "koopa", "art/animation/crowdkoopa.sanim.zlib",
+        "art/animation/crowdkoopa.shier", "crowdkoopa",
+        "Art/Characters/Crowdkoopa/crowdkoopa.rlt",
+        "Art/Characters/Crowdkoopa/crowdkoopa.rlg" },
+    { "penguin", "art/animation/crowdpenguin.sanim.zlib",
+        "art/animation/crowdpenguin.shier", "crowdpenguin",
+        "Art/Characters/Crowdpenguin/crowdpenguin.rlt",
+        "Art/Characters/Crowdpenguin/crowdpenguin.rlg" },
+    { "delfin", "art/animation/crowddelfin.sanim.zlib",
+        "art/animation/crowddelfin.shier", "crowddelfin",
+        "Art/Characters/Crowddelfin/crowddelfin.rlt",
+        "Art/Characters/Crowddelfin/crowddelfin.rlg" },
+    { "delfina", "art/animation/crowddelfina.sanim.zlib",
+        "art/animation/crowddelfina.shier", "crowddelfina",
+        "Art/Characters/Crowddelfina/crowddelfina.rlt",
+        "Art/Characters/Crowddelfina/crowddelfina.rlg" },
+    { "monkey", "art/animation/crowdmonkey.sanim.zlib",
+        "art/animation/crowdmonkey.shier", "crowdmonkey",
+        "Art/Characters/Crowdmonkey/crowdmonkey.rlt",
+        "Art/Characters/Crowdmonkey/crowdmonkey.rlg" },
+};
+
+// Storage for the static crowd tables; their destructors follow __sinit.
+class CrowdModelArray
+{
+public:
+    CrowdModelArray(int count)
+    {
+        data = new (8, false) ImpostorModel*[count];
+        capacity = count;
+    }
+    ~CrowdModelArray() { delete[] data; }
+
+    ImpostorModel*& operator[](unsigned int index) { return data[index]; }
+
+    ImpostorModel** data;
+    int capacity;
+};
+
+class CrowdCharacterArray
+{
+public:
+    CrowdCharacterArray(int count)
+    {
+        data = new (8, false) AnimatedImpostorCharacter*[count];
+        capacity = count;
+    }
+    ~CrowdCharacterArray() { delete[] data; }
+
+    AnimatedImpostorCharacter*& operator[](unsigned int index)
+    {
+        return data[index];
+    }
+
+    AnimatedImpostorCharacter** data;
+    int capacity;
+};
+
+class CrowdDefinitionArray
+{
+public:
+    CrowdDefinitionArray(int count)
+    {
+        data = new (8, false) CrowdCharacterDefinition[count];
+        capacity = count;
+    }
+    ~CrowdDefinitionArray() { delete[] data; }
+
+    CrowdCharacterDefinition* data;
+    int capacity;
+};
+
+static const char* sCrowdCharactersToLoadPath = "/Render/Crowd/CharactersToLoad";
+static char sAlternateCrowdListSuffix[] = "Alt";
+static char sCrowdCharacterListFormat[] = "ini/CrowdCharacterLists/%s%s.ini";
+static const double sCrowdViewVectorMinLengthSq = 0.001;
+static const float sCrowdZero = 0.0f;
+static const float sMaxCrowdSidelineCullingDistance = 50.0f;
+static const float sCrowdSidelineCullingDistanceStep = 0.05f;
+static const float sAlternateCrowdViewBudgetScale = 750.0f;
+static const float sDefaultMaxCrowdSize = 10000.0f;
+static const float sCrowdImpostorSizeScale = 1.5f;
+static const double sCrowdIntegerConversionBias = 4503599627370496.0;
+static const float sCrowdLayoutRotationX = 0.9599311f;
+static const float sCrowdLayoutSize = 12.0f;
+static const float sCrowdExcitedBlendTime = 2.0f;
+static const float sCrowdIdleBlendTime = 5.0f;
+static GLMemoryRequirement sCrowdResourceRequirements[2]
+    = { { GLM_Header, 0x8000 }, { GLM_VertexData, 0 } };
+static GLMemoryRequirement sEmptyCrowdResourceRequirements[2]
+    = { { GLM_Header, 0x400 }, { GLM_VertexData, 0x400 } };
+static char sMaxCrowdSizePath[] = "user/CrowdMax";
+static char sCrowdClusterName[] = "impostorCluster";
+static char sViceCrowdModelName[] = "_vice/crowd_testanim";
+static char sViceNightCrowdModelName[] = "_vicenight/crowd_testanim";
+static char sUndergroundCrowdModelName[] = "_underground/crowd_testanim";
+static char sWastelandsCrowdModelName[] = "_wastelands/crowd_testanim";
+static CrowdLayoutObject* sCrowdLayoutObject;
+static CrowdModelArray sCrowdModels(36);
+static CrowdCharacterArray sCrowdCharacters(36);
+static CrowdDefinitionArray sCrowdLoadDefinitions(8);
+static int sNumCrowdCharacters;
+static bool sCullCrowdInDebugCamera;
+static CrowdSidelineFilter* sCrowdSidelineFilter;
+static signed char sCrowdViewBudgetConfigured;
+static bool sCrowdImpostorsExcited;
+static ImpostorCluster* sCrowdCluster;
+static bool sLockCrowdImpostorAnimation;
+CrowdModelCollection gCrowdModelCollection;
+
+inline CrowdSidelineFilter::CrowdSidelineFilter()
+{
+    mSidelineCullingDistance.BindWithDefault("mfSidelineCullingDistance",
+        sCrowdZero, "/Render/Crowd", true, sCrowdZero,
+        sMaxCrowdSidelineCullingDistance, sCrowdSidelineCullingDistanceStep);
+}
+
+void UpdateImpostorPositions()
+{
+    nlVector3 viewVector;
+    nlVector3 upVector = { 0.0f, 0.0f, 1.0f };
+
+    cCameraManager::GetViewVector(viewVector);
+    if (viewVector.GetLengthSq3D() > sCrowdViewVectorMinLengthSq
+        && upVector.GetLengthSq3D() > sCrowdViewVectorMinLengthSq)
+    {
+        ImpostorManager::GetInstance()->UpdatePositions(
+            &viewVector, &upVector);
+    }
+}
+
+void LoadCrowdCharacterList()
+{
+    sNumCrowdCharacters = 0;
+
+    int captain = GameInfoManager::Instance()->GetTeam(0);
+    const char* teamName;
+    const CharacterInfo& team
+        = GetCharacterInfo(GetCharacterIndexFromCaptain(captain));
+    int opponentCaptain = GameInfoManager::Instance()->GetTeam(1);
+    const CharacterInfo& opponent
+        = GetCharacterInfo(GetCharacterIndexFromCaptain(opponentCaptain));
+
+    teamName = team.mName;
+    bool alternateColour = NeedsAlternateColour(team, opponent);
+    char fileName[256];
+    nlSNPrintf(fileName, sizeof(fileName), sCrowdCharacterListFormat, teamName,
+        alternateColour ? sAlternateCrowdListSuffix : "");
+
+    LoadTweakConfigFile(fileName, sCrowdCharactersToLoadPath, true);
+    TweakEntry* entry
+        = FindOrCreateTweakPath(GetTweakRoot(), sCrowdCharactersToLoadPath, true);
+    for (TweakNode* node = entry->m_ChildHead; node != 0;
+        node = node->m_Next)
+    {
+        const char* name = GetTweakNodeName(node);
+        for (int i = 0; i < 36; ++i)
+        {
+            if (nlStrICmp(name, sCrowdCharacterDefinitions[i].mName) == 0)
+            {
+                sCrowdLoadDefinitions.data[sNumCrowdCharacters]
+                    = sCrowdCharacterDefinitions[i];
+                ++sNumCrowdCharacters;
+            }
+        }
+    }
+
+    gCrowdModelCollection.Initialize(sCrowdLoadDefinitions.data, sNumCrowdCharacters);
+}
+
+static char sCrowdIdleAnimation[] = "idle";
+static char sCrowdExcitedAnimation[] = "excited";
+static float sCrowdExcitedThreshold = 200.0f;
+static float sCrowdIdleThreshold = 100.0f;
+
+static inline void CreateCrowdCharacters(
+    ImpostorCharacterParams* params)
+{
+    int budget = 20000 / sNumCrowdCharacters;
+    params->mWidth = 64;
+    params->mHeight = 64;
+    params->mUseAdditiveBlend = false;
+    params->mUseIntensityAlpha = false;
+    params->mBaseAngle = 0;
+    for (int i = 0; i < sNumCrowdCharacters; ++i)
+    {
+        sCrowdModels[i] = gCrowdModelCollection.mModels[i];
+        sCrowdCharacters[i] = new (8, false) CrowdImpostorCharacter(
+                sCrowdLoadDefinitions.data[i % sNumCrowdCharacters].mName,
+                sCrowdModels[i],
+                (void*)sCrowdIdleAnimation, budget, 4, 2, params);
+        GetCrowdImpostorManager()->AddCharacter(sCrowdCharacters[i]);
+    }
+}
+
+void InitializeCrowdImpostors(bool alternateView)
+{
+    CrowdSidelineFilter* filter = new (8, false) CrowdSidelineFilter;
+    sCrowdSidelineFilter = filter;
+
+    int crowdMax = GetTweakInt(sMaxCrowdSizePath, 10000);
+    if (!sCrowdViewBudgetConfigured)
+    {
+        unsigned int scaled = (unsigned int)(crowdMax << 10);
+        sCrowdResourceRequirements[1].mSize = (unsigned int)(
+            sAlternateCrowdViewBudgetScale * ((float)scaled / sDefaultMaxCrowdSize));
+        sCrowdViewBudgetConfigured = true;
+    }
+
+    const GLMemoryRequirement* requirements = sEmptyCrowdResourceRequirements;
+    if (alternateView)
+    {
+        requirements = sCrowdResourceRequirements;
+    }
+    ImpostorManager::GetInstance()->Initialize(
+        GetLayerView(eCLV_ImpostorTexture), crowdMax, requirements, 2, false);
+    ImpostorManager::GetInstance()->SetImpostorSizeScale(sCrowdImpostorSizeScale);
+
+    ImpostorCharacterParams params;
+    CreateCrowdCharacters(&params);
+
+    sCrowdImpostorsExcited = false;
+    CreateCrowdLayoutObject();
+
+    ImpostorCharacterParams clusterParams;
+    clusterParams.mUseAdditiveBlend = false;
+    clusterParams.mUseIntensityAlpha = false;
+    clusterParams.mBaseAngle = 0;
+    clusterParams.mWidth = 128;
+    clusterParams.mHeight = 128;
+    ImpostorCluster* clusterCharacter
+        = new (8, false) ImpostorCluster(sCrowdClusterName, 10, &clusterParams);
+    sCrowdCluster = clusterCharacter;
+    unsigned long clusterTexture;
+    u32 firstHash = nlStringLowerHash(sViceCrowdModelName);
+    clusterTexture = sCrowdCluster->GetTexture();
+    SetCrowdModelTexture(firstHash, clusterTexture);
+    SetCrowdModelTexture(nlStringLowerHash(sViceNightCrowdModelName), clusterTexture);
+    SetCrowdModelTexture(nlStringLowerHash(sUndergroundCrowdModelName), clusterTexture);
+    SetCrowdModelTexture(nlStringLowerHash(sWastelandsCrowdModelName), clusterTexture);
+
+    GetCrowdImpostorManager()->GenerateCrowd( 0);
+    GetCrowdImpostorManager()->AddVisibilityFilter( sCrowdSidelineFilter);
+    UpdateImpostorLighting();
+    ImpostorManager::GetInstance()->StaggerAnimations();
+}
+
+static inline void DeleteCrowdCharacterArrays()
+{
+    for (int i = 0; i < sNumCrowdCharacters; ++i)
+    {
+        delete sCrowdModels[i];
+        delete sCrowdCharacters[i];
+    }
+}
+
+void UninitializeCrowdImpostors()
+{
+    ImpostorManager::GetInstance()->ResetImpostors();
+    DeleteCrowdCharacterArrays();
+    sNumCrowdCharacters = 0;
+
+    delete sCrowdCluster;
+    GetCrowdImpostorManager()->Clear();
+    ImpostorManager::GetInstance()->Uninitialize();
+
+    if (sCrowdLayoutObject != 0)
+    {
+        delete sCrowdLayoutObject;
+        sCrowdLayoutObject = 0;
+    }
+    if (sCrowdSidelineFilter != 0)
+    {
+        delete sCrowdSidelineFilter;
+        sCrowdSidelineFilter = 0;
+    }
+}
+
+extern const float sCrowdLayoutTransformW = 1.0f;
+extern const float sCrowdLayoutXScale = 0.5f;
+
+void CreateCrowdLayoutObject()
+{
+    const float& w = sCrowdLayoutTransformW;
+    const float& scale = sCrowdLayoutXScale;
+    nlMatrix4 transform;
+    transform.SetIdentity();
+    nlMakeRotationMatrixX(transform, sCrowdLayoutRotationX);
+
+    float layoutSize = sCrowdLayoutSize;
+    float zero = sCrowdZero;
+    transform.m41 = scale * -layoutSize;
+    transform.m42 = zero;
+    transform.m43 = zero;
+    transform.m44 = w;
+
+    BasicStadium* stadium = BasicStadium::GetCurrentStadium();
+    WorldObjectLoadContext* context
+        = new (8, false) WorldObjectLoadContext(stadium);
+    sCrowdLayoutObject = new (8, false) CrowdLayoutObject;
+    sCrowdLayoutObject->Initialize();
+    sCrowdLayoutObject->mStartWidth = layoutSize;
+    sCrowdLayoutObject->mEndWidth = layoutSize;
+    sCrowdLayoutObject->mLength = layoutSize;
+    sCrowdLayoutObject->mEndOffset = zero;
+    sCrowdLayoutObject->SetWorldMatrix(transform);
+    GetCrowdImpostorManager()->AddObject( sCrowdLayoutObject, 1);
+    delete context;
+}
+
+void SetCrowdModelTexture(u32 textureHash, unsigned long texture)
+{
+    nlDLListIterator<WorldDrawable*> iterator;
+    iterator = BasicStadium::GetCurrentStadium()->m_renderObjects.Begin();
+    const unsigned long& textureIndex = glGetTextureManager()->GetTextureIndex(texture);
+
+    for (; iterator.hasNext(); iterator.next())
+    {
+        DrawableObject* pObject = (DrawableObject*)*iterator;
+        if (pObject->m_uObjectType == WORLD_OBJECT_STADIUM_DRAWABLE)
+        {
+            glModel* pGlModel = pObject->GetModel();
+            for (glModelPacket* pPacket = pGlModel->packets;
+                 pPacket < pGlModel->packets + pGlModel->numPackets;
+                 ++pPacket)
+            {
+                unsigned long packetTexture
+                    = glGetMaterialUnsignedParameter(
+                        pPacket, gDiffuseTextureSemantic);
+                if (packetTexture == textureHash)
+                {
+                    glSetMaterialTextureParameter(pPacket, gDiffuseTextureSemantic, texture);
+                    unsigned long resolvedTexture = textureIndex;
+                    glSetMaterialTextureIndexParameter(pPacket, gDiffuseTextureSemantic, &resolvedTexture);
+                }
+            }
+        }
+    }
+}
+
+void SetCrowdImpostorsExcited()
+{
+    sCrowdImpostorsExcited = true;
+    ImpostorManager::GetInstance()->UpdateCharacters(
+        sCrowdExcitedBlendTime, sCrowdExcitedAnimation);
+    ImpostorManager::GetInstance()->StaggerAnimations();
+}
+
+void SetCrowdImpostorsIdle()
+{
+    sCrowdImpostorsExcited = false;
+    ImpostorManager::GetInstance()->UpdateCharacters(
+        sCrowdIdleBlendTime, sCrowdIdleAnimation);
+    ImpostorManager::GetInstance()->StaggerAnimations();
+}
+
+void UpdateCrowdImpostorAnimation(float value)
+{
+    if (!sLockCrowdImpostorAnimation)
+    {
+        if (sCrowdImpostorsExcited)
+        {
+            if (value < sCrowdIdleThreshold)
+            {
+                sCrowdImpostorsExcited = false;
+                ImpostorManager::GetInstance()->UpdateCharacters(
+                    sCrowdIdleBlendTime, sCrowdIdleAnimation);
+                ImpostorManager::GetInstance()->StaggerAnimations();
+            }
+        }
+        else if (value > sCrowdExcitedThreshold)
+        {
+            sCrowdImpostorsExcited = true;
+            ImpostorManager::GetInstance()->UpdateCharacters(
+                sCrowdExcitedBlendTime, sCrowdExcitedAnimation);
+            ImpostorManager::GetInstance()->StaggerAnimations();
+        }
+    }
+}
+
+bool CrowdSidelineFilter::IsVisible(const Impostor* impostor)
+{
+    if (cCameraManager::PeekCamera()->GetType() != eCameraType_Gameplay
+        && cCameraManager::PeekCamera()->GetType() != eCameraType_Gameplay
+        && (cCameraManager::PeekCamera()->GetType() != eCameraType_Debug
+            || !sCullCrowdInDebugCamera))
+    {
+        return true;
+    }
+
+    if (impostor->mPosition.y > sCrowdZero)
+        return true;
+
+    if (fabsf(impostor->mPosition.x) > cField::GetGoalLineX(1U))
+        return true;
+
+    float sideline = cField::GetSidelineY(1U);
+    sideline += (float)mSidelineCullingDistance;
+    return -impostor->mPosition.y > sideline;
+}
+
+CrowdImpostorCharacter::~CrowdImpostorCharacter()
+{
+}

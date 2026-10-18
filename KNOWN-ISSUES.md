@@ -9,8 +9,10 @@
   levels 5/6/7 through Options were not tested in that handoff.
 - Two-Vita LAN, Classic controls, rear touch, save/update behavior and wider
   game progression need testing on the release candidate.
-- The recovered app is not a source export or a ready-to-share installer.
-  Current source/dependency pins, resource licenses, release artwork and
-  fresh installation remain open release requirements.
+- The current native source, renderer and patched vitaGL files are included.
+  The dependency-build recipe, full linked-library provenance, resource
+  licenses, release artwork and fresh installation remain open requirements.
+- The runtime requires the owner's shader compiler module even when the
+  startup cache is included. It is not part of the package.
 
 No whole-game, universal compatibility or locked-framerate claim is made.

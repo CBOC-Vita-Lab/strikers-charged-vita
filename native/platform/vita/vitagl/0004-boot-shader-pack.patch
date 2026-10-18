@@ -1,0 +1,75 @@
+diff -ru a/source/custom_shaders.c b/source/custom_shaders.c
+--- a/source/custom_shaders.c	2026-10-17 14:08:27.787897171 -0400
++++ b/source/custom_shaders.c	2026-10-17 14:08:42.125066827 -0400
+@@ -39,6 +39,13 @@
+ // W5 SEED: a second, READ-ONLY cache folder (the package's seed: app0:shadercache/<key>/v<magic>), tried when the writable cache has no file for a shader.
+ // With it a package can carry every compiled shader without copying them to the memory card at the first start (about 75 ms per file or folder there).
+ char vgl_shader_seed_path[256];
++// W5 BOOT: compiled shaders the application holds in memory (one pack file read at start-up instead of one file per shader:
++// a memory card answers a file open in about 7 ms). Asked before any cache file; NULL = none. The returned bytes are a cache
++// file's contents (the format the cache writes), 4-byte aligned, and must stay valid: unserialize_shader copies what it keeps.
++static const void *(*vgl_shader_pack_lookup)(int fragment, uint64_t hash, uint32_t *size) = NULL;
++void vglSetShaderPackLookup(const void *(*fn)(int fragment, uint64_t hash, uint32_t *size)) {
++	vgl_shader_pack_lookup = fn;
++}
+ static SceUID vgl_open_seed(const char *kind, uint8_t subdir_hash, uint64_t hash) {
+ 	if (!vgl_shader_seed_path[0])
+ 		return -1;
+@@ -2020,6 +2027,16 @@
+ 	uint64_t hash = XXH3_64bits(s->source, s->size);
+ 	uint8_t subdir_hash = hash >> 56;
+ 	sprintf(fname, "%s/%s/%02X/%llX.gxp", vgl_shader_cache_path, s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
++	if (vgl_shader_pack_lookup) {
++		uint32_t psz = 0;
++		const void *pb = vgl_shader_pack_lookup(s->type == GL_FRAGMENT_SHADER, hash, &psz);
++		if (pb) {
++			vgl_free(s->source);
++			s->source = NULL;
++			unserialize_shader((void *)pb, psz, s, GL_FALSE);
++			return;
++		}
++	}
+ 	SceUID f = sceIoOpen(fname, SCE_O_RDONLY, 0777);
+ 	if (f < 0)
+ 		f = vgl_open_seed(s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
+@@ -2423,8 +2440,12 @@
+ 			uint64_t hash = XXH3_64bits(p->vshader->source, p->vshader->size);
+ 			uint8_t subdir_hash = hash >> 56;
+ 			sprintf(vert_fname, "%s/v/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+-			SceUID f = sceIoOpen(vert_fname, SCE_O_RDONLY, 0777);
+-			if (f < 0)
++			uint32_t psz = 0;
++			const void *pb = vgl_shader_pack_lookup ? vgl_shader_pack_lookup(0, hash, &psz) : NULL;
++			if (pb)
++				unserialize_shader((void *)pb, psz, p->vshader, GL_TRUE);
++			SceUID f = pb ? -1 : sceIoOpen(vert_fname, SCE_O_RDONLY, 0777);
++			if (!pb && f < 0)
+ 				f = vgl_open_seed("v", subdir_hash, hash);
+ 			if (f >= 0) {
+ 				size_t sz = sceIoLseek(f, 0, SCE_SEEK_END);
+@@ -2440,8 +2461,12 @@
+ 			uint64_t hash = XXH3_64bits(p->fshader->source, p->fshader->size);
+ 			uint8_t subdir_hash = hash >> 56;
+ 			sprintf(frag_fname, "%s/f/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+-			SceUID f = sceIoOpen(frag_fname, SCE_O_RDONLY, 0777);
+-			if (f < 0)
++			uint32_t psz = 0;
++			const void *pb = vgl_shader_pack_lookup ? vgl_shader_pack_lookup(1, hash, &psz) : NULL;
++			if (pb)
++				unserialize_shader((void *)pb, psz, p->fshader, GL_TRUE);
++			SceUID f = pb ? -1 : sceIoOpen(frag_fname, SCE_O_RDONLY, 0777);
++			if (!pb && f < 0)
+ 				f = vgl_open_seed("f", subdir_hash, hash);
+ 			if (f >= 0) {
+ 				size_t sz = sceIoLseek(f, 0, SCE_SEEK_END);
+diff -ru a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h	2026-10-17 14:08:27.793265052 -0400
++++ b/source/vitaGL.h	2026-10-17 14:08:42.125335267 -0400
+@@ -1258,6 +1258,7 @@
+ 
+ // Overloads the shader cache path when HAVE_SHADER_CACHE=1 is used. Must be called before vglInit*. Default value: ux0:data/shader_cache.
+ void vglSetShaderCachePath(const char *path);
++void vglSetShaderPackLookup(const void *(*fn)(int fragment, uint64_t hash, uint32_t *size)); // W5 BOOT: in-memory compiled shaders, asked first (NULL = none)
+ void vglSetShaderSeedPath(const char *path); // W5 SEED: read-only second shader cache folder (<path>/{v,f}/HH/hash.gxp), tried when the first has no file
+ 
+ // Change the lifetime for a texture to be considered cacheable. Requires HAVE_TEXTURE_CACHE.

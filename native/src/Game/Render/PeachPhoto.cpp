@@ -1,0 +1,515 @@
+#include "Game/Debug/ShapeRender.h"
+#include "Game/Replay.h"
+#include "Game/Render/RLView.h"
+#include "NL/gl/gl.h"
+#include "NL/gl/glState.h"
+#include "NL/gl/glView.h"
+#include "NL/glx/glxTexture.h"
+#include "NL/nlColour.h"
+#include "NL/nlMath.h"
+#include "Game/Render/CrowdManager.h"
+#include "Game/Render/PeachPhoto.h"
+#include "NL/gl/glMultiTextureModelWriter.h"
+
+#include <string.h>
+#include "Game/SharedStaticStorage.h"
+#ifdef NP_NATIVE
+#include "np/framesend.h"
+#endif
+
+char sPeachPhotoTexture[] = "target/grayscale";
+char sPeachPhotoWhiteTexture[] = "global/white";
+char sPeachPhotoMaskTexture1[] = "global/peach_mask1";
+char sPeachPhotoMaskTexture2[] = "global/peach_mask2";
+
+int gPeachPhotoAlpha = 0xA0;
+float gPeachPhotoDisplacementRange = 5.0f;
+float gPeachPhotoFadeTime = 0.3f;
+int gPeachPhotoBorderAlpha = 0x30;
+int gPeachPhotoTextureRotation = 1;
+bool gPeachPhotoResetState = true;
+float gPeachPhotoDepthOffset = 0.005f;
+
+unsigned int gPeachPhotoBorderIntensity;
+bool gPeachPhotoDebugBounds;
+bool gPeachPhotoDisableImage;
+bool gPeachPhotoDisableMasks;
+
+const nlVector2 sPeachPhotoTexcoords[4] = {
+    { 0.0f, 0.0f },
+    { 0.0f, 1.0f },
+    { 1.0f, 1.0f },
+    { 1.0f, 0.0f },
+};
+
+CrowdManager CrowdManager::instance;
+PeachPhotoState gPeachPhotoState;
+
+void CrowdManager::Initialize(void*)
+{
+}
+
+void CrowdManager::Uninitialize()
+{
+}
+
+void CrowdManager::Replay(LoadFrame& frame)
+{
+    int replayState = 0;
+    Replayable<1, LoadFrame, int>(frame, replayState);
+}
+
+void CrowdManager::Replay(SaveFrame& frame)
+{
+    int state = m_State;
+    Replayable<1, SaveFrame, int>(frame, state);
+}
+
+void CrowdManager::Update(float)
+{
+}
+
+static inline void SetPeachPhotoCellCorner(nlVector3& point,
+    const nlVector3& origin, float xStep, float yStep,
+    int x, int y, float z)
+{
+    nlVec3Set(point, origin.x + xStep * (float)x,
+        origin.y + yStep * (float)y, z);
+}
+
+void StartPeachPhoto(PeachPhotoState* photo,
+    const nlVector3* centre, float delay, float halfWidth,
+    float halfHeight)
+{
+    photo->centre = *centre;
+    const float negativeHalfWidth = -halfWidth;
+    const float negativeHalfHeight = -halfHeight;
+    nlVector3 topLeft = { 0.0f, 0.0f, 0.0f };
+    const float cellZ = topLeft.z;
+    const nlVector3& photoCentre = photo->centre;
+    const float xStep = (float)((2.0 * halfWidth) / 3.0);
+    const float yStep = (float)((2.0 * negativeHalfHeight) / 3.0);
+
+    const float z = photoCentre.z;
+    const float bottom = photoCentre.y + negativeHalfHeight;
+    const float right = photoCentre.x + halfWidth;
+    float top = photoCentre.y + halfHeight;
+    float left = photoCentre.x + negativeHalfWidth;
+
+    photo->delay = delay;
+    nlVec3Set(photo->corners[0], left, bottom, z);
+    nlVec3Set(photo->corners[1], right, bottom, z);
+    nlVec3Set(photo->corners[2], right, top, z);
+    nlVec3Set(photo->corners[3], left, top, z);
+    left = photo->centre.x - halfWidth;
+    top = photo->centre.y - negativeHalfHeight;
+    topLeft.x = left;
+    topLeft.y = top;
+
+    for (int x = 0; x < 3; ++x)
+    {
+        for (int y = 0; y < 3; ++y)
+        {
+            SetPeachPhotoCellCorner(photo->cells[x][y].world[0],
+                topLeft, xStep, yStep, x, (y + 1), cellZ);
+            SetPeachPhotoCellCorner(photo->cells[x][y].world[1],
+                topLeft, xStep, yStep, (x + 1), (y + 1), cellZ);
+            SetPeachPhotoCellCorner(photo->cells[x][y].world[2],
+                topLeft, xStep, yStep, (x + 1), y, cellZ);
+            SetPeachPhotoCellCorner(photo->cells[x][y].world[3],
+                topLeft, xStep, yStep, x, y, cellZ);
+        }
+    }
+
+    photo->displacement = nlRandomf(2.0f * gPeachPhotoDisplacementRange)
+                        - gPeachPhotoDisplacementRange;
+    photo->state = PEACH_PHOTO_ACTIVE;
+    photo->firstFrameSeen = false;
+    photo->textureReady = false;
+    photo->lastFrame = glGetCurrentFrame();
+    photo->projected = false;
+    photo->fadeTime = 0.0f;
+    RLView* view = GetLayerView(eCLV_Characters);
+    view->m_Target = 8;
+}
+
+void EndPeachPhoto(PeachPhotoState* photo, bool immediate)
+{
+    if (photo->state != PEACH_PHOTO_INACTIVE)
+    {
+        if (immediate)
+        {
+            photo->state = PEACH_PHOTO_INACTIVE;
+            GetLayerView(eCLV_Characters)->m_Target = 0;
+        }
+        else
+        {
+            photo->state = PEACH_PHOTO_FADING;
+            photo->fadeTime = 0.0f;
+        }
+    }
+}
+
+// A 4x4 tile of 16-bit texels occupies 32 bytes.
+// The texel is stored the way GX reads it: big-endian (W5 LOOK2: the audit of CPU writers and readers of GX data; the native build stored it in host order,
+// which swapped the border's intensity and alpha bytes).
+static inline void PeachPhotoStoreTexel(u8* dst, unsigned short colour)
+{
+#ifdef NP_NATIVE
+    dst[0] = static_cast<u8>(colour >> 8);
+    dst[1] = static_cast<u8>(colour & 0xFF);
+#else
+    *reinterpret_cast<unsigned short*>(dst) = colour;
+#endif
+}
+
+struct PeachPhotoTexelOffset
+{
+    int bytes;
+};
+
+struct PeachPhotoCoordinate
+{
+    int value;
+
+    PeachPhotoCoordinate(int v) : value(v) { }
+};
+
+struct PeachPhotoTexelColumn
+{
+    int pixel;
+    int tile;
+};
+
+static inline void GetPeachPhotoTexelColumn(
+    PeachPhotoCoordinate coordinate, PeachPhotoTexelColumn& column)
+{
+    column.tile = coordinate.value >> 2;
+    column.pixel = (coordinate.value & 3) << 1;
+}
+
+static inline PeachPhotoTexelOffset PeachPhotoTopOffset(
+    const PeachPhotoTexelColumn& column)
+{
+    PeachPhotoTexelOffset offset;
+    offset.bytes = column.pixel;
+    offset.bytes += column.tile << 5;
+    return offset;
+}
+
+static inline void SetPeachPhotoTop(
+    PlatTexture* texture, const PeachPhotoTexelColumn& column, unsigned short colour)
+{
+    PeachPhotoTexelOffset offset = PeachPhotoTopOffset(column);
+    PeachPhotoStoreTexel(
+        static_cast<u8*>(texture->m_SwizzledData) + offset.bytes, colour);
+}
+
+static inline PeachPhotoTexelOffset PeachPhotoPixelOffset(int coordinate, int shift)
+{
+    PeachPhotoTexelOffset result;
+    result.bytes = coordinate & 3;
+    result.bytes <<= shift;
+    return result;
+}
+
+static inline PeachPhotoTexelOffset PeachPhotoCombineOffset(int columnPixel, int rowPixel)
+{
+    PeachPhotoTexelOffset result;
+    result.bytes = columnPixel;
+    result.bytes += rowPixel;
+    return result;
+}
+
+static inline PeachPhotoTexelOffset PeachPhotoColumnOffset(
+    PlatTexture* texture, const PeachPhotoTexelColumn& column, int y)
+{
+    PeachPhotoTexelOffset pixel = PeachPhotoPixelOffset(y, 3);
+    PeachPhotoTexelOffset offset;
+    offset.bytes = ((y >> 2) * (texture->m_Width >> 2) + column.tile) << 5;
+    PeachPhotoTexelOffset within = PeachPhotoCombineOffset(column.pixel, pixel.bytes);
+    offset.bytes += within.bytes;
+    return offset;
+}
+
+static inline void SetPeachPhotoBottom(PlatTexture* texture,
+    PeachPhotoCoordinate row, const PeachPhotoTexelColumn& column, unsigned short colour)
+{
+    PeachPhotoTexelOffset offset = PeachPhotoColumnOffset(texture, column, row.value);
+    PeachPhotoStoreTexel(
+        static_cast<u8*>(texture->m_SwizzledData) + offset.bytes, colour);
+}
+
+struct PeachPhotoTexelRow
+{
+    int pixel;
+    int tile;
+};
+
+static inline void GetPeachPhotoTexelRow(
+    PeachPhotoCoordinate coordinate, PeachPhotoTexelRow& row)
+{
+    row.tile = coordinate.value >> 2;
+    row.pixel = (coordinate.value & 3) << 3;
+}
+
+static inline void SetPeachPhotoLeft(
+    PlatTexture* texture, const PeachPhotoTexelRow& row, unsigned short colour)
+{
+    PeachPhotoTexelOffset offset;
+    offset.bytes = row.pixel;
+    offset.bytes += (row.tile * (texture->m_Width >> 2)) << 5;
+    PeachPhotoStoreTexel(
+        static_cast<u8*>(texture->m_SwizzledData) + offset.bytes, colour);
+}
+
+static inline PeachPhotoTexelOffset PeachPhotoRowOffset(
+    PlatTexture* texture, int column, const PeachPhotoTexelRow& row)
+{
+    PeachPhotoTexelOffset within = PeachPhotoPixelOffset(column, 1);
+    PeachPhotoTexelOffset offset;
+    offset.bytes = (row.tile * (texture->m_Width >> 2) + (column >> 2)) << 5;
+    within.bytes += row.pixel;
+    offset.bytes += within.bytes;
+    return offset;
+}
+
+static inline void SetPeachPhotoRight(PlatTexture* texture,
+    PeachPhotoCoordinate column, const PeachPhotoTexelRow& row, unsigned short colour)
+{
+    PeachPhotoTexelOffset offset = PeachPhotoRowOffset(texture, column.value, row);
+    PeachPhotoStoreTexel(
+        static_cast<u8*>(texture->m_SwizzledData) + offset.bytes, colour);
+}
+
+void SetPeachPhotoTextureBorder(
+    unsigned short colour, unsigned long textureHandle)
+{
+    int x, y;
+#ifdef NP_NATIVE
+    NpFsGate("texwrite");   // NP (pipeline): the border pixels are written into the texture data the send reads
+#endif
+    PlatTexture* texture = glx_GetTex(textureHandle);
+    const int width = texture->m_Width;
+    const int height = texture->m_Height;
+    PeachPhotoCoordinate coordinate(0);
+
+    for (x = 0; x < width; ++x)
+    {
+        coordinate.value = x;
+        PeachPhotoTexelColumn column;
+        GetPeachPhotoTexelColumn(coordinate, column);
+        coordinate.value = height - 1;
+        SetPeachPhotoTop(texture, column, colour);
+        SetPeachPhotoBottom(texture, coordinate, column, colour);
+    }
+
+    for (y = 0; y < height; ++y)
+    {
+        coordinate.value = y;
+        PeachPhotoTexelRow row;
+        GetPeachPhotoTexelRow(coordinate, row);
+        SetPeachPhotoLeft(texture, row, colour);
+        coordinate.value = width - 1;
+        SetPeachPhotoRight(texture, coordinate, row, colour);
+    }
+}
+
+void UpdatePeachPhoto(
+    PeachPhotoState* photo, float dt, int)
+{
+    if (photo->state == PEACH_PHOTO_ACTIVE)
+    {
+        const unsigned long texture = glGetTexture(sPeachPhotoTexture);
+        const unsigned short border =
+            (unsigned short)((gPeachPhotoBorderIntensity << 8) | gPeachPhotoBorderAlpha);
+        SetPeachPhotoTextureBorder(border, texture);
+
+        photo->delay -= dt;
+        if (photo->delay < 0.0f)
+        {
+            photo->delay = 0.0f;
+            if (photo->state != PEACH_PHOTO_INACTIVE)
+            {
+                photo->state = PEACH_PHOTO_FADING;
+                photo->fadeTime = 0.0f;
+            }
+        }
+    }
+
+    if (photo->state != PEACH_PHOTO_INACTIVE)
+    {
+        const unsigned int currentFrame = glGetCurrentFrame();
+        if (currentFrame != photo->lastFrame)
+        {
+            if (photo->firstFrameSeen || photo->textureReady)
+            {
+                photo->lastFrame = currentFrame;
+                photo->textureReady = true;
+                RLView* view = GetLayerView(eCLV_Characters);
+                view->m_Target = 0;
+            }
+            else
+            {
+                photo->lastFrame = currentFrame;
+                photo->firstFrameSeen = true;
+            }
+        }
+
+        if (photo->state == PEACH_PHOTO_FADING)
+        {
+            photo->fadeTime += dt;
+            if (photo->fadeTime > gPeachPhotoFadeTime)
+            {
+                photo->state = PEACH_PHOTO_INACTIVE;
+            }
+        }
+    }
+}
+
+void RenderPeachPhoto(PeachPhotoState* photo)
+{
+    glModel* model;
+
+    if (photo->state == PEACH_PHOTO_INACTIVE)
+    {
+        return;
+    }
+
+    float alpha;
+    if (photo->state == PEACH_PHOTO_FADING)
+    {
+        float elapsed = photo->fadeTime / gPeachPhotoFadeTime;
+        if (elapsed > 1.0f)
+        {
+            elapsed = 1.0f;
+        }
+        alpha = 1.0f - elapsed;
+    }
+    else
+    {
+        alpha = 1.0f;
+    }
+
+    if (gPeachPhotoDebugBounds)
+    {
+        nlColour red = { { 0xFF, 0, 0, 0xFF } };
+        g_ShapeRenderer.DrawLine3D(
+            photo->corners[0], photo->corners[1], red, true);
+        g_ShapeRenderer.DrawLine3D(
+            photo->corners[1], photo->corners[2], red, true);
+        g_ShapeRenderer.DrawLine3D(
+            photo->corners[2], photo->corners[3], red, true);
+        g_ShapeRenderer.DrawLine3D(
+            photo->corners[3], photo->corners[0], red, true);
+    }
+
+    glSetDefaultState(gPeachPhotoResetState);
+    glSetCurrentTexture(glGetTexture(sPeachPhotoTexture), GLTT_Diffuse);
+    glSetTextureState(GLTS_DiffuseWrap, 3);
+    glSetCurrentTextureState(glHandleizeTextureState());
+    glSetRasterState(GLS_AlphaBlend, 1);
+    glSetCurrentRasterState(glHandleizeRasterState());
+
+    if (!photo->projected)
+    {
+        int i;
+        for (i = 0; i < 4; ++i)
+        {
+            nlVector3 projected;
+            glViewProjectPoint(GetLayerView(eCLV_Characters),
+                photo->corners[i],
+                projected);
+            photo->projectedCorners[i].x = 0.5f * (1.0f + projected.x);
+            photo->projectedCorners[i].y = 0.5f * (1.0f + projected.y);
+        }
+
+        float oneThird = 1.0f / 3.0f;
+        for (i = 0; i < 3; ++i)
+        {
+            for (int x = 0; x < 3; ++x)
+            {
+                for (int corner = 0; corner < 4; ++corner)
+                {
+                    nlVector3 projected;
+                    glViewProjectPoint(GetLayerView(eCLV_Characters),
+                        photo->cells[i][x].world[corner],
+                        projected);
+                    photo->cells[i][x].projected[corner].x =
+                        0.5f * (1.0f + projected.x);
+                    photo->cells[i][x].projected[corner].y =
+                        0.5f * (1.0f + projected.y);
+
+                    nlVec2Set(photo->cells[i][x].texture[0],
+                        oneThird * (float)i,
+                        oneThird * (float)(x + 1));
+                    nlVec2Set(photo->cells[i][x].texture[1],
+                        oneThird * (float)(i + 1),
+                        oneThird * (float)(x + 1));
+                    nlVec2Set(photo->cells[i][x].texture[2],
+                        oneThird * (float)(i + 1),
+                        oneThird * (float)x);
+                    nlVec2Set(photo->cells[i][x].texture[3],
+                        oneThird * (float)i,
+                        oneThird * (float)x);
+                }
+            }
+        }
+        photo->projected = true;
+    }
+
+    nlColour colour = { {
+        0xFF, 0xFF, 0xFF,
+        (unsigned char)(alpha * (float)gPeachPhotoAlpha)
+    } };
+
+    glMultiTextureModelWriter writer;
+    nlVector2 texture[4];
+    texture[0] = sPeachPhotoTexcoords[0];
+    texture[1] = sPeachPhotoTexcoords[1];
+    texture[2] = sPeachPhotoTexcoords[2];
+    texture[3] = sPeachPhotoTexcoords[3];
+
+    if (writer.Begin(4, 3, 0))
+    {
+        for (int i = 0; i < 4; ++i)
+        {
+            writer.Texcoord0(photo->projectedCorners[i]);
+
+            const nlVector2& tex = texture[(i + gPeachPhotoTextureRotation) % 4];
+            writer.Texcoord1(tex);
+            writer.Texcoord2(tex);
+            writer.Colour(colour);
+
+            nlVector3 position = photo->corners[i];
+            position.z += gPeachPhotoDepthOffset;
+            writer.Vertex(position);
+        }
+
+        if (writer.End())
+        {
+            writer.Texture(0, glGetTexture(
+                gPeachPhotoDisableImage ? sPeachPhotoWhiteTexture : sPeachPhotoTexture));
+
+            writer.Texture(1, glGetTexture(
+                gPeachPhotoDisableMasks ? sPeachPhotoWhiteTexture : sPeachPhotoMaskTexture1));
+
+            writer.Texture(2, glGetTexture(
+                gPeachPhotoDisableMasks ? sPeachPhotoWhiteTexture : sPeachPhotoMaskTexture2));
+
+            model = writer.GetModel();
+            for (glModelPacket* packet = model->packets;
+                 packet < model->packets + model->numPackets;
+                 ++packet)
+            {
+                glSetRasterState(
+                    packet->rasterState, GLS_AlphaTest, 1);
+                glSetRasterState(
+                    packet->rasterState, GLS_AlphaTestRef, 0);
+            }
+
+            GetLayerView(eCLV_PeachPhoto3D)->AttachModel(
+                writer.GetModel(), 0);
+        }
+    }
+}

@@ -1,0 +1,8 @@
+index.pkl
+gen_fns*.inc
+dt_a
+dt_a_dbg
+dt_b
+dt_b_mut
+out_*.txt
+err_*.txt

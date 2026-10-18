@@ -1,0 +1,18 @@
+# RT (wave 5), CONSOLE A/B: the timed scripted match (nav/match60.txt) on the lab package (MSCN00001; vitaGL cdbba42-glb with the patches platform/vita/vitagl/0001 + 0003-rt).
+# The lab build has the RT timers on by default (VitaPlan: MSC_VITA_RT_TIMERS=3, MSC_VGX_RTTIME=1, MSC_LAT=1). Read in log.txt:
+#   [rt] every 300 presents: scenes/frame, depth MB loaded/stored/not moved, CPU of the scene changes, the draw that begins a scene, GPU busy / span / tail p50 p95
+#   [lat] every 300 shown frames: pad->shown p50 p95 (the input delay) and its stages; [frame-timing] ... lat_n lat_p50_us lat_p95_us
+#   [vgx] prof (PROF=3) all=, [vgx-vita] display: interval ... (pictures held 0/1/2/3/4+ vblanks), [vita] frame N: fps
+# MSAA2: RT1 + 2x multisampling (LOOK's switch). GPU busy in [rt] against RT1 decides whether 2x fits; photograph a player's edge.
+MSC_INPUT_SCRIPT=match60.txt
+MSC_MAX_FRAMES=12000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=300
+MSC_VITA_MEMSTATS=1
+MSC_VGX_PROF=3
+NP_DATA_DIR=ux0:data/mscharged/np-data
+MSC_PLAN=C
+MSC_VGX_RT=1
+MSC_VITA_MSAA=2
+MSC_LATE_WAIT=0

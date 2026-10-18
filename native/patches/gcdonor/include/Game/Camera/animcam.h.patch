@@ -1,0 +1,13 @@
+diff --git a/include/Game/Camera/animcam.h b/include/Game/Camera/animcam.h
+index 9f62f89..3c3ee55 100644
+--- a/include/Game/Camera/animcam.h
++++ b/include/Game/Camera/animcam.h
+@@ -23,6 +23,8 @@ public:
+ }; // total size: 0x28
+ 
+ bool LoadAnimCameraData(nlChunk* outerChunk, nlChunk* outerEnd, cCameraData* pAnimCameraData, bool ownsKeyData);
++// NP: big-endian conversion of a camera container chunk, see animcam.cpp.
++bool PortConvertCameraChunk(nlChunk* camera, unsigned long size);
+ 
+ class cAnimCamera : public cBaseCamera
+ {

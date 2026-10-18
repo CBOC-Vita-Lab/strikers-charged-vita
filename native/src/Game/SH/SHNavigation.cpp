@@ -1,0 +1,530 @@
+#include "revolution/types.h"
+#include "NL/nlDLListContainer.inl"
+#include "NL/plat/PlatPadManager.h"
+#include "NL/plat/PlatPadStatus.h"
+#include "Game/SH/SHNavigation.h"
+#include "Game/BaseGameSceneManager.h"
+
+#include "Game/DB/CharacterInfo.h"
+#include "Game/FE/feFinder.h"
+#include "Game/SH/PointerFinders.h"
+#include "Game/FE/fePresentation.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/feSceneManager.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlInstance.h"
+#include "Game/FE/tlSlide.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/GameInfo.h"
+#include "Game/Render/FrontEndPresentation.h"
+#include "NL/globalpad.h"
+#include "NL/nlBasicString.h"
+#include "NL/nlColour.h"
+#include "NL/nlPrint.h"
+#include "NL/nlString.h"
+#include "NL/nlTask.h"
+#include "Game/FE/feDPD.h"
+#include "Game/FE/fePageControls.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feFinder_impl.h"
+
+bool sPointerInputEnabled = true;
+bool sPointerHidden;
+NLString gNextFETransition;
+
+SHNavigation::SHNavigation()
+    : mPageControls(true)
+{
+    mTransitionPlaying = false;
+    mTransitionPending = false;
+    mHomeWarningPlaying = false;
+    mIsWidescreen = false;
+    mPadding1E0 = 0;
+    mVisibleButtons = false;
+
+    for (int channel = 0; channel < 4; ++channel)
+    {
+        if (g_pPadManager->GetPad(channel) != 0)
+        {
+            g_pPlatPadManager->SetDPDEnabled(channel, true);
+        }
+    }
+}
+
+SHNavigation::~SHNavigation()
+{
+    for (int channel = 0; channel < 4; ++channel)
+    {
+        if (g_pPadManager->GetPad(channel) != 0)
+        {
+            g_pPlatPadManager->SetDPDEnabled(channel, false);
+        }
+        SetPointerInstance(channel, 0);
+    }
+}
+
+void SHNavigation::SceneCreated()
+{
+    TLInstance* layer = FEFinder<TLInstance, 1>::FindOrDefault(GetPresentation()->GetActiveSlide(), "Layer");
+
+    for (int index = 0; index < 4; ++index)
+    {
+        char name[64];
+        nlSNPrintf(name, sizeof(name), "cursor%d", index);
+        mPointerInstances[index] = FEFinder<TLComponentInstance, 4>::Find(layer, name);
+        SetPointerInstance(index, mPointerInstances[index]);
+        mPointerInstances[index]->SetActiveSlide("waiting", true, false);
+    }
+
+    mBackButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "back");
+    mBreadcrumbs = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "breadcrumbs");
+    mPlayButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "Play_Now");
+    mDoneButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "done");
+    mLowerDoneButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "LOWER DONE");
+    mProgressButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "PROGRESS");
+    mTransition = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "transition");
+    mTransition->SetVisible(false);
+    mHomeWarning = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "no home");
+    mHomeWarning->SetVisible(false);
+
+    TLComponentInstance* timer = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "the_timer");
+    if (GameInfoManager::Instance()->GetUserInfo().IsWidescreen())
+    {
+        mPlusButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "+16:9");
+        mMinusButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "-16:9");
+        FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "+")->SetVisible(false);
+        FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "-")->SetVisible(false);
+        timer->SetActiveSlide("16:9", true, false);
+        mIsWidescreen = true;
+        mHomeWarning->SetActiveSlide("widescreen", true, false);
+    }
+    else
+    {
+        mPlusButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "+");
+        mMinusButton = FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "-");
+        FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "+16:9")->SetVisible(false);
+        FEFinder<TLComponentInstance, 4>::FindOrDefault(layer, "-16:9")->SetVisible(false);
+        timer->SetActiveSlide("4:3", true, false);
+    }
+
+    mPageControls.SetMinusButton(mMinusButton);
+    mPageControls.SetPlusButton(mPlusButton);
+
+    mTimer = FEFinder<TLInstance, TLAT_TEXT>::Find<TLSlide>(timer->GetActiveSlide(), "Timer",
+        InlineHasher(0UL), InlineHasher(0UL), InlineHasher(0UL), InlineHasher(0UL), InlineHasher(0UL));
+    mTimer->SetVisible(false);
+    RestoreButtonVisibility();
+    if (GetOverlayManager() != 0)
+    {
+        SetPointerTeamColours();
+    }
+}
+
+void SHNavigation::Update(float fDeltaT)
+{
+    BaseSceneHandler::Update(fDeltaT);
+    mVisible = sPointerInputEnabled;
+
+    for (int index = 0; index < 4; ++index)
+    {
+        if (mPointerInstances[index] == 0)
+        {
+            mPointerInstances[index]->m_bVisible = false;
+            continue;
+        }
+
+        u16 angle;
+        u8 valid = true;
+        nlVector2 position = GetPointerPosition(index, &angle, &valid);
+        if (valid)
+        {
+            mPointerInstances[index]->SetAssetPosition(position.x, position.y, 0.0f);
+            mPointerInstances[index]->SetAssetRotation(
+                0.0f, 0.0f, AngUnitsToRad_fromUnsignedShort((u16)-angle));
+        }
+        mPointerInstances[index]->m_bVisible = valid && !sPointerHidden;
+    }
+
+    if (mTransitionPlaying)
+    {
+        if (mTransitionPending)
+        {
+            mTransition->m_bVisible = true;
+            mTransitionPending = false;
+            const char* functionName = gNextFETransition.c_str();
+            FrontEndPresentation::GetInstance()->Call(functionName);
+        }
+
+        if (mTransition->GetActiveSlide()->m_time >= 0.6f)
+        {
+            mTransition->m_bVisible = false;
+            mTransitionPlaying = false;
+            sPointerInputEnabled = !sPointerHidden;
+        }
+    }
+
+    if (mHomeWarningPlaying)
+    {
+        TLSlide* slide = mHomeWarning->GetActiveSlide();
+        if (slide->GetCurrentTime() >= slide->GetStartTime() + slide->GetDuration())
+        {
+            mHomeWarning->m_bVisible = false;
+            mHomeWarningPlaying = false;
+
+            if ((nlTaskManager::m_pInstance->mCurrentState & 4) == 0)
+            {
+                mPlusButton->m_bVisible = mVisibleButtons & 1;
+                mMinusButton->m_bVisible = (mVisibleButtons >> 1) & 1;
+                mBackButton->m_bVisible = (mVisibleButtons >> 2) & 1;
+                mBreadcrumbs->m_bVisible = (mVisibleButtons >> 3) & 1;
+                mPlayButton->m_bVisible = (mVisibleButtons >> 4) & 1;
+                mDoneButton->m_bVisible = (mVisibleButtons >> 5) & 1;
+                mLowerDoneButton->m_bVisible = (mVisibleButtons >> 6) & 1;
+                mProgressButton->m_bVisible = (mVisibleButtons >> 7) & 1;
+            }
+        }
+    }
+}
+
+void SetPointerEnabled(bool value)
+{
+    if (sPointerInputEnabled != value)
+    {
+        if (value != 0)
+        {
+            for (int channel = 0; channel < 4; ++channel)
+            {
+                if (g_pPadManager->GetPad(channel) != 0)
+                {
+                    g_pPlatPadManager->SetDPDEnabled(channel, true);
+                }
+            }
+        }
+        else
+        {
+            for (int channel = 0; channel < 4; ++channel)
+            {
+                if (g_pPadManager->GetPad(channel) != 0)
+                {
+                    g_pPlatPadManager->SetDPDEnabled(channel, false);
+                }
+            }
+        }
+        sPointerInputEnabled = value;
+    }
+
+    sPointerHidden = !sPointerInputEnabled;
+}
+
+void SHNavigation::SetButtonVisibility(int mask, bool visible)
+{
+    if (visible)
+    {
+        this->mVisibleButtons |= mask;
+    }
+    else
+    {
+        this->mVisibleButtons &= ~mask;
+    }
+
+    this->mPlusButton->m_bVisible = this->mVisibleButtons & 1;
+    this->mMinusButton->m_bVisible = (this->mVisibleButtons >> 1) & 1;
+    this->mBackButton->m_bVisible = (this->mVisibleButtons >> 2) & 1;
+    this->mBreadcrumbs->m_bVisible = (this->mVisibleButtons >> 3) & 1;
+    this->mPlayButton->m_bVisible = (this->mVisibleButtons >> 4) & 1;
+    this->mDoneButton->m_bVisible = (this->mVisibleButtons >> 5) & 1;
+    this->mLowerDoneButton->m_bVisible = (this->mVisibleButtons >> 6) & 1;
+    this->mProgressButton->m_bVisible = (this->mVisibleButtons >> 7) & 1;
+}
+
+void SHNavigation::RestoreButtonVisibility()
+{
+    this->mPlusButton->m_bVisible = this->mVisibleButtons & 1;
+    this->mMinusButton->m_bVisible = (this->mVisibleButtons >> 1) & 1;
+    this->mBackButton->m_bVisible = (this->mVisibleButtons >> 2) & 1;
+    this->mBreadcrumbs->m_bVisible = (this->mVisibleButtons >> 3) & 1;
+    this->mPlayButton->m_bVisible = (this->mVisibleButtons >> 4) & 1;
+    this->mDoneButton->m_bVisible = (this->mVisibleButtons >> 5) & 1;
+    this->mLowerDoneButton->m_bVisible = (this->mVisibleButtons >> 6) & 1;
+    this->mProgressButton->m_bVisible = (this->mVisibleButtons >> 7) & 1;
+}
+
+void SHNavigation::HideButtons()
+{
+    this->mPlusButton->m_bVisible = false;
+    this->mMinusButton->m_bVisible = false;
+    this->mBackButton->m_bVisible = false;
+    this->mBreadcrumbs->m_bVisible = false;
+    this->mPlayButton->m_bVisible = false;
+    this->mDoneButton->m_bVisible = false;
+    this->mLowerDoneButton->m_bVisible = false;
+    this->mProgressButton->m_bVisible = false;
+}
+
+void SHNavigation::ResetButtons(bool enabled)
+{
+    this->mVisibleButtons = 0;
+
+    TLComponentInstance* component = FEFinder<TLComponentInstance, 4>::FindOrDefault(
+        this->mBackButton->GetActiveSlide(), "back");
+    component->SetActiveSlide("off", true, false);
+
+    if (enabled)
+    {
+        this->mPlusButton->SetActiveSlide("off", true, false);
+        this->mMinusButton->SetActiveSlide("off", true, false);
+    }
+
+    this->mPlayButton->SetActiveSlide("off", true, false);
+    this->mDoneButton->SetActiveSlide("off", true, false);
+    this->mLowerDoneButton->SetActiveSlide("off", true, false);
+    this->mProgressButton->SetActiveSlide("off", true, false);
+    SetPlayButtonText(NAV_PLAY_NOW);
+    SetBackButtonText(NAV_BACK);
+    SetDoneButtonText(NAV_DONE);
+}
+
+void SHNavigation::SetButtons(int value, bool enabled)
+{
+    ResetButtons(enabled);
+    this->mVisibleButtons = value;
+    this->mPlusButton->m_bVisible = this->mVisibleButtons & 1;
+    this->mMinusButton->m_bVisible = (this->mVisibleButtons >> 1) & 1;
+    this->mBackButton->m_bVisible = (this->mVisibleButtons >> 2) & 1;
+    this->mBreadcrumbs->m_bVisible = (this->mVisibleButtons >> 3) & 1;
+    this->mPlayButton->m_bVisible = (this->mVisibleButtons >> 4) & 1;
+    this->mDoneButton->m_bVisible = (this->mVisibleButtons >> 5) & 1;
+    this->mLowerDoneButton->m_bVisible = (this->mVisibleButtons >> 6) & 1;
+    this->mProgressButton->m_bVisible = (this->mVisibleButtons >> 7) & 1;
+    SetPlayButtonText(NAV_PLAY_NOW);
+    SetBackButtonText(NAV_BACK);
+    SetDoneButtonText(NAV_DONE);
+}
+
+TLComponentInstance* SHNavigation::GetButton(int value)
+{
+    TLComponentInstance* component = 0;
+    switch (value)
+    {
+    case NAVIGATION_BUTTON_PLUS:
+        component = this->mPlusButton;
+        break;
+    case NAVIGATION_BUTTON_MINUS:
+        component = this->mMinusButton;
+        break;
+    case NAVIGATION_BUTTON_BACK:
+        component = this->mBackButton;
+        break;
+    case NAVIGATION_BUTTON_BREADCRUMBS:
+        component = this->mBreadcrumbs;
+        break;
+    case NAVIGATION_BUTTON_PLAY:
+        component = this->mPlayButton;
+        break;
+    case NAVIGATION_BUTTON_DONE:
+        component = this->mDoneButton;
+        break;
+    case NAVIGATION_BUTTON_LOWER_DONE:
+        component = this->mLowerDoneButton;
+        break;
+    case NAVIGATION_BUTTON_PROGRESS:
+        component = this->mProgressButton;
+        break;
+    }
+    return component;
+}
+
+SHNavigation* GetNavigationScene()
+{
+    return (SHNavigation*)FESceneManager::Instance()->m_topMostScene;
+}
+
+void SHNavigation::SetPlayButtonText(int value)
+{
+    TLTextInstance* text0 = FEFinder<TLTextInstance, 3>::FindOrDefault(this->mPlayButton,
+        "off", "Group", "playnow");
+
+    TLTextInstance* text1 = FEFinder<TLTextInstance, 3>::FindOrDefault(this->mPlayButton,
+        "over", "Group", "playnow");
+
+    TLTextInstance* text2 = FEFinder<TLTextInstance, 3>::FindOrDefault(this->mPlayButton,
+        "down", "Group", "playnow");
+
+    switch (value)
+    {
+    case NAV_PLAY_NOW:
+        text0->SetStringId("PLAY_NOW");
+        text1->SetStringId("PLAY_NOW");
+        text2->SetStringId("PLAY_NOW");
+        break;
+    case NAV_RESTART_CUP:
+        text0->SetStringId("RESTART_CUP");
+        text1->SetStringId("RESTART_CUP");
+        text2->SetStringId("RESTART_CUP");
+        break;
+    case NAV_CONTINUE:
+        text0->SetStringId("CONTINUE");
+        text1->SetStringId("CONTINUE");
+        text2->SetStringId("CONTINUE");
+        break;
+    case NAV_PLAY_READY:
+        text0->SetStringId("PLAY_NOW_READY");
+        text1->SetStringId("PLAY_NOW_READY");
+        text2->SetStringId("PLAY_NOW_READY");
+        break;
+    }
+}
+
+void SHNavigation::SetDoneButtonText(int value)
+{
+    TLTextInstance* text0 = FEFinder<TLTextInstance, 3>::FindOrDefault(this->mDoneButton,
+        "off", "Group", "done");
+
+    TLTextInstance* text1 = FEFinder<TLTextInstance, 3>::FindOrDefault(this->mDoneButton,
+        "over", "Group", "done");
+
+    TLTextInstance* text2 = FEFinder<TLTextInstance, 3>::FindOrDefault(this->mDoneButton,
+        "down", "Group", "done");
+
+    switch (value)
+    {
+    case NAV_DONE:
+        text0->SetStringId("DONE");
+        text1->SetStringId("DONE");
+        text2->SetStringId("DONE");
+        break;
+    case NAV_ACCEPT:
+        text0->SetStringId("OPTIONS_ACCEPT");
+        text1->SetStringId("OPTIONS_ACCEPT");
+        text2->SetStringId("OPTIONS_ACCEPT");
+        break;
+    }
+}
+
+void SHNavigation::SetBackButtonText(int value)
+{
+    TLComponentInstance* component = FEFinder<TLComponentInstance, 4>::FindOrDefault(
+        this->mBackButton->GetActiveSlide(), "back");
+
+    TLTextInstance* text0 = FEFinder<TLTextInstance, 3>::FindOrDefault(component,
+        "off", "back text");
+
+    TLTextInstance* text1 = FEFinder<TLTextInstance, 3>::FindOrDefault(component,
+        "over", "back text");
+
+    TLTextInstance* text2 = FEFinder<TLTextInstance, 3>::FindOrDefault(component,
+        "down", "back text");
+
+    switch (value)
+    {
+    case NAV_BACK:
+        text0->SetStringId("BACK");
+        text1->SetStringId("BACK");
+        text2->SetStringId("BACK");
+        break;
+    case NAV_LOG_OUT:
+        text0->SetStringId("LOG_OUT");
+        text1->SetStringId("LOG_OUT");
+        text2->SetStringId("LOG_OUT");
+        break;
+    }
+}
+
+void SHNavigation::StartTransition()
+{
+    this->mTransition->SetActiveSlide("Slide1", true, false);
+
+    TLComponentInstance* component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_1");
+    component->SetActiveSlide("Slide1", true, false);
+
+    component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_2");
+    component->SetActiveSlide("Slide1", true, false);
+
+    component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_3");
+    component->SetActiveSlide("Slide1", true, false);
+
+    component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_4");
+    component->SetActiveSlide("Slide1", true, false);
+
+    component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_5");
+    component->SetActiveSlide("Slide1", true, false);
+
+    component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_6");
+    component->SetActiveSlide("Slide1", true, false);
+
+    component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_7");
+    component->SetActiveSlide("Slide1", true, false);
+
+    component = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        this->mTransition->GetActiveSlide(), "Group", "door_8");
+    component->SetActiveSlide("Slide1", true, false);
+
+    this->mTransitionPlaying = true;
+    this->mTransitionPending = true;
+}
+
+void SHNavigation::ShowHomeButtonWarning()
+{
+    if (this->mFEScene == 0 || this->mFEScene->mState != FE_SCENE_READY
+        || this->mHomeWarningPlaying)
+    {
+        return;
+    }
+
+    if (!sPointerInputEnabled)
+    {
+        if ((nlTaskManager::m_pInstance->mCurrentState & 4) == 0)
+        {
+            this->mPlusButton->m_bVisible = false;
+            this->mMinusButton->m_bVisible = false;
+            this->mBackButton->m_bVisible = false;
+            this->mBreadcrumbs->m_bVisible = false;
+            this->mPlayButton->m_bVisible = false;
+            this->mDoneButton->m_bVisible = false;
+            this->mLowerDoneButton->m_bVisible = false;
+            this->mProgressButton->m_bVisible = false;
+        }
+        sPointerInputEnabled = true;
+        sPointerHidden = true;
+    }
+
+    this->mHomeWarning->m_bVisible = true;
+    if (this->mIsWidescreen)
+    {
+        this->mHomeWarning->SetActiveSlide("widescreen", true, false);
+    }
+    else
+    {
+        this->mHomeWarning->SetActiveSlide("Slide1", true, false);
+    }
+    this->mHomeWarningPlaying = true;
+}
+
+void SHNavigation::SetPointerTeamColours()
+{
+    nlColour teamColours[2];
+
+    int team0 = GameInfoManager::Instance()->GetTeam(0);
+    int team1 = GameInfoManager::Instance()->GetTeam(1);
+    const CharacterInfo& info0 = GetCharacterInfo(GetCharacterIndexFromCaptain(team0));
+    const CharacterInfo& info1 = GetCharacterInfo(GetCharacterIndexFromCaptain(team1));
+
+    teamColours[0] = GetTeamColour(info0, info1, true);
+    teamColours[1] = GetTeamColour(info1, info0, true);
+
+    for (int index = 0; index < 4; ++index)
+    {
+        int side = GameInfoManager::Instance()->GetPlayingSide(index);
+        if (side == 0 || side == 1)
+        {
+            SetPointerColour(index, teamColours[side]);
+        }
+    }
+}

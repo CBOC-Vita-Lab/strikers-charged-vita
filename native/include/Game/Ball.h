@@ -1,0 +1,236 @@
+#ifndef GAME_BALL_H
+#define GAME_BALL_H
+
+#include "NL/nlMath.h"
+#include "NL/nlTimer.h"
+
+#include "Game/CharacterTriggers.h"
+
+enum eBallState
+{
+    BALL_STATE_LOOSE = 0,
+    BALL_STATE_CLEARING = 1,
+    BALL_STATE_POSSESSED = 2,
+    BALL_STATE_GROUND_PASS = 3,
+    BALL_STATE_GOALIE_DEFLECTION = 4,
+    BALL_STATE_VOLLEY_PASS = 5,
+    BALL_STATE_SHOT = 6,
+    BALL_STATE_CHIP_SHOT = 7,
+    BALL_STATE_SKILLSHOT = 8,
+    BALL_STATE_LIGHTNING = 9,
+    BALL_STATE_FALLING = 10,
+};
+
+enum eSpinType
+{
+    SPINTYPE_NONE = 0,
+    SPINTYPE_BACK = 1,
+    SPINTYPE_FORWARD = 2,
+    SPINTYPE_ROLLING = 3,
+    SPINTYPE_PARAMETER = 4,
+};
+
+class cFielder;
+class cPlayer;
+class BlurHandler;
+class DebugWriteCache;
+class DrawableModel;
+class DrawableObject;
+class PhysicsAIBall;
+class PhysicsPatch;
+class EffectsGroup;
+class RunningChecksum;
+class Plat3dSoundSrc;
+
+class cBall
+{
+public:
+    cBall();
+    ~cBall();
+
+    void ClearOwner();
+    void ClearBallEffects();
+    void CollideWithCharacterCallback(
+        cPlayer* pCharacter, const nlVector3& v3PreBallVelocity);
+    void PostPhysicsUpdate(float fDeltaT);
+    void UpdateOrientation(float fDeltaT);
+    void WarpTo(const nlVector3& toPos);
+    void SetPassTarget(cPlayer* passTargetPlayer, const nlVector3& pos,
+        bool bVolley);
+    void SetPassTargetTimer(float seconds);
+    float PredictLandingSpotAndTime(nlVector3& v3Dest,
+        int* pNumSolutions, float* pTimes, float fHeight);
+    void KillBlurHandler();
+    void ClearBallBlur();
+    void SetOwner(cPlayer* pOwner);
+    cPlayer* GetOwner() const { return m_pOwner; }
+    const nlVector3& GetPosition() const
+    {
+        return m_v3Position;
+    }
+    void SetPosition(const nlVector3& pos);
+    void SetVelocity(const nlVector3& velocity, eSpinType spin,
+        const nlVector3* pAngularVelocity);
+    void Shoot(cPlayer* pShooter, const nlVector3& v3Dir,
+        const nlVector3& v3Spin, eSpinType spinType, int nBallState,
+        bool bParam6);
+    void ShootRelease(const nlVector3& v3Velocity, eSpinType SpinType);
+    void ShootAtFast(nlVector3& v3Vel, const nlVector3& v3Target,
+        float fDesiredTime);
+    void Update(float fDeltaT);
+    void SyncLog(void* context, DebugWriteCache* cache);
+    void ChecksumState(RunningChecksum* runningChecksum);
+    unsigned int GetGoalType() const
+    {
+        return m_uGoalType;
+    }
+    nlVector3* GetAIVelocity() const;
+    nlVector3* GetDrawablePosition() const;
+    float fn_80014F38(float fScale) const;
+    cFielder* GetOwnerFielder();
+    cPlayer* GetOwnerGoalie();
+    cFielder* GetPassTargetFielder() const;
+    void InitiateBallBlur(
+        eBallShotEffectType effectType, cPlayer* pPlayer);
+    bool GetInNet(int& nSide);
+    bool IsInPassState() const
+    {
+        return meBallState == BALL_STATE_VOLLEY_PASS || meBallState == BALL_STATE_GROUND_PASS;
+    }
+    bool HasActivePassTarget() const
+    {
+        return (meBallState == BALL_STATE_VOLLEY_PASS || meBallState == BALL_STATE_GROUND_PASS) && m_pPassTarget != 0;
+    }
+
+    bool HasPassTarget()
+    {
+        bool bState;
+        bool bResult = false;
+        bState = true;
+        if (meBallState != BALL_STATE_VOLLEY_PASS && meBallState != BALL_STATE_GROUND_PASS)
+        {
+            bState = false;
+        }
+        if (bState && m_pPassTarget != 0)
+        {
+            bResult = true;
+        }
+        return bResult;
+    }
+
+    cPlayer* GetPassTarget() const { return m_pPassTarget; }
+    float GetPassProgress() const
+    {
+        if (m_fTotalPassTime > 0.0f)
+        {
+            return 1.0f - m_tPassTargetTimer.GetSeconds() / m_fTotalPassTime;
+        }
+        return 0.0f;
+    }
+    const nlVector3& GetPassIntercept() const { return m_v3PassIntercept; }
+
+    bool IsSkillShotActive()
+    {
+        return m_tShotTimer.m_uPackedTime != 0 && meBallState == BALL_STATE_SKILLSHOT;
+    }
+
+    bool IsChipShotActive()
+    {
+        return m_tShotTimer.m_uPackedTime != 0 && meBallState == BALL_STATE_CHIP_SHOT;
+    }
+
+    /* 0x00 */ bool m_bVisible;
+    /* 0x01 */ u8 mPadding001[0x03];
+    /* 0x04 */ u32 m_bBallPathChangeCount;
+    /* 0x08 */ u32 m_bBallDeflectCount;
+    /* 0x0C */ Timer m_tShotTimer;
+    /* 0x14 */ Timer m_tLightningTimer;
+    /* 0x1C */ Timer m_tNoPickupTimer;
+    /* 0x24 */ Timer m_tPassTargetTimer;
+    /* 0x2C */ Timer mtNoChargeLossTimer;
+    /* 0x34 */ Timer mtStuckInRiotTimer;
+    /* 0x3C */ Timer mtShotClockTimer;
+    /* 0x44 */ int mnShotClockTeam;
+    /* 0x48 */ bool mbStuckInRiotDone;
+    /* 0x49 */ bool mbBallOnFire;
+    /* 0x4A */ bool mbBallFrozen;
+    /* 0x4B */ u8 mPadding04B;
+    /* 0x4C */ float m_fTotalPassTime;
+    /* 0x50 */ int m_iConsecutiveVolleyPasses;
+    /* 0x54 */ nlVector3 m_v3Position;
+    /* 0x60 */ nlVector3 m_v3PrevPosition;
+    /* 0x6C */ nlVector3 m_v3Velocity;
+    /* 0x78 */ nlVector3 m_v3PassIntercept;
+    /* 0x84 */ nlQuaternion m_qOrientation;
+    /* 0x94 */ nlVector3 m_v3ShotTarget;
+    /* 0xA0 */ nlVector3 m_v3ShotOrigin;
+    /* 0xAC */ unsigned int m_uGoalType;
+    /* 0xB0 */ unsigned int m_uVoiceID;
+    /* 0xB4 */ unsigned int m_CurrentGlowEffect;
+    /* 0xB8 */ eBallState meBallState;
+    /* 0xBC */ eBallState mePrevBallState;
+    /* 0xC0 */ float mfChargeValue;
+    /* 0xC4 */ float mfSkillShotTime;
+    /* 0xC8 */ cPlayer* m_pOwner;
+    /* 0xCC */ cPlayer* m_pPrevOwner;
+    /* 0xD0 */ cPlayer* m_pLastTouch;
+    /* 0xD4 */ cPlayer* m_pPassTarget;
+    /* 0xD8 */ cPlayer* m_pShooter;
+    /* 0xDC */ cPlayer* mpDamageTarget;
+    /* 0xE0 */ BlurHandler* m_pBlurHandler;
+    /* 0xE4 */ DrawableModel* m_pDrawableBall;
+    /* 0xE8 */ PhysicsAIBall* m_pPhysicsBall;
+    /* 0xEC */ Plat3dSoundSrc* m_pSoundOwner;
+    /* 0xF0 */ unsigned long m_uGlowSoundCue;
+}; // total size: 0xF4
+
+extern "C" void fn_80015C38(cBall* pBall, int nBallState);
+
+struct LiveBallTrail;
+float GetBallChargeValue(cBall* pBall, int nParam);
+void ResetBallCharge(cBall* pBall, bool bParam);
+LiveBallTrail* GetBallTrail(unsigned int nIndex);
+unsigned int GetNumBallTrails();
+
+extern cBall* g_pBall;
+extern float gHeaderTargetPredictionHeight;
+
+
+// Shared functions and data from Game/Ball.cpp.
+extern "C" void fn_80014494(cBall*);
+void SetBallFallState(cBall* pBall);
+extern "C" void fn_800145A4(cBall*);
+extern "C" bool fn_80014D38(cBall*);
+extern "C" bool fn_80014E20(cBall* pBall);
+bool IsBallEffectPlaying(cBall* pBall, const EffectsGroup* pGroup);
+void EmitBallChargeTransition(cBall* pBall);
+void UpdateBallStateAndTimers(cBall*, float);
+void DecayBallCharge(cBall*);
+extern "C" void fn_800189C4(cBall* pBall);
+extern "C" void fn_80018A00();
+void OnBallGameOver();
+void OnBallResetEffects(void*);
+void OnBallGetReadyForKickoff(void*);
+void OnBallKickoff();
+void OnBallFall(void*);
+void OnBallTronWallCollision(void*);
+struct CollisionEggData;
+void OnBallEggCollision(CollisionEggData*);
+void OnBallPatchCollision(PhysicsPatch*);
+void OnBallDebrisCollision(void*);
+void OnBallThwompCollision(void*);
+void OnBallStateChange(int, int);
+void InitializeBallTrails(unsigned int nNumTrails);
+
+
+extern "C" void fn_800154FC(cBall* pBall, float fParam);
+extern "C" void fn_800156F8(cBall* pBall, cPlayer* pPlayer);
+extern "C" float fn_800156A8(cBall* pBall);
+bool IsDryBonesSkillshot(cBall* pBall);
+extern "C" bool fn_800167A8(cBall* pBall);
+bool IsBallShotActive(cBall* pBall);
+extern "C" void fn_800180F4( cBall* pBall, nlVector3* pPosition, float fTime);
+void ResetBall(cBall* pBall, bool bParam);
+void SetBallTrailVisible(LiveBallTrail* pBallTrail, bool bParam);
+
+#endif // GAME_BALL_H

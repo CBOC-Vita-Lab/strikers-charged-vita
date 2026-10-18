@@ -1,0 +1,1085 @@
+#include "NL/nlSingleton.inl"
+#include <dwc/dwc_nastime.h>
+#include <dwc/dwc_ranking.h>
+#include "Game/OnlinePlayer.h"
+#include "Game/Sys/debug.h"
+#include <revolution/net/NETDigest.h>
+
+#include "Game/NetworkStats.h"
+
+#include "Game/GameInfo.h"
+#include "Game/NetworkSession.h"
+#include "Game/NetworkSeasonCalendar.h"
+#include "Game/NetworkStatsManager.h"
+#include "Game/Sys/simpleparser.h"
+#include "Game/TweakValue.h"
+#include "Game/SharedStaticStorage.h"
+#include "Game/main.h"
+#include "NL/nlPrint.h"
+#include "NL/nlString.h"
+#include "NL/nlTicker.h"
+#include "NL/nlstring_tmpl.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include "Game/TweakValue.inl"
+
+int g_nConnectToStatsAddress[4] = { 192, 168, 2, 188 };
+
+static int g_nConnectToStatsPort = 80;
+static float sReportSocketLifetime = 5000.0f;
+static char sStatsSeparators[] = " \t\r\n:,";
+
+NetworkStatsReporter::NetworkStatsReporter()
+{
+    mListener = 0;
+    mState = STATS_REPORT_IDLE;
+    mFilter = RANKING_FILTER_NEARBY;
+    mLimit = 0;
+    mLeaderboardPlayers = 0;
+    mLeaderboardMetadata = 0;
+    mHomePlayer.mName[0] = 0;
+    mHomePlayer.mProfileId = 0;
+    memset(mHomePlayer.mMiiData, 0, sizeof(mHomePlayer.mMiiData));
+    mAwayPlayer.mName[0] = 0;
+    mAwayPlayer.mProfileId = 0;
+    memset(mAwayPlayer.mMiiData, 0, sizeof(mAwayPlayer.mMiiData));
+    mReportHome = false;
+    mHomeScore = -1;
+    mAwayScore = -1;
+    mReportStartTime = 0;
+}
+
+void NetworkStatsPlayer::CopyFrom(const NetworkStatsPlayer& other)
+{
+    nlStrNCpy(mName, other.mName, 11);
+    mProfileId = other.mProfileId;
+    memcpy(mMiiData, other.mMiiData, sizeof(mMiiData));
+}
+
+void NetworkStatsReporter::Reset()
+{
+    mListener = 0;
+    mState = STATS_REPORT_IDLE;
+    mFilter = RANKING_FILTER_NEARBY;
+    mLimit = 0;
+    mLeaderboardPlayers = 0;
+    mLeaderboardMetadata = 0;
+    mHomePlayer.mName[0] = 0;
+    mHomePlayer.mProfileId = 0;
+    memset(mHomePlayer.mMiiData, 0, sizeof(mHomePlayer.mMiiData));
+    mAwayPlayer.mName[0] = 0;
+    mAwayPlayer.mProfileId = 0;
+    memset(mAwayPlayer.mMiiData, 0, sizeof(mAwayPlayer.mMiiData));
+    mReportHome = false;
+    mHomeScore = -1;
+    mAwayScore = -1;
+    mReportStartTime = 0;
+}
+
+void NetworkStatsReporter::Close()
+{
+    TransportSocketClose(&mSocket);
+}
+
+void NetworkStatsReporter::SetListener(
+    NetworkStatsListener* listener)
+{
+    mListener = listener;
+}
+
+void NetworkStatsReporter::Open()
+{
+    if (!TransportSocketOpen(&mSocket, true))
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "Failed to open Stats TCP Socket");
+    }
+    else if (!TransportSocketBind(&mSocket, 1002))
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "Failed to bind Stats TCP Socket");
+    }
+    else
+    {
+        TransportSocketSetNonBlocking(&mSocket, false);
+    }
+}
+
+bool NetworkStatsReporter::ReportGameResult(int,
+    const NetworkScoreSubmission*, NetworkStatsPlayer* home,
+    NetworkStatsPlayer* away, bool reportHome, int homeScore,
+    int awayScore, const NetworkScoreSubmission*)
+{
+    if (!reportHome)
+    {
+        tDebugPrintManager::Print(DC_NETWORK,
+            "ReportGameResult returning true, but did not really report this game..only home team should do that for now\n");
+        return true;
+    }
+
+    Open();
+
+    if (!TransportSocketIsOpen(&mSocket))
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "Failed to ReportGameResult, TCP Socket not open\n");
+        return false;
+    }
+
+    u8 address[4];
+    address[0] = (u8)g_nConnectToStatsAddress[0];
+    address[1] = (u8)g_nConnectToStatsAddress[1];
+    address[2] = (u8)g_nConnectToStatsAddress[2];
+    address[3] = (u8)g_nConnectToStatsAddress[3];
+    int result = TransportSocketConnect(
+        &mSocket, address, (u16)g_nConnectToStatsPort);
+    if (result != -26)
+    {
+        tDebugPrintManager::Print(DC_NETWORK,
+            "Connect Result (ReportGameResult) to Stats Server %d\n",
+            result);
+        Close();
+        return false;
+    }
+
+    tDebugPrintManager::Print(DC_NETWORK, "Connect (ReportGameResult) To Stats In Progress\n");
+    mState = STATS_REPORT_SEND_RESULT;
+    mHomePlayer.CopyFrom(*home);
+    mAwayPlayer.CopyFrom(*away);
+    mReportHome = reportHome;
+    mHomeScore = homeScore;
+    mAwayScore = awayScore;
+    return true;
+}
+
+bool NetworkStatsReporter::SubmitScore(
+    int, const NetworkRankingMeta*)
+{
+    return false;
+}
+
+bool NetworkStatsReporter::ReservedStatsQuery()
+{
+    return false;
+}
+
+bool NetworkStatsReporter::GetLeaderboardStats(int category,
+    int filter, int limit, NetworkStatsPlayer* players,
+    NetworkRankingMeta* metadata)
+{
+    Open();
+
+    if (!TransportSocketIsOpen(&mSocket))
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "Failed to Get Leaderboard stats, TCP Socket not open\n");
+        mListener->OnLeaderboardResult(
+            false, category, filter, 0, 0, 0);
+        return false;
+    }
+
+    u8 address[4];
+    address[0] = (u8)g_nConnectToStatsAddress[0];
+    address[1] = (u8)g_nConnectToStatsAddress[1];
+    address[2] = (u8)g_nConnectToStatsAddress[2];
+    address[3] = (u8)g_nConnectToStatsAddress[3];
+    int result = TransportSocketConnect(
+        &mSocket, address, (u16)g_nConnectToStatsPort);
+    if (result != -26)
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "Connect Result to Stats Server %d\n", result);
+        mListener->OnLeaderboardResult(
+            false, category, filter, 0, 0, 0);
+        Close();
+        return false;
+    }
+
+    tDebugPrintManager::Print(DC_NETWORK, "Connect To Stats In Progress\n");
+    mState = STATS_REPORT_SEND_QUERY;
+    mFilter = filter;
+    mLimit = limit;
+    mLeaderboardPlayers = players;
+    mLeaderboardMetadata = metadata;
+    return true;
+}
+
+enum eLeaderboardResponseColumn
+{
+    LEADERBOARD_RESPONSE_RANK = 0,
+    LEADERBOARD_RESPONSE_NAME = 1,
+    LEADERBOARD_RESPONSE_SCORE = 2,
+    LEADERBOARD_RESPONSE_WINS = 4,
+    LEADERBOARD_RESPONSE_LOSSES = 5,
+};
+
+void NetworkStatsReporter::ParseLeaderboardResponse(
+    char* data, int size)
+{
+    SimpleParser parser;
+    parser.StartParsing(data, size, sStatsSeparators);
+
+    int row = 0;
+    int column = 0;
+    while (row < mLimit)
+    {
+        char* token = parser.NextTokenOnLine(true);
+        if (token != 0)
+        {
+            switch (column)
+            {
+            case LEADERBOARD_RESPONSE_RANK:
+                mLeaderboardMetadata[row].mOnlineRegion = GetOnlineRegion();
+                mLeaderboardMetadata[row].mDisplayRank = atoi(token);
+                break;
+            case LEADERBOARD_RESPONSE_NAME:
+                nlStrToWcs(token, mLeaderboardPlayers[row].mName, 11);
+                mLeaderboardPlayers[row].mProfileId = 0;
+                break;
+            case LEADERBOARD_RESPONSE_SCORE:
+                mLeaderboardMetadata[row].mScore = atoi(token);
+                break;
+            case LEADERBOARD_RESPONSE_WINS:
+                mLeaderboardMetadata[row].mWins = atoi(token);
+                break;
+            case LEADERBOARD_RESPONSE_LOSSES:
+                mLeaderboardMetadata[row].mLosses = atoi(token);
+                break;
+            }
+            ++column;
+        }
+        else
+        {
+            column = 0;
+            ++row;
+            if (!parser.AdvanceLine())
+            {
+                break;
+            }
+        }
+    }
+
+    mListener->OnLeaderboardResult(true, 0, mFilter, row,
+        mLeaderboardPlayers, mLeaderboardMetadata);
+}
+
+void NetworkStatsReporter::Update()
+{
+    switch (mState)
+    {
+    case STATS_REPORT_SEND_QUERY:
+    {
+        char request[256];
+        nlSNPrintf(request, 255,
+            "GET /OnlineRankingSimulator/Rankings.py?SimpleFormat=true\r\n\r\n");
+        int result = TransportSocketSend(&mSocket, request, nlStrLen(request));
+        if (result > 0)
+        {
+            tDebugPrintManager::Print(DC_NETWORK, "Send Result to Stats Server %d\n", result);
+            mState = STATS_REPORT_RECEIVE_QUERY;
+        }
+        else
+        {
+            tDebugPrintManager::Print(DC_NETWORK, "Send Result to Stats Server %d\n", result);
+            mListener->OnLeaderboardResult(false, 0, mFilter, 0, 0, 0);
+            mState = STATS_REPORT_IDLE;
+            Close();
+        }
+        break;
+    }
+    case STATS_REPORT_RECEIVE_QUERY:
+    {
+        char response[1000];
+        int result = TransportSocketReceiveFrom(&mSocket, response, 999, 0, 0);
+        if (result <= 0)
+        {
+            if (result != -6)
+            {
+                tDebugPrintManager::Print(DC_NETWORK, "Received Stats String Error %d\n", result);
+                mListener->OnLeaderboardResult(false, 0, mFilter, 0, 0, 0);
+                mState = STATS_REPORT_IDLE;
+                Close();
+            }
+        }
+        else
+        {
+            tDebugPrintManager::Print(DC_NETWORK,
+                "Received Stats Length = %d, Data follows:\n", result);
+            response[result] = 0;
+            tDebugPrintManager::Print(DC_NETWORK, response);
+            ParseLeaderboardResponse(response, result);
+            mState = STATS_REPORT_IDLE;
+            Close();
+        }
+        break;
+    }
+    case STATS_REPORT_SEND_RESULT:
+    {
+        char homeName[11] = { 0 };
+        char awayName[11] = { 0 };
+        char request[256];
+        nlWcsToStr(mHomePlayer.mName, homeName, 11);
+        nlWcsToStr(mAwayPlayer.mName, awayName, 11);
+        nlSNPrintf(request, 255,
+            "GET /OnlineRankingSimulator/Rankings.py?yourname=%s&opponentsname=%s&yourscore=%d&opponentsscore=%d HTTP/1.0\r\n\r\n",
+            homeName, awayName, mHomeScore, mAwayScore);
+        int result = TransportSocketSend(&mSocket, request, nlStrLen(request));
+        if (result > 0)
+        {
+            tDebugPrintManager::Print(DC_NETWORK,
+                "Send ReportGameResult to Stats Server %d\n", result);
+            mState = STATS_REPORT_WAIT_CLOSE;
+            mReportStartTime = nlGetTicker();
+        }
+        else
+        {
+            tDebugPrintManager::Print(DC_NETWORK,
+                "Send Error ReportGameResult to Stats Server %d\n", result);
+            mState = STATS_REPORT_IDLE;
+            Close();
+        }
+        break;
+    }
+    case STATS_REPORT_WAIT_CLOSE:
+    {
+        if (nlGetTickerDifference(mReportStartTime, nlGetTicker())
+            > sReportSocketLifetime)
+        {
+            tDebugPrintManager::Print(DC_NETWORK,
+                "Waited, now closing socket that was used for ReportGameResult\n");
+            mState = STATS_REPORT_IDLE;
+            Close();
+        }
+        break;
+    }
+    case STATS_REPORT_IDLE:
+    default:
+        break;
+    }
+}
+
+NetworkRanking::NetworkRanking()
+{
+    mInitialized = false;
+    Reset();
+}
+
+void NetworkRanking::Reset()
+{
+    mRequestFailed = false;
+    mOperation = RANKING_OP_IDLE;
+    mListener = 0;
+    mSubmission.mWins = 0;
+    mSubmission.mLosses = 0;
+    mSubmission.mOnlineRegion = 0;
+    mSubmission.mName[0] = 0;
+    memset(mSubmission.mMiiData, 0, sizeof(mSubmission.mMiiData));
+    memset(mSubmission.mDigest, 0, sizeof(mSubmission.mDigest));
+    mSubmittingScore = false;
+    mLimit = mFilter = RANKING_FILTER_NEARBY;
+    mLeaderboardPlayers = 0;
+    mLeaderboardMetadata = 0;
+    mCategory = 0;
+}
+
+static inline void ShutdownRankingSession(bool& initialized)
+{
+    if (initialized)
+    {
+        DWC_RnkShutdown();
+        initialized = false;
+    }
+}
+
+void NetworkRanking::ShutdownRanking()
+{
+    if (mInitialized)
+    {
+        ShutdownRankingSession(mInitialized);
+    }
+}
+
+void NetworkRanking::InitializeRanking()
+{
+    GameInfoSaveSlot* save =
+        GameInfoManager::GetInstance()->GetSaveSlot(gNetworkSaveSlotIndex);
+    DWCRnkError result = DWC_RnkInitialize(
+        "DbfBialvJznkQWYuOrRa0002282500000ef90000020042db60ecmschargedwii",
+        (DWCUserData*)save);
+    switch (result)
+    {
+    case DWC_RNK_ERROR_INIT_ALREADYINITIALIZED:
+        tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkInitialize already initialized\n");
+    case DWC_RNK_SUCCESS:
+        tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkInitialize succeeded.\n");
+        mInitialized = true;
+        break;
+    default:
+        tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkInitialize returned error %d\n", result);
+        break;
+    }
+}
+
+void NetworkRanking::SetListener(NetworkStatsListener* listener)
+{
+    mListener = listener;
+}
+
+static u8 sRankingHmacKey[32] = {
+    0x17, 0xB2, 0x40, 0x52, 0x5F, 0x89, 0xF0, 0xFF,
+    0xE9, 0xB9, 0xB0, 0x17, 0x66, 0x06, 0x37, 0xA1,
+    0x63, 0x70, 0x9E, 0xC9, 0xCF, 0x42, 0xD1, 0x89,
+    0x91, 0x36, 0xC7, 0xBD, 0x2B, 0x58, 0xBC, 0x39,
+};
+
+bool NetworkRanking::ReportGameResult(int category,
+    const NetworkScoreSubmission*, NetworkStatsPlayer*,
+    NetworkStatsPlayer*, bool, int, int,
+    const NetworkScoreSubmission* fallback)
+{
+    mSubmission.mWins = fallback->mWins;
+    mSubmission.mLosses = fallback->mLosses;
+    mSubmission.mOnlineRegion = fallback->mOnlineRegion;
+    nlStrNCpy(mSubmission.mName, gNetworkMiiNameWide, 11);
+    memcpy(mSubmission.mMiiData, &gNetworkMiiData, sizeof(mSubmission.mMiiData));
+    mSubmission.mDay = fallback->mDay;
+    mSubmission.mMonth = fallback->mMonth;
+    mSubmission.mYear = fallback->mYear;
+    mCategory = category;
+    mSubmittingScore = false;
+
+    NETHMACContext context;
+    NETHMACInit(&context, NETGetMD5Interface(), sRankingHmacKey,
+        sizeof(sRankingHmacKey));
+    NETHMACUpdate(&context, &mSubmission,
+        (u8*)mSubmission.mDigest - (u8*)&mSubmission);
+    NETHMACGetDigest(&context, mSubmission.mDigest);
+
+    DWCRnkRegion region;
+    switch (GetRegion())
+    {
+    case GAME_REGION_US:
+        region = DWC_RNK_REGION_US;
+        break;
+    case GAME_REGION_EU:
+        region = DWC_RNK_REGION_EU;
+        break;
+    case GAME_REGION_JAPAN:
+        region = DWC_RNK_REGION_JP;
+        break;
+    default:
+        region = DWC_RNK_REGION_US;
+        break;
+    }
+    DWCRnkError result = DWC_RnkPutScoreAsync(category, region,
+        fallback->mScore, &mSubmission, sizeof(mSubmission));
+    if (result == DWC_RNK_SUCCESS)
+    {
+        mOperation = RANKING_OP_PUT_SCORE;
+        tDebugPrintManager::Print(DC_NETWORK,
+            "DWC_RnkPutScoreAsync start processing okay cat %d\n",
+            mCategory);
+        return true;
+    }
+    tDebugPrintManager::Print(DC_NETWORK,
+        "DWC_RnkPutScoreAsync cat %d returned error %d\n", mCategory,
+        result);
+    return false;
+}
+
+void NetworkRankingMeta::LoadLocal()
+{
+    if (g_pNetworkSessionBase->GetSessionMode() == NET_MODE_LAN)
+    {
+        mDay = 1;
+        mMonth = 1;
+        mYear = 2000;
+    }
+    else
+    {
+        DWCDate date;
+        DWCTime time;
+        GetAdjustedNetworkDate(&date, &time);
+        mDay = date.mday;
+        mMonth = date.month;
+        mYear = date.year;
+    }
+}
+
+bool NetworkRanking::SubmitScore(int category,
+    const NetworkRankingMeta* submission)
+{
+    nlStrNCpy(mSubmission.mName, gNetworkMiiNameWide, 11);
+    memcpy(mSubmission.mMiiData, &gNetworkMiiData, sizeof(mSubmission.mMiiData));
+
+    if (submission == 0)
+    {
+        mSubmission.mWins = 0;
+        mSubmission.mLosses = 0;
+        mSubmission.mOnlineRegion = (u16)GetOnlineRegion();
+        DWCTime time;
+        DWCDate date;
+        GetAdjustedNetworkDate(&date, &time);
+        mSubmission.mDay = date.mday;
+        mSubmission.mMonth = date.month;
+        mSubmission.mYear = date.year;
+    }
+    else
+    {
+        mSubmission.mWins = submission->mWins;
+        mSubmission.mLosses = submission->mLosses;
+        mSubmission.mOnlineRegion = (u16)submission->mOnlineRegion;
+        mSubmission.mDay = submission->mDay;
+        mSubmission.mMonth = submission->mMonth;
+        mSubmission.mYear = submission->mYear;
+    }
+    mCategory = category;
+    mSubmittingScore = true;
+
+    NETHMACContext context;
+    NETHMACInit(&context, NETGetMD5Interface(), sRankingHmacKey,
+        sizeof(sRankingHmacKey));
+    NETHMACUpdate(&context, &mSubmission,
+        (u8*)mSubmission.mDigest - (u8*)&mSubmission);
+    NETHMACGetDigest(&context, mSubmission.mDigest);
+
+    DWCRnkRegion region;
+    switch (GetRegion())
+    {
+    case GAME_REGION_US:
+        region = DWC_RNK_REGION_US;
+        break;
+    case GAME_REGION_EU:
+        region = DWC_RNK_REGION_EU;
+        break;
+    case GAME_REGION_JAPAN:
+        region = DWC_RNK_REGION_JP;
+        break;
+    default:
+        region = DWC_RNK_REGION_US;
+        break;
+    }
+    int score = submission != 0 ? submission->mScore : 0;
+    DWCRnkError result = DWC_RnkPutScoreAsync(
+        category, region, score, &mSubmission, sizeof(mSubmission));
+    if (result == DWC_RNK_SUCCESS)
+    {
+        mOperation = RANKING_OP_PUT_SCORE;
+        tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkPutScoreAsync start processing okay\n");
+        return true;
+    }
+    tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkPutScoreAsync returned error %d\n", result);
+    return false;
+}
+
+bool NetworkRanking::ReservedStatsQuery()
+{
+    return false;
+}
+
+static inline u32 GetMinutesSinceNetworkDayStart(const DWCTime& time)
+{
+    u32 since = time.min + time.hour * 60;
+    ++since;
+    if (since < 1)
+    {
+        since = 1;
+    }
+    tDebugPrintManager::Print(DC_NETWORK,
+        "Total Mins since beginning of day = %d (Cur time %d:%d)\n",
+        since, time.hour, time.min);
+    return since;
+}
+
+static inline u32 GetMinutesSinceNetworkSeasonStart(
+    const DWCDate& date, const DWCTime& time)
+{
+    NetworkSeasonDate current;
+    current.mMonth = date.month;
+    current.mDay = date.mday;
+    int year = date.year;
+    int season = FindNetworkSeasonBoundary(
+        &sNetworkSeasonDateTable, current);
+    int days = GetDaysSinceSeasonBoundary(
+        &sNetworkSeasonDateTable, season, current, year);
+    tDebugPrintManager::Print(DC_NETWORK,
+        "Time from now %d %d %d to start of season index %d is %d days\n",
+        year, current.mMonth, current.mDay, season, days);
+    u32 since = days * 1440;
+    since += time.min + time.hour * 60;
+    ++since;
+    if (since < 1)
+    {
+        since = 1;
+    }
+    tDebugPrintManager::Print(DC_NETWORK,
+        "Total Mins since beginning of season = %d (Cur time %d:%d)\n",
+        since, time.hour, time.min);
+    return since;
+}
+
+bool NetworkRanking::GetLeaderboardStats(int category,
+    int filter, int limit, NetworkStatsPlayer* players,
+    NetworkRankingMeta* metadata)
+{
+    mFilter = filter;
+    mLimit = limit;
+    mLeaderboardPlayers = players;
+    mLeaderboardMetadata = metadata;
+    mCategory = category;
+
+    DWCRnkGetParam parameter;
+    DWCRnkGetMode mode = DWC_RNK_GET_MODE_NEAR;
+    switch (filter)
+    {
+    case RANKING_FILTER_NEARBY:
+    {
+        mode = DWC_RNK_GET_MODE_NEAR;
+        parameter.size = sizeof(parameter.near);
+        parameter.near.sort = DWC_RNK_ORDER_DES;
+        if (category == 1 || category == 4)
+        {
+            DWCTime time;
+            DWCDate date;
+            if (mLimit > DWC_RNK_GET_MAX)
+            {
+                mLimit = DWC_RNK_GET_MAX;
+            }
+            parameter.near.limit = mLimit;
+            GetAdjustedNetworkDate(&date, &time);
+            parameter.near.since = GetMinutesSinceNetworkDayStart(time);
+        }
+        else
+        {
+            DWCTime time;
+            DWCDate date;
+            if (mLimit > DWC_RNK_GET_MAX)
+            {
+                mLimit = DWC_RNK_GET_MAX;
+            }
+            parameter.near.limit = mLimit;
+            GetAdjustedNetworkDate(&date, &time);
+            parameter.near.since = GetMinutesSinceNetworkSeasonStart(date, time);
+        }
+        break;
+    }
+    case RANKING_FILTER_FRIENDS:
+    {
+        mode = DWC_RNK_GET_MODE_FRIENDS;
+        parameter.size = sizeof(parameter.friends);
+        parameter.friends.sort = DWC_RNK_ORDER_DES;
+        parameter.friends.limit = mLimit;
+        parameter.friends.since = 0;
+        for (int i = 0; i < DWC_RNK_FRIENDS_MAX; ++i)
+        {
+            int* entry = (int*)GameInfoManager::GetInstance()->GetUnknown0x40(
+                gNetworkSaveSlotIndex, i);
+            parameter.friends.friends[i] = entry[1];
+        }
+        break;
+    }
+    case RANKING_FILTER_TOP:
+    {
+        mode = DWC_RNK_GET_MODE_TOPLIST;
+        parameter.size = sizeof(parameter.toplist);
+        parameter.toplist.sort = DWC_RNK_ORDER_DES;
+        if (category == 1 || category == 4)
+        {
+            DWCTime time;
+            DWCDate date;
+            if (mLimit > DWC_RNK_GET_MAX)
+            {
+                mLimit = DWC_RNK_GET_MAX;
+            }
+            parameter.toplist.limit = mLimit;
+            GetAdjustedNetworkDate(&date, &time);
+            u32 since = GetMinutesSinceNetworkDayStart(time);
+            parameter.toplist.since = since;
+            tDebugPrintManager::Print(DC_NETWORK,
+                "Getting SOD TOP since %d limit %d\n", since,
+                parameter.toplist.limit);
+        }
+        else
+        {
+            DWCTime time;
+            DWCDate date;
+            if (mLimit > DWC_RNK_GET_MAX)
+            {
+                mLimit = DWC_RNK_GET_MAX;
+            }
+            parameter.toplist.limit = mLimit;
+            GetAdjustedNetworkDate(&date, &time);
+            parameter.toplist.since = GetMinutesSinceNetworkSeasonStart(date, time);
+        }
+        break;
+    }
+    }
+
+    DWCRnkRegion region;
+    switch (GetRegion())
+    {
+    case GAME_REGION_US:
+        region = DWC_RNK_REGION_US;
+        break;
+    case GAME_REGION_EU:
+        region = DWC_RNK_REGION_EU;
+        break;
+    case GAME_REGION_JAPAN:
+        region = DWC_RNK_REGION_JP;
+        break;
+    default:
+        region = DWC_RNK_REGION_US;
+        break;
+    }
+    DWCRnkError result =
+        DWC_RnkGetScoreAsync(mode, category, region, &parameter);
+    if (result == DWC_RNK_SUCCESS)
+    {
+        mOperation = RANKING_OP_GET_SCORE;
+        tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkGetScoreAsync start processing okay.\n");
+        return true;
+    }
+    tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkGetScoreAsync returned error %d\n", result);
+    return false;
+}
+
+void NetworkRanking::ProcessLeaderboardResults()
+{
+    u32 rowCount = 0;
+    DWCRnkError result = DWC_RnkResGetRowCount(&rowCount);
+    if (result != DWC_RNK_SUCCESS)
+    {
+        tDebugPrintManager::Print(DC_NETWORK,
+            "Error %d from DWC_RnkResGetRowCount cat %d filter %d\n",
+            result, mCategory, mFilter);
+        mListener->OnLeaderboardResult(
+            false, mCategory, mFilter, 0, 0, 0);
+        return;
+    }
+
+    int retained = 0;
+    for (u32 i = 0; i < rowCount; ++i)
+    {
+        DWCRnkData row;
+        result = DWC_RnkResGetRow(&row, i);
+        if (result == DWC_RNK_SUCCESS)
+        {
+            mLeaderboardPlayers[retained].mProfileId = row.pid;
+            mLeaderboardPlayers[retained].mName[0] = 0;
+
+            bool valid = false;
+            NetworkRankingSubmission* submission =
+                (NetworkRankingSubmission*)row.userdata;
+            if (row.size == sizeof(NetworkRankingSubmission))
+            {
+                u8 digest[20];
+                memset(digest, '!', sizeof(digest));
+                NETHMACContext context;
+                NETHMACInit(&context, NETGetMD5Interface(), sRankingHmacKey,
+                    sizeof(sRankingHmacKey));
+                NETHMACUpdate(&context, submission,
+                    (u8*)submission->mDigest - (u8*)submission);
+                NETHMACGetDigest(&context, digest);
+                if (memcmp(digest, submission->mDigest,
+                        sizeof(submission->mDigest)) == 0)
+                {
+                    valid = true;
+                }
+                else
+                {
+                    tDebugPrintManager::Print(DC_NETWORK, "Warning: Binary Data failed HMAC MD5 check\n");
+                }
+            }
+            else
+            {
+                tDebugPrintManager::Print(DC_NETWORK,
+                    "Warning: Expected Binary Data Size %d Got Size %d\n",
+                    sizeof(NetworkRankingSubmission), row.size);
+            }
+
+            if (valid)
+            {
+                mLeaderboardMetadata[retained].mWins = submission->mWins;
+                mLeaderboardMetadata[retained].mLosses = submission->mLosses;
+                mLeaderboardMetadata[retained].mOnlineRegion = submission->mOnlineRegion;
+                mLeaderboardMetadata[retained].mDay = submission->mDay;
+                mLeaderboardMetadata[retained].mMonth = submission->mMonth;
+                mLeaderboardMetadata[retained].mYear = submission->mYear;
+                nlStrNCpy(mLeaderboardPlayers[retained].mName,
+                    submission->mName, 11);
+                memcpy(mLeaderboardPlayers[retained].mMiiData,
+                    submission->mMiiData, sizeof(mLeaderboardPlayers[retained].mMiiData));
+            }
+            else
+            {
+                mLeaderboardMetadata[retained].mWins = 0;
+                mLeaderboardMetadata[retained].mLosses = 0;
+                mLeaderboardMetadata[retained].mOnlineRegion = 0;
+                mLeaderboardMetadata[retained].mDay = 1;
+                mLeaderboardMetadata[retained].mMonth = 1;
+                mLeaderboardMetadata[retained].mYear = 2000;
+                memset(mLeaderboardPlayers[retained].mMiiData, 0,
+                    sizeof(mLeaderboardPlayers[retained].mMiiData));
+            }
+            mLeaderboardMetadata[retained].mScore = row.score;
+            mLeaderboardMetadata[retained].mDisplayRank = row.order;
+            ++retained;
+        }
+        else
+        {
+            tDebugPrintManager::Print(DC_NETWORK,
+                "Error %d calling DWC_RnkResGetRow %d\n", result, i);
+        }
+    }
+
+    if (mFilter == RANKING_FILTER_FRIENDS)
+    {
+        FilterCurrentSeason(retained);
+    }
+    SortLeaderboardResults(retained);
+    mListener->OnLeaderboardResult(true, mCategory, mFilter, retained,
+        mLeaderboardPlayers, mLeaderboardMetadata);
+}
+
+void NetworkRanking::FilterCurrentSeason(int count)
+{
+    DWCDate date;
+    DWCTime time;
+    GetAdjustedNetworkDate(&date, &time);
+    NetworkSeasonDate current;
+    current.mMonth = date.month;
+    current.mDay = date.mday;
+    int currentYear = date.year;
+    int currentSeason =
+        FindNetworkSeasonBoundary(&sNetworkSeasonDateTable, current);
+    for (int i = 0; i < count; ++i)
+    {
+        NetworkRankingMeta& metadata = mLeaderboardMetadata[i];
+        NetworkSeasonDate previous;
+        previous.mMonth = metadata.mMonth;
+        previous.mDay = metadata.mDay;
+        int previousYear = metadata.mYear;
+        int previousSeason =
+            FindNetworkSeasonBoundary(&sNetworkSeasonDateTable, previous);
+        if (currentYear != previousYear || currentSeason != previousSeason)
+        {
+            metadata.Reset();
+        }
+    }
+}
+
+int NetworkRanking::CompareLeaderboardRows(
+    const void* left, const void* right)
+{
+    const NetworkRankingSortRow* a = (const NetworkRankingSortRow*)left;
+    const NetworkRankingSortRow* b = (const NetworkRankingSortRow*)right;
+    int scoreDifference = a->mMetadata.mScore - b->mMetadata.mScore;
+    if (scoreDifference > 0)
+    {
+        return -1;
+    }
+    if (scoreDifference < 0)
+    {
+        return 1;
+    }
+
+    GameInfoSaveSlot* save =
+        GameInfoManager::GetInstance()->GetSaveSlot(gNetworkSaveSlotIndex);
+    int localProfile = save->unknown_0x01C;
+    if (a->mPlayer.mProfileId == localProfile)
+    {
+        return -1;
+    }
+    if (b->mPlayer.mProfileId == localProfile)
+    {
+        return 1;
+    }
+
+    int nameDifference = nlStrICmp(a->mPlayer.mName, b->mPlayer.mName);
+    if (nameDifference != 0)
+    {
+        return nameDifference;
+    }
+
+    int winDifference = a->mMetadata.mWins - b->mMetadata.mWins;
+    int differentialB = b->mMetadata.mWins - b->mMetadata.mLosses;
+    int differentialA = a->mMetadata.mWins - a->mMetadata.mLosses;
+    int differentialDifference = differentialA - differentialB;
+    if (differentialDifference > 0)
+    {
+        return -1;
+    }
+    if (differentialDifference < 0)
+    {
+        return 1;
+    }
+    if (winDifference > 0)
+    {
+        return -1;
+    }
+    return winDifference < 0;
+}
+
+void NetworkRanking::AssignDisplayRanks(
+    int count, NetworkRankingMeta* metadata, int firstRank)
+{
+    int rank = firstRank;
+    int nextRank = firstRank;
+    int previousScore = -1;
+    for (int i = 0; i < count; ++i)
+    {
+        if (previousScore != metadata[i].mScore)
+        {
+            rank = nextRank;
+            previousScore = metadata[i].mScore;
+        }
+        metadata[i].mDisplayRank = rank;
+        ++nextRank;
+    }
+}
+
+void NetworkRanking::SortLeaderboardResults(int count)
+{
+    if (count > 1)
+    {
+        NetworkRankingSortRow* rows = new (8, false) NetworkRankingSortRow[count];
+        for (int i = 0; i < count; ++i)
+        {
+            rows[i].mPlayer.CopyFrom(mLeaderboardPlayers[i]);
+            rows[i].mMetadata = mLeaderboardMetadata[i];
+        }
+        qsort(rows, count, sizeof(NetworkRankingSortRow),
+            CompareLeaderboardRows);
+        for (int i = 0; i < count; ++i)
+        {
+            mLeaderboardPlayers[i].CopyFrom(rows[i].mPlayer);
+            mLeaderboardMetadata[i] = rows[i].mMetadata;
+        }
+        delete[] rows;
+    }
+    switch (mFilter)
+    {
+    case RANKING_FILTER_NEARBY:
+    {
+        int rankedRow = -1;
+        for (int i = 0; i < count; ++i)
+        {
+            if (mLeaderboardMetadata[i].mDisplayRank > 0)
+            {
+                rankedRow = i;
+                break;
+            }
+        }
+        int score = mLeaderboardMetadata[rankedRow].mScore;
+        int firstRank = mLeaderboardMetadata[rankedRow].mDisplayRank;
+        for (int i = rankedRow; i >= 0; --i)
+        {
+            if (score != mLeaderboardMetadata[i].mScore)
+            {
+                --firstRank;
+            }
+        }
+        if (firstRank > 0)
+        {
+            AssignDisplayRanks(count, mLeaderboardMetadata, firstRank);
+        }
+        else
+        {
+            AssignDisplayRanks(count, mLeaderboardMetadata, 1);
+        }
+        break;
+    }
+    case RANKING_FILTER_FRIENDS:
+    case RANKING_FILTER_TOP:
+        AssignDisplayRanks(count, mLeaderboardMetadata, 1);
+        break;
+    }
+}
+
+NetworkRankingSortRow::NetworkRankingSortRow()
+{
+}
+
+void NetworkRanking::Update()
+{
+    if (!mInitialized)
+    {
+        return;
+    }
+    if (mRequestFailed)
+    {
+        return;
+    }
+    if (mOperation == RANKING_OP_IDLE)
+    {
+        return;
+    }
+
+    DWCRnkError result = DWC_RnkProcess();
+    if (result == DWC_RNK_SUCCESS)
+    {
+        return;
+    }
+
+    if (result == DWC_RNK_IN_ERROR)
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "DWC_RnkProcesss() returned error %d\n", result);
+        mRequestFailed = true;
+        switch (mOperation)
+        {
+        case RANKING_OP_PUT_SCORE:
+            tDebugPrintManager::Print(DC_NETWORK, "Putting Score failed!\n");
+            if (mSubmittingScore)
+            {
+                mListener->OnSubmitScoreResult(false, mCategory);
+            }
+            else
+            {
+                mListener->OnReportGameResult(false, mCategory);
+            }
+            break;
+        case RANKING_OP_GET_SCORE:
+            tDebugPrintManager::Print(DC_NETWORK, "Getting score failed!\n");
+            mListener->OnLeaderboardResult(
+                false, mCategory, mFilter, 0, 0, 0);
+            break;
+        }
+        mOperation = RANKING_OP_IDLE;
+    }
+    else if (result == DWC_RNK_PROCESS_NOTASK)
+    {
+        switch (mOperation)
+        {
+        case RANKING_OP_PUT_SCORE:
+            tDebugPrintManager::Print(DC_NETWORK, "Putting Score succeeded!\n");
+            if (mSubmittingScore)
+            {
+                mListener->OnSubmitScoreResult(true, mCategory);
+            }
+            else
+            {
+                mListener->OnReportGameResult(true, mCategory);
+            }
+            break;
+        case RANKING_OP_GET_SCORE:
+            tDebugPrintManager::Print(DC_NETWORK, "Getting score succeeded!\n");
+            ProcessLeaderboardResults();
+            break;
+        }
+        mOperation = RANKING_OP_IDLE;
+    }
+    else
+    {
+        tDebugPrintManager::Print(DC_NETWORK,
+            "Unexpected DWC_RnkProcesss returned %d\n", result);
+    }
+}
+
+static TweakIntBinding sConnectToStatsAddress0Tweak(
+    "g_nConnectToStatsAddress0", "Network/Stats",
+    &g_nConnectToStatsAddress[0], true);
+static TweakIntBinding sConnectToStatsAddress1Tweak(
+    "g_nConnectToStatsAddress1", "Network/Stats",
+    &g_nConnectToStatsAddress[1], true);
+static TweakIntBinding sConnectToStatsAddress2Tweak(
+    "g_nConnectToStatsAddress2", "Network/Stats",
+    &g_nConnectToStatsAddress[2], true);
+static TweakIntBinding sConnectToStatsAddress3Tweak(
+    "g_nConnectToStatsAddress3", "Network/Stats",
+    &g_nConnectToStatsAddress[3], true);

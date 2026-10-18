@@ -1,0 +1,72 @@
+diff --git a/src/Game/Camera/animcam.cpp b/src/Game/Camera/animcam.cpp
+index d484a46..7b14405 100644
+--- a/src/Game/Camera/animcam.cpp
++++ b/src/Game/Camera/animcam.cpp
+@@ -14,6 +14,7 @@
+ #include "NL/platqmath.h"
+ #include "NL/platvmath.h"
+ #include "NL/nlstring_tmpl.h"
++#include "port/chunk_endian.h"
+ 
+ static float dofBehindTarget = 2.0f;
+ static float dofReferenceFOV = 45.0f;
+@@ -87,6 +88,38 @@ cCameraData::~cCameraData()
+     }
+ }
+ 
++// NP: camera files and the camera chunks inside .nis files are big-endian. Converts the headers of
++// the camera container `camera` (a 0x8002500B chunk of `size` bytes, header included) and the
++// payloads LoadAnimCameraData reads: the key count (u32) and the position, target, rotation, FOV and
++// focal length key arrays (floats). Returns false, converting nothing further, when the tree is not
++// well formed; the loader must then not walk it.
++bool PortConvertCameraChunk(nlChunk* camera, unsigned long size)
++{
++    if (port_disc_chunk_swap_tree(camera, size) == 0)
++    {
++        return false;
++    }
++
++    nlChunk* end = camera->GetLastChunk();
++    for (nlChunk* chunk = camera->GetFirstChunk(); chunk < end; chunk = chunk->GetNextChunk())
++    {
++        switch (chunk->GetID())
++        {
++        case 0x2500C:
++        case 0x25003:
++        case 0x25004:
++        case 0x25006:
++        case 0x25009:
++        case 0x2500A:
++            port_disc32_array(chunk->GetData(), chunk->GetDataSize() / 4);
++            break;
++        default:
++            break;
++        }
++    }
++    return true;
++}
++
+ bool LoadAnimCameraData(nlChunk* outerChunk, nlChunk* outerEnd, cCameraData* pAnimCameraData, bool ownsKeyData)
+ {
+     pAnimCameraData->ownsKeyData = ownsKeyData;
+@@ -233,6 +266,20 @@ bool LoadAnimCameraData(nlChunk* outerChunk, nlChunk* outerEnd, cCameraData* pAn
+ 
+ bool cAnimCamera::LoadCameraAnimation(nlChunk* begin, unsigned long fileSize, const char* cameraName, bool ownsKeyData)
+ {
++    // NP: a missing file arrives as null; a file that is not a well-formed chunk tree is refused.
++    if (begin == 0)
++    {
++        return false;
++    }
++    if (!PortConvertCameraChunk(begin, fileSize))
++    {
++        if (ownsKeyData)
++        {
++            nlFree(begin);
++        }
++        return false;
++    }
++
+     nlChunk* end = begin->GetLastChunk();
+     nlChunk* first = begin->GetFirstChunk();
+ 

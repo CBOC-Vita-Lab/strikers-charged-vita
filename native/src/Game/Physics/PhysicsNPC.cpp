@@ -1,0 +1,204 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/Physics/PhysicsNPC.h"
+#include "Game/Render/ChainChomp.h"
+
+#include "Game/Ball.h"
+#include "Game/Character.h"
+#include "Game/Field.h"
+#include "Game/GameInfo.h"
+#include "Game/Physics/CollisionSpace.h"
+#include "Game/Physics/PhysicsAIBall.h"
+#include "Game/Physics/PhysicsBanana.h"
+#include "Game/Physics/PhysicsCharacter.h"
+#include "Game/Physics/PhysicsFakeBall.h"
+#include "Game/Physics/PhysicsPatch.h"
+#include "Game/Physics/PhysicsShell.h"
+#include "Game/Render/SkinAnimatedMovableNPC.h"
+
+#include "math.h"
+
+
+PhysicsNPC::PhysicsNPC(float radius)
+    : PhysicsSphere(g_CollisionSpace, (PhysicsWorld*)0, radius)
+    , mpTriggerCallbackFunc(0)
+    , mpAINPC(0)
+    , mContactsDisabled(false)
+    , mFrictionUpdatesRemaining(0)
+    , mFrictionScale(0.0f)
+{
+    SetCollide(0x14062);
+    SetCategory(2);
+}
+
+void PhysicsNPC::SetCallbackFunction(CallbackFn callback)
+{
+    mpTriggerCallbackFunc = callback;
+}
+
+ContactType PhysicsNPC::Contact(
+    PhysicsObject* object, dContact* contact, int numContacts)
+{
+    nlVector3 position;
+    GetPosition(&position);
+
+    if (mContactsDisabled)
+    {
+        return NO_CONTACT;
+    }
+
+    switch (object->GetObjectType())
+    {
+    case PHYSOBJ_COLUMN:
+    {
+        cCharacter* character
+            = ((PhysicsCharacter*)object->m_parentObject)->m_pAICharacter;
+        if (character->m_eClassType == FIELDER)
+        {
+            if (character != 0 && mpTriggerCallbackFunc != 0)
+            {
+                nlVector3 contactPosition;
+                nlVec3Set(contactPosition, contact->geom.pos[0], contact->geom.pos[1], contact->geom.pos[2]);
+                mpTriggerCallbackFunc(this, object, contactPosition);
+                break;
+            }
+            return NO_CONTACT;
+        }
+        if (character->m_eClassType == GOALIE)
+        {
+            return ONE_WAY_CONTACT_THIS;
+        }
+        break;
+    }
+    case PHYSOBJ_AI_BALL:
+    {
+        cBall* ball = ((PhysicsAIBall*)object)->m_pAIBall;
+        if (!ball->m_pPhysicsBall->mbCanCollidePlayer)
+        {
+            return NO_CONTACT;
+        }
+        if (mpTriggerCallbackFunc != 0)
+        {
+            nlVector3 contactPosition;
+            nlVec3Set(contactPosition, contact->geom.pos[0], contact->geom.pos[1], contact->geom.pos[2]);
+            mpTriggerCallbackFunc(this, object, contactPosition);
+        }
+        ((PhysicsBall*)object)->mbUseMagnusEffect = false;
+        ((PhysicsBall*)object)->mfChargeBonus = 0.0f;
+        FakeBallWorld::InvalidateBallCache();
+        ++ball->m_bBallPathChangeCount;
+        return ONE_WAY_CONTACT_OTHER;
+    }
+    case PHYSOBJ_SHELL:
+    {
+        if (mpTriggerCallbackFunc != 0)
+        {
+            nlVector3 contactPosition;
+            nlVec3Set(contactPosition, contact->geom.pos[0], contact->geom.pos[1], contact->geom.pos[2]);
+            mpTriggerCallbackFunc(this, object, contactPosition);
+        }
+        break;
+    }
+    case PHYSOBJ_BANANA:
+    {
+        if (mpTriggerCallbackFunc != 0)
+        {
+            nlVector3 contactPosition;
+            nlVec3Set(contactPosition, contact->geom.pos[0], contact->geom.pos[1], contact->geom.pos[2]);
+            mpTriggerCallbackFunc(this, object, contactPosition);
+        }
+        break;
+    }
+    case PHYSOBJ_SHOCKWAVE:
+        return ONE_WAY_CONTACT_THIS;
+    default:
+    {
+        if (object->GetObjectType() == PHYSOBJ_WALL
+            && GameInfoManager::Instance()->GetStadium() == STAD_THUNDER_ISLAND)
+        {
+            bool isChainChomp
+                = ((SkinAnimatedNPC*)mpAINPC)->GetSkinAnimatedNPC_Type()
+               == SkinAnimatedNPC_CHAIN_CHOMP;
+            if (isChainChomp)
+            {
+                ChainChomp* chainChomp = (ChainChomp*)mpAINPC;
+                float bottom = chainChomp->mv3Position.y
+                             - chainChomp->mpPhysObj->GetRadius();
+                bool isPastSideline = bottom > cField::GetSidelineY(1U);
+                bool isInsideGoalLine = fabsf(chainChomp->mv3Position.x)
+                                     < cField::GetGoalLineX(1U) - 0.5f;
+                if (isInsideGoalLine && isPastSideline)
+                {
+                    chainChomp->Fall();
+                    mContactsDisabled = true;
+                }
+            }
+        }
+
+        if (object->GetObjectType() == PHYSOBJ_PATCH)
+        {
+            bool isChainChomp
+                = ((SkinAnimatedNPC*)mpAINPC)->GetSkinAnimatedNPC_Type()
+               == SkinAnimatedNPC_CHAIN_CHOMP;
+            if (isChainChomp)
+            {
+                int type = ((PhysicsPatch*)object)->m_Type;
+                PhysicsPatchInfo* info = GetPhysicsPatchInfo(type);
+                if (info->mFriction != 0.0f)
+                {
+                    if (mFrictionUpdatesRemaining != 2
+                        || info->mFriction > mFrictionScale)
+                    {
+                        mFrictionScale = info->mFriction;
+                    }
+                    mFrictionUpdatesRemaining = 2;
+                }
+            }
+        }
+        break;
+    }
+    }
+
+    return NO_CONTACT;
+}
+
+void PhysicsNPC::PreUpdate()
+{
+    PhysicsObject::PreUpdate();
+    if (mFrictionUpdatesRemaining > 0)
+    {
+        nlVector3 velocity;
+        GetLinearVelocity(&velocity);
+        nlVec3Scale(velocity, mFrictionScale);
+        SetLinearVelocity(velocity);
+    }
+}
+
+void PhysicsNPC::PostUpdate()
+{
+    PhysicsObject::PostUpdate();
+    if (mFrictionUpdatesRemaining > 0)
+    {
+        nlVector3 velocity;
+        GetLinearVelocity(&velocity);
+        nlVec3Scale(velocity, 1.0f / mFrictionScale);
+        SetLinearVelocity(velocity);
+        if (--mFrictionUpdatesRemaining == 0)
+        {
+            mFrictionScale = 0.0f;
+        }
+    }
+}
+
+bool PhysicsNPC::SetContactInfo(
+    dContact* contact, PhysicsObject* other, bool first)
+{
+    if (first)
+    {
+        SetDefaultContactInfo(contact);
+    }
+
+    contact->surface.bounce = 0.01f;
+    contact->surface.bounce_vel = 0.0f;
+    contact->surface.mu = 5.0f;
+    return true;
+}

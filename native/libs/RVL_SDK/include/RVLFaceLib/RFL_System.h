@@ -1,0 +1,25 @@
+#ifndef RVL_FACE_LIBRARY_SYSTEM_H
+#define RVL_FACE_LIBRARY_SYSTEM_H
+#include <revolution/types.h>
+
+#include <RVLFaceLib/RFL_Types.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+char* RFLGetArcFilePath(void);
+u32 RFLGetWorkSize(BOOL deluxeTex);
+RFLErrcode RFLInitResAsync(void* workBuffer, void* resBuffer, u32 resSize,
+                           BOOL deluxeTex);
+RFLErrcode RFLInitRes(void* workBuffer, void* resBuffer, u32 resSize,
+                      BOOL deluxeTex);
+void RFLExit(void);
+BOOL RFLAvailable(void);
+RFLErrcode RFLGetAsyncStatus(void);
+s32 RFLGetLastReason(void);
+RFLErrcode RFLWaitAsync(void);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

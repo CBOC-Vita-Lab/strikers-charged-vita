@@ -1,0 +1,304 @@
+# W5-ITEM generated script: INFINITE cheat (periodic items)
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=5 home=1 away=8 hsk=0,1,2 ask=5,6,7 human=0 time=300 skill=2 powerup=10
+wait ingame == 1 4000
+log STATE match object
+mash 100 30 gs == 1 4000
+log STATE kick-off
+wait gs == 5 6000
+log STATE open play
+idle 20
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+aim opp 0 dopp < 4 150
+if item0b >= 0
+press 10 3 10
+endif
+if item0 >= 0 && ctl >= 0
+log ITEM inf use
+press 400 3 20
+endif
+idle 120
+log STATE script end
+idle 60
+exit

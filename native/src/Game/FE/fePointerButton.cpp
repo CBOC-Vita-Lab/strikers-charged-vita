@@ -1,0 +1,118 @@
+#include "Game/FE/fePointerButton.h"
+
+#include "Game/Audio/AudioGlobals.h"
+#include "Game/FE/feInput.h"
+#include "Game/RumbleActions.h"
+#include "NL/nlString.h"
+
+
+FEPointerButton::FEPointerButton()
+    : FEPointerRegion(0)
+{
+    mSpeakerEnabled = true;
+    mPointerStates[0] = POINTER_BUTTON_NORMAL;
+    mPointerStates[1] = POINTER_BUTTON_NORMAL;
+    mPointerStates[2] = POINTER_BUTTON_NORMAL;
+    mPointerStates[3] = POINTER_BUTTON_NORMAL;
+}
+
+FEPointerButton::FEPointerButton(void* context)
+    : FEPointerRegion(context)
+{
+    mSpeakerEnabled = true;
+    mPointerStates[0] = POINTER_BUTTON_NORMAL;
+    mPointerStates[1] = POINTER_BUTTON_NORMAL;
+    mPointerStates[2] = POINTER_BUTTON_NORMAL;
+    mPointerStates[3] = POINTER_BUTTON_NORMAL;
+}
+
+bool FEPointerButton::HasOtherPointerState(int value, unsigned int which) const
+{
+    for (unsigned int i = 0; i < 4; i++)
+    {
+        if (i != which && value == mPointerStates[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void FEPointerButton::OnPointerUpdate(int index, void* context)
+{
+    if (mUpdateCallback)
+    {
+        mUpdateCallback(index, context);
+    }
+}
+
+void FEPointerButton::OnPointerEnter(int index, void* context)
+{
+    if (mEnterCallback)
+    {
+        mEnterCallback(index, context);
+    }
+
+    if (mSpeakerEnabled)
+    {
+        if (!IsRumbleActionActive(g_pFEInput->GetGlobalPad((eFEINPUT_PAD)index)))
+        {
+            BeginRumbleAction(RUMBLE_POINTER_HOVER, g_pFEInput->GetGlobalPad((eFEINPUT_PAD)index));
+        }
+    }
+}
+
+void FEPointerButton::OnPointerLeave(int index, void* context)
+{
+    if (mLeaveCallback)
+    {
+        mLeaveCallback(index, context);
+    }
+}
+
+void FEPointerButton::OnPointerInside(int index, void* context)
+{
+    if (mInsideCallback)
+    {
+        mInsideCallback(index, context);
+    }
+}
+
+void FEPointerButton::OnPointerPress(int index, void* context)
+{
+    if (mPressCallback)
+    {
+        mPressCallback(index, context);
+    }
+}
+
+void FEPointerButton::OnPointerRelease(int index, void* context)
+{
+    if (mReleaseCallback)
+    {
+        mReleaseCallback(index, context);
+    }
+}
+
+void FEPointerButton::OnPointerAuxiliaryAction(int index, void* context)
+{
+    if (mAuxiliaryCallback)
+    {
+        mAuxiliaryCallback(index, context);
+    }
+}
+
+void FEPointerButton::PlayHoverFeedback(int index)
+{
+    if (!IsRumbleActionActive(g_pFEInput->GetGlobalPad((eFEINPUT_PAD)index)))
+    {
+        BeginRumbleAction(RUMBLE_POINTER_HOVER, g_pFEInput->GetGlobalPad((eFEINPUT_PAD)index));
+    }
+}
+
+void FEPointerButton::HandlePointerEvent(const FEPointerEvent* event)
+{
+    unsigned long hash = nlStringLowerHash("ControllerSpeaker");
+    SetAudioEffectContext(&hash, event->mIndex + 1);
+    ProcessPointerEvent(event);
+}

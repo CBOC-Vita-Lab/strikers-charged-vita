@@ -1,0 +1,50 @@
+diff --git a/src/NL/glx/glxDisplayList.cpp b/src/NL/glx/glxDisplayList.cpp
+index fbe4ab5..c38061c 100644
+--- a/src/NL/glx/glxDisplayList.cpp
++++ b/src/NL/glx/glxDisplayList.cpp
+@@ -8,6 +8,9 @@
+ #include "NL/gl/glModel.h"
+ #include "NL/nlMemory.h"
+ #include "NL/nlString.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_endian.h" /* the display list is GX data: big-endian (NPA) */
++#endif
+ 
+ #define DISPLAY_LIST_HEADER 0xBA7EF00D
+ 
+@@ -81,7 +84,11 @@ DisplayList* dlMakeDisplayList(
+     nlZeroMemory(p + actualSize, size - actualSize);
+ 
+     p[0] = opcodes[(unsigned char)packet->primType];
++#ifdef NP_NATIVE
++    npa_wr16(p + 1, (uint16_t)packet->numVertices);
++#else
+     *(unsigned short*)(p + 1) = packet->numVertices;
++#endif
+ 
+     unsigned char* p8 = p + 3;
+     unsigned char hasColor = bStitch;
+@@ -97,7 +104,11 @@ DisplayList* dlMakeDisplayList(
+ 
+             for (unsigned long j = 0; j < numStreams; ++j)
+             {
++#ifdef NP_NATIVE
++                npa_wr16(p8, *pInd); /* indices are host order after npa_convert_rlg, the list is read by GX */
++#else
+                 *(unsigned short*)p8 = *pInd;
++#endif
+                 p8 += 2;
+             }
+ 
+@@ -112,7 +123,11 @@ DisplayList* dlMakeDisplayList(
+         {
+             for (unsigned long j = 0; j < numStreams; ++j)
+             {
++#ifdef NP_NATIVE
++                npa_wr16(p8, *pInd); /* indices are host order after npa_convert_rlg, the list is read by GX */
++#else
+                 *(unsigned short*)p8 = *pInd;
++#endif
+                 p8 += 2;
+             }
+ 

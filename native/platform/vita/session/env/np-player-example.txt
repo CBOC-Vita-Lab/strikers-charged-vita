@@ -1,0 +1,67 @@
+# ux0:data/mscharged/np-player.txt : the PLAYER build's (MSCN00003) optional settings, same NAME=VALUE format as the lab build's env.txt. The player build never reads env.txt.
+# Nothing in this file is needed to play. Remove the '#' of a line to use it.
+#
+# Share the owner's save with the recompiled game (the native game would then read and write ux0:data/mscharged/NAND/, which was never tried with a populated save):
+# NP_DATA_DIR=ux0:data/mscharged
+#
+# Draw the 3D at a lower resolution than the screen's 960x544 and scale it up at present (cheaper for the GPU; 640x362 is close to the default's look):
+# MSC_VITA_RENDER=640x362
+#
+# The game's 4:3 mode instead of the full-screen widescreen picture (a 640x480 picture in a box with bars):
+# NP_WIDESCREEN=0
+#
+# Frame statistics and game-state lines in log.txt (what the lab runs use):
+# MSC_WATCH=1
+# MSC_WATCH_EVERY=600
+# MSC_FRAME_TIMING=900
+#
+# Shader seed: the package carries its compiled shaders as ONE file (app0:shadercache/<key>.pack, W5 BOOT), read once at the start: nothing is copied at an install or an
+# update, and the shaders the console compiles itself are kept in ux0:data/mscharged/shadercache. (A package built with NP_SEED_LOOSE=1 has the old loose files; then
+# MSC_VITA_SEED=link reads them in place, =app0 reads them in place without keeping new ones, nothing = the old copy.)
+#
+# Start-up (W5 BOOT): the loading screen instead of the boot text (=text shows the text console), the Wii Remote strap and Nunchuk screens (=0 brings them back), the
+# start paced per refresh until the game's boot screens (=0: every second refresh, as the rest of the game):
+# MSC_BOOT_SCREEN=text
+# MSC_SKIP_STRAP=0
+# MSC_BOOT_FPS=0
+#
+# Renderer cost on the console (VRS, docs/wave4-VRS.md): every 100 frames log.txt gets "[vgx] prof ..." (the render thread's back end time per frame by command type and, at the
+# end of the line, "| thread: period= idle= rest=": the thread's whole frame interval, its idle time and what is left = record decode + anything that blocks) and the call census:
+# MSC_VGX_PROF=2
+# With a vitaGL built with HAVE_SCRATCH_MEMORY (build/np/VRS/deps-perf, tools: platform/vita/tools/vitadeps_vrs.sh perf) the frame's vertex and index buffers come from vitaGL's circular
+# pool; 0 puts them back on its general heap (A/B), the second line changes the pool (vitaGL default 32 MiB; an overrun is logged as "Circular pool overrun"):
+# MSC_VITA_VGL_SCRATCH=0
+# (18 MiB gave 6 "Circular pool overrun" lines in a Vita3K match, the default 32 gave none; one frame needed about 7.9 MiB, so 27 is the lowest value worth trying)
+# MSC_VITA_VGL_CIRC_MIB=32
+#
+# Core plan (W5 PIPE, docs/wave5-PIPE.md): the player starts in PLAN C without any line here: frame send on a worker (core 1) beside the next frame's build (the two-stage pipeline,
+# MSC_FS_PIPE=1), the record decode on its own thread (core 2) and the GL back end on the render thread (core 1). A guard file ux0:data/mscharged/np-plan.txt (a number; delete it to reset)
+# steps the next start down when a start did not present 900 frames, stalled for 30 s or crashed: first to plan Cn (plan C without the pipeline), then plan A (frame send on core 2,
+# decode + back end on one thread) and then plan S (no worker: the old default). The log says "[plan] ..." at the start. Choose by hand (no guard then) with one line:
+# MSC_PLAN=C
+# MSC_PLAN=Cn
+# MSC_PLAN=A
+# MSC_PLAN=S
+# MSC_PLAN=auto     (the guard's choice, the default)
+# Any of MSC_FRAMESEND, MSC_VGX_BACKEND_THREAD, MSC_VITA_CORE_FRAMESEND set in this file takes the plan out of the game: they are used as written (and no guard).
+# The pipeline alone (on top of any plan with a worker) is MSC_FS_PIPE=1; MSC_FS_PIPE=0 takes it away from plan C without leaving the plan.
+#
+# The single-player AI skips scripts when 1 ms of (real) time went into one update (retail rule, about 17 % of the scripts at the Vita's speed, 8 to 10 % on the Wii [E], docs/wave5-PIPE.md
+# section 5). The player build starts with MSC_AI_BUDGET=off: no script is skipped (like network matches and the oracle runs; the AI no longer depends on the clock). =retail brings back the
+# original real-time rule, =slow:K the original rule with the clock divided by K (K = how many times slower than the Wii the console runs the scripts), =ops:R the same rule on a clock
+# that counts interpreter work (R thousand weighted operations = 1 ms; the same match on every device). A lab build keeps retail unless env.txt says otherwise.
+# MSC_AI_BUDGET=retail
+# MSC_AI_STATS=1    (prints what the budget does, every 3600 updates, in any mode)
+# With MSC_VGX_PROF=2 the thread line adds "slotwait= beidle=": slotwait large = the back end is the limit, beidle large = the decode is.
+#
+# The real CPU clock is measured at every start ("[clock] boot: dependent-add loop ... MHz" in log.txt); every N seconds during play with
+# MSC_VITA_CLOCK_PERIOD=N. A PSVshellPlus 500 MHz profile for the title (platform/vita/session/psvshell/, NOT installed by anything here) changes it.
+# MSC_VITA_CLOCK_PERIOD=60
+#
+# The fourth core (the system core, thread mask 0x80000) as a test: before the game starts a 12 s probe measures what a thread there gets and what it costs the three game
+# cores; the result is the "[core4]" lines of log.txt. =only leaves the application after the probe. A job lane on that core: MSC_JOBS=4 MSC_JOBS_CORES=213
+# (a lane the system refuses withdraws itself).
+# MSC_VITA_PROBE_CORE4=only
+#
+# Zero every game-heap allocation (removes a stale-data dependence of one draw in the 3D menus; costs 22 KB of fill per match frame):
+# NP_HEAP_POISON=0

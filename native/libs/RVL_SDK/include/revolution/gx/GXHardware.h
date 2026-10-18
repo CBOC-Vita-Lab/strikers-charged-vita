@@ -1,0 +1,339 @@
+/**
+ * For more details, see:
+ * https://www.gc-forever.com/yagcd/chap8.html#sec8
+ * https://www.gc-forever.com/yagcd/chap5.html#sec5
+ * https://github.com/dolphin-emu/dolphin/blob/master/Source/Core/VideoCommon/BPMemory.h
+ * https://github.com/dolphin-emu/dolphin/blob/master/Source/Core/VideoCommon/XFMemory.h
+ * https://github.com/dolphin-emu/dolphin/blob/master/Source/Core/VideoCommon/OpcodeDecoding.h
+ * https://patents.google.com/patent/US6700586B1/en
+ * https://patents.google.com/patent/US6639595B1/en
+ * https://patents.google.com/patent/US7002591
+ * https://patents.google.com/patent/US6697074
+ */
+
+#ifndef RVL_SDK_GX_HARDWARE_H
+#define RVL_SDK_GX_HARDWARE_H
+#include <revolution/types.h>
+
+#include <revolution/gx/GXTypes.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/************************************************************
+ *
+ *
+ * GX FIFO
+ *
+ *
+ ***********************************************************/
+
+#define GXFIFO_ADDR 0xCC008000
+
+/**
+ * FIFO write/gather pipe
+ */
+extern volatile union {
+    // 1-byte
+    char c;
+    unsigned char uc;
+    // 2-byte
+    short s;
+    unsigned short us;
+    // 4-byte
+    int i;
+    unsigned int ui;
+    void* p;
+    float f;
+} WGPIPE AT_ADDRESS(0xCC008000);
+
+#define GX_WRITE_U8(value) (WGPIPE.uc = (u8)(value))
+#define GX_WRITE_U16(value) (WGPIPE.us = (u16)(value))
+#define GX_WRITE_U32(value) (WGPIPE.ui = (u32)(value))
+#define GX_WRITE_F32(value) (WGPIPE.f = (f32)(value))
+
+/**
+ * FIFO commands
+ */
+typedef enum {
+    GX_FIFO_CMD_NOOP = 0x00,
+
+    GX_FIFO_CMD_LOAD_BP_REG = 0x61,
+    GX_FIFO_CMD_LOAD_CP_REG = 0x08,
+    GX_FIFO_CMD_LOAD_XF_REG = 0x10,
+
+    GX_FIFO_CMD_LOAD_INDX_A = 0x20,
+    GX_FIFO_CMD_LOAD_INDX_B = 0x28,
+    GX_FIFO_CMD_LOAD_INDX_C = 0x30,
+    GX_FIFO_CMD_LOAD_INDX_D = 0x38,
+
+    GX_FIFO_CMD_CALL_DL = 0x40,
+    GX_FIFO_CMD_INVAL_VTX = 0x48,
+
+    GX_FIFO_CMD_DRAW_POINTS = GX_POINTS,
+    GX_FIFO_CMD_DRAW_LINES = GX_LINES,
+    GX_FIFO_CMD_DRAW_LINESTRIP = GX_LINESTRIP,
+    GX_FIFO_CMD_DRAW_TRIANGLES = GX_TRIANGLES,
+    GX_FIFO_CMD_DRAW_TRIANGLESTRIP = GX_TRIANGLESTRIP,
+    GX_FIFO_CMD_DRAW_TRIANGLEFAN = GX_TRIANGLEFAN,
+    GX_FIFO_CMD_DRAW_QUADS = GX_QUADS,
+} GXFifoCmd;
+
+/**
+ * FIFO command sizes
+ */
+#define GX_FIFO_CMD_LOAD_INDX_SIZE 5
+#define GX_FIFO_CMD_DRAW_SIZE 3
+
+#define __GX_FIFO_SET_LOAD_INDX_DST(reg, x) ((reg) = GX_BITSET(reg, 20, 12, x))
+#define __GX_FIFO_SET_LOAD_INDX_NELEM(reg, x) ((reg) = GX_BITSET(reg, 16, 4, x))
+#define __GX_FIFO_SET_LOAD_INDX_INDEX(reg, x) ((reg) = GX_BITSET(reg, 0, 16, x))
+
+#define __GX_FIFO_LOAD_INDX(reg, dst, nelem, index)                            \
+    {                                                                          \
+        u32 cmd = 0;                                                           \
+        __GX_FIFO_SET_LOAD_INDX_DST(cmd, dst);                                 \
+        __GX_FIFO_SET_LOAD_INDX_NELEM(cmd, nelem);                             \
+        __GX_FIFO_SET_LOAD_INDX_INDEX(cmd, index);                             \
+        WGPIPE.c = reg;                                                        \
+        WGPIPE.i = cmd;                                                        \
+    }
+
+#define GX_FIFO_LOAD_INDX_A(dst, nelem, index)                                 \
+    __GX_FIFO_LOAD_INDX(GX_FIFO_CMD_LOAD_INDX_A, dst, nelem, index)
+
+#define GX_FIFO_LOAD_INDX_B(dst, nelem, index)                                 \
+    __GX_FIFO_LOAD_INDX(GX_FIFO_CMD_LOAD_INDX_B, dst, nelem, index)
+
+#define GX_FIFO_LOAD_INDX_C(dst, nelem, index)                                 \
+    __GX_FIFO_LOAD_INDX(GX_FIFO_CMD_LOAD_INDX_C, dst, nelem, index)
+
+#define GX_FIFO_LOAD_INDX_D(dst, nelem, index)                                 \
+    __GX_FIFO_LOAD_INDX(GX_FIFO_CMD_LOAD_INDX_D, dst, nelem, index)
+
+/************************************************************
+ *
+ *
+ * GX Blitting Processor (BP)
+ *
+ *
+ ***********************************************************/
+
+/**
+ * Load immediate value into BP register
+ */
+#define GX_BP_LOAD_REG(data)                                                   \
+    WGPIPE.c = GX_FIFO_CMD_LOAD_BP_REG;                                        \
+    WGPIPE.i = (data);
+
+/**
+ * Positional register-field helpers.
+ *
+ * GX_SET_REG names a field by its first and last PowerPC bit; SET_REG_FIELD
+ * names the same field by LSB shift and width. Both reduce to the single
+ * rlwimi the hardware registers are built with.
+ */
+#define GX_SET_REG(reg, x, st, end)                                            \
+    ((reg) = GX_BITSET((reg), (st), (end) - (st) + 1, (x)))
+
+#define GX_SET_REG2(reg, x, st, end) GX_SET_REG((reg), (x), (st), (end))
+
+#define SET_REG_FIELD(reg, size, shift, val)                                   \
+    do {                                                                        \
+        (reg) = (u32)__rlwimi((u32)(reg), (val), (shift),                      \
+                              32 - (shift) - (size), 31 - (shift));             \
+    } while (0)
+
+#define FAST_FLAG_SET(reg, value, shift, size)                                 \
+    do {                                                                        \
+        (reg) = (u32)__rlwimi((int)(reg), (int)(value), (shift),               \
+                              32 - (shift) - (size), 31 - (shift));             \
+    } while (0)
+
+#define GET_REG_FIELD(reg, size, shift)                                        \
+    ((int)((reg) >> (shift)) & ((1 << (size)) - 1))
+
+/**
+ * Load immediate value into BP register (rasterizer spelling)
+ */
+#define GX_WRITE_RAS_REG(value) GX_BP_LOAD_REG(value)
+
+/**
+ * Set BP command opcode (first 8 bits)
+ */
+#define GX_BP_SET_OPCODE(cmd, opcode) (cmd) = GX_BITSET(cmd, 0, 8, (opcode))
+
+#define GX_BP_OPCODE_SHIFT 24
+#define GX_BP_CMD_SZ (sizeof(u8) + sizeof(u32))
+
+/************************************************************
+ *
+ *
+ * GX Command Processor (CP)
+ *
+ *
+ ***********************************************************/
+
+extern volatile void* __piReg;
+extern volatile void* __cpReg;
+extern volatile void* __peReg;
+extern volatile void* __memReg;
+
+#define GX_PI_ADDR 0x0C003000
+#define GX_CP_ADDR 0x0C000000
+#define GX_PE_ADDR 0x0C001000
+#define GX_MEM_ADDR 0x0C004000
+
+#define GX_GET_MEM_REG(offset)                                                 \
+    (*(volatile u16*)((volatile u16*)__memReg + (offset)))
+#define GX_GET_CP_REG(offset)                                                  \
+    (*(volatile u16*)((volatile u16*)__cpReg + (offset)))
+#define GX_GET_PE_REG(offset)                                                  \
+    (*(volatile u16*)((volatile u16*)__peReg + (offset)))
+#define GX_GET_PI_REG(offset)                                                  \
+    (*(volatile u32*)((volatile u32*)__piReg + (offset)))
+
+#define GX_SET_MEM_REG(offset, value)                                          \
+    (*(volatile u16*)((volatile u16*)__memReg + (offset)) = (value))
+
+#define GX_SET_CP_REG(offset, value)                                           \
+    (*(volatile u16*)((volatile u16*)__cpReg + (offset)) = (value))
+#define GX_SET_PE_REG(offset, value)                                           \
+    (*(volatile u16*)((volatile u16*)__peReg + (offset)) = (value))
+#define GX_SET_PI_REG(offset, value)                                           \
+    (*(volatile u32*)((volatile u32*)__piReg + (offset)) = (value))
+
+#define GX_WRITE_CP_STRM_REG(addr, vtxfmt, data)                               \
+    {                                                                          \
+        GX_WRITE_U8(GX_FIFO_CMD_LOAD_CP_REG);                                  \
+        GX_WRITE_U8((vtxfmt) | ((addr) << 4));                                 \
+        GX_WRITE_U32(data);                                                    \
+    }
+
+#define GX_WRITE_XF_REG(addr, data, count)                                     \
+    {                                                                          \
+        GX_WRITE_U8(GX_FIFO_CMD_LOAD_XF_REG);                                  \
+        GX_WRITE_U32((addr) | ((count) << 16));                                \
+        GX_WRITE_U32(data);                                                    \
+    }
+
+#define GX_WRITE_RA_REG(reg)                                                   \
+    {                                                                          \
+        GX_WRITE_U8(GX_FIFO_CMD_LOAD_BP_REG);                                  \
+        GX_WRITE_U32(reg);                                                     \
+    }
+
+static inline u32 GXReadMEMReg(u32 addrLo, u32 addrHi) {
+    u32 hiStart, hiNew, lo;
+
+    hiStart = GX_GET_MEM_REG(addrHi);
+    do {
+        hiNew = hiStart;
+        lo = GX_GET_MEM_REG(addrLo);
+        hiStart = GX_GET_MEM_REG(addrHi);
+    } while (hiStart != hiNew);
+
+    return (hiStart << 16) | lo;
+}
+
+/**
+ * Load immediate value into CP register
+ */
+#define GX_CP_LOAD_REG(addr, data)                                             \
+    WGPIPE.c = GX_FIFO_CMD_LOAD_CP_REG;                                        \
+    WGPIPE.c = (addr);                                                         \
+    WGPIPE.i = (data);
+
+#define GX_CP_CMD_SZ (sizeof(u8) + sizeof(u8) + sizeof(u32))
+
+/************************************************************
+ *
+ *
+ * GX Transform Unit (XF)
+ *
+ *
+ ***********************************************************/
+
+/**
+ * XF memory
+ */
+typedef enum {
+    GX_XF_MEM_POSMTX = 0x0000,
+    GX_XF_MEM_NRMMTX = 0x0400,
+    GX_XF_MEM_DUALTEXMTX = 0x0500,
+    GX_XF_MEM_LIGHTOBJ = 0x0600
+} GXXfMem;
+
+/**
+ * Header for an XF register load
+ */
+#define GX_XF_LOAD_REG_HDR(addr)                                               \
+    WGPIPE.c = GX_FIFO_CMD_LOAD_XF_REG;                                        \
+    WGPIPE.i = (addr);
+
+/**
+ * Load immediate value into XF register
+ */
+#define GX_XF_LOAD_REG(addr, data)                                             \
+    GX_XF_LOAD_REG_HDR(addr);                                                  \
+    WGPIPE.i = (data);
+
+#define GX_XF_CMD_SZ (sizeof(u8) + sizeof(u32) + sizeof(u32))
+
+/**
+ * Load immediate values into multiple XF registers
+ */
+#define GX_XF_LOAD_REGS(size, addr)                                            \
+    {                                                                          \
+        u32 cmd = 0;                                                           \
+        cmd |= (addr);                                                         \
+        cmd |= (size) << 16;                                                   \
+        GX_XF_LOAD_REG_HDR(cmd);                                               \
+    }
+
+/**
+ * Enums for Tex0-Tex7 register fields
+ */
+typedef enum {
+    GX_XF_TEX_PROJ_ST, // (s,t): texmul is 2x4
+    GX_XF_TEX_PROJ_STQ // (s,t,q): texmul is 3x4
+} GXXfTexProj;
+
+typedef enum {
+    GX_XF_TEX_FORM_AB11, // (A, B, 1.0, 1.0) (used for regular texture source)
+    GX_XF_TEX_FORM_ABC1  // (A, B, C, 1.0) (used for geometry or normal source)
+} GXXfTexForm;
+
+typedef enum {
+    GX_XF_TG_REGULAR, // Regular transformation (transform incoming data)
+    GX_XF_TG_BUMP,    // Texgen bump mapping
+
+    GX_XF_TG_CLR0, // Color texgen: (s,t)=(r,g:b) (g and b are concatenated),
+                   // color0
+
+    GX_XF_TG_CLR1 // Color texgen: (s,t)=(r,g:b) (g and b are concatenated),
+                  // color1
+} GXXfTexGen;
+
+/**
+ * Misc. hardware enums
+ */
+typedef enum {
+    GX_RAS_COLOR0A0,
+    GX_RAS_COLOR1A1,
+    GX_RAS_ALPHA_BUMP = 5,
+    GX_RAS_ALPHA_BUMPN,
+    GX_RAS_COLOR_ZERO,
+
+    GX_RAS_MAX_CHANNEL
+} GXRasChannelID;
+
+typedef enum {
+    GX_TEVREG_COLOR,
+    GX_TEVREG_KONST,
+} GXTevRegType;
+
+#ifdef __cplusplus
+}
+#endif
+#endif

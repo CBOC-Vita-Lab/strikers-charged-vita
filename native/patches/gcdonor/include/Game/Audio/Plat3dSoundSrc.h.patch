@@ -1,0 +1,32 @@
+diff --git a/include/Game/Audio/Plat3dSoundSrc.h b/include/Game/Audio/Plat3dSoundSrc.h
+index e5ceafb..61c2167 100644
+--- a/include/Game/Audio/Plat3dSoundSrc.h
++++ b/include/Game/Audio/Plat3dSoundSrc.h
+@@ -1,6 +1,7 @@
+ #ifndef GAME_AUDIO_PLAT3DSOUNDSRC_H
+ #define GAME_AUDIO_PLAT3DSOUNDSRC_H
+ 
++#include "port/bitfield.h"
+ #include "Game/Audio/AudioSystem.h"
+ #include "Game/Audio/XSoundHandle.h"
+ 
+@@ -22,11 +23,19 @@ public:
+     /* 0x44 */ union
+     {
+         u32 m_SpatialBits;
++        // NP: m_SpatialBits is masked as a whole word elsewhere (|= 0x00800000, >> 24); reversed on
++        // little-endian targets so the named fields are the same bits (port/bitfield.h).
+         struct
+         {
++#if NP_BITFIELDS_LSB_FIRST
++            u32 m_UnknownFlags09 : 23;
++            u32 m_SquareRootPan : 1;
++            u32 m_InterauralDelay : 8;
++#else
+             u32 m_InterauralDelay : 8;
+             u32 m_SquareRootPan : 1;
+             u32 m_UnknownFlags09 : 23;
++#endif
+         } m_Spatial;
+     };
+ };

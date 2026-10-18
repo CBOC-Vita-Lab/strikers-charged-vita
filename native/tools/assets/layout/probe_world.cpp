@@ -1,0 +1,11 @@
+#include "Game/World/WorldDrawable.h"
+#include "Game/World/WorldAnimObjects.h"
+#include "Game/World/worldanim.h"
+#include "Game/World/WorldEffect.h"
+#include "Game/World/WorldHelperObject.h"
+#include "Game/Render/StadiumPhysicsObject.h"
+#include "Game/Render/StadiumWorldObjects.h"
+#include "Game/Render/SolarFlareEffect.h"
+#include "Game/Render/WorldNPC.h"
+#include "Game/Render/CrowdImpostorManager.h"
+WorldDrawable a0; WorldVisibilityDrawable a1; WorldPhysicsDrawable a2; WorldHelperObject a3; WorldEffect a4;

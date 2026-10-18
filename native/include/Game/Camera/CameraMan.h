@@ -1,0 +1,106 @@
+#ifndef _CAMERAMAN_H_
+#define _CAMERAMAN_H_
+
+#include "types.h"
+#include "Game/Camera/BaseCam.h"
+#include "NL/nlDLRing.h"
+#include "NL/nlMath.h"
+
+enum eCameraTransition
+{
+    eCT_NONE = 0,
+    eCT_EASE_IN = 1,
+};
+
+enum eCameraMessage
+{
+    eCM_ABORTED_BY_POP = 0,
+    eCM_ABORTED_BY_PUSH = 1,
+    eCM_COMPLETE = 2,
+};
+
+void FireCameraRumbleFilter(float fRumbleX, float fRumbleY, float fSpring, float fDamping);
+float AdjustFOVForWidescreen(float fFOV);
+void CameraAnimationLoadCallback(void* fileData, unsigned long fileSize, void* context);
+void UpdateCameraTransition(float fDeltaT);
+bool AsyncFinalizeCameraLoading();
+void AsyncStartCameraLoadingForStadiumViewer();
+void AsyncStartCameraLoading(bool frontEnd);
+
+inline float BlendCameraValue(float start, float end, float blend)
+{
+    return end * blend + start * (1.0f - blend);
+}
+
+class cCameraManager
+{
+public:
+    static void Shutdown();
+    static void Update(float fDeltaT);
+    static void UpdateGameCameraType();
+    static bool HasCamera(cBaseCamera* pCamera);
+    static void PushCamera(cBaseCamera* pCamera);
+    static void Remove(const cBaseCamera& camera);
+    static void Remove(eCameraType type, bool bDeleteAfterRemoving);
+    static void PushCameraWithTransition(cBaseCamera* pCamera, float fDuration, eCameraTransition transition, void (*pCallback)(eCameraMessage), bool bDeleteCurrentCamera);
+    static cBaseCamera* PopCamera();
+    static cBaseCamera* PopCameraWithTransition(float fDuration, eCameraTransition transition, void (*pCallback)(eCameraMessage));
+    static float GetDistanceFromCameraToObject(const nlVector3& objectPosition);
+    static void GetViewVector(nlVector3& viewVector);
+    static void GetUpVector(nlVector3& upVector);
+    static void SetWorldUpVectorTilt(float fXAxisTilt, float fYAxisTilt);
+    static void PushWorldUpVector();
+    static void PopWorldUpVector();
+
+    static inline cBaseCamera* PeekCamera()
+    {
+        cBaseCamera* pCamera = nlDLRingGetStart<cBaseCamera>(m_cameraStack);
+        return pCamera;
+    }
+
+    template <typename T>
+    static T* GetCamera(eCameraType type);
+
+    static u16 m_aJoystickRemap;
+    static cBaseCamera* m_cameraStack;
+    static eCameraTransition m_transition;
+    static void (*m_pCallback)(eCameraMessage);
+
+    static nlMatrix4 m_matView;
+    static nlVector3 m_cameraPosition;
+    static nlMatrix4 m_matPrevView;
+    static float m_fTransitionSpeed;
+    static float m_fTransitionTime;
+    static float m_fPrevFOV;
+    static float m_fFOV;
+    static int m_BeginFrameCameraType;
+
+    static nlVector3 m_UpVectorStack[2];
+    static int m_UpVectorStackSize;
+};
+
+template <typename T>
+T* cCameraManager::GetCamera(eCameraType type)
+{
+    cBaseCamera* cam = m_cameraStack;
+    if (cam != NULL)
+    {
+        do
+        {
+            if (cam->GetType() == type)
+            {
+                return (T*)cam;
+            }
+            cam = cam->m_next;
+        } while (cam != m_cameraStack);
+    }
+    return NULL;
+}
+
+cBaseCamera* GetNextCamera();
+
+void FireCameraNoiseFilter(nlVector3& amplitude, float frequency, float duration);
+
+extern nlVector3 g_CameraWorldUpVector;
+
+#endif // _CAMERAMAN_H_

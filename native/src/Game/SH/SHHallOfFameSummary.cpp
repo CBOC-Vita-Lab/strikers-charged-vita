@@ -1,0 +1,413 @@
+#include <string.h>
+
+#include "Game/SH/SHHallOfFameSummary.h"
+#include "Game/DB/GameProgress.h"
+#include "Game/FE/FEAudio.h"
+#include "Game/FE/feFinder.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feFinder_impl.h"
+#include "Game/FE/feInput.h"
+#include "Game/FE/fePackage.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/FE/feDPD.h"
+#include "Game/FE/fePageControls.h"
+#include "Game/SH/SHHallOfFame.h"
+#include "Game/SH/SHNavigation.h"
+#include "NL/nlAlgorithm.h"
+#include "NL/nlBasicString.h"
+#include "NL/nlFormat.h"
+#include "NL/nlLocalization.h"
+#include "NL/nlLocalizationLookup.h"
+#include "NL/nlPrint.h"
+#include "NL/nlString.h"
+
+struct HallOfFameTrophyEntry
+{
+    const char* mStringId;
+    unsigned int mUnlockFlag;
+};
+
+static HallOfFameTrophyEntry sTrophyEntries[] = {
+    { "SUMMARY_FIRE_CUP", 0x1 },
+    { "SUMMARY_FIRE_WALL", 0x8 },
+    { "SUMMARY_FIRE_BOOT", 0x10 },
+    { "SUMMARY_CRYSTAL_CUP", 0x2 },
+    { "SUMMARY_CRYSTAL_WALL", 0x20 },
+    { "SUMMARY_CRYSTAL_BOOT", 0x40 },
+    { "SUMMARY_STRIKER_CUP", 0x4 },
+    { "SUMMARY_STRIKER_WALL", 0x80 },
+    { "SUMMARY_STRIKER_BOOT", 0x100 },
+};
+
+struct HallOfFameUnlockEntry
+{
+    const char* mStringId;
+    bool (*mIsUnlocked)();
+};
+
+static HallOfFameUnlockEntry sUnlockEntries[] = {
+    { "STADIUM_TICKER_WASTELANDS", IsWastelandsUnlocked },
+    { "STADIUM_TICKER_LAVAPIT", IsLavaPitUnlocked },
+    { "STADIUM_TICKER_DUMP", IsDumpUnlocked },
+    { "STADIUM_TICKER_CRYSTALCANYON", IsCrystalCanyonUnlocked },
+    { "STADIUM_TICKER_GALACTIC", IsGalacticStadiumUnlocked },
+    { "STADIUM_TICKER_STORMSHIP", IsStormshipUnlocked },
+    { "NAME_BOWSERJR", IsBowserJrUnlocked },
+    { "NAME_DIDDYKONG", IsDiddyKongUnlocked },
+    { "NAME_PETEY", IsPeteyUnlocked },
+};
+
+struct HallOfFameChallengeEntry
+{
+    const char* mStringId;
+    int mChallenge;
+};
+
+static HallOfFameChallengeEntry sChallengeEntries[] = {
+    { "NAME_MARIO", 10 },
+    { "NAME_LUIGI", 11 },
+    { "NAME_DK", 12 },
+    { "NAME_PEACH", 13 },
+    { "NAME_DAISY", 14 },
+    { "NAME_WARIO", 15 },
+    { "NAME_WALUIGI", 16 },
+    { "NAME_YOSHI", 17 },
+    { "NAME_BOWSER", 18 },
+    { "NAME_PETEY", 19 },
+    { "NAME_BOWSERJR", 20 },
+    { "NAME_DIDDYKONG", 21 },
+};
+
+SHHallOfFameSummary::SHHallOfFameSummary(int mode)
+    : mMode(mode)
+    , mBackButton()
+    , mScrollBar()
+{
+    mFirstVisibleItem = 0;
+    mInitialized = false;
+    mNextPageRequested = false;
+    mPreviousPageRequested = false;
+    mState = HOF_SUMMARY_ENTERING;
+    mPointerInsideCount[0] = 0;
+    mPointerInsideCount[1] = 0;
+    mPointerInsideCount[2] = 0;
+    mPointerInsideCount[3] = 0;
+
+    switch (mMode)
+    {
+    case HOF_TROPHY_SUMMARY:
+        mItemCount = 9;
+        break;
+    case HOF_UNLOCK_SUMMARY:
+        mItemCount = 9;
+        break;
+    case HOF_CHALLENGE_SUMMARY:
+        mItemCount = 12;
+        break;
+    }
+}
+
+SHHallOfFameSummary::~SHHallOfFameSummary()
+{
+}
+
+inline void SHHallOfFameSummary::UpdateRows()
+{
+    switch (mMode)
+    {
+    case HOF_TROPHY_SUMMARY:
+        for (int i = 0; i < 7; i++)
+        {
+            UpdateRow(i, sTrophyEntries[i + mFirstVisibleItem].mStringId,
+                IsUnlockFlagSet(sTrophyEntries[i + mFirstVisibleItem].mUnlockFlag));
+        }
+        break;
+    case HOF_UNLOCK_SUMMARY:
+        for (int i = 0; i < 7; i++)
+        {
+            UpdateRow(i, sUnlockEntries[i + mFirstVisibleItem].mStringId,
+                sUnlockEntries[i + mFirstVisibleItem].mIsUnlocked());
+        }
+        break;
+    case HOF_CHALLENGE_SUMMARY:
+        for (int i = 0; i < 7; i++)
+        {
+            UpdateRow(i, sChallengeEntries[i + mFirstVisibleItem].mStringId,
+                g_pStrikerChallenge->IsUnlocked(
+                    sChallengeEntries[i + mFirstVisibleItem].mChallenge));
+        }
+        break;
+    }
+}
+
+void SHHallOfFameSummary::SceneCreated()
+{
+    SHNavigation* scene = GetNavigationScene();
+    TLComponentInstance* screen = 0;
+    TLComponentInstance* breadcrumbs = 0;
+    if (scene != 0)
+    {
+        scene->SetButtons(NAVIGATION_BUTTON_PLUS | NAVIGATION_BUTTON_MINUS | NAVIGATION_BUTTON_BACK | NAVIGATION_BUTTON_BREADCRUMBS, false);
+        screen = scene->GetButton(NAVIGATION_BUTTON_BACK);
+        breadcrumbs = scene->GetButton(NAVIGATION_BUTTON_BREADCRUMBS);
+        mPageControls = &scene->mPageControls;
+        mPageControls->SetButtonState(1, true, true);
+        mPageControls->SetButtonState(0, true, true);
+    }
+
+    mBackButton.SetButtonInstance(screen);
+    SetHallOfFameBreadcrumbs(mMode, breadcrumbs);
+
+    FEPresentation* presentation = mFEScene->m_pFEPackage->GetPresentation();
+    TLComponentInstance* scrollbar = FEFinder<TLComponentInstance, 4>::Find<>(presentation->m_currentSlide, "Layer", "summary", "scrollbar");
+    mScrollBar.SetComponent(scrollbar);
+    mScrollBar.SetRange(mItemCount - 7);
+    mScrollBar.SetValue(mFirstVisibleItem);
+
+    for (int i = 0; i < 4; i++)
+    {
+        GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+
+    UpdateTitle();
+    UpdateRows();
+}
+
+void SHHallOfFameSummary::Update(float fDeltaT)
+{
+    BaseSceneHandler::Update(fDeltaT);
+
+    if (mState == HOF_SUMMARY_ENTERING || mState == HOF_SUMMARY_TRANSITIONING || mState == HOF_SUMMARY_EXITING_BACK)
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() < slide->GetStartTime() + slide->GetDuration())
+        {
+            for (int pad = 0; pad < 4; pad++)
+            {
+                GetPointerInstance(pad)->SetActiveSlide("waiting", true, false);
+            }
+            return;
+        }
+
+        if (mState == HOF_SUMMARY_ENTERING)
+        {
+            mState = HOF_SUMMARY_ACTIVE;
+        }
+        else if (mState == HOF_SUMMARY_TRANSITIONING)
+        {
+            if (mPreviousPageRequested)
+            {
+                CycleHallOfFameDetailPage(mMode, false);
+                return;
+            }
+            if (mNextPageRequested)
+            {
+                CycleHallOfFameDetailPage(mMode, true);
+            }
+            return;
+        }
+        else if (mState == HOF_SUMMARY_EXITING_BACK)
+        {
+            LeaveHallOfFamePage(mMode);
+            return;
+        }
+    }
+
+    if (!mInitialized)
+    {
+        mInitialized = true;
+    }
+
+    if (!mScrollBar.mInitialized)
+    {
+        mScrollBar.Initialize();
+    }
+
+    bool processInput;
+    for (unsigned int pad = 0; pad < 4; pad++)
+    {
+        TLComponentInstance* controller = GetPointerInstance(pad);
+        if (g_pFEInput->m_InputLockDepth == 0)
+        {
+            if (pad != gFEControllerIndex)
+            {
+                controller->SetActiveSlide("waiting", true, false);
+                processInput = false;
+                goto checkInput;
+            }
+
+            if (mPointerInsideCount[pad] > 0)
+            {
+                controller->SetActiveSlide("A", true, false);
+            }
+            else
+            {
+                controller->SetActiveSlide("cursor", true, false);
+            }
+        }
+        processInput = true;
+
+    checkInput:
+        if (processInput)
+        {
+            unsigned char valid = 1;
+            FEPointerEvent event;
+            event.mIndex = pad;
+            event.mPosition = GetPointerPosition(pad, &valid);
+            event.mPressed
+                = g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0);
+            event.mReleased
+                = g_pFEInput->JustReleased((eFEINPUT_PAD)pad, 0x1E, true, 0);
+
+            mPageControls->Update(event, fDeltaT);
+            mScrollBar.Update(event, fDeltaT);
+
+            if (mBackButton.UpdateBackButton(event, fDeltaT))
+            {
+                mState = HOF_SUMMARY_EXITING_BACK;
+                SHNavigation* scene = GetNavigationScene();
+                if (scene != 0)
+                {
+                    scene->HideButtons();
+                }
+                mPresentation->SetActiveSlide("OUT", true);
+                return;
+            }
+
+            if (mPageControls->IsButtonPressed(1)
+                || mPageControls->IsButtonPressed(0))
+            {
+                FEAudio::PlayAnimAudioEvent(0x375C885A, 0, 0, 1);
+                FEAudio::PlayAnimAudioEvent(0x304FDD1E, 0, 0, 1);
+                mState = HOF_SUMMARY_TRANSITIONING;
+                mPresentation->SetActiveSlide("out", true);
+
+                if (mPageControls->IsButtonPressed(1))
+                {
+                    mPreviousPageRequested = true;
+                }
+                else if (mPageControls->IsButtonPressed(0))
+                {
+                    mNextPageRequested = true;
+                }
+                return;
+            }
+        }
+    }
+
+    if (mScrollBar.IsScrolling(1, 1))
+    {
+        ++mFirstVisibleItem;
+        UpdateRows();
+    }
+    else if (mScrollBar.IsScrolling(0, 1))
+    {
+        --mFirstVisibleItem;
+        UpdateRows();
+    }
+}
+
+void SHHallOfFameSummary::UpdateTitle()
+{
+    WideBasicString title;
+
+    FEPresentation* presentation = this->mFEScene->m_pFEPackage->GetPresentation();
+    TLTextInstance* titleText = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation->m_currentSlide, "Layer", "summary", "subtitle", "SUBtitle");
+
+    switch (this->mMode)
+    {
+    case HOF_TROPHY_SUMMARY:
+        title = WideBasicString(LookupLocString("TITLE_SUMMARY_TROPHIES"));
+        break;
+    case HOF_UNLOCK_SUMMARY:
+        title = WideBasicString(LookupLocString("TITLE_SUMMARY_STADIUMS_CHARACTERS"));
+        break;
+    case HOF_CHALLENGE_SUMMARY:
+        title = WideBasicString(LookupLocString("TITLE_SUMMARY_STRIKER_CHALLENGES"));
+        break;
+    }
+
+    memcpy(this->mTitleBuffer, title.c_str(), sizeof(this->mTitleBuffer));
+    titleText->SetString(this->mTitleBuffer);
+}
+
+void SHHallOfFameSummary::UpdateRow(int index, const char* stringId, bool unlocked)
+{
+    WideBasicString itemText;
+    if (this->mMode == HOF_CHALLENGE_SUMMARY)
+    {
+        WideBasicString itemName(LookupLocString(stringId));
+        WideBasicString format(LookupLocString("SUMMARY_CHALLENGES"));
+        itemText = Format(format, itemName);
+    }
+    else
+    {
+        itemText = WideBasicString(LookupLocString(stringId));
+    }
+
+    char itemComponentName[8];
+    nlSNPrintf(itemComponentName, sizeof(itemComponentName), "ITEM_%d", index);
+
+    FEPresentation* presentation = this->mFEScene->m_pFEPackage->GetPresentation();
+    TLTextInstance* rowText = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation->m_currentSlide, "Layer", "summary", itemComponentName, "CHALLENGE_0", "stat_0");
+
+    TLComponentInstance* lockState = FEFinder<TLComponentInstance, 4>::FindOrDefault(presentation->m_currentSlide, "Layer", "summary", itemComponentName, "CHALLENGE_0", "lockedunlocked");
+
+    if (unlocked)
+    {
+        if (this->mMode == HOF_TROPHY_SUMMARY)
+        {
+            lockState->SetActiveSlide("claimed", true, false);
+        }
+        else if (this->mMode == HOF_UNLOCK_SUMMARY)
+        {
+            lockState->SetActiveSlide("unlocked", true, false);
+        }
+        else
+        {
+            lockState->SetActiveSlide("completed", true, false);
+        }
+    }
+    else
+    {
+        if (this->mMode == HOF_TROPHY_SUMMARY)
+        {
+            lockState->SetActiveSlide("unclaimed", true, false);
+        }
+        else if (this->mMode == HOF_UNLOCK_SUMMARY)
+        {
+            lockState->SetActiveSlide("locked", true, false);
+        }
+        else
+        {
+            lockState->SetActiveSlide("completed", true, false);
+        }
+    }
+
+    if (this->mMode == HOF_CHALLENGE_SUMMARY)
+    {
+        TLTextInstance* statusText = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation->m_currentSlide, "Layer", "summary", itemComponentName, "CHALLENGE_0", "lockedunlocked", "stat_1");
+
+        if (unlocked)
+        {
+            statusText->SetStringId("SUMMARY_COMPLETED");
+        }
+        else
+        {
+            statusText->SetStringId("SUMMARY_INCOMPLETE");
+        }
+    }
+
+    memcpy(this->mItemTextBuffers[index], itemText.c_str(),
+        sizeof(this->mItemTextBuffers[index]));
+    rowText->SetString(this->mItemTextBuffers[index]);
+
+    char tournamentName[16];
+    nlSNPrintf(tournamentName, sizeof(tournamentName), "TOURNAMENT_%d",
+        index + this->mFirstVisibleItem + 1);
+
+    TLTextInstance* tournamentText = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation->m_currentSlide, "Layer", "summary", itemComponentName, "CHALLENGE_0", "number");
+    tournamentText->SetStringId(tournamentName);
+}

@@ -1,0 +1,151 @@
+# LAN joiner: boot to the main menu, Multiplayer, Join Game, wait for the host to start.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 24 2400
+log STATE lobby
+idle 400
+press 4
+idle 30
+press 100
+log joining
+wait peers >= 2 7200
+log STATE joined
+wait scene != 24 7200
+log STATE launched
+# Draft, captains, sidekicks, stadium: accept whatever is highlighted until the match is loaded.
+mash 100 45 ingame == 1 12000
+log STATE in match
+wait gs == 5 6000
+log STATE open play
+# both consoles stop at the same match clock (the lockstep keeps the clocks equal), so neither sees the other leave
+stopwhen clock >= 150
+# W5-ITEM: both consoles give themselves items (harness `item me`, MSC_ITEM_TEST=1: the request rides the input stream)
+# and use them at the nearest opponent; then the cycle (a mushroom in behind, Z, X, X). joiner order.
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan freeze give
+item me freeze 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan freeze use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan banana give
+item me banana 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan banana use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan bobomb give
+item me bobomb 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan bobomb use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan chomp give
+item me chomp 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan chomp use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan mushroom give
+item me mushroom 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan mushroom use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan star give
+item me star 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan star use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan captain give
+item me captain 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan captain use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan green give
+item me green 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan green use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan red give
+item me red 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan red use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan spiny give
+item me spiny 1 set
+tap 0 1 itemme != -1 120
+aim opp 0 dopp < 4.5 200
+log ITEM lan spiny use
+tap 400 12 itemme == -1 200
+idle 100
+tap 0 1 gs == 5 3000
+tap 0 1 ctl >= 0 600
+log ITEM lan cycle
+item me banana 1 set
+item me mushroom 1 add
+tap 0 1 itemme == 4 && itemmeb == 7 120
+press 10 3 10
+tap 0 1 itemme == 7 60
+log ITEM lan cycled
+tap 400 12 itemme != 7 120
+idle 60
+aim opp 0 dopp < 4.5 200
+tap 400 12 itemme == -1 200
+idle 200
+log STATE items done
+wait clock >= 150 20000
+log STATE played
+exit

@@ -1,0 +1,24 @@
+# MSP frame-pacing proof, scene "hof": main menu -> Hall of Fame (the trophy room and its camera moves), idle 1800 frames
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu, pointer on Domination Mode
+idle 60
+mash 4 20 onctx == 5
+log STATE pointer on Hall of Fame
+idle 20
+press 100
+log STATE Hall of Fame entered
+idle 1800
+log STATE Hall of Fame idle done
+exit

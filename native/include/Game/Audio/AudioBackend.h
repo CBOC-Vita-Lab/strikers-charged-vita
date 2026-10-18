@@ -1,0 +1,109 @@
+#ifndef GAME_AUDIO_AUDIO_BACKEND_H
+#define GAME_AUDIO_AUDIO_BACKEND_H
+
+#include "Game/Audio/AudioGlobals.h"
+
+#include "revolution/axfx.h"
+#include "revolution/os/OSAlarm.h"
+#include "revolution/wenc.h"
+
+#include "NL/MemAlloc.h"
+#include "NL/nlArrayAllocator.h"
+#include "NL/nlFile.h"
+#include "NL/nlList.h"
+
+enum eAudioOutputMode
+{
+    AUDIO_OUTPUT_MONO = 0,
+    AUDIO_OUTPUT_STEREO = 1,
+    AUDIO_OUTPUT_DPL2 = 3,
+};
+
+class AudioSource;
+struct XSoundOwner;
+class AudioReadState;
+struct AudioSourceInfo;
+
+struct AudioReadRequest
+{
+    nlFile* m_File;
+    unsigned int m_Offset;
+    void* m_Buffer;
+    ReadAsyncCallback m_Callback;
+    unsigned long m_UserParam;
+    AudioReadState* m_State;
+    unsigned int m_Size : 31;
+    bool m_Cancel : 1;
+};
+
+class AudioReadQueue
+    : public ListContainerBase<AudioReadRequest,
+          nlStaticArrayAllocator<ListEntry<AudioReadRequest>, 32> >
+{
+};
+
+class AudioBackendBase
+{
+public:
+    AudioBackendBase();
+    virtual ~AudioBackendBase() { }
+    virtual bool Initialize() = 0;
+    virtual void Shutdown() = 0;
+};
+
+class AudioBackend : public AudioBackendBase
+{
+public:
+    AudioBackend();
+    virtual ~AudioBackend();
+    virtual bool Initialize();
+    virtual void Shutdown();
+
+    void SuspendControllerSpeakers();
+    void ResumeControllerSpeakers();
+    void* AllocateAudioMemory(unsigned long size);
+    void FreeAudioMemory(void* pointer);
+    void ServiceReadQueue(float dt);
+    AudioSource* CreateSource(AudioSourceInfo*, XSoundOwner* owner);
+    void ReleaseSource(AudioSource* source);
+    void QueueRead(nlFile* file, unsigned int offset, void* buffer,
+        unsigned int size, ReadAsyncCallback callback, unsigned long userParam,
+        AudioReadState* state);
+    void QueueReadCancellation(AudioReadState* state);
+    void SetOutputMode(unsigned int mode);
+    void InitializeAuxEffects();
+
+    AXFX_REVERBHI* GetReverb() { return &m_ReverbEffect.m_Reverb; }
+    AXFX_REVERBHI_DPL2* GetReverbDpl2() { return &m_ReverbEffect.m_ReverbDpl2; }
+    AXFX_DELAY* GetDelay() { return &m_DelayEffect.m_Delay; }
+
+    /* 0x004 */ nlListSlotPool<AudioSource*> m_Sources;
+    /* 0x024 */ AudioReadQueue m_ReadQueue;
+    /* 0x434 */ MemoryAllocator m_AudioAllocator;
+    /* 0x44C */ u32 m_OutputMode;
+    /* 0x450 */ bool m_MixControllerSpeakersToMain;
+    /* 0x451 */ u8 m_Pad451[3];
+    /* 0x454 */ union
+    {
+        AXFX_REVERBHI m_Reverb;
+        AXFX_REVERBHI_DPL2 m_ReverbDpl2;
+    } m_ReverbEffect;
+    /* 0x5E4 */ union
+    {
+        AXFX_DELAY m_Delay;
+        AXFX_DELAY_EXP_DPL2 m_DelayDpl2;
+    } m_DelayEffect;
+    /* 0x668 */ OSAlarm m_ControllerSpeakerAlarm;
+    /* 0x698 */ u32 m_ControllerSpeakerFlags[4];
+    /* 0x6A8 */ WENCInfo m_ControllerSpeakerEncoders[4];
+};
+
+inline AudioBackendBase::AudioBackendBase()
+{
+    g_pAudioBackend = static_cast<AudioBackend*>(this);
+}
+
+void DumpAudioMemory();
+void UpdateAudioSources();
+
+#endif // GAME_AUDIO_AUDIO_BACKEND_H

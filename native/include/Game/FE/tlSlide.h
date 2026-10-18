@@ -1,0 +1,55 @@
+#ifndef _TLSLIDE_H_
+#define _TLSLIDE_H_
+
+#include "types.h"
+
+#include "Game/FE/feAnimation.h"
+#include "Game/FE/tlInstance.h"
+
+enum eTimeLinePlayMode
+{
+    TLPM_STOP_AT_END = 0,
+    TLPM_LOOPING = 1,
+    TLPM_CONTINUE = 2,
+};
+
+class TLSlide
+{
+public:
+    TLSlide();
+
+    f32 GetCurrentTime() const
+    {
+        return m_time;
+    }
+
+    f32 GetStartTime() const
+    {
+        return m_start;
+    }
+
+    f32 GetDuration() const
+    {
+        return m_duration;
+    }
+
+    void Update(float deltaTime);
+    void UpdateAsset(TLInstance* instance, float deltaTime);
+
+    /* 0x00 */ TLSlide* m_next;
+    /* 0x04 */ char pad0[0x4];
+    /* 0x08 */ TLInstance* pChildren;
+    /* 0x0C */ FEAnimation* m_animations;
+    /* 0x10 */ f32 m_start;
+    /* 0x14 */ f32 m_duration;
+    /* 0x18 */ f32 m_time;
+    /* 0x1C */ eTimeLinePlayMode m_uPlayMode;
+    /* 0x20 */ char m_szName[32];
+    /* 0x40 */ u32 m_hash;
+    /* 0x44 */ bool m_bPaused;
+
+private:
+    void SetName(const char* name);
+};
+
+#endif // _TLSLIDE_H_

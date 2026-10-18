@@ -1,0 +1,85 @@
+Multiplayer 4/4: the lockstep error reporters (frame/CRC/seed mismatch, sync error, input queue overflow, connection lost) print one [mp-lan] line each in a LAN session,
+so that a test run (scripts/mp/lan_pair.py logic) can never pass silently with a drifting match.
+
+diff --git a/src/Game/NetworkSession.cpp b/src/Game/NetworkSession.cpp
+index 2a10e0b..326e903 100644
+--- a/src/Game/NetworkSession.cpp
++++ b/src/Game/NetworkSession.cpp
+@@ -23,6 +23,7 @@
+ #include "Game/NetworkRandom.h"
+ #include "Game/FE/feMusic.h"
+ #include "Game/FriendManager.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ #include "Game/AI/AIPad.h"
+ #include "Game/DB/SaveLoad.h"
+@@ -2480,6 +2481,7 @@ void NetworkSession::PopupNetworkError(int overlay)
+ 
+ void NetworkSession::OnGameConnectionLost(u32 connection, int reason)
+ {
++    NpLanLog("connection lost (connection %u, reason %d)\n", connection, reason);
+     switch (GetSessionState())
+     {
+     case 3:
+diff --git a/src/Game/NetworkSync.cpp b/src/Game/NetworkSync.cpp
+index 141df78..14251e8 100644
+--- a/src/Game/NetworkSync.cpp
++++ b/src/Game/NetworkSync.cpp
+@@ -1,4 +1,5 @@
+ #include "Game/NetworkSync.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ #include "Game/DebugWriteCache.h"
+ #include "Game/TweakValue.h"
+@@ -43,6 +44,7 @@ DebugWriteCache* NetworkSyncState::GetWriteCache()
+ 
+ void NetworkSyncState::OnFrameMismatch(int value)
+ {
++    NpLanLog("DESYNC frame mismatch at network tick %d\n", value);
+     if (mCaptureEnabled)
+     {
+         if (mFrameMismatchFrame == -1)
+@@ -63,6 +65,7 @@ void NetworkSyncState::OnFrameMismatch(int value)
+ 
+ void NetworkSyncState::OnChecksumMismatch(int value)
+ {
++    NpLanLog("DESYNC checksum mismatch at network tick %d\n", value);
+     if (mCaptureEnabled)
+     {
+         if (mChecksumMismatchFrame == -1)
+@@ -83,6 +86,7 @@ void NetworkSyncState::OnChecksumMismatch(int value)
+ 
+ void NetworkSyncState::OnRandomSeedMismatch(int value)
+ {
++    NpLanLog("DESYNC random seed mismatch at network tick %d\n", value);
+     if (mCaptureEnabled)
+     {
+         if (mRandomSeedMismatchFrame == -1)
+diff --git a/src/Game/Task/FixedUpdateTask.cpp b/src/Game/Task/FixedUpdateTask.cpp
+index 45a863b..84bd2ce 100644
+--- a/src/Game/Task/FixedUpdateTask.cpp
++++ b/src/Game/Task/FixedUpdateTask.cpp
+@@ -1,6 +1,7 @@
+ #include "NL/nlDLListContainer.inl"
+ #include "Game/Task/FixedUpdateTask.h"
+ #include "Game/EventDispatcher.inl"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ #include "Game/FE/feManager.h"
+ 
+@@ -221,6 +222,7 @@ u32 FixedUpdateTask::WriteSyncLog()
+ 
+ void FixedUpdateTask::OnSyncError()
+ {
++    NpLanLog("sync error reported to the player\n");
+     if (g_pNetworkSession->GetSessionMode())
+     {
+         NetworkStatsManager::Instance()->CalculateAndReportGameResult(2);
+@@ -230,6 +232,7 @@ void FixedUpdateTask::OnSyncError()
+ 
+ void FixedUpdateTask::OnInputQueueOverflow()
+ {
++    NpLanLog("input queue overflow\n");
+     NetworkStatsManager::Instance()->CalculateAndReportGameResult(4);
+     g_pNetworkSession->PopupNetworkError(2);
+ }

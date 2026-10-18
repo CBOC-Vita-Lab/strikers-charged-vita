@@ -1,0 +1,72 @@
+diff --git a/src/Game/GL/ShaderSkinMesh.cpp b/src/Game/GL/ShaderSkinMesh.cpp
+index cabac47..ce3e3a5 100644
+--- a/src/Game/GL/ShaderSkinMesh.cpp
++++ b/src/Game/GL/ShaderSkinMesh.cpp
+@@ -6,6 +6,9 @@
+ #include "Game/GL/glModelBuilder.h"
+ #include "NL/gl/glMemory.h"
+ #include <string.h>
++#ifdef NP_NATIVE
++#include "platform/assets/np_endian.h" /* GX vertex arrays stay big-endian (NPA) */
++#endif
+ #include "Game/PoseAccumulator.h"
+ #include "NL/nlMemory.h"
+ #include "NL/platvmath.h"
+@@ -92,6 +95,13 @@ void ShaderSkinMesh::InitializeSkinData()
+     }
+ }
+ 
++#ifdef NP_NATIVE
++/* rlg vertex arrays are big-endian (GX reads them as they are); the CPU reads them through npa_rdf32 */
++#define NPA_SKINW(pw, k) npa_rdf32(&(*(pw))[k])
++#else
++#define NPA_SKINW(pw, k) ((*(pw))[k])
++#endif
++
+ void ShaderSkinMesh::BuildPacketSkinData(
+     PacketSkinData* data, glModelPacket* pPacket,
+     BoneMapList* node)
+@@ -130,13 +140,13 @@ void ShaderSkinMesh::BuildPacketSkinData(
+         int numPairs = 0;
+         for (unsigned long j = 0; j < numVertices; j++)
+         {
+-            if (0.0f != (*pWeights)[1])
++            if (0.0f != NPA_SKINW(pWeights, 1))
+             {
+                 rigidSkin = false;
+             }
+             for (unsigned long k = 0; k < 4; k++)
+             {
+-                float weight = (*pWeights)[k];
++                float weight = NPA_SKINW(pWeights, k);
+                 if (0.0f == weight)
+                 {
+                     break;
+@@ -310,11 +320,13 @@ void ShaderSkinMesh::CreateMorphBuffer(unsigned long packetIndex,
+ #ifdef NP_NATIVE
+ // out += weight * ((in [+ morph]) * M [+ translation]): scalar replacement for the paired-single
+ // asm blocks of the original (row-vector convention, translation in row 3, as the asm reads it).
++// NPA contract: `in` (model stream 1 / 2) and `out` (skinnedVertices / skinnedNormals) are GX vertex
++// arrays, so they are BIG-ENDIAN; matrix, morph and weight are CPU data in host order.
+ static inline void NpSkinAccumulate(nlVector3& out, const nlVector3& in, const nlVector3* morph,
+     const nlMatrix4& matrix, float weight, bool translate)
+ {
+     const float (*m)[4] = matrix.e2;
+-    float x = in.x, y = in.y, z = in.z;
++    float x = npa_rdf32(&in.x), y = npa_rdf32(&in.y), z = npa_rdf32(&in.z);
+     if (morph != 0)
+     {
+         x += morph->x;
+@@ -330,9 +342,9 @@ static inline void NpSkinAccumulate(nlVector3& out, const nlVector3& in, const n
+         ty += m[3][1];
+         tz += m[3][2];
+     }
+-    out.x += tx * weight;
+-    out.y += ty * weight;
+-    out.z += tz * weight;
++    npa_wrf32(&out.x, npa_rdf32(&out.x) + tx * weight);
++    npa_wrf32(&out.y, npa_rdf32(&out.y) + ty * weight);
++    npa_wrf32(&out.z, npa_rdf32(&out.z) + tz * weight);
+ }
+ #endif
+ 

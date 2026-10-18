@@ -1,0 +1,17 @@
+0001	Declare the port's opt-in tweak hooks	94	0	1	include/mscharged_tweaks.h
+0002	Tweak: unlock everything	9	0	1	src/Game/DB/GameProgress.cpp
+0003	Tweak: no Mega Strikes	13	0	1	src/Game/GameInfo.cpp
+0004	Tweak: skip the intro	43	1	4	src/Game/AsyncLoading.cpp|src/Game/SH/SHBootLoading.cpp|src/Game/SH/SHMoviePlayer.cpp|src/Game/SH/SHTitleScreen.cpp
+0005	Tweak: fast menus	104	0	8	src/Game/Camera/animcam.cpp|src/Game/FE/fePopupMenu.cpp|src/Game/FE/fePresentation.cpp|src/Game/FE/tlSlide.cpp|src/Game/SH/SHPause.cpp|src/Game/Task/FrontEndTask.cpp|src/Game/main.cpp|src/NL/nlTask.cpp
+0006	Fix: redraw resting goal nets (issue #19)	9	1	1	src/Game/Drawable/DrawableNetMesh.cpp
+0008	Tweak: CPU vs CPU	12	0	1	src/Game/SH/SHChooseSides.cpp
+0009	Fix: load the electrocution overlay texture (issue #33)	67	0	1	src/Game/Effects/EmissionManager.cpp
+0010	Fix: shots no longer pass through the goalies after a cut-short deke (issue #38)	29	1	2	src/Game/AI/GoalieActions.cpp|src/Game/Player.cpp
+0011	Port: start without the boot loading message	6	0	1	src/Game/main.cpp
+0012	Tweak: fast terrain	20	0	2	src/Game/GameTweaksManager.cpp|src/Game/Weather.cpp
+0013	Port option: frame rate above the original	21	0	2	src/Game/Task/BeginFrameTask.cpp|src/NL/glx/glxSwap.cpp
+0014	Port option: keep the original's per-frame steps at higher rates	61	3	8	src/Game/BasicStadium.cpp|src/Game/Blinker.cpp|src/Game/Camera/CameraMan.cpp|src/Game/FE/feModelManager.cpp|src/Game/GL/GLTextureAnim.cpp|src/Game/Render/Presentation.cpp|src/Game/World/WorldEffect.cpp|src/NL/glx/GXSkinnedMultiLightMaterialProgramRender.cpp
+0015	Tweak: mirror match	383	3	14	include/Game/DB/CharacterInfo.h|src/Game/AI/GoalieActions.cpp|src/Game/CharacterLoader.cpp|src/Game/DB/BasicGameInfo.cpp|src/Game/FE/Overlay/OverlayHandlerDefensivePlay.cpp|src/Game/FE/feCaptainComponent.cpp|src/Game/FE/feCharacterPDAComponent.cpp|src/Game/Render/FrontEndPresentation_interp.cpp|src/Game/Render/ImpostorCharacter.cpp|src/Game/Render/Indicators.cpp|src/Game/SH/SHChooseCaptains.cpp|src/Game/SH/SHChooseSidekicks.cpp|src/Game/SH/SHChooseSides.cpp|src/Game/SH/SHNavigation.cpp
+0016	Tweak: Thunder Island walls	135	15	13	include/Game/GameInfo.h|src/Game/AI/DesireSteering.cpp|src/Game/AI/Fielder.cpp|src/Game/AI/FielderActions.cpp|src/Game/Character.cpp|src/Game/Game.cpp|src/Game/GameInfo.cpp|src/Game/Physics/PhysicsBanana.cpp|src/Game/Physics/PhysicsCharacter.cpp|src/Game/Physics/PhysicsNPC.cpp|src/Game/Physics/PhysicsShell.cpp|src/Game/PhysicsAIBall.cpp|src/Game/Render/ChainChomp.cpp
+0017	Tweak: blue Peach	69	0	5	include/Game/DB/CharacterInfo.h|src/Game/CharacterLoader.cpp|src/Game/DB/BasicGameInfo.cpp|src/Game/FE/Overlay/OverlayHandlerDefensivePlay.cpp|src/Game/Render/Indicators.cpp
+0018	Reduce background rendering in Performance Mode	19	0	2	include/mscharged_tweaks.h|src/Game/Task/GameRenderTask.cpp

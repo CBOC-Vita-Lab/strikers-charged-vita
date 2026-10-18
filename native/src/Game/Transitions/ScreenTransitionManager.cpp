@@ -1,0 +1,244 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/Transitions/ScreenTransitionManager.h"
+
+#include "Game/Transitions/TransitionSequence.h"
+#include "Game/Transitions/ColourBlendScreenTransition.h"
+#include "Game/Transitions/ScriptedTransition.h"
+#include "Game/Transitions/ModelTransition.h"
+
+#include "Game/Sys/simpleparser.h"
+
+#include "string.h"
+
+#include "NL/gl/gl.h"
+#include "NL/nlMath.h"
+#include "NL/nlString.h"
+#include "NL/nlstring_tmpl.h"
+
+template <>
+ScreenTransitionManager* nlSingleton<ScreenTransitionManager>::s_pInstance = 0;
+
+ScreenTransitionManager::ScreenTransitionManager()
+    : m_pActiveTransition(0)
+    , m_TransitionMap()
+    , m_eView(0)
+    , m_pCallback(0)
+    , m_SelectedTransition(0)
+    , m_fCurrentTime(0.0f)
+{
+    m_Cut = false;
+    m_Transitions.reserve(16);
+}
+
+ScreenTransitionManager::~ScreenTransitionManager()
+{
+    if (m_pActiveTransition != 0)
+    {
+        m_pActiveTransition->Cancel();
+
+        if (m_pCallback != 0)
+        {
+            m_pCallback->TransitionFinished();
+        }
+    }
+
+    m_pActiveTransition = 0;
+    m_TransitionMap.DeleteValues();
+}
+
+void ScreenTransitionManager::Update(float dt)
+{
+    if (m_pActiveTransition != 0)
+    {
+        m_pActiveTransition->Update(dt);
+
+        if (m_pActiveTransition->IsFinished())
+        {
+            m_pActiveTransition->Cancel();
+            m_pActiveTransition = 0;
+            m_fCurrentTime = 0.0f;
+
+            if (m_pCallback != 0)
+            {
+                m_pCallback->TransitionFinished();
+            }
+        }
+        else
+        {
+            m_fCurrentTime += dt;
+
+            if (m_pCallback != 0)
+            {
+                float progress = (m_fCurrentLength > 0.0f) ? m_fCurrentTime / m_fCurrentLength : 0.0f;
+
+                m_pCallback->TransitionProgressed(progress);
+            }
+        }
+    }
+}
+
+void ScreenTransitionManager::Render()
+{
+    if (m_eView != 0 && m_pActiveTransition != 0 && !m_pActiveTransition->IsFinished())
+    {
+        if (m_fCurrentTime == 0.0f)
+        {
+            m_pActiveTransition->Update(0.0f);
+        }
+
+        m_pActiveTransition->Render(m_eView);
+
+        if (m_pCallback != 0 && m_pActiveTransition->ConsumeScreenGrabRequest())
+        {
+            m_pCallback->ScreenGrabRequested();
+        }
+    }
+}
+
+void ScreenTransitionManager::CancelAllTransitions()
+{
+    if (m_pActiveTransition != 0)
+    {
+        m_pActiveTransition->Cancel();
+
+        if (m_pCallback != 0)
+        {
+            m_pCallback->TransitionFinished();
+        }
+    }
+    m_pActiveTransition = 0;
+}
+
+void ScreenTransitionManager::AddTransitionToMap(char* name, ScreenTransition* pTransition)
+{
+    unsigned long transitionHash = glHash(name);
+    m_TransitionMap.Add(transitionHash, pTransition);
+
+    m_Transitions.push_back(name);
+}
+
+void ScreenTransitionManager::EnableRandomTransition(const char* filter)
+{
+    SelectRandomTransition(filter);
+
+    if (m_pActiveTransition != 0)
+    {
+        m_pActiveTransition->Cancel();
+    }
+
+    if (m_SelectedTransition != 0)
+    {
+        m_SelectedTransition->Reset();
+        m_pActiveTransition = m_SelectedTransition;
+        m_SelectedTransition = 0;
+        m_fCurrentTime = 0.0f;
+        m_Cut = false;
+        m_fCurrentLength = m_pActiveTransition->GetTransitionLength();
+    }
+}
+
+void ScreenTransitionManager::SelectRandomTransition(const char* filter)
+{
+    Vector<BasicString<char, Detail::TempStringAllocator>, DefaultAllocator> candidates;
+    candidates.reserve(8);
+
+    for (int i = 0; i < m_Transitions.mSize; ++i)
+    {
+        if (nlStrNICmp<char>(m_Transitions.mData[i].c_str(), filter, nlStrLen<char>(filter)) == 0)
+        {
+            candidates.push_back(m_Transitions.mData[i]);
+        }
+    }
+
+    m_SelectedTransition = 0;
+
+    if (candidates.mSize > 0)
+    {
+        int randomIndex = nlRandom(candidates.mSize, &nlDefaultSeed);
+        const char* selectedName = candidates.mData[randomIndex].c_str();
+
+        unsigned long transitionHash = glHash(selectedName);
+        ScreenTransition** foundTransition = 0;
+        bool found = m_TransitionMap.FindGet(transitionHash, &foundTransition);
+
+        if (found)
+        {
+            m_SelectedTransition = *foundTransition;
+        }
+    }
+}
+
+float ScreenTransitionManager::GetSelectedTransitionCutTime() const
+{
+    if (m_SelectedTransition != 0)
+    {
+        return m_SelectedTransition->CutTime();
+    }
+    return 0.0f;
+}
+
+void ScreenTransitionManager::EnableSelectedTransition()
+{
+    if (m_pActiveTransition != 0)
+    {
+        m_pActiveTransition->Cancel();
+    }
+
+    if (m_SelectedTransition != 0)
+    {
+        m_SelectedTransition->Reset();
+        m_pActiveTransition = m_SelectedTransition;
+        m_SelectedTransition = 0;
+        m_fCurrentTime = 0.0f;
+        m_Cut = false;
+        m_fCurrentLength = m_pActiveTransition->GetTransitionLength();
+    }
+}
+
+void ScreenTransitionManager::AddTransitions(char* loadedData, unsigned long fileSize)
+{
+    SimpleParser parser;
+    char szNameBuffer[64];
+
+    parser.StartParsing(loadedData, fileSize, " \t\r\n");
+    char* pToken = parser.NextToken(true);
+
+    while (pToken != 0)
+    {
+        if (nlStrCmp<char>(pToken, "colourblend") == 0)
+        {
+            pToken = parser.NextTokenOnLine(true);
+            nlStrNCpy<char>(szNameBuffer, pToken, sizeof(szNameBuffer));
+            AddTransitionToMap(szNameBuffer, ColourBlendScreenTransition::GetFromParser(&parser));
+        }
+        else if (nlStrCmp<char>(pToken, "sequence") == 0)
+        {
+            nlStrNCpy<char>(szNameBuffer, parser.NextTokenOnLine(true), sizeof(szNameBuffer));
+            TransitionSequence* transitionSequence = new (8, false) TransitionSequence();
+            transitionSequence->Initialize(&parser);
+            AddTransitionToMap(szNameBuffer, transitionSequence);
+        }
+        else if (nlStrCmp<char>(pToken, "transition") == 0)
+        {
+            nlStrNCpy<char>(szNameBuffer, parser.NextTokenOnLine(true), sizeof(szNameBuffer));
+            ScriptedScreenTransition* scriptedTransition = new (8, false) ScriptedScreenTransition();
+            scriptedTransition->InitializeFromParser(&parser);
+            AddTransitionToMap(szNameBuffer, scriptedTransition);
+        }
+        else if (nlStrCmp<char>(pToken, "model") == 0)
+        {
+            nlStrNCpy<char>(szNameBuffer, parser.NextTokenOnLine(true), sizeof(szNameBuffer));
+            ModeledScreenTransition* modeledTransition = new (8, false) ModeledScreenTransition();
+            modeledTransition->LoadFromParser(&parser);
+            AddTransitionToMap(szNameBuffer, modeledTransition);
+        }
+        else if (*pToken == '#')
+        {
+            while (pToken != 0)
+            {
+                pToken = parser.NextTokenOnLine(true);
+            }
+        }
+        pToken = parser.NextToken(true);
+    }
+}

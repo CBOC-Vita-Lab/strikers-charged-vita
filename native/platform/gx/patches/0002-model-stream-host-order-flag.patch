@@ -1,0 +1,63 @@
+diff --git a/include/NL/gl/glModel.h b/include/NL/gl/glModel.h
+index 0c9510f..110f70c 100644
+--- a/include/NL/gl/glModel.h
++++ b/include/NL/gl/glModel.h
+@@ -40,7 +40,7 @@ struct glModelStream
+     /* 0x04 */ u8 index;
+     /* 0x05 */ u8 stride;
+     /* 0x06 */ u8 id;
+-    /* 0x07 */ u8 unknown07;
++    /* 0x07 */ u8 unknown07; // NP_NATIVE: bit 0 = the array holds host-order values (np_gx.h NP_GL_STREAM_HOST_ORDER); 0 in the disc's models
+ }; // size: 0x8
+ 
+ struct glModelPacket;
+diff --git a/src/Game/GL/ShaderSkinMesh.cpp b/src/Game/GL/ShaderSkinMesh.cpp
+index cabac47..de8ad66 100644
+--- a/src/Game/GL/ShaderSkinMesh.cpp
++++ b/src/Game/GL/ShaderSkinMesh.cpp
+@@ -254,6 +254,9 @@ void ShaderSkinMesh::PrepareToRender()
+             memcpy(pStreams, pPacket->streams, numStreams * sizeof(glModelStream));
+             glSetModelStream(pStreams, pStreams->index,
+                 (void*)pPacket->skinnedVertices, pStreams->stride, pStreams->id);
++#ifdef NP_NATIVE
++            pStreams->unknown07 = 0; /* the skinned arrays are written big-endian (npa_wrf32), like the disc's */
++#endif
+             if (pPacket->skinnedNormals != 0)
+             {
+                 glModelStream* pStream = pStreams + 1;
+@@ -263,6 +266,9 @@ void ShaderSkinMesh::PrepareToRender()
+                     {
+                         glSetModelStream(pStream, pStream->index,
+                             (void*)pPacket->skinnedNormals, sizeof(nlVector3), 2);
++#ifdef NP_NATIVE
++                        pStream->unknown07 = 0;
++#endif
+                         break;
+                     }
+                 }
+diff --git a/src/Game/GL/glModelBuilder.cpp b/src/Game/GL/glModelBuilder.cpp
+index c500daf..7a48c75 100644
+--- a/src/Game/GL/glModelBuilder.cpp
++++ b/src/Game/GL/glModelBuilder.cpp
+@@ -1,5 +1,8 @@
+ #include "NL/gl/glMaterialProgram.h"
+ #include "Game/GL/glModelBuilder.h"
++#ifdef NP_NATIVE
++#include "np_gx.h"
++#endif
+ #include "NL/gl/glMemory.h"
+ #include "NL/gl/glModel.h"
+ #include "NL/gl/glState.h"
+@@ -76,7 +79,12 @@ void glSetModelStream(glModelStream* pStream, int stream,
+     pStream->address = address;
+     pStream->stride = stride;
+     pStream->id = type;
++#ifdef NP_NATIVE
++    // The arrays the mesh writers fill hold host-order values; disc streams have 0 here (platform/gx, np_gx.h).
++    pStream->unknown07 = NP_GL_STREAM_HOST_ORDER;
++#else
+     pStream->unknown07 = 0;
++#endif
+     pStream->index = stream;
+ }
+ 

@@ -1,0 +1,85 @@
+diff --git a/src/NL/glx/glxLoadModel.cpp b/src/NL/glx/glxLoadModel.cpp
+index 7661025..d768c3f 100644
+--- a/src/NL/glx/glxLoadModel.cpp
++++ b/src/NL/glx/glxLoadModel.cpp
+@@ -18,6 +18,9 @@
+ #include "NL/platvmath.h"
+ 
+ #include <string.h>
++#ifdef NP_NATIVE
++#include "platform/assets/np_endian.h" /* vertex arrays stay big-endian (NPA) */
++#endif
+ 
+ 
+ class GLXRLGReader : public RLGReader
+@@ -52,6 +55,61 @@ void GLXRLGReader::LoadVertexAnim(nlChunk* chunk)
+     DCFlushRange(data, chunk->GetDataSize());
+ }
+ 
++#ifdef NP_NATIVE
++static void MoveLargestBoneWeightFirst(glModelPacket* packet)
++{
++    unsigned char* boneIndices = 0;
++    unsigned char* boneWeights = 0; /* float[4] per vertex, big-endian (GX reads this array as it is) */
++    unsigned long i;
++
++    for (i = 0; i < packet->numStreams; ++i)
++    {
++        glModelStream* stream = &packet->streams[i];
++        switch (stream->id)
++        {
++        case 7:
++            boneIndices = (unsigned char*)stream->address;
++            break;
++        case 5:
++            boneWeights = (unsigned char*)stream->address;
++            break;
++        }
++    }
++
++    for (i = 0; i < packet->numUniqueVertices; ++i)
++    {
++        float largestWeight = 0.0f;
++        int largestIndex = 0;
++        float w[4];
++        int k;
++        for (k = 0; k < 4; ++k)
++            w[k] = npa_rdf32(boneWeights + 4 * k);
++        for (k = 0; k < 4; ++k)
++        {
++            if (w[k] > largestWeight)
++            {
++                largestIndex = k;
++                largestWeight = w[k];
++            }
++        }
++
++        if (largestIndex != 0)
++        {
++            unsigned char firstIndex = boneIndices[0];
++            unsigned char firstWeight[4];
++            memcpy(firstWeight, boneWeights, 4);
++            boneIndices[0] = boneIndices[largestIndex];
++            memcpy(boneWeights, boneWeights + 4 * largestIndex, 4);
++            boneIndices[largestIndex] = firstIndex;
++            memcpy(boneWeights + 4 * largestIndex, firstWeight, 4);
++        }
++
++        boneIndices += 4;
++        boneWeights += 16;
++    }
++}
++
++#else
+ static void MoveLargestBoneWeightFirst(glModelPacket* packet)
+ {
+     unsigned char* boneIndices = 0;
+@@ -111,6 +169,8 @@ static void MoveLargestBoneWeightFirst(glModelPacket* packet)
+     }
+ }
+ 
++#endif // NP_NATIVE
++
+ static inline bool HasStream(
+     const glModelPacket* packet, unsigned int streamID)
+ {

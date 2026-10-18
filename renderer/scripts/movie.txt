@@ -1,0 +1,6 @@
+# vgx robustness script: dismiss the notices, then let the intro movie play for 1500 frames
+# (a new texture every frame through the THP decoder), then stop.
+mash 100 20 scene == 22
+log STATE intro movie
+idle 1500
+exit

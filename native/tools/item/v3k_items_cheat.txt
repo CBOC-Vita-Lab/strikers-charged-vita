@@ -1,0 +1,266 @@
+# W5-ITEM Vita3K run of the W5INT lab package (it has no item hook): the INFINITE power-up cheat (powerup=10) deals BOTH teams an item every
+# 7.5 s through the game's own AwardPowerup; the AI uses its items, pad 0 uses and cycles its own (X = item, Z = cycle on the GameCube controls).
+# Stadium Vice (13, electric fence: item hits throw players into it), Mario v Waluigi. Ends at 80 s of match clock.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=13 home=0 away=6 hsk=0,1,2 ask=5,6,7 human=0 time=90 powerup=10
+wait ingame == 1 4000
+log STATE match object
+mash 100 30 gs == 1 4000
+log STATE kick-off
+wait gs == 5 6000
+log STATE open play
+stopwhen clock >= 80
+hold 40 0 70 0
+press 400 3 20
+hold 30 0 0 70
+hold 40 0 -51 47
+press 400 3 20
+hold 30 0 -47 -51
+hold 40 0 6 -69
+press 400 3 20
+hold 30 0 69 6
+press 10 3 10
+press 400 3 20
+hold 40 0 42 55
+press 400 3 20
+hold 30 0 -55 42
+hold 6 800 42 55
+idle 10
+hold 40 0 -68 -12
+press 400 3 20
+hold 30 0 12 -68
+hold 40 0 59 -37
+press 400 3 20
+hold 30 0 37 59
+press 10 3 10
+press 400 3 20
+hold 40 0 -18 67
+press 400 3 20
+hold 30 0 -67 -18
+hold 40 0 -32 -62
+press 400 3 20
+hold 30 0 62 -32
+hold 6 800 -32 -62
+idle 10
+hold 40 0 65 24
+press 400 3 20
+hold 30 0 -24 65
+press 10 3 10
+press 400 3 20
+hold 40 0 -64 26
+press 400 3 20
+hold 30 0 -26 -64
+hold 40 0 29 -63
+press 400 3 20
+hold 30 0 63 29
+hold 40 0 20 66
+press 400 3 20
+hold 30 0 -66 20
+press 10 3 10
+press 400 3 20
+hold 6 800 20 66
+idle 10
+hold 40 0 -60 -35
+press 400 3 20
+hold 30 0 35 -60
+hold 40 0 68 -14
+press 400 3 20
+hold 30 0 14 68
+hold 40 0 -40 57
+press 400 3 20
+hold 30 0 -57 -40
+press 10 3 10
+press 400 3 20
+hold 40 0 -8 -69
+press 400 3 20
+hold 30 0 69 -8
+hold 6 800 -8 -69
+idle 10
+hold 40 0 53 45
+press 400 3 20
+hold 30 0 -45 53
+hold 40 0 -69 2
+press 400 3 20
+hold 30 0 -2 -69
+press 10 3 10
+press 400 3 20
+hold 40 0 49 -49
+press 400 3 20
+hold 30 0 49 49
+hold 40 0 -3 69
+press 400 3 20
+hold 30 0 -69 -3
+hold 6 800 -3 69
+idle 10
+hold 40 0 -44 -53
+press 400 3 20
+hold 30 0 53 -44
+press 10 3 10
+press 400 3 20
+hold 40 0 69 9
+press 400 3 20
+hold 30 0 -9 69
+hold 40 0 -57 39
+press 400 3 20
+hold 30 0 -39 -57
+hold 40 0 15 -68
+press 400 3 20
+hold 30 0 68 15
+press 10 3 10
+press 400 3 20
+hold 6 800 15 -68
+idle 10
+hold 40 0 34 60
+press 400 3 20
+hold 30 0 -60 34
+hold 40 0 -66 -21
+press 400 3 20
+hold 30 0 21 -66
+hold 40 0 63 -29
+press 400 3 20
+hold 30 0 29 63
+press 10 3 10
+press 400 3 20
+hold 40 0 -27 64
+press 400 3 20
+hold 30 0 -64 -27
+hold 6 800 -27 64
+idle 10
+hold 40 0 -23 -65
+press 400 3 20
+hold 30 0 65 -23
+hold 40 0 61 32
+press 400 3 20
+hold 30 0 -32 61
+press 10 3 10
+press 400 3 20
+hold 40 0 -67 17
+press 400 3 20
+hold 30 0 -17 -67
+hold 40 0 37 -58
+press 400 3 20
+hold 30 0 58 37
+hold 6 800 37 -58
+idle 10
+hold 40 0 11 69
+press 400 3 20
+hold 30 0 -69 11
+press 10 3 10
+press 400 3 20
+hold 40 0 -55 -42
+press 400 3 20
+hold 30 0 42 -55
+hold 40 0 69 -5
+press 400 3 20
+hold 30 0 5 69
+hold 40 0 -47 51
+press 400 3 20
+hold 30 0 -51 -47
+press 10 3 10
+press 400 3 20
+hold 6 800 -47 51
+idle 10
+hold 40 0 0 -69
+press 400 3 20
+hold 30 0 69 0
+hold 40 0 46 51
+press 400 3 20
+hold 30 0 -51 46
+hold 40 0 -69 -6
+press 400 3 20
+hold 30 0 6 -69
+press 10 3 10
+press 400 3 20
+hold 40 0 55 -42
+press 400 3 20
+hold 30 0 42 55
+hold 6 800 55 -42
+idle 10
+hold 40 0 -12 68
+press 400 3 20
+hold 30 0 -68 -12
+hold 40 0 -37 -59
+press 400 3 20
+hold 30 0 59 -37
+press 10 3 10
+press 400 3 20
+hold 40 0 67 18
+press 400 3 20
+hold 30 0 -18 67
+hold 40 0 -62 31
+press 400 3 20
+hold 30 0 -31 -62
+hold 6 800 -62 31
+idle 10
+hold 40 0 24 -65
+press 400 3 20
+hold 30 0 65 24
+press 10 3 10
+press 400 3 20
+hold 40 0 26 64
+press 400 3 20
+hold 30 0 -64 26
+hold 40 0 -63 -30
+press 400 3 20
+hold 30 0 30 -63
+hold 40 0 66 -20
+press 400 3 20
+hold 30 0 20 66
+press 10 3 10
+press 400 3 20
+hold 6 800 66 -20
+idle 10
+hold 40 0 -35 60
+press 400 3 20
+hold 30 0 -60 -35
+hold 40 0 -14 -68
+press 400 3 20
+hold 30 0 68 -14
+hold 40 0 56 40
+press 400 3 20
+hold 30 0 -40 56
+press 10 3 10
+press 400 3 20
+hold 40 0 -69 8
+press 400 3 20
+hold 30 0 -8 -69
+hold 6 800 -69 8
+idle 10
+hold 40 0 45 -53
+press 400 3 20
+hold 30 0 53 45
+hold 40 0 2 69
+press 400 3 20
+hold 30 0 -69 2
+press 10 3 10
+press 400 3 20
+hold 40 0 -49 -49
+press 400 3 20
+hold 30 0 49 -49
+hold 40 0 69 3
+press 400 3 20
+hold 30 0 -3 69
+hold 6 800 69 3
+idle 10
+hold 40 0 -54 44
+press 400 3 20
+hold 30 0 -44 -54
+press 10 3 10
+press 400 3 20
+hold 40 0 9 -69
+press 400 3 20
+hold 30 0 69 9
+hold 40 0 39 57
+press 400 3 20
+hold 30 0 -57 39
+hold 40 0 -68 -15
+press 400 3 20
+hold 30 0 15 -68
+press 10 3 10
+press 400 3 20
+hold 6 800 -68 -15
+idle 10
+log STATE script end
+exit

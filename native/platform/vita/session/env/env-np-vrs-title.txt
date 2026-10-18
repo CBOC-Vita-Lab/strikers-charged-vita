@@ -1,0 +1,12 @@
+# VRS (wave 4): boot to the title in the emulator, the same script for two packages (vitaGL strict / perf deps) and a picture compare by frame number.
+# Run: RUNS_DIR=.../VRS/v3k-runs PROFILE_DIR=.../VRS/v3k FILES=tools/nav/boot_title.txt platform/vita/tools/job_v3k.sh <tag> 420 <this file> "reached MSC_MAX_FRAMES" <vpk>
+MSC_INPUT_SCRIPT=boot_title.txt
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=300
+MSC_MAX_FRAMES=1520
+MSC_VITA_RENDER=320x224
+MSC_VITA_MEMSTATS=1
+MSC_VITA_SHOT=430-470/10,600,900,1200,1500
+MSC_VGX_PROF=2
+NP_DATA_DIR=ux0:data/mscharged/np-data

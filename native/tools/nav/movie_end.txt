@@ -1,0 +1,7 @@
+# Let the intro movie play to its end without any button (the game must go on to the title screen by itself).
+wait scene == 22
+log STATE intro movie playing
+wait scene == 0 9000
+log STATE title screen reached by itself
+idle 120
+exit

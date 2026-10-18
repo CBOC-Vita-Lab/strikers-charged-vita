@@ -30,14 +30,18 @@ This is private release preparation for Claude's native `a8d4ad6` build.
 The installed executable and app resources have been packaged as a private
 VPK candidate without changing them. A fresh console read confirms the
 executable is that exact build. You will not need to compile the port.
-Matching source/dependencies, public-content clearance and fresh-install
-testing are still needed before publication. No public download is available.
+The native source, renderer, patched vitaGL source files and build notes are
+now in this repository. The dependency build setup is not yet complete;
+clean rebuilding, content clearance and fresh-install testing remain release
+gates. No public download is available.
 
 Level 7 has an emulator match test. Level 6, the Options cycle and the final
 package still need Vita acceptance. Menus can run below 30 FPS; no locked
 30 FPS or whole-game completion claim is made. See [Known Issues](KNOWN-ISSUES.md).
 
-[Controls](CONTROLS.md) | [Included Files](ASSETS.md) | [Credits](CREDITS.md)
+[Controls](CONTROLS.md) | [Building](BUILDING.md) | [Source Record](SOURCE.md)
+| [Technical Notes](TECHNICAL.md) | [Included Files](ASSETS.md)
+| [Licenses](THIRD_PARTY_NOTICES.md) | [Changes](CHANGELOG.md) | [Credits](CREDITS.md)
 
 CBOC, Claude and ChatGPT contributed to the port and release preparation;
 upstream contributors retain their credit and rights.

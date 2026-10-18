@@ -1,0 +1,145 @@
+Multiplayer 6 (wave 5 NET): each tick's input leaves right after it is captured, one tick per message, in a LAN session; the steps of a
+networked match are counted for the log. TransportConnection::FlushOutgoing is the first block of the retail UpdateConnected (which now
+calls it: one code path), ReliableSocket::FlushOutgoing runs it for connected connections only (no receives, no callbacks), and
+NetworkInputRouter::OnInputCaptured ends with NpLanInputSent (platform/sdk/net/np_lan.cpp), which flushes only in a LAN session with
+MSC_LAN_SENDNOW (default 1). np_lan sets the retail tweaks g_nTicksPerPacket (MSC_LAN_TICKS_PER_PACKET, default 1) and s_nPayloadRedundancy
+(MSC_LAN_REDUNDANCY, default 6 with one tick per message) when LAN mode starts and restores them when it is left. The single-tick
+serialize buffer grows from 200 to 400 bytes (a four-event message is ~229). NetworkInputManager::PrepareUpdate calls NpLanStep (a step,
+or a starved step) for the "[mp-lan] net" line. Already in the tree of branch W5NET; the file is the record. See np/docs/wave5-NET.md.
+
+diff --git a/include/NL/plat/ReliableSocket.h b/include/NL/plat/ReliableSocket.h
+index 3f787c3..22ded83 100644
+--- a/include/NL/plat/ReliableSocket.h
++++ b/include/NL/plat/ReliableSocket.h
+@@ -48,6 +48,8 @@ struct ReliableSocket
+     void DebugDraw(int column, int* row, bool showBandwidth);
+     void DrawScreenPrinter();
+     void Update();
++    // NP (np/patches/mp 0006): every connected connection sends what it has queued, now (no receives, no callbacks).
++    void FlushOutgoing();
+     void UpdateBandwidth();
+     void LogMessage(int size, TransportMessage* message);
+     void HandleMessage(TransportMessage* message, const u8* address, u16 port);
+diff --git a/include/NL/plat/TransportConnection.h b/include/NL/plat/TransportConnection.h
+index 284dd1d..2f288d6 100644
+--- a/include/NL/plat/TransportConnection.h
++++ b/include/NL/plat/TransportConnection.h
+@@ -42,6 +42,8 @@ public:
+     int ResendNotACKed(
+         TransportMessage& message, int minimumMS);
+     void UpdateConnected();
++    // NP (np/patches/mp 0006): sends what is queued now (the first block of UpdateConnected); see TransportConnection.cpp.
++    void FlushOutgoing();
+     void CheckTimeouts();
+     void SubmitReliable(u8 type, const void* buffer, int size);
+     void SubmitUnreliable(const void* buffer, int size);
+diff --git a/src/Game/InputManager.cpp b/src/Game/InputManager.cpp
+index 64ada3b..939ef3e 100644
+--- a/src/Game/InputManager.cpp
++++ b/src/Game/InputManager.cpp
+@@ -7,6 +7,7 @@
+ #include "Game/NetworkSession.h"
+ #include "NL/nlMemory.h"
+ #include "NL/nlTicker.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ NetworkInputManager* gInputManager;
+ 
+@@ -126,6 +127,7 @@ bool NetworkInputManager::PrepareUpdate()
+         router->CheckCongestion();
+         if (router->HasInput())
+         {
++            NpLanStep(false);  // multiplayer (np/patches/mp 0006): input delay and queue depths of this step, for the log
+             router->mStarvedForInput = false;
+             if (mCongestionStartTicker != 0)
+             {
+@@ -144,6 +146,7 @@ bool NetworkInputManager::PrepareUpdate()
+         }
+ 
+         router->mStarvedForInput = true;
++        NpLanStep(true);  // multiplayer (np/patches/mp 0006): a starved step (20 ms of match clock without a simulation step)
+         mCongestionStartTicker = nlGetTicker();
+     }
+     else if (!mQueueOverflowReported)
+diff --git a/src/Game/InputRouter.cpp b/src/Game/InputRouter.cpp
+index 5ade0b3..b3b9487 100644
+--- a/src/Game/InputRouter.cpp
++++ b/src/Game/InputRouter.cpp
+@@ -467,7 +467,9 @@ void NetworkInputRouter::OnInputCaptured()
+     {
+     case 1:
+     {
+-        u8 buffer[200];
++        // multiplayer (np/patches/mp 0006): 400 like the bundle's buffer; a single message with four events and two
++        // changed records serializes to about 229 bytes, which overran the retail 200 (a tick-per-packet path the Wii never used)
++        u8 buffer[400];
+         int size = gNetworkMessageRegistry->Serialize(
+             &mCurrentMessage, buffer, sizeof(buffer));
+         int machines = mSession->GetNumMachines();
+@@ -500,6 +502,7 @@ void NetworkInputRouter::OnInputCaptured()
+         break;
+     }
+     }
++    NpLanInputSent();  // multiplayer (np/patches/mp 0006): a LAN session sends the queued input now, not at the frame's end
+ }
+ 
+ inline void NetworkInputRouter::RecordEmptyInputHeader(s8 machine, int frame)
+diff --git a/src/NL/plat/ReliableSocket.cpp b/src/NL/plat/ReliableSocket.cpp
+index ada0ace..b9fc938 100644
+--- a/src/NL/plat/ReliableSocket.cpp
++++ b/src/NL/plat/ReliableSocket.cpp
+@@ -326,6 +326,20 @@ void ReliableSocket::Update()
+     UpdateBandwidth();
+ }
+ 
++// NP (np/patches/mp 0006): called by the native port's LAN mode right after a tick's input was queued (np_lan.cpp
++// NpLanInputSent), so that the input leaves at once instead of at the end-of-frame network task. Connected connections
++// only; connecting and closing ones keep the retail timing of Update().
++void ReliableSocket::FlushOutgoing()
++{
++    for (int i = 0; i < mConnectionCount; i++)
++    {
++        if (mConnections[i]->GetState() == TransportConnection::STATE_6)
++        {
++            mConnections[i]->FlushOutgoing();
++        }
++    }
++}
++
+ void ReliableSocket::SendMessage(TransportMessage* message, const u8* address,
+     u16 port, bool* error)
+ {
+diff --git a/src/NL/plat/TransportConnection.cpp b/src/NL/plat/TransportConnection.cpp
+index 2971178..f5f6b16 100644
+--- a/src/NL/plat/TransportConnection.cpp
++++ b/src/NL/plat/TransportConnection.cpp
+@@ -386,10 +386,12 @@ void TransportConnection::UpdateKeepAlive()
+     }
+ }
+ 
+-void TransportConnection::UpdateConnected()
++// NP (np/patches/mp 0006): the first block of the retail UpdateConnected, as a helper that the native port's LAN mode also
++// calls right after a tick's input was queued (ReliableSocket::FlushOutgoing, np_lan.cpp NpLanInputSent), instead of
++// letting the input wait for the end-of-frame network task. It builds one message (the ack, the queued reliable packets,
++// the queued unreliable ones, the payload redundancy, the piggyback resends) and sends it; no callbacks, no receives.
++void TransportConnection::FlushOutgoing()
+ {
+-    UpdateKeepAlive();
+-
+     if (m_OutgoingSendQ.GetCount() > 0)
+     {
+         TransportMessage message;
+@@ -467,6 +469,13 @@ void TransportConnection::UpdateConnected()
+             delete mFreeAfterSendQ.Pop();
+         }
+     }
++}
++
++void TransportConnection::UpdateConnected()
++{
++    UpdateKeepAlive();
++
++    FlushOutgoing();  // NP: the retail block, unchanged (see above)
+ 
+     if (m_SentNotACKedQ.GetCount() > 0)
+     {

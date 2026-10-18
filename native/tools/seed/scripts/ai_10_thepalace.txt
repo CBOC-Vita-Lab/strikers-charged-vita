@@ -1,0 +1,13 @@
+# W5-SEED generated script: AI against AI in thepalace (donkeykong v bowserjr)
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=10 home=3 away=9 hsk=2,3,4 ask=5,6,7 time=120
+wait ingame == 1 4000
+log STATE match object
+wait gs == 5 6000
+log STATE open play
+idle 3600
+log STATE script end
+exit

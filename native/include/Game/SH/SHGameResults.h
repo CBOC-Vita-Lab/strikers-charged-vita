@@ -1,0 +1,32 @@
+#ifndef GAME_SH_SH_GAME_RESULTS_H
+#define GAME_SH_SH_GAME_RESULTS_H
+
+#include "Game/SH/SHStrikerTimesBase.h"
+#include "Game/FE/MatchSummary.h"
+#include "Game/NetTournManager.h"
+
+class TLTextInstance;
+
+class BasicGameInfo;
+
+class GameResultsScene : public SHStrikerTimesBase
+{
+public:
+    GameResultsScene();
+    virtual ~GameResultsScene();
+    virtual void Update(float dt);
+    virtual void SceneCreated();
+    virtual void OnDoneTransitionComplete();
+
+    void SetResultsData(BasicGameInfo* data, BaseSceneHandler* listener, NetworkTournamentGame* game);
+
+    /* 0x5D4 */ TLTextInstance* mTitleText;
+    /* 0x5D8 */ bool mSuppressMatchSummary;
+    /* 0x5DC */ MatchSummary mSummary;
+    /* 0xA10 */ BasicGameInfo* mGameData;
+    /* 0xA14 */ BaseSceneHandler* mListener;
+    /* 0xA18 */ NetworkTournamentGame* mTournamentGame;
+    /* 0xA1C */ u16 mTitleBuffer[0x20];
+}; // size 0xA5C
+
+#endif // GAME_SH_SH_GAME_RESULTS_H

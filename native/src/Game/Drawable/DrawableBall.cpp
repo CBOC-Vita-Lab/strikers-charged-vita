@@ -1,0 +1,198 @@
+#include "Game/Drawable/DrawableBall.h"
+
+#include "Game/Ball.h"
+#include "Game/BallTrail.h"
+#include "Game/CharacterTemplate.h"
+#include "Game/Drawable/DrawableCharacter.h"
+#include "Game/Drawable/DrawableModel.h"
+#include "Game/RenderSnapshot.h"
+#include "Game/Render/Presentation.h"
+#include "NL/nlTask.h"
+#include "Game/SharedStaticStorage.h"
+
+static float g_fBallTrailScale = 2.25f;
+
+DrawableCharacter* DrawableBall::IndexToPlayer(int index) const
+{
+    if (index < 0 || index >= 10)
+    {
+        return 0;
+    }
+    return &mRenderSnapshot->mCharacters[index];
+}
+
+DrawableBall::DrawableBall(RenderSnapshot* renderSnapshot)
+    : mRenderSnapshot(renderSnapshot)
+    , mFlags(0)
+    , mScale(0.0f)
+    , mTrailCount(0)
+{
+    mFlags.value |= 0x80000000;
+}
+
+void DrawableBall::Grab()
+{
+    mOrientation = g_pBall->m_qOrientation;
+    mPosition = g_pBall->m_v3Position;
+    mVelocity = g_pBall->m_v3Velocity;
+    mScale = GetBallChargeValue(g_pBall, 0);
+
+    mFlags.bits.ownerIndex
+        = GetCharacterIndex((cCharacter*)g_pBall->m_pOwner);
+    mFlags.bits.previousOwnerIndex
+        = GetCharacterIndex((cCharacter*)g_pBall->m_pPrevOwner);
+    mFlags.bits.passTargetIndex
+        = GetCharacterIndex((cCharacter*)g_pBall->m_pPassTarget);
+    mFlags.bits.lastTouchIndex
+        = GetCharacterIndex((cCharacter*)g_pBall->m_pLastTouch);
+    cBall* ball = g_pBall;
+    mFlags.bits.visible = ball->m_bVisible;
+    mFlags.bits.transient = 0;
+
+    mTrailCount = GetNumBallTrails();
+    for (u32 i = 0; i < mTrailCount; ++i)
+    {
+        LiveBallTrail* trail = GetBallTrail(i);
+        mTrail[i].visible = trail->visible;
+        mTrail[i].position = trail->position;
+        mTrail[i].orientation = trail->orientation;
+    }
+}
+
+void DrawableBall::Render() const
+{
+    DrawableModel* drawable = g_pBall->m_pDrawableBall;
+    if (mFlags.bits.visible)
+    {
+        drawable->m_uObjectFlags |= 1;
+    }
+    else
+    {
+        drawable->m_uObjectFlags &= ~1;
+    }
+
+    if (mFlags.bits.visible)
+    {
+        drawable->orientation = mOrientation;
+        drawable->worldMatrixUpToDate = false;
+        drawable->translation = mPosition;
+        drawable->worldMatrixUpToDate = false;
+
+        if ((nlTaskManager::m_pInstance->mCurrentState & 0x20018) == 0)
+        {
+            if (g_pBall->m_pOwner == 0)
+            {
+                drawable->modelScale = 1.5f;
+            }
+            else
+            {
+                drawable->modelScale = 1.25f;
+            }
+        }
+        else
+        {
+            drawable->modelScale = 1.0f;
+        }
+
+        drawable->snapshotScale = mScale;
+        drawable->renderFlags |= 2;
+
+        const int ownerIndex = mFlags.bits.ownerIndex;
+        bool useDefaultRendering = true;
+        if (IndexToPlayer(ownerIndex) != 0)
+        {
+            if (IndexToPlayer(ownerIndex)->character->GetCharacterClass() == BIRDO)
+            {
+                useDefaultRendering = false;
+            }
+        }
+
+        if (useDefaultRendering)
+        {
+            drawable->renderFlags |= 4;
+        }
+        else
+        {
+            drawable->renderFlags &= ~4;
+        }
+        drawable->Draw();
+    }
+
+    for (u32 i = 0; i < mTrailCount; ++i)
+    {
+        const float scale = mScale;
+        DrawableModel* trail = GetBallTrail(i)->drawable;
+
+        if (mTrail[i].visible)
+        {
+            trail->m_uObjectFlags |= 1;
+        }
+        else
+        {
+            trail->m_uObjectFlags &= ~1;
+        }
+
+        if (mTrail[i].visible)
+        {
+            trail->snapshotScale = scale;
+            trail->translation = mTrail[i].position;
+            trail->worldMatrixUpToDate = false;
+            trail->orientation = mTrail[i].orientation;
+            trail->worldMatrixUpToDate = false;
+            trail->modelScale = g_fBallTrailScale;
+            trail->renderFlags &= ~6;
+            trail->Draw();
+        }
+    }
+}
+
+void DrawableBall::Blend(
+    const float* blendFactors, const DrawableBall& lhs, const DrawableBall& rhs)
+{
+    const float factor = *blendFactors;
+
+    mPrevOrientation = mOrientation;
+    nlQuatNLerp(mOrientation, lhs.mOrientation, rhs.mOrientation, factor);
+
+    mPosition.x = (1.0f - factor) * lhs.mPosition.x + factor * rhs.mPosition.x;
+    mPosition.y = (1.0f - factor) * lhs.mPosition.y + factor * rhs.mPosition.y;
+    mPosition.z = (1.0f - factor) * lhs.mPosition.z + factor * rhs.mPosition.z;
+    mVelocity.x = (1.0f - factor) * lhs.mVelocity.x + factor * rhs.mVelocity.x;
+    mVelocity.y = (1.0f - factor) * lhs.mVelocity.y + factor * rhs.mVelocity.y;
+    mVelocity.z = (1.0f - factor) * lhs.mVelocity.z + factor * rhs.mVelocity.z;
+    mScale = lhs.mScale * (1.0f - factor) + factor * rhs.mScale;
+
+    if (factor < 0.5f)
+    {
+        mFlags.value = lhs.mFlags.value;
+    }
+    else
+    {
+        mFlags.value = rhs.mFlags.value;
+    }
+
+    mTrailCount = lhs.mTrailCount <= rhs.mTrailCount ? lhs.mTrailCount : rhs.mTrailCount;
+    for (u32 i = 0; i < mTrailCount; ++i)
+    {
+        mTrail[i].visible = lhs.mTrail[i].visible && rhs.mTrail[i].visible;
+        if (mTrail[i].visible)
+        {
+            mTrail[i].position.x =
+                (1.0f - factor) * lhs.mTrail[i].position.x + factor * rhs.mTrail[i].position.x;
+            mTrail[i].position.y =
+                (1.0f - factor) * lhs.mTrail[i].position.y + factor * rhs.mTrail[i].position.y;
+            mTrail[i].position.z =
+                (1.0f - factor) * lhs.mTrail[i].position.z + factor * rhs.mTrail[i].position.z;
+            nlQuatNLerp(
+                mTrail[i].orientation, lhs.mTrail[i].orientation, rhs.mTrail[i].orientation, factor);
+        }
+    }
+}
+
+void DrawableBall::EvaluateFrom(DrawableCharacter& character)
+{
+    mPosition = character.GetBallPosition();
+    mOrientation = character.GetBallOrientation();
+    mScale = GetPresentation()->mBallGlowLevel;
+}
+

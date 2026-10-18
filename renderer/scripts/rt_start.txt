@@ -1,0 +1,2 @@
+# real-time timeline (use with MSC_RENDER_SIZE=320x224 so rendering keeps up): A at 1500 skips the intro movie -> start screen
+1500 1503 100 0 0

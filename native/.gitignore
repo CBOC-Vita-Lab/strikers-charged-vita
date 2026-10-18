@@ -1,0 +1,11 @@
+/build/
+*.o
+*.a
+*.elf
+*.vpk
+*.self
+/out/
+!/platform/vita/Makefile.vpk
+
+# qemu TCG plugins built by tools/perf/build_plugin.sh
+/tools/perf/*.so

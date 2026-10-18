@@ -1,0 +1,108 @@
+#ifndef GAME_RENDER_CROWD_IMPOSTOR_MANAGER_H
+#define GAME_RENDER_CROWD_IMPOSTOR_MANAGER_H
+
+#include "Game/Render/Impostor.h"
+#include "Game/Render/ImpostorCharacter.h"
+#include "Game/TweakValue.h"
+#include "Game/World/WorldObject.h"
+#include "NL/nlMath.h"
+#include "NL/nlDLListContainer.h"
+#include "types.h"
+
+class CrowdPointCallback;
+class GLView;
+class WorldAnimController;
+struct WorldObjectLoadContext;
+
+class CrowdLayoutObject : public WorldObject
+{
+public:
+    virtual void ReleaseResources();
+    virtual nlMatrix4* GetWorldMatrix() { return &mTransform; }
+    virtual void SetWorldMatrix(const nlMatrix4& transform) { mTransform = transform; }
+    virtual void RegisterWithCrowdManager(WorldObjectLoadContext* context);
+
+    void Initialize();
+    void GetCorners(nlVector4* corners);
+    u16 GetFacingAngle(int numAngles);
+    bool ContainsLocalPoint(const nlVector3* point);
+    int PlacePoints(CrowdPointCallback* callback, float rowSpacing, float memberSpacing);
+
+    /* 0x04 */ unsigned long m_uHashID;
+    /* 0x08 */ unsigned long m_uObjectType;
+    /* 0x0C */ unsigned long m_uObjectCreationFlags;
+    /* 0x10 */ World* m_pWorldContext;
+    /* 0x14 */ int m_nAnimNode;
+    /* 0x18 */ WorldAnimController* m_pAnimController;
+    /* 0x1C */ u8 m_pad1C[0x04];
+    /* 0x20 */ nlMatrix4 mTransform;
+    /* 0x60 */ float mStartWidth;
+    /* 0x64 */ float mEndWidth;
+    /* 0x68 */ float mLength;
+    /* 0x6C */ float mEndOffset;
+    /* 0x70 */ unsigned int mIsOcclusionVolume;
+    /* 0x74 */ u8 m_pad74[0x0C];
+}; // size: 0x80
+
+class CrowdSidelineFilter
+{
+public:
+    CrowdSidelineFilter();
+    virtual bool IsVisible(const Impostor* impostor);
+
+    /* 0x04 */ TweakFloatBinding mSidelineCullingDistance;
+}; // size: 0x14
+
+struct CrowdLayoutRecord
+{
+    /* 0x00 */ nlVector3 mBoundsMin;
+    /* 0x0C */ nlVector3 mBoundsMax;
+    /* 0x18 */ CrowdLayoutObject* mObject;
+    /* 0x1C */ int mFirstImpostor;
+    /* 0x20 */ int mNumImpostors;
+}; // size: 0x24
+
+class CrowdImpostorManager
+{
+public:
+    CrowdImpostorManager();
+    ~CrowdImpostorManager();
+
+    void AddObject(CrowdLayoutObject* object, bool enabled);
+    void AddCharacter(ImpostorCharacter* character);
+    void GenerateCrowd(int reload);
+    void Clear();
+    void AddVisibilityFilter(CrowdSidelineFilter* filter);
+    void UpdateCrowdVisibility(GLView* view);
+    void ReleaseCrowdImpostors();
+    bool IsObjectEnabled(CrowdLayoutObject* object);
+    bool IsPointOccluded(const nlVector4& worldPoint, nlVector4& localPoint);
+    ImpostorCharacter* GetCharacter(int index);
+
+    CrowdLayoutRecord* AllocateLayout()
+    {
+        if (mNumLayouts == mPrimaryObjectCount)
+            return 0;
+
+        return &mLayouts[mNumLayouts++];
+    }
+
+    /* 0x00 */ nlDLListSlotPool<ImpostorCharacter*> mCharacters;
+    /* 0x1C */ nlDLListSlotPool<CrowdLayoutObject*> mPrimaryObjects;
+    /* 0x38 */ nlDLListSlotPool<CrowdLayoutObject*> mOcclusionObjects;
+    /* 0x54 */ nlDLListSlotPool<CrowdLayoutObject*> mEnabledObjects;
+    /* 0x70 */ nlMatrix4* mInverseMatrices;
+    /* 0x74 */ CrowdLayoutRecord* mLayouts;
+    /* 0x78 */ int mNumLayouts;
+    /* 0x7C */ int mPrimaryObjectCount;
+    /* 0x80 */ int mEnabledObjectCount;
+    /* 0x84 */ int mOcclusionObjectCount;
+    /* 0x88 */ int mNumAngles;
+    /* 0x8C */ int mNumVisibilityFilters;
+    /* 0x90 */ CrowdSidelineFilter* mVisibilityFilters[5];
+}; // size: 0xA4
+
+CrowdImpostorManager* GetCrowdImpostorManager();
+void GetCrowdLayoutBounds(const nlVector4* points, nlVector4* boundsMin, nlVector4* boundsMax);
+
+#endif // GAME_RENDER_CROWD_IMPOSTOR_MANAGER_H

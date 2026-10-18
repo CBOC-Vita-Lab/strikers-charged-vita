@@ -1,0 +1,70 @@
+diff --git a/src/Game/SHierarchy.cpp b/src/Game/SHierarchy.cpp
+index 42a4380..7fad802 100644
+--- a/src/Game/SHierarchy.cpp
++++ b/src/Game/SHierarchy.cpp
+@@ -1,4 +1,5 @@
+ #include "Game/SHierarchy.h"
++#include "port/chunk_endian.h"
+ 
+ bool cSHierarchy::PreserveBoneLength(int i) const
+ {
+@@ -84,6 +85,13 @@ void cSHierarchy::BuildPushPopFlags(
+ 
+ cSHierarchy* cSHierarchy::Initialize(nlChunk* pChunk)
+ {
++    // NP: big-endian on disc. Chunk headers first, then each payload as it is reached. A tree whose
++    // sizes do not fit is refused rather than walked out of bounds.
++    if (port_disc_chunk_swap_tree(pChunk, port_disc32(&pChunk->m_Size) + sizeof(nlChunk)) == 0)
++    {
++        return 0;
++    }
++
+     nlChunk* pFirst = (nlChunk*)pChunk->GetUnalignedData();
+     if (pChunk->IsAlignedChunk())
+     {
+@@ -92,18 +100,25 @@ cSHierarchy* cSHierarchy::Initialize(nlChunk* pChunk)
+ 
+     pChunk = pFirst;
+     cSHierarchy* pRetval = (cSHierarchy*)pChunk->GetData();
++    // NP: the record's own words from the file: hash (+4), node count (+8), pelvis and spine nodes
++    // (+0x24, +0x28); the rest are pointers this function fills in.
++    port_disc32_array(&pRetval->m_uHashID, 2);
++    port_disc32_array(&pRetval->m_nPelvisNodeIndex, 2);
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_szName = (const char*)pChunk->GetData();
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_pNodeID = (u32*)pChunk->GetData();
++    port_disc32_array(pRetval->m_pNodeID, pChunk->GetDataSize() / 4);
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_pParent = (int*)pChunk->GetData();
++    port_disc32_array(pRetval->m_pParent, pChunk->GetDataSize() / 4);
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_pNumChildren = (int*)pChunk->GetData();
++    port_disc32_array(pRetval->m_pNumChildren, pChunk->GetDataSize() / 4);
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_pChildren = (int**)pChunk->GetData();
+@@ -113,6 +128,7 @@ cSHierarchy* cSHierarchy::Initialize(nlChunk* pChunk)
+ 
+     pChunk = pChunk->GetNextChunk();
+     int* pChild = (int*)pChunk->GetData();
++    port_disc32_array(pChild, pChunk->GetDataSize() / 4);
+ 
+     for (int i = 0; i < pRetval->m_nNumNodes; i++)
+     {
+@@ -132,9 +148,11 @@ cSHierarchy* cSHierarchy::Initialize(nlChunk* pChunk)
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_pMirrorTable = (int*)pChunk->GetData();
++    port_disc32_array(pRetval->m_pMirrorTable, pChunk->GetDataSize() / 4);
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_pV3TranslationOffset = (nlVector3*)pChunk->GetData();
++    port_disc32_array(pRetval->m_pV3TranslationOffset, pChunk->GetDataSize() / 4);
+ 
+     pChunk = pChunk->GetNextChunk();
+     pRetval->m_pPreserveBoneLength = (u8*)pChunk->GetData();

@@ -10,6 +10,9 @@ For the shortest path, open [Start Here](START-HERE.txt).
 - A homebrew-enabled PS Vita and VitaShell.
 - Your own Mario Strikers Charged **Wii USA Rev 1 (`R4QE01`)** dump.
 - The matching ready-made native player VPK, application ID **`MSCN00003`**.
+- A legitimately obtained `libshacccg.suprx` at `ur0:data/`. The source checks
+  for this shader compiler even with the startup cache. It is not bundled;
+  keep an existing lawful setup and do not download unofficial module bundles.
 - About 3 GB free on the Vita for the extracted game, app and saves.
 
 ## Installation
@@ -76,6 +79,9 @@ recompiled build is not interchangeable with this native player release.
 
 Check the application ID, game revision and folder nesting first. In
 particular, `game/sys/fst.bin` must not be under `game/game/` or `game/DATA/`.
+For a missing shader-compiler error, check the `ur0:data/` requirement above.
+kubridge is optional in this native source; do not change kernel plugins
+as a routine install/update step.
 Do not replace the app's shader cache with one from a different build.
 Keep any log private until filenames, addresses and save details have been
 reviewed. Never attach the original disc or save to an issue by default.

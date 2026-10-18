@@ -1,0 +1,241 @@
+#ifndef GAME_AI_AVOIDABLE_OBJECT_H
+#define GAME_AI_AVOIDABLE_OBJECT_H
+
+#include "Game/AI/AvoidController.h"
+#include "NL/nlMath.h"
+
+class cFielder;
+class cPlayer;
+class PhysicsPatch;
+class PowerupBase;
+class ChainChomp;
+
+static const nlVector3 v3Zero = { 0.0f, 0.0f, 0.0f };
+
+// Polymorphic "thing to avoid". Each object links itself into
+// gAvoidableObjects, which AvoidController::Update scans. The
+// retail binary keeps the family in one translation unit.
+class AvoidableObject
+{
+public:
+    AvoidableObject(int type);
+    virtual ~AvoidableObject();
+    virtual const nlVector3& GetPosition() = 0;
+    virtual const nlVector3& GetVelocity() = 0;
+    virtual float GetRadius() = 0;
+    virtual float GetAttackReach()
+    {
+        return 0.0f;
+    }
+    virtual bool GetClosestBoundaryPoint(
+        const nlVector3& target, nlVector3& point, nlVector3& dir);
+    virtual bool IsWithinRange(
+        AvoidableObject* other, float range);
+    virtual float GetAvoidanceWeight(AvoidableObject* other)
+    {
+        return 1.0f;
+    }
+    virtual float GetAvoidanceStrength(AvoidableObject* other)
+    {
+        return 1.0f;
+    }
+    virtual bool IsMobile()
+    {
+        return false;
+    }
+
+    /* 0x04 */ AvoidableObject* next;
+    /* 0x08 */ int mId;
+    /* 0x0C */ int mType;
+    /* 0x10 */ const float* mTweaks;
+}; // size: 0x14
+
+class AvoidableFielder : public AvoidableObject
+{
+public:
+    AvoidableFielder(cFielder* pFielder)
+        : AvoidableObject(AVOID_FIELDERS)
+        , m_pFielder(pFielder)
+    {
+    }
+    virtual ~AvoidableFielder()
+    {
+    }
+    virtual const nlVector3& GetPosition();
+    virtual const nlVector3& GetVelocity();
+    virtual float GetRadius();
+    virtual float GetAttackReach();
+    virtual bool IsWithinRange(
+        AvoidableObject* other, float range);
+    virtual float GetAvoidanceWeight(AvoidableObject* other);
+    virtual float GetAvoidanceStrength(AvoidableObject* other);
+    virtual bool IsMobile()
+    {
+        return true;
+    }
+
+    /* 0x14 */ cFielder* m_pFielder;
+}; // size: 0x18
+
+class AvoidableGoalie : public AvoidableObject
+{
+public:
+    AvoidableGoalie(cPlayer* pPlayer)
+        : AvoidableObject(AVOID_GOALIES)
+        , m_pPlayer(pPlayer)
+    {
+    }
+    virtual ~AvoidableGoalie()
+    {
+    }
+    virtual const nlVector3& GetPosition();
+    virtual const nlVector3& GetVelocity();
+    virtual float GetRadius();
+    virtual bool IsMobile()
+    {
+        return true;
+    }
+
+    /* 0x14 */ cPlayer* m_pPlayer;
+}; // size: 0x18
+
+class AvoidablePowerup : public AvoidableObject
+{
+public:
+    AvoidablePowerup(PowerupBase* pPowerup)
+        : AvoidableObject(AVOID_POWERUPS)
+        , m_pPowerup(pPowerup)
+        , m_pChainChomp(0)
+    {
+    }
+    AvoidablePowerup(ChainChomp* pChainChomp)
+        : AvoidableObject(AVOID_POWERUPS)
+        , m_pPowerup(0)
+        , m_pChainChomp(pChainChomp)
+    {
+    }
+    virtual ~AvoidablePowerup()
+    {
+    }
+    virtual const nlVector3& GetPosition();
+    virtual const nlVector3& GetVelocity();
+    virtual float GetRadius();
+    virtual bool IsMobile();
+
+    /* 0x14 */ PowerupBase* m_pPowerup;
+    /* 0x18 */ ChainChomp* m_pChainChomp;
+}; // size: 0x1C
+
+class AvoidablePoint : public AvoidableObject
+{
+public:
+    AvoidablePoint(
+        int type, float radius, const nlVector3& position);
+
+    AvoidablePoint(
+        int type, const nlVector2& position, float radius)
+        : AvoidableObject(type)
+        , mRadius(radius)
+    {
+        mPosition.x = position.x;
+        mPosition.y = position.y;
+        mPosition.z = 0.0f;
+    }
+
+    AvoidablePoint(
+        int type, const nlVector3& position, float radius)
+        : AvoidableObject(type)
+        , mPosition(position)
+        , mRadius(radius)
+    {
+    }
+    virtual ~AvoidablePoint()
+    {
+    }
+    virtual const nlVector3& GetPosition();
+    virtual const nlVector3& GetVelocity();
+    virtual float GetRadius();
+
+    /* 0x14 */ nlVector3 mPosition;
+    /* 0x20 */ float mRadius;
+}; // size: 0x24
+
+class AvoidablePatch : public AvoidableObject
+{
+public:
+    AvoidablePatch(PhysicsPatch* pPatch)
+        : AvoidableObject(AVOID_PATCHES)
+        , m_pPatch(pPatch)
+    {
+    }
+    virtual ~AvoidablePatch()
+    {
+    }
+    virtual const nlVector3& GetPosition();
+    virtual const nlVector3& GetVelocity();
+    virtual float GetRadius();
+    virtual bool IsMobile();
+
+    /* 0x14 */ PhysicsPatch* m_pPatch;
+    /* 0x18 */ nlVector3 mPathVelocity;
+}; // size: 0x24
+
+enum eAvoidablePolygonType
+{
+    AVOID_POLYGON_FIELD_BOUNDARY = 1,
+    AVOID_POLYGON_SHOT_LANE = 2,
+    AVOID_POLYGON_THWOMP = 3,
+    AVOID_POLYGON_WALUIGI_WALL = 4,
+};
+
+class AvoidablePolygon : public AvoidableObject
+{
+public:
+    bool IntersectsSegment(const nlVector2& start, const nlVector2& end) const;
+    AvoidablePolygon(
+        int polygonType, const nlVector3& a, const nlVector3& b, float width);
+    AvoidablePolygon(
+        int polygonType, const nlVector3& center, float length, float width);
+    void Update(const nlVector2& a, const nlVector2& b, float width)
+    {
+        nlVec2Sub(mNormals[1], b, a);
+        float scale = nlRecipSqrt(nlVec2LengthSquared(mNormals[1]), true);
+        nlVec2Set(mNormals[1], scale * mNormals[1].x, scale * mNormals[1].y);
+        nlVec2Neg(mNormals[3], mNormals[1]);
+        nlVec2Rotate(mNormals[0], mNormals[1], 0x4000);
+        nlVec2Rotate(mNormals[2], mNormals[3], 0x4000);
+        nlVec2ScaleAdd(mPoints[0], 0.5f * width, mNormals[0], a);
+        nlVec2ScaleAdd(mPoints[1], 0.5f * width, mNormals[0], b);
+        nlVec2ScaleAdd(mPoints[3], 0.5f * width, mNormals[2], a);
+        nlVec2ScaleAdd(mPoints[2], 0.5f * width, mNormals[2], b);
+    }
+    virtual ~AvoidablePolygon();
+    virtual const nlVector3& GetPosition();
+    virtual const nlVector3& GetVelocity()
+    {
+        return v3Zero;
+    }
+    virtual float GetRadius()
+    {
+        return 0.0f;
+    }
+    virtual bool GetClosestBoundaryPoint(
+        const nlVector3& target, nlVector3& point, nlVector3& dir);
+    virtual bool IsWithinRange(
+        AvoidableObject* other, float range);
+
+    /* 0x14 */ int mPolygonType;
+    /* 0x18 */ nlVector2 mPoints[4];
+    /* 0x38 */ nlVector2 mNormals[4];
+    /* 0x58 */ nlVector3 mCenter;
+    /* 0x64 */ cFielder* mOwner;
+}; // size: 0x68
+
+extern nlList<AvoidableObject> gAvoidableObjects;
+extern int gNextAvoidableObjectId;
+extern float gAvoidableTweaks[7][7];
+
+extern "C" int GetAvoidableIndex(eAvoidableThings avoidable);
+extern "C" int GetAvoidableMask(int index);
+
+#endif // GAME_AI_AVOIDABLE_OBJECT_H

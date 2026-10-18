@@ -1,0 +1,219 @@
+Multiplayer 1/4: whole 16-byte input records on the wire (the retail message drops the analog triggers and the pointer), bounds-checked receive,
+and the capture hook (NetworkPeerChannel::CaptureNetworkPeerChannelInput -> NpLanAfterChannelCapture). Both consoles run this build. See np/docs/multiplayer.md.
+
+diff --git a/src/Game/NetworkInput.cpp b/src/Game/NetworkInput.cpp
+index c5dafe4..0da26e3 100644
+--- a/src/Game/NetworkInput.cpp
++++ b/src/Game/NetworkInput.cpp
+@@ -6,6 +6,7 @@
+ #include "Game/NetworkSession.h"
+ #include "Game/PackedDetInput.h"
+ #include "NL/globalpad.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ NetworkPeerChannel* NetworkPeer::GetNetworkPeerChannel(int channel)
+ {
+@@ -104,6 +105,7 @@ void NetworkPeerChannel::CaptureNetworkPeerChannelInput()
+     }
+     mLocalInput.m_aRemapAngle
+         = gInputManager->mFrameProvider->GetInputRemapAngle();
++    NpLanAfterChannelCapture(this);  // multiplayer: the record that goes on the wire is normalized here
+ }
+ 
+ void NetworkPeerChannel::ApplyNetworkPeerChannelInput(const PackedDetInput* record, u16 remapAngle, u8 connected)
+@@ -202,26 +204,16 @@ u8 NetMessageInput::GetNetworkInputMessagePlayerState(s8 player)
+     return (mPlayerStates >> ((player & 0x7F) * 2)) & 3;
+ }
+ 
++// Multiplayer (np/patches/mp): the whole 16-byte record travels. The retail message carries 13 of the 16 bytes per
++// changed player (no analog triggers in byte 2, no pointer in bytes 9-11), which the Vita controls use. Both consoles
++// run this build, so nothing is lost; the change bits keep their meaning (any difference sets all of them) and the
++// receiver copies the whole record.
+ void NetMessageInput::SetNetworkInputMessageRecord(s8 player, const PackedDetInput* record)
+ {
+     const u8* source = (const u8*)record;
+ 
+-    if (*(const u16*)(source + 0) != *(u16*)(mRecords[player].mData + 0))
+-        mRecordChanges[player] |= 2;
+-    if ((s8)source[12] != (s8)mRecords[player].mData[12]
+-        || (s8)source[13] != (s8)mRecords[player].mData[13])
+-        mRecordChanges[player] |= 4;
+-    if ((s8)source[14] != (s8)mRecords[player].mData[14]
+-        || (s8)source[15] != (s8)mRecords[player].mData[15])
+-        mRecordChanges[player] |= 8;
+-    if ((s8)source[3] != (s8)mRecords[player].mData[3]
+-        || (s8)source[4] != (s8)mRecords[player].mData[4]
+-        || (s8)source[5] != (s8)mRecords[player].mData[5])
+-        mRecordChanges[player] |= 0x10;
+-    if ((s8)source[6] != (s8)mRecords[player].mData[6]
+-        || (s8)source[7] != (s8)mRecords[player].mData[7]
+-        || (s8)source[8] != (s8)mRecords[player].mData[8])
+-        mRecordChanges[player] |= 0x20;
++    if (memcmp(source, mRecords[player].mData, 0x10) != 0)
++        mRecordChanges[player] |= 0x7E;
+ 
+     if (mRecordChanges[player] != 0)
+         mFlags |= 0x10 << player;
+@@ -230,44 +222,8 @@ void NetMessageInput::SetNetworkInputMessageRecord(s8 player, const PackedDetInp
+ 
+ void NetMessageInput::ApplyNetworkInputMessageRecord(s8 player, PackedDetInput* record)
+ {
+-    if (mRecordChanges[player] & 2)
+-        record->mButtonBitfield = *(u16*)mRecords[player].mData;
+-    if (mRecordChanges[player] & 4)
+-    {
+-        const u8* source = mRecords[player].mData + 12;
+-        s8 leftX = *source++;
+-        s8 leftY = *source;
+-        record->mAnalogAxes[0] = leftX;
+-        record->mAnalogAxes[1] = leftY;
+-    }
+-    if (mRecordChanges[player] & 8)
+-    {
+-        const u8* source = mRecords[player].mData + 14;
+-        s8 rightX = *source++;
+-        s8 rightY = *source;
+-        record->mAnalogAxes[2] = rightX;
+-        record->mAnalogAxes[3] = rightY;
+-    }
+-    if (mRecordChanges[player] & 0x10)
+-    {
+-        const u8* source = mRecords[player].mData + 3;
+-        s8 x = *source++;
+-        s8 y = *source++;
+-        s8 z = *source;
+-        record->mRemoteAccel[0] = x;
+-        record->mRemoteAccel[1] = y;
+-        record->mRemoteAccel[2] = z;
+-    }
+-    if (mRecordChanges[player] & 0x20)
+-    {
+-        const u8* source = mRecords[player].mData + 6;
+-        s8 x = *source++;
+-        s8 y = *source++;
+-        s8 z = *source;
+-        record->mFreeStyleAccel[0] = x;
+-        record->mFreeStyleAccel[1] = y;
+-        record->mFreeStyleAccel[2] = z;
+-    }
++    if (mRecordChanges[player] != 0)
++        memcpy(record, mRecords[player].mData, 0x10);
+ }
+ 
+ void NetMessageInput::SetNetworkInputMessageRemapAngle(u16 remapAngle)
+@@ -316,60 +272,79 @@ DetermDataEvent* NetMessageInput::GetNetworkInputMessageEvent(int index)
+     return &mEvents[index];
+ }
+ 
++namespace
++{
++// Multiplayer: the retail serializer trusted every count and size of a received message. This one stops at the end
++// of the buffer and refuses an event count above 4 or an event larger than its storage.
++struct InputSerializerGuard
++{
++    NetworkMessageSerializer* mSerializer;
++    bool mOk;
++
++    void Transfer(void* value, unsigned long size)
++    {
++        if (!mOk)
++            return;
++        if (mSerializer->mDirection == 0 && mSerializer->mEnd != 0 && mSerializer->mPosition + size > mSerializer->mEnd)
++        {
++            mOk = false;
++            return;
++        }
++        mSerializer->Transfer(value, size);
++    }
++};
++}
++
+ void NetMessageInput::Serialize(
+     NetworkMessageSerializer* serializer)
+ {
+-    serializer->Transfer(&mFlags, 1);
+-    serializer->Transfer(&mPlayerStates, 1);
++    InputSerializerGuard io = { serializer, true };
++    io.Transfer(&mFlags, 1);
++    io.Transfer(&mPlayerStates, 1);
+     if (mFlags & 1)
+-        serializer->Transfer(&mRemapAngleHigh, 1);
++        io.Transfer(&mRemapAngleHigh, 1);
+     if (mFlags & 4)
+     {
+-        serializer->Transfer(&mChecksum, 4);
+-        serializer->Transfer(&mFrame, 4);
+-        serializer->Transfer(&mRandomSeed, 4);
++        io.Transfer(&mChecksum, 4);
++        io.Transfer(&mFrame, 4);
++        io.Transfer(&mRandomSeed, 4);
+     }
+     else if (mFlags & 2)
+     {
+-        serializer->Transfer(&mFrame, 4);
++        io.Transfer(&mFrame, 4);
+     }
+-    serializer->Transfer(&mEventCount, 1);
+-    for (int i = 0; i < mEventCount; ++i)
+-        mEvents[i].Serialize(serializer);
+-    if (serializer->mDirection == 0)
++    io.Transfer(&mEventCount, 1);
++    if (io.mOk && mEventCount > 4)
+     {
+-        for (s8 i = 0; i < 4; ++i)
+-        {
+-            if (mFlags & (0x10 << i))
+-                serializer->Transfer(&mRecordChanges[i], 1);
+-        }
++        io.mOk = false;
++        mEventCount = 0;
+     }
+-    else
++    for (int i = 0; i < mEventCount && io.mOk; ++i)
+     {
+-        for (s8 i = 0; i < 4; ++i)
++        io.Transfer(&mEvents[i].mSize, 1);
++        if (mEvents[i].mSize > sizeof(mEvents[i].mData))
+         {
+-            if (mFlags & (0x10 << i))
+-                serializer->Transfer(&mRecordChanges[i], 1);
++            io.mOk = false;
++            break;
+         }
++        io.Transfer(mEvents[i].mData, mEvents[i].mSize);
+     }
+     for (s8 i = 0; i < 4; ++i)
+     {
+-        if (mRecordChanges[i] & 2)
+-            serializer->Transfer(mRecords[i].mData + 0, 2);
+-        if (mRecordChanges[i] & 4)
+-        {
+-            serializer->Transfer(mRecords[i].mData + 12, 1);
+-            serializer->Transfer(mRecords[i].mData + 13, 1);
+-        }
+-        if (mRecordChanges[i] & 8)
+-        {
+-            serializer->Transfer(mRecords[i].mData + 14, 1);
+-            serializer->Transfer(mRecords[i].mData + 15, 1);
+-        }
+-        if (mRecordChanges[i] & 0x10)
+-            serializer->Transfer(mRecords[i].mData + 3, 3);
+-        if (mRecordChanges[i] & 0x20)
+-            serializer->Transfer(mRecords[i].mData + 6, 3);
++        if (mFlags & (0x10 << i))
++            io.Transfer(&mRecordChanges[i], 1);
++    }
++    for (s8 i = 0; i < 4; ++i)
++    {
++        if (mRecordChanges[i] != 0)
++            io.Transfer(mRecords[i].mData, 0x10);
++    }
++    if (!io.mOk && serializer->mDirection == 0)
++    {
++        // a malformed message from the other console: apply nothing from it
++        mEventCount = 0;
++        memset(mRecordChanges, 0, sizeof(mRecordChanges));
++        NpLanLog("malformed input message rejected\n");
+     }
+ }
+ 

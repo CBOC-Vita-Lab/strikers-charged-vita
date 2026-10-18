@@ -1,0 +1,63 @@
+#ifndef GAME_AUDIO_LOWPASSFILTER_H
+#define GAME_AUDIO_LOWPASSFILTER_H
+
+#include "Game/Audio/AudioEffect.h"
+#include "NL/nlSlotPool.h"
+
+class LowPassFilterParameter : public AudioEffectParameter
+{
+public:
+    LowPassFilterParameter();
+
+    static void* operator new(size_t)
+    {
+        LowPassFilterParameter* parameter = 0;
+        s_Pool.Allocate(parameter);
+        return parameter;
+    }
+
+    static void operator delete(void* pointer)
+    {
+        s_Pool.Free((LowPassFilterParameter*)pointer);
+    }
+
+    u32 m_On;
+    u32 m_Frequency;
+
+    static SlotPool<LowPassFilterParameter> s_Pool;
+};
+
+class LowPassFilter : public AudioEffectBase
+{
+public:
+    LowPassFilter();
+
+    virtual void CreateParameter(unsigned int definition, const void* context,
+        bool disabled, AudioEffectParameter** output);
+    virtual void BeginBlend();
+    virtual void BlendParameter(AudioEffectParameter* destination,
+        AudioEffectParameter* source);
+    virtual void EndBlend();
+    virtual void OnParameterFinished(AudioEffectParameter* parameter);
+    virtual void ApplyToSound(void* handle);
+
+    static void* operator new(size_t)
+    {
+        LowPassFilter* effect = 0;
+        s_Pool.Allocate(effect);
+        return effect;
+    }
+
+    static void operator delete(void* pointer)
+    {
+        s_Pool.Free((LowPassFilter*)pointer);
+    }
+
+    LowPassFilterParameter m_Initial;
+    LowPassFilterParameter m_Final;
+    u32 m_FilterCount;
+
+    static SlotPool<LowPassFilter> s_Pool;
+};
+
+#endif // GAME_AUDIO_LOWPASSFILTER_H

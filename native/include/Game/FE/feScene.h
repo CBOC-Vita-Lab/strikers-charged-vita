@@ -1,0 +1,53 @@
+#ifndef _FESCENE_H_
+#define _FESCENE_H_
+
+#include "Game/FE/feResourceManager.h"
+#include "Game/FE/feSceneResource.h"
+#include "NL/nlMath.h"
+#include "types.h"
+
+class FEPackage;
+class MemoryAllocator;
+struct FE_FILE_HEADER;
+
+enum eFESceneLoadState
+{
+    FE_SCENE_INITIAL = 1,
+    FE_SCENE_LOADING_RESOURCES = 5,
+    FE_SCENE_READY = 6,
+};
+
+class FEScene
+{
+public:
+    FEScene();
+    ~FEScene();
+
+    bool LoadPackage(const char* szPackageFileName, MemoryAllocator* pAllocator);
+    void LoadPackage(void* pData, unsigned long uSize);
+    static void LoadPackageCallback(void* pData, unsigned long uSize, void* pUserData);
+    void UnloadPackage();
+    void ReleaseResourceHandles();
+    void Update(float fDeltaT);
+    void AllResourcesLoadedCallback();
+    FEPackage* GetPackage() const
+    {
+        return m_pFEPackage;
+    }
+
+    /* 0x00 */ FEPackage* m_pFEPackage;
+    /* 0x04 */ unsigned long m_uHashID;
+    /* 0x08 */ nlMatrix4 m_matView;
+    /* 0x48 */ unsigned long m_uRenderView;
+    /* 0x4C */ FE_FILE_HEADER* m_pFileHeader;
+    /* 0x50 */ unsigned long* m_pPointerTable;
+    /* 0x54 */ FESceneResource m_feSceneResourceHandle;
+    /* 0x74 */ int mState;
+    /* 0x78 */ FEResourceHandle* m_pResourceHandles;
+    /* 0x7C */ MemoryAllocator* m_pAllocator;
+
+private:
+    void LoadPackageResources(FEPackage* pFEPackage);
+}; // size 0x80
+
+#endif // _FESCENE_H_

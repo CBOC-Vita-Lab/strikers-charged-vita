@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.DS_Store
+build/
+/private/
+*.vpk
+*.elf
+*.o
+*.a
+*.iso
+*.wbfs
+*.gxp
+*.pkl
+*.pth
+*.onnx

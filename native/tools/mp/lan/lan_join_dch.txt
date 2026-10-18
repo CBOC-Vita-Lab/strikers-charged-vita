@@ -1,0 +1,57 @@
+# LAN joiner: the host quits abruptly mid-match; follow the game's own handling (error popup, lobby, main menu).
+# LAN joiner: boot to the main menu, Multiplayer, Join Game, wait for the host to start.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 24 2400
+log STATE lobby
+idle 400
+press 4
+idle 30
+press 100
+log joining
+wait peers >= 2 7200
+log STATE joined
+wait scene != 24 7200
+log STATE launched
+# Draft, captains, sidekicks, stadium: accept whatever is highlighted until the match is loaded.
+mash 100 45 ingame == 1 12000
+log STATE in match
+wait gs == 5 6000
+log STATE open play
+# The host vanishes ~20 s into the match: wait for the game to notice and leave the match.
+wait scene == 10 || ovl == 10 7200
+log STATE error popup
+idle 120
+mash 100 90 ingame == 0 3600
+log STATE match ended after disconnect
+# A broken-off LAN match returns to the LAN lobby (Create Game / Join Game).
+wait scene == 24 3600
+log STATE back in lobby
+idle 300
+# Back out of the lobby: multiplayer ends and the main menu comes back.
+press 200
+wait scene == 1 2400
+log STATE main menu again
+wait nbuttons >= 8 600
+idle 120
+exit

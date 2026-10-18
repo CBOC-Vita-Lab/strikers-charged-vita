@@ -1,0 +1,115 @@
+diff --git a/src/NL/nlFile.cpp b/src/NL/nlFile.cpp
+index dded71c..45018ab 100644
+--- a/src/NL/nlFile.cpp
++++ b/src/NL/nlFile.cpp
+@@ -5,6 +5,9 @@
+ #include "NL/nlCompressedFile.h"
+ #include "NL/nlFileGC.h"
+ #include "NL/nlMemory.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_hook.h" /* platform/assets: byte-order conversion of disc data at load (NPA) */
++#endif
+ 
+ 
+ void nlCancelEntireFileLoadCallback(nlFile*, void*, unsigned int, unsigned long, ReadAsyncCallback);
+@@ -17,6 +20,9 @@ struct AsyncFileLoadData
+     unsigned long datasize;
+     LoadAsyncCallback callback;
+     void* user_data;
++#ifdef NP_NATIVE
++    int npaTag;
++#endif
+ 
+     AsyncFileLoadData(nlFile* const f, void* const alloc, const unsigned long size, LoadAsyncCallback const cb, void* const user)
+         : file(f)
+@@ -25,6 +31,9 @@ struct AsyncFileLoadData
+         , callback(cb)
+         , user_data(user)
+     {
++#ifdef NP_NATIVE
++        npaTag = 0;
++#endif
+     }
+ };
+ 
+@@ -103,6 +112,9 @@ void* nlLoadEntireFile(const char* filename, unsigned long* outSize, unsigned in
+                 CurrentAllocator = AllocatorStack[AllocatorStackDepth - 1];
+             }
+             file->Read(alloc_data, datasize, bufferSize);
++#ifdef NP_NATIVE
++            npa_hook_convert(npa_hook_tag(filename), alloc_data, datasize, filename);
++#endif
+         }
+ 
+         delete file;
+@@ -118,6 +130,9 @@ void* nlLoadEntireFile(const char* filename, unsigned long* outSize, unsigned in
+ static void nlLoadEntireFileAsyncCallback(nlFile*, void*, unsigned int, unsigned long userParam)
+ {
+     AsyncFileLoadData* data = (AsyncFileLoadData*)userParam;
++#ifdef NP_NATIVE
++    npa_hook_convert(data->npaTag, data->alloc_data, data->datasize, "async load");
++#endif
+     data->callback(data->alloc_data, data->datasize, data->user_data);
+     delete data->file;
+     delete data;
+@@ -172,6 +187,9 @@ unsigned int nlLoadEntireFileAsync(const char* filename, LoadAsyncCallback callb
+         CurrentAllocator = AllocatorStack[AllocatorStackDepth - 1];
+ 
+         asyncData = new (nlMalloc(sizeof(AsyncFileLoadData), 8, true)) AsyncFileLoadData(file, alloc_data, datasize, callback, user_data);
++#ifdef NP_NATIVE
++        asyncData->npaTag = npa_hook_tag(filename);
++#endif
+         result = (unsigned int)nlReadAsync(file, alloc_data, datasize, nlLoadEntireFileAsyncCallback, (unsigned long)asyncData, filesize);
+     }
+     else
+@@ -230,6 +248,9 @@ struct CompressedFileLoad
+         , finalChunkSize(0)
+         , inflateState(compressedSize, 0, 0)
+     {
++#ifdef NP_NATIVE
++        npaTag = 0;
++#endif
+         if (readBuffer0 != 0)
+         {
+             readBuffers[0] = readBuffer0;
+@@ -266,6 +287,9 @@ struct CompressedFileLoad
+     unsigned int uncompressedSize;
+     nlFile* file;
+     void* output;
++#ifdef NP_NATIVE
++    int npaTag; /* tag of the inflated file, see np_hook.h */
++#endif
+     unsigned long param;
+     unsigned int compressedSize;
+     LoadAsyncCallback callback;
+@@ -298,6 +322,10 @@ void OnCompressedFileHeaderRead(nlFile*, void*, unsigned int, unsigned long user
+ {
+     CompressedFileLoad* state = (CompressedFileLoad*)userParam;
+     MemoryAllocator* allocator = state->allocator;
++#ifdef NP_NATIVE
++    /* the container's first word (uncompressed size) was read raw: it is big-endian on disc */
++    state->uncompressedSize = __builtin_bswap32(state->uncompressedSize);
++#endif
+ 
+     AllocatorStack[AllocatorStackDepth++] = allocator;
+     CurrentAllocator = allocator;
+@@ -338,6 +366,9 @@ void OnCompressedFileDataRead(nlFile* file, void* buffer, unsigned int size, uns
+     if (state->completedReads == state->readCount)
+     {
+         state->inflateState.Finish();
++#ifdef NP_NATIVE
++        npa_hook_convert(state->npaTag, state->output, state->uncompressedSize, "compressed load");
++#endif
+         state->callback(state->output, state->uncompressedSize, state->userData);
+         delete state->file;
+ 
+@@ -383,6 +414,9 @@ bool nlLoadCompressedFileAsync(const char* path, LoadAsyncCallback callback,
+         CompressedFileLoad(file, param, compressedSize, callback, userData,
+             allocator, allocType, chunkSize, readBuffer0, readBuffer1);
+ 
++#ifdef NP_NATIVE
++    state->npaTag = npa_hook_tag(path);
++#endif
+     nlReadAsync(file, state, 4, OnCompressedFileHeaderRead, (unsigned long)state, 0);
+ 
+     unsigned int payloadSize = compressedSize - 4;

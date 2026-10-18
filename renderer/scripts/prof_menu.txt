@@ -1,0 +1,27 @@
+# vgx profile script, short: the main menu's 3D scene (captain, pitch, lit geometry, menu
+# overlay), 150 frames. For lock turns of two minutes: tools/scripts/nav_menu_idle.txt with a
+# shorter wait and window. Not a substitute for prof_open_play.txt: fewer draws and GX calls
+# per frame than a match; it compares builds call for call on the same frames.
+# --- boot screens, intro movie, title -------------------------------------------------------
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu, pointer on Domination Mode
+idle 60
+log profile window: idle main menu, 150 frames
+prof begin
+idle 150
+prof end
+log STATE main menu idle done
+idle 5
+exit

@@ -1,0 +1,7 @@
+# np-player.txt of the PLAYER build in Vita3K: boot to the title screen with the nav script (proves: the settings file is read, env.txt is not, no lab server, saves go to np-data).
+MSC_INPUT_SCRIPT=boot_title.txt
+MSC_MAX_FRAMES=3000
+MSC_WATCH=1
+MSC_WATCH_EVERY=120
+MSC_VITA_RENDER=320x224
+MSC_VITA_DRAW_EVERY=4

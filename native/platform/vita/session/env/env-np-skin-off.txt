@@ -1,0 +1,16 @@
+# SKIN (wave 5), CONSOLE A/B, run A (the control): the timed scripted match (nav/match60.txt: menus, captains, sidekicks, sides, stadium, walk-out, 62 s of
+# match clock with its goal replays and celebrations), plan C (the player's default), back-end profile PROF=3, the SKIN switches as set at the end of this file.
+# Read in log.txt, every 100 presented frames: '[vgx] prof (... PROF=3 ...): all= stream= ...' (back end ms per frame; stream = the vertex/index upload),
+# '| thread: period= idle= rest=' (rest = the decode D), '[vgx] per frame: ... draws= streamBytes= uniformBytes= ringBytes=', and the '[frame-timing]' windows
+# (p50 / p95 frame interval) with the '[nav]' scene changes. Compare the same scenes in runs A and B.
+MSC_INPUT_SCRIPT=match60.txt
+MSC_MAX_FRAMES=12000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=300
+MSC_VITA_MEMSTATS=1
+MSC_VGX_PROF=3
+MSC_PLAN=C
+NP_DATA_DIR=ux0:data/mscharged/np-data
+MSC_SKIN_GPU=0
+MSC_VGX_SOFTINST=0

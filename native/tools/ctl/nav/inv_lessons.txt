@@ -1,0 +1,36 @@
+# W5 CTL inventory: Strikers 101 (the lesson screens). GL frame dumps every N frames.
+vmash cross 20 scene == 0
+log STATE title screen
+idle 60
+vmash cross 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file
+idle 60
+wait nbuttons >= 2
+idle 10
+vmash cross 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0 1800
+log STATE main menu
+idle 90
+# Strikers 101: the 101 button of the ring (panel 290,320), the first lesson
+touch 290 320 3 0
+try wait scene == 76 300
+idle 150
+log STATE strikers 101 select
+vpress cross 3 0
+idle 250
+log STATE strikers 101 after cross
+vpress cross 3 0
+idle 300
+log STATE strikers 101 after cross 2
+vpress cross 3 0
+idle 500
+log STATE strikers 101 after cross 3
+vpress cross 3 0
+idle 600
+log STATE strikers 101 after cross 4
+exit

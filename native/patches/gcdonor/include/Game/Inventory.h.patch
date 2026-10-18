@@ -1,0 +1,47 @@
+diff --git a/include/Game/Inventory.h b/include/Game/Inventory.h
+index c6de024..c5d1f8d 100644
+--- a/include/Game/Inventory.h
++++ b/include/Game/Inventory.h
+@@ -4,6 +4,7 @@
+ #include "NL/nlPrint.h"
+ 
+ #include "Game/SAnim.h"
++#include "port/endian.h"
+ #include "NL/nlList.h"
+ #include "NL/nlString.h"
+ #include "NL/nlPrint.h"
+@@ -20,9 +21,15 @@ public:
+ 
+     void ParseChunk(nlChunk* chunk)
+     {
+-        if (T::IsValidChunkID(chunk->GetID()))
++        if (T::IsValidChunkID(port_disc32(&chunk->m_ID) & 0x80FFFFFF))
+         {
+             T* item = T::Initialize(chunk);
++            // NP: an item whose tree is not well formed is refused (null) rather than listed.
++            if (item == 0)
++            {
++                nlPrintf("Warning: inventory refused a malformed chunk tree\n");
++                return;
++            }
+             m_lItemList.AddStart(item);
+             m_nItemCount++;
+         }
+@@ -35,10 +42,15 @@ public:
+ 
+     void ParseChunks(nlChunk* chunk, nlChunk* end)
+     {
+-        while (chunk != end)
++        // NP: the file is big-endian and each item converts its own subtree (T::Initialize), so
++        // the walk reads the top-level header through the swap instead of trusting it, and finds
++        // the next one before the item has touched the header.
++        while (chunk != end && chunk != 0)
+         {
++            const unsigned long uSize = port_disc32(&chunk->m_Size);
++            nlChunk* next = (nlChunk*)((unsigned char*)chunk + sizeof(nlChunk) + ((uSize + 3) & ~3UL));
+             ParseChunk(chunk);
+-            chunk = chunk->GetNextChunk();
++            chunk = next;
+         }
+     }
+ 

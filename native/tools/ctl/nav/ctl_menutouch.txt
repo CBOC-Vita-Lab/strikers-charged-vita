@@ -1,0 +1,52 @@
+# W5 CTL: the front-touch menu pointer and the MODERN menu buttons, Vita commands only (tools/nav/nps2_menunav.txt is the GameCube-pad
+# version of the same walk). A finger on a button points there and presses it; Circle goes back (MODERN; CLASSIC: Square).
+# Run with MSC_WATCH=1 MSC_WATCH_BUTTONS=1; with NP_TOUCH_POINTER=0 the touches must do nothing (the script then logs "no scene change").
+vmash cross 20 scene == 0
+log STATE title screen
+vmash cross 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+vmash cross 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0 1800
+log STATE main menu
+idle 30
+# MODERN menu buttons first: Cross on the first button (options), Circle back
+vpress cross 3 10
+try wait scene == 27 600
+log STATE cross pressed the hovered button
+wait nbuttons >= 8 900
+idle 30
+vpress circle 3 10
+try wait scene == 1 600
+log STATE circle went back
+wait nbuttons >= 8 900
+idle 30
+# the touch pointer: a finger on a ring button points there and presses it (A while down). Pointer space -> panel: the ring's
+# buttons (MSC_WATCH_BUTTONS: options ctx 0 at (-5,170), multiplayer ctx 1 at (-150,105)) are at panel (474,58) and (300,140)
+touch 474 58 3 0
+try wait scene == 27 150
+log STATE touch on the options button done
+if scene == 27
+log STATE the finger opened options
+wait nbuttons >= 8 900
+idle 30
+vpress circle 3 10
+try wait scene == 1 600
+wait nbuttons >= 8 900
+idle 30
+endif
+touch 300 140 3 0
+try wait scene == 24 150
+log STATE touch on the multiplayer button done
+if scene == 24
+log STATE the finger opened multiplayer
+endif
+idle 30
+log STATE script end
+exit

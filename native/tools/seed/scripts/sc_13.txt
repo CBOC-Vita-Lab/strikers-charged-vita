@@ -1,0 +1,11 @@
+# W5-SEED generated script: front-end scene 13 pushed from the title
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+scene 13
+idle 240
+popscene
+idle 60
+log STATE script end
+exit

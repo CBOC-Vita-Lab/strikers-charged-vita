@@ -1,0 +1,578 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/Effects/EmissionController.h"
+#include "Game/Effects/EmissionManager.h"
+#include "Game/Effects/ParticleSystem.h"
+#include "Game/Effects/EffectsGroup.h"
+#include "Game/PoseAccumulator.h"
+#include "Game/SHierarchy.h"
+#include "Game/SAnim/pnSAnimController.h"
+
+#include "NL/nlFile.h"
+#include "NL/nlMemory.h"
+#include "Game/SharedStaticStorage.h"
+
+static int numLingeringSystems;
+
+void EmissionController::ClearParticles()
+{
+    nlDLListIterator<ParticleSystem*> iterator;
+    iterator = m_Systems.Begin();
+    while (iterator.hasNext())
+    {
+        ParticleSystem* p = *iterator;
+        p->ClearParticles();
+        iterator.Step();
+    }
+
+    if (mFinishedCallback)
+    {
+        mFinishedCallback(*this, 0);
+    }
+}
+
+EmissionController::EmissionController(EffectsGroup* pGroup, EmissionManager* pManager, unsigned short id, void* pContext, int glView)
+    : m_pGroup(pGroup)
+    , m_pContext(pContext)
+    , m_Replaying(false)
+    , m_Age(0.0f)
+    , m_TimeScale(1.0f)
+    , m_ReplayDeltaTime(0.0f)
+    , m_bDying(false)
+    , m_Id(id)
+    , m_bPoseErrorDisplayed(false)
+    , m_pManager(pManager)
+    , m_View(glView)
+{
+    m_bLingering = m_pGroup->m_bIsLingering != 0;
+    m_uUserData = 0;
+
+    InitializeSystemsFromGroup();
+
+    m_fGround = 0.015625f;
+    m_aFacing = 0;
+    m_vPosition.x = 0.0f;
+    m_vPosition.y = 0.0f;
+    m_vPosition.z = 0.0f;
+    m_vDirection.x = 0.0f;
+    m_vDirection.y = 0.0f;
+    m_vDirection.z = 1.0f;
+    m_vVelocity.x = 0.0f;
+    m_vVelocity.y = 0.0f;
+    m_vVelocity.z = 0.0f;
+    m_pPose = 0;
+    m_pAnimController = 0;
+    m_uJointIDOverride = 0;
+    m_bVisible = true;
+    m_bDisabled = false;
+
+    if (m_bLingering)
+    {
+        numLingeringSystems++;
+    }
+
+    m_pManager->KillOldest(numLingeringSystems - 12, true);
+}
+
+void EmissionController::InitializeSystemsFromGroup()
+{
+    EffectsSpec* pSpec = m_pGroup->m_specs;
+    EffectsSpec* pEndSpec = pSpec + m_pGroup->m_numSpecs;
+
+    while (pSpec < pEndSpec)
+    {
+        if (pSpec->m_eAttach == FXBind_Joint && pSpec->m_uJointID == 0xFFFFFFFF)
+        {
+            pSpec++;
+            continue;
+        }
+
+        if (pSpec->m_uTerrainID == 0 || pSpec->m_uTerrainID == fxGetTerrain())
+        {
+            ParticleSystem* pSys = new (nlMalloc(sizeof(ParticleSystem), 8, false))
+                ParticleSystem(pSpec->m_pTemplate, &m_pManager->mParticles, pSpec, m_View);
+
+            pSys->m_fDelay = pSpec->m_fDelay;
+            m_Systems.AddEnd(pSys);
+        }
+
+        pSpec++;
+    }
+
+    m_fGround = 0.015625f;
+    m_aFacing = 0;
+    m_vPosition.x = 0.0f;
+    m_vPosition.y = 0.0f;
+    m_vPosition.z = 0.0f;
+    m_vDirection.x = 0.0f;
+    m_vDirection.y = 0.0f;
+    m_vDirection.z = 1.0f;
+    m_vVelocity.x = 0.0f;
+    m_vVelocity.y = 0.0f;
+    m_vVelocity.z = 0.0f;
+    m_pPose = 0;
+    m_pAnimController = 0;
+    m_pUserEffects = 0;
+    m_nUserEffects = m_pGroup->m_userSpecs;
+
+    if (m_nUserEffects > 0)
+    {
+        int i;
+        UserEffectSpec** pUserSpecs = m_pGroup->GetUserSpecs();
+        m_pUserEffects = (UserEffectSpec**)nlMalloc(m_nUserEffects * sizeof(UserEffectSpec*), 8, false);
+
+        for (i = 0; i < m_nUserEffects; i++)
+        {
+            if (pUserSpecs[i] == 0)
+            {
+                m_pUserEffects[i] = 0;
+            }
+            else
+            {
+                m_pUserEffects[i] = pUserSpecs[i]->Clone();
+            }
+        }
+    }
+}
+
+EmissionController::~EmissionController()
+{
+    if (mFinishedCallback)
+    {
+        mFinishedCallback(*this, 2);
+        mFinishedCallback.Clear();
+    }
+
+    while (!m_Systems.IsEmpty())
+    {
+        ParticleSystem* pSys;
+        m_Systems.RemoveStart(&pSys);
+        delete pSys;
+    }
+
+    if (m_pUserEffects != 0)
+    {
+        for (int i = 0; i < m_nUserEffects; i++)
+        {
+            if (m_pUserEffects[i] != 0)
+            {
+                delete m_pUserEffects[i];
+            }
+        }
+        delete[] m_pUserEffects;
+    }
+
+    if (m_bLingering)
+    {
+        numLingeringSystems--;
+    }
+}
+
+void EmissionController::SetPosition(const nlVector3& position)
+{
+    m_vPosition = position;
+}
+
+void EmissionController::SetDirection(const nlVector3& direction)
+{
+    m_vDirection = direction;
+}
+
+void EmissionController::SetVelocity(const nlVector3& velocity)
+{
+    m_vVelocity = velocity;
+}
+
+void EmissionController::SetPoseAccumulator(
+    const cPoseAccumulator& pPose)
+{
+    m_pPose = &pPose;
+}
+
+void EmissionController::SetAnimController(
+    const cPN_SAnimController& animc)
+{
+    m_pAnimController = &animc;
+}
+
+void EmissionController::Die()
+{
+    if (m_bDying)
+    {
+        return;
+    }
+
+    m_bDying = true;
+
+    nlDLListIterator<ParticleSystem*> iterator;
+    iterator = m_Systems.Begin();
+    while (iterator.hasNext())
+    {
+        ParticleSystem* p = *iterator;
+        p->Die();
+        iterator.Step();
+    }
+
+    if (mFinishedCallback)
+    {
+        mFinishedCallback(*this, 0);
+    }
+}
+
+float EmissionController::GetRemainingTime()
+{
+    float maxRemainingTime = 0.0f;
+    nlDLListIterator<ParticleSystem*> node;
+    node = m_Systems.Begin();
+
+    while (node.hasNext())
+    {
+        ParticleSystem* p = *node;
+        float remainingTime = p->GetRemainingTime();
+        if (remainingTime > maxRemainingTime)
+        {
+            maxRemainingTime = remainingTime;
+        }
+        node.Step();
+    }
+
+    return maxRemainingTime;
+}
+
+void ComputeAscendingJointPosition(nlVector3& out, const cPoseAccumulator* pPose,
+    u32 uJointID, float fVelocity, float fcurrentTime)
+{
+    float fsetDistance = fVelocity * fcurrentTime;
+    cSHierarchy* pHier = pPose->m_BaseSHierarchy;
+    int jointIndex = pHier->GetNodeIndexByID(uJointID);
+    int parentIndex = pHier->GetParent(jointIndex);
+
+    while (parentIndex != -1)
+    {
+        const nlMatrix4& jointMat = pPose->GetNodeMatrix(jointIndex);
+        const nlMatrix4& parentMat = pPose->GetNodeMatrix(parentIndex);
+        nlVector3 v;
+        nlVec3Sub(v, parentMat.GetTranslation(), jointMat.GetTranslation());
+        float dist = nlVec3Length(v);
+
+        if (dist >= fsetDistance)
+        {
+            float fInterp = fsetDistance / dist;
+            nlVecLerp(out, jointMat.GetTranslation(), parentMat.GetTranslation(), fInterp);
+            break;
+        }
+
+        fsetDistance -= dist;
+        jointIndex = parentIndex;
+        parentIndex = pHier->GetParent(parentIndex);
+    }
+
+    if (parentIndex == -1)
+    {
+        const nlMatrix4& jointMat = pPose->GetNodeMatrix(jointIndex);
+        out = jointMat.GetTranslation();
+    }
+}
+
+bool EmissionController::IsLingering() const
+{
+    return m_bLingering;
+}
+
+void EmissionController::ComputePositionAndVelocity(EffectsSpec& spec, nlVector3& pos, nlVector3& vel)
+{
+    pos = m_vPosition;
+    vel = m_vVelocity;
+
+    if (mPositionCallback)
+    {
+        pos = mPositionCallback(*this, spec);
+    }
+    else if (spec.m_eAttach == FXBind_Joint || spec.m_eAttach == 3)
+    {
+        if (spec.m_eJointBinding == JB_Ascend && m_pPose != 0)
+        {
+            vel.x = 0.0f;
+            vel.y = 0.0f;
+            vel.z = 0.0f;
+
+            ComputeAscendingJointPosition(pos, m_pPose,
+                m_uJointIDOverride == 0 ? spec.m_uJointID : m_uJointIDOverride,
+                spec.m_fJointVelocity, m_Age);
+        }
+        else if (m_pPose != 0)
+        {
+            unsigned int jointID = spec.m_uJointID;
+            if (m_pAnimController != 0 && m_pAnimController->m_bMirror)
+            {
+                cSHierarchy* pHier = m_pPose->m_BaseSHierarchy;
+                int nodeIndex = pHier->GetNodeIndexByID(jointID);
+                jointID = pHier->GetNodeID(pHier->GetMirroredNode(nodeIndex));
+            }
+
+            const nlMatrix4& mat = m_pPose->GetNodeMatrixByHashID(
+                m_uJointIDOverride == 0 ? jointID : m_uJointIDOverride);
+            pos = mat.GetTranslation();
+        }
+        else if (!m_bPoseErrorDisplayed)
+        {
+            m_pManager->AddError("No Pose Buffer To Play Effect - playing at default position\n");
+            m_bPoseErrorDisplayed = true;
+        }
+    }
+
+    if (m_pManager->mSnapToGround && spec.m_bGround)
+    {
+        pos.z = m_fGround + m_pManager->GetShadowHeight();
+    }
+    pos.z += spec.m_fOffset;
+}
+
+bool fxUpdateParticleSystem(
+    EmissionController* controller, ParticleSystem* pSys, int& numSys, float dt)
+{
+    pSys->m_aFacing = controller->m_aFacing;
+    EffectsSpec* pSpec = pSys->m_pSpec;
+
+    if (pSpec->m_uTerrainID != 0 && pSpec->m_uTerrainID != fxGetTerrain())
+    {
+        return true;
+    }
+
+    numSys++;
+    pSys->m_uLayer = pSpec->m_uLayer;
+
+    nlVector3 pos = controller->m_vPosition;
+    nlVector3 vel = controller->m_vVelocity;
+    controller->ComputePositionAndVelocity(*pSpec, pos, vel);
+    pSys->m_vPosition = pos;
+    pSys->m_vVelocity = vel;
+    controller->UpdateParticleSystemDirection(pSpec, pSys);
+
+    pSys->UpdateCoordSys();
+    pSys->m_bVisible = controller->m_bVisible;
+    return pSys->Update(dt);
+}
+
+void EmissionController::UpdateParticleSystemDirection(EffectsSpec* pSpec, ParticleSystem* pSys)
+{
+    if (pSpec->m_nForwardAxis == FX_FORWARD_DIRECTION || m_pPose == 0)
+    {
+        pSys->m_vForward = m_vDirection;
+        return;
+    }
+
+    nlVector4 dir;
+    switch (pSpec->m_nForwardAxis)
+    {
+    case FX_FORWARD_POSITIVE_X:
+        nlVec4Set(dir, 1.0f, 0.0f, 0.0f, 0.0f);
+        break;
+    case FX_FORWARD_POSITIVE_Y:
+        nlVec4Set(dir, 0.0f, 1.0f, 0.0f, 0.0f);
+        break;
+    case FX_FORWARD_POSITIVE_Z:
+        nlVec4Set(dir, 0.0f, 0.0f, 1.0f, 0.0f);
+        break;
+    case FX_FORWARD_NEGATIVE_X:
+        nlVec4Set(dir, -1.0f, 0.0f, 0.0f, 0.0f);
+        break;
+    case FX_FORWARD_NEGATIVE_Y:
+        nlVec4Set(dir, 0.0f, -1.0f, 0.0f, 0.0f);
+        break;
+    case FX_FORWARD_NEGATIVE_Z:
+        nlVec4Set(dir, 0.0f, 0.0f, -1.0f, 0.0f);
+        break;
+    }
+
+    u32 jointID = pSpec->m_uJointID;
+    if (m_pAnimController != 0 && m_pAnimController->m_bMirror)
+    {
+        cSHierarchy* pHier = m_pPose->m_BaseSHierarchy;
+        int nodeIndex = pHier->GetNodeIndexByID(jointID);
+        jointID = pHier->GetNodeID(pHier->GetMirroredNode(nodeIndex));
+    }
+
+    const nlMatrix4& mat = m_pPose->GetNodeMatrixByHashID(
+        m_uJointIDOverride == 0 ? jointID : m_uJointIDOverride);
+    nlMultVectorMatrix(dir, mat);
+    pSys->m_vForward = *(nlVector3*)&dir;
+}
+
+bool EmissionController::Update(float dt)
+{
+    if (m_bDisabled)
+    {
+        return true;
+    }
+
+    dt *= m_TimeScale;
+
+    int numDel;
+    int numSys;
+    UserEffectInfo info;
+    numSys = 0;
+    numDel = 0;
+
+    if (m_Replaying)
+    {
+        dt = m_ReplayDeltaTime;
+    }
+    else
+    {
+        m_Age += dt;
+    }
+
+    bool positionChanged = false;
+    if (mUpdateCallback)
+    {
+        nlVector3 oldPosition = m_vPosition;
+        mUpdateCallback(*this);
+        if (!nlNear(m_vPosition, oldPosition))
+        {
+            positionChanged = true;
+        }
+    }
+
+    if (dt <= 0.0f)
+    {
+        if (positionChanged)
+        {
+            dt = 0.0f;
+        }
+        else
+        {
+            return true;
+        }
+    }
+
+    nlDLListIterator<ParticleSystem*> iterator;
+    iterator = m_Systems.Begin();
+    while (iterator.hasNext())
+    {
+        ParticleSystem* pSys = *iterator;
+        if (!fxUpdateParticleSystem(this, pSys, numSys, dt))
+        {
+            m_Systems.Remove(&iterator);
+            delete pSys;
+            numDel++;
+        }
+        else
+        {
+            iterator.Step();
+        }
+    }
+
+    bool isFinished = numSys == numDel;
+    if (isFinished && mFinishedCallback)
+    {
+        mFinishedCallback(*this, 1);
+    }
+
+    if (m_nUserEffects > 0)
+    {
+        info.pv3Position = &m_vPosition;
+        info.pv3Direction = &m_vDirection;
+        for (int i = 0; i < m_nUserEffects; i++)
+        {
+            if (m_pUserEffects[i] != 0)
+            {
+                m_pUserEffects[i]->Update(dt, &info);
+                isFinished &= m_pUserEffects[i]->IsFinished();
+            }
+        }
+    }
+
+    return !isFinished;
+}
+
+void* fxLoadEntireFileHigh(const char* filename, unsigned long* fileSize)
+{
+    void* buffer = 0;
+    u32 size = 0;
+
+    nlFile* file = nlOpen(filename);
+    if (file != 0)
+    {
+        unsigned int allocSize;
+        size = nlFileSize(file, &allocSize);
+        buffer = nlMalloc(allocSize, 0x20, true);
+        nlRead(file, buffer, size, 0);
+        nlClose(file);
+    }
+
+    if (fileSize != 0)
+    {
+        *fileSize = size;
+    }
+
+    return buffer;
+}
+
+int EmissionController::Render()
+{
+    if (m_bDisabled)
+    {
+        return 0;
+    }
+
+    int numParticles = 0;
+    nlDLListIterator<ParticleSystem*> iterator;
+    iterator = m_Systems.Begin();
+
+    while (iterator.hasNext())
+    {
+        ParticleSystem* pSys = *iterator;
+        GLView* view = (GLView*)m_pContext;
+        numParticles += pSys->m_bVisible ? pSys->RenderAllParticles(view) : 0;
+        iterator.Step();
+    }
+
+    if (m_nUserEffects > 0)
+    {
+        UserEffectInfo info;
+        info.pv3Position = &m_vPosition;
+        info.pv3Direction = &m_vDirection;
+
+        for (int i = 0; i < m_nUserEffects; i++)
+        {
+            if (m_pUserEffects[i] != 0 && !m_pUserEffects[i]->IsFinished())
+            {
+                m_pUserEffects[i]->Render(&info, (GLView*)m_pContext);
+            }
+        }
+    }
+
+    return numParticles;
+}
+
+void EmissionController::SetUpdateCallback(
+    const Function1<void, EmissionController&>& ucb)
+{
+    mUpdateCallback = ucb;
+}
+
+void EmissionController::SetFinishedCallback(
+    const Function2<void, EmissionController&, int>& fcb)
+{
+    mFinishedCallback = fcb;
+}
+
+float EmissionController::GetBoundingRadius()
+{
+    float maxRadius = 0.0f;
+    nlDLListIterator<ParticleSystem*> node;
+    node = m_Systems.Begin();
+
+    while (node.hasNext())
+    {
+        ParticleSystem* system = *node;
+        float radius = system->m_pTemplate->GetBoundingRadius();
+        if (radius > maxRadius)
+        {
+            maxRadius = radius;
+        }
+        node.Step();
+    }
+
+    return maxRadius;
+}

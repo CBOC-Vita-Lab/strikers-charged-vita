@@ -1,0 +1,488 @@
+#include "revolution/types.h"
+#include "revolution/vi_fwd.h"
+#include "NL/nlDLListContainer.inl"
+#include "NL/plat/PlatPadManager.h"
+#include "Game/SH/SHNavigation.h"
+#include "NL/nlFunction.inl"
+#include "Game/GameSceneManager.h"
+#include "Game/SH/SHTitleScreen.h"
+#include "np/boot.h"
+#include "Game/Render/RLViewLayers.h"
+#include "Game/FE/FEAudio.h"
+
+#include "Game/DB/CharacterInfo.h"
+#include "Game/DB/GameProgress.h"
+#include "Game/DB/SaveLoad.h"
+#include "Game/DB/StadiumInfo.h"
+#include "Game/FE/feFinder.h"
+#include "Game/FE/feInput.h"
+#include "Game/FE/feMusic.h"
+#include "Game/FE/fePopupMenu.h"
+#include "Game/FE/fePresentation.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/GameInfo.h"
+#include "Game/Render/FrontEndPresentation.h"
+#include "Game/TweakRegistry.h"
+#include "NL/globalpad.h"
+#include "NL/nlBind.h"
+#include "NL/nlConfig.h"
+#include "NL/nlMath.h"
+#include "Game/FE/feDPD.h"
+#include "Game/SH/SHLoading.h"
+#include "Game/SH/SHMoviePlayer.h"
+#include "Game/SharedStaticStorage.h"
+#include "Game/main.h"
+
+static bool sTitleDimmingTimeSet;
+
+extern const int gTitleUnlockInputSequence[10] = {
+    13, 14, 13, 14, 11, 12, 0, 1, 2, 0,
+};
+
+void StartTitleToMainMenuTransition()
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+    FrontEndPresentation::GetInstance()->Call("TransitionTitleScreenToMainMenu");
+    FEAudio::PlayAnimAudioEvent(0x80060B2D, 0, 0, 1);
+}
+
+TitleScene::TitleScene(ScreenMovement movement)
+    : m_fTimeElapsed(0.0f)
+    , mControllerComponent()
+    , mStartedDemo(false)
+    , mStartedMovie(false)
+    , mInitialized(false)
+    , mPointerOverStartButton(false)
+    , mMovement(movement)
+{
+    for (int i = 0; i < 9; ++i)
+    {
+        mUnlockInputSequence[i] = gTitleUnlockInputSequence[i];
+        mUnlockInputEntered[i] = false;
+    }
+
+    if (!sTitleDimmingTimeSet)
+    {
+        VISetTimeToDimming(VI_DM_15M);
+        sTitleDimmingTimeSet = true;
+    }
+
+    LoadMemoryCardIconData();
+}
+
+TitleScene::~TitleScene()
+{
+}
+
+void TitleScene::SceneCreated()
+{
+    NpBootMark("title screen");
+    if (IsWidescreen())
+    {
+        mPresentation->SetActiveSlide("widescreen", true);
+    }
+    else
+    {
+        mPresentation->SetActiveSlide("regular", true);
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+
+    mTextPressStart = FEFinder<TLComponentInstance, 2>::Find<TLSlide>(
+        mPresentation->m_currentSlide,
+        nlStringLowerHash("Layer2"),
+        nlStringLowerHash("Component2"),
+        0,
+        0,
+        0,
+        0);
+
+    FEMusic::StartStreamIfDifferent(0);
+    SetPointerEnabled(0);
+    SHNavigation* object = GetNavigationScene();
+    if (object != 0)
+    {
+        object->SetButtons(NAVIGATION_BUTTON_NONE, true);
+    }
+
+    if (mMovement != SCREEN_BACK)
+    {
+        FEAudio::PlayAnimAudioEvent(0x26894C84, 0, 0, 1);
+    }
+}
+
+inline void TitleScene::InitializePointerButtons()
+{
+    typedef Detail::MemFunImpl<void, void (TitleScene::*)(int, void*)> PointerMethod;
+    typedef BindExp3<void, PointerMethod, TitleScene*, Placeholder<0>, Placeholder<1> >
+        PointerBinding;
+    FEPointerListener::Callback enter(
+        PointerBinding(MemFun(&TitleScene::OnControllerPointerEnter), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback leave(
+        PointerBinding(MemFun(&TitleScene::OnControllerPointerLeave), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback select(
+        PointerBinding(MemFun(&TitleScene::OnControllerPointerPress), this, Placeholder<0>(), Placeholder<1>()));
+
+    mControllerComponent.SetInstanceBounds(mTextPressStart, true, 0.0f, 0.0f, 1.0f, 1.0f);
+    mControllerComponent.SetPointerEnterCallback(enter);
+    mControllerComponent.SetPointerLeaveCallback(leave);
+    mControllerComponent.SetPointerPressCallback(select);
+}
+
+void TitleScene::Update(float dt)
+{
+    BaseSceneHandler::Update(dt);
+    m_fTimeElapsed += dt;
+    if (m_fTimeElapsed < 1.5f)
+        return;
+
+    if (!mInitialized)
+    {
+        InitializePointerButtons();
+
+        for (int i = 0; i < 4; ++i)
+        {
+            GetPointerInstance(i)->SetActiveSlide("cursor", true, false);
+        }
+        mInitialized = true;
+    }
+
+    if (mStartedDemo)
+        return;
+
+    float demoTimeout = GetConfigFloat(Config::Global(), "fe_demo_mode_time_out", 60.0f);
+    if (GetTweakBool("/user/dosoak", false))
+    {
+        if (GameInfoManager::Instance()->mSoakDemoMatchEnabled && GetTweakBool("/user/dosoak", false))
+        {
+            StartDemoMatch();
+        }
+        m_fTimeElapsed = 0.0f;
+        mStartedDemo = true;
+    }
+    else if (GetTweakBool("/user/Smoke Test", false)
+        && GetTweakBool("/user/Smoke Test FE", false)
+        && m_fTimeElapsed >= demoTimeout)
+    {
+        GameInfoManager::Instance()->SetMode(GameInfoManager::GM_FRIENDLY, false);
+        SuperLoadingScene* scene = static_cast<SuperLoadingScene*>(
+            GameSceneManager::Instance()->Push(SCENE_SUPER_LOADING, SCREEN_NOTHING, true));
+        scene->mType = SuperLoadingScene::TT_IN;
+        m_fTimeElapsed = 0.0f;
+        mStartedDemo = true;
+    }
+
+    for (int pad = 0; pad < 4; ++pad)
+    {
+        TLComponentInstance* pointer = GetPointerInstance(pad);
+        if ((unsigned int)pad != gFEControllerIndex)
+        {
+            pointer->SetActiveSlide("waiting", true, false);
+            continue;
+        }
+
+        if (m_fTimeElapsed > 160.0f)
+        {
+            FEMusic::StopStream();
+            SetPointerEnabled(false);
+            IntroMovieScene* scene = static_cast<IntroMovieScene*>(
+                GameSceneManager::Instance()->Push(SCENE_INTRO_MOVIE, SCREEN_NOTHING, true));
+            if (scene != 0)
+            {
+                scene->ResetMoviePlayer();
+            }
+            mStartedDemo = true;
+            m_fTimeElapsed = 0.0f;
+            return;
+        }
+
+        pointer->SetActiveSlide("A", true, false);
+        if (g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0))
+        {
+            OnControllerPointerPress(pad, 0);
+        }
+
+        bool acceptedInput = false;
+        for (int input = 0; input < 6; ++input)
+        {
+            if (!mUnlockInputEntered[input])
+            {
+                if (g_pFEInput->JustPressed(
+                        (eFEINPUT_PAD)pad, mUnlockInputSequence[input], true, 0))
+                {
+                    mUnlockInputEntered[input] = true;
+                    acceptedInput = true;
+                    break;
+                }
+                else if (g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1F, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x29, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x28, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x2D, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x2C, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x30, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x31, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0C, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0B, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0D, true, 0)
+                    || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0E, true, 0))
+                {
+                    for (int reset = 0; reset < 6; ++reset)
+                    {
+                        mUnlockInputEntered[reset] = false;
+                    }
+                }
+            }
+        }
+
+        if (!acceptedInput
+            && (g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1F, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x29, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x28, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x2D, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x2C, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x30, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x31, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0C, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0B, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0D, true, 0)
+                || g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x0E, true, 0)))
+        {
+            for (int reset = 0; reset < 6; ++reset)
+            {
+                mUnlockInputEntered[reset] = false;
+            }
+        }
+
+        bool sequenceReady = true;
+        for (int input = 0; input < 6; ++input)
+        {
+            sequenceReady = sequenceReady && mUnlockInputEntered[input];
+        }
+
+        if (sequenceReady && g_pPlatPadManager->type[pad] == 2)
+        {
+            WiiFreestylePadStatus status = *g_pPlatPadManager->GetFreestyleStatus(pad);
+            float remoteAcceleration = status.kpad.acc_speed;
+            float freestyleAcceleration = status.kpad.ex_status.fs.acc_speed;
+
+            for (int input = 6; input < 9; ++input)
+            {
+                if (!mUnlockInputEntered[input])
+                {
+                    switch (mUnlockInputSequence[input])
+                    {
+                    case 1:
+                        if (remoteAcceleration > 2.0f)
+                            mUnlockInputEntered[input] = true;
+                        break;
+                    case 0:
+                        if (freestyleAcceleration > 2.0f)
+                            mUnlockInputEntered[input] = true;
+                        break;
+                    case 2:
+                        if (freestyleAcceleration > 2.0f && remoteAcceleration > 2.0f)
+                            mUnlockInputEntered[input] = true;
+                        break;
+                    }
+                }
+            }
+
+            for (int input = 0; input < 9; ++input)
+            {
+                sequenceReady = sequenceReady && mUnlockInputEntered[input];
+            }
+
+            if (sequenceReady && !GetUnlockAll())
+            {
+                SetUnlockAll(true);
+                FEAudio::PlayAnimAudioEvent(0xCF37DAC7, 0, 0, true);
+                for (int input = 0; input < 9; ++input)
+                {
+                    mUnlockInputEntered[input] = false;
+                }
+            }
+        }
+    }
+}
+
+static inline int PickRandomCaptain(bool e3Build)
+{
+    while (true)
+    {
+        int captain = nlRandom(12, &nlDefaultSeed);
+        int availability = GetCharacterInfo(GetCharacterIndexFromCaptain(captain)).mRandomSelectionAvailability;
+        if ((e3Build && availability == 1) || (!e3Build && availability != 0))
+            return captain;
+    }
+}
+
+static inline int PickRandomSidekick(bool e3Build)
+{
+    while (true)
+    {
+        int sidekick = nlRandom(8, &nlDefaultSeed);
+        if (sidekick == 3)
+            continue;
+        int availability = GetCharacterInfo(GetCharacterIndexFromSidekick(sidekick)).mRandomSelectionAvailability;
+        if ((e3Build && availability == 1) || (!e3Build && availability != 0))
+            return sidekick;
+    }
+}
+
+void TitleScene::StartDemoMatch()
+{
+    GameInfoManager* gameInfo = GameInfoManager::Instance();
+    gameInfo->SetMode(GameInfoManager::GM_DEMO, false);
+
+    int homeId = PickRandomCaptain(g_e3_Build);
+    int awayId = homeId;
+    while (homeId == awayId)
+    {
+        awayId = PickRandomCaptain(g_e3_Build);
+    }
+
+    int homeSkId0 = PickRandomSidekick(g_e3_Build);
+    int homeSkId1 = PickRandomSidekick(g_e3_Build);
+    int homeSkId2 = PickRandomSidekick(g_e3_Build);
+    int awaySkId0 = PickRandomSidekick(g_e3_Build);
+    int awaySkId1 = PickRandomSidekick(g_e3_Build);
+    int awaySkId2 = PickRandomSidekick(g_e3_Build);
+
+    int stadId;
+    do
+    {
+        stadId = nlRandom(17, &nlDefaultSeed);
+    } while (!IsStadiumEnabled(stadId));
+
+    gameInfo->SetStadium(stadId);
+    gameInfo->SetTeam(0, homeId);
+    gameInfo->SetTeam(1, awayId);
+    gameInfo->SetSidekick(0, homeSkId0, 0);
+    gameInfo->SetSidekick(0, homeSkId1, 1);
+    gameInfo->SetSidekick(0, homeSkId2, 2);
+    gameInfo->SetSidekick(1, awaySkId0, 0);
+    gameInfo->SetSidekick(1, awaySkId1, 1);
+    gameInfo->SetSidekick(1, awaySkId2, 2);
+    gameInfo->ResetPlayingSides();
+    GameSceneManager::Instance()->PushLoadingScene(true);
+}
+
+void TitleScene::OnControllerPointerPress(int index, void*)
+{
+    mTextPressStart->SetActiveSlide("down", true, false);
+    mControllerComponent.SetPointerState(POINTER_BUTTON_SELECTED, index);
+    FEAudio::PlayAnimAudioEvent(0x55C84A9D, 0, 0, 1);
+    SetPointerEnabled(1);
+    GameSceneManager::Instance()->Pop();
+    GameInfoManager::Instance()->mUserInfo.mGameplayOptions.OnSettingsUpdated();
+    GameInfoManager::Instance()->mUserInfo.mCheatOptions.OnSettingsUpdated();
+    VISetTimeToDimming(VI_DM_DEFAULT);
+    sTitleDimmingTimeSet = false;
+
+    WPADInfo info;
+    if (WPADGetInfo(index, &info) == WPAD_ERR_OK && info.battery <= 1)
+    {
+        FEPopupMenu* popup = static_cast<FEPopupMenu*>(
+            GameSceneManager::Instance()->Push(SCENE_POPUP_MENU, SCREEN_NOTHING, false));
+        popup->Create(POPUP_LOW_BATTERY, Function<FnVoidVoid>(StartTitleToMainMenuTransition));
+    }
+    else
+    {
+        StartTitleToMainMenuTransition();
+    }
+}
+
+void TitleScene::OnControllerPointerEnter(int index, void*)
+{
+    mTextPressStart->SetActiveSlide("over", true, false);
+    mControllerComponent.SetPointerState(POINTER_BUTTON_HOVER, index);
+    FEAudio::PlayAnimAudioEvent(0xAA73EF32, 0, 0, 1);
+    mPointerOverStartButton = true;
+}
+
+void TitleScene::OnControllerPointerLeave(int index, void*)
+{
+    mTextPressStart->SetActiveSlide("off", true, false);
+    mControllerComponent.SetPointerState(POINTER_BUTTON_NORMAL, index);
+    mPointerOverStartButton = false;
+}
+
+HealthWarningSceneV2::HealthWarningSceneV2()
+    : mWarningPhase(PhaseFadeIn)
+{
+}
+
+HealthWarningSceneV2::~HealthWarningSceneV2()
+{
+}
+
+void HealthWarningSceneV2::SceneCreated()
+{
+}
+
+void HealthWarningSceneV2::Update(float fDeltaT)
+{
+    BaseSceneHandler::Update(fDeltaT);
+
+    switch (mWarningPhase)
+    {
+    case PhaseFadeIn:
+        if (IsWidescreen())
+            mPresentation->SetActiveSlide("fadein_widescreen", true);
+        else
+            mPresentation->SetActiveSlide("fadein_regular", true);
+        mPresentation->Update(0.0f);
+        mWarningPhase = PhaseWaitForInput;
+        break;
+    case PhaseWaitForInput:
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() >= slide->GetDuration())
+        {
+            for (int pad = 0; pad < 4; ++pad)
+            {
+                cGlobalPad* controller = g_pPadManager->GetPad(pad);
+                if (controller != 0 && controller->IsConnected()
+                    && controller->IsPressed(0x1E, true)
+                    && controller->IsPressed(0x1F, true))
+                {
+                    if (IsWidescreen())
+                    {
+                        mPresentation->SetActiveSlide("fadeout_widescreen", true);
+                        mPresentation->Update(0.0f);
+                    }
+                    else
+                    {
+                        mPresentation->SetActiveSlide("fadeout_regular", true);
+                        mPresentation->Update(0.0f);
+                    }
+                    mWarningPhase = PhaseFadeOut;
+                }
+            }
+        }
+        break;
+    }
+    case PhaseFadeOut:
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() >= slide->GetStartTime() + slide->GetDuration())
+        {
+            mWarningPhase = PhaseFinished;
+            GameSceneManager::Instance()->Push(SCENE_MAIN_MENU, SCREEN_FORWARD, true);
+            FrontEndPresentation::GetInstance()->Call("TransitionTitleScreenToMainMenu");
+        }
+        break;
+    }
+    }
+}
+
+#include "Game/FE/feFinderFind_impl.h"
+#include "Game/FE/feFinderDefault_impl.h"

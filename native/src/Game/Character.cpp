@@ -1,0 +1,2697 @@
+#include "NL/nlDLListContainer.inl"
+#define NL_AVL_TREE_DEFER_DELETE_ENTRY
+#include "NL/nlAVLTree.h"
+#undef NL_AVL_TREE_DEFER_DELETE_ENTRY
+
+#include "Game/AI/ShotMeter.h"
+#include "Game/Field.h"
+#include "Game/Game.h"
+#include "Game/Goalie.h"
+#include "Game/GameInfo.h"
+#include "Game/GameTweaks.h"
+#include "Game/MathHelpers.h"
+#include "Game/Terrain.h"
+#include "Game/Render/ElectricFence.h"
+#include "Game/Render/NPCManager.h"
+#include "Game/Render/ShootToScoreMeter.h"
+#include "Game/Physics/PhysicsAIBall.h"
+#include "Game/Character.h"
+#include "Game/CharacterTemplate.h"
+#include "Game/Player.h"
+
+#include "Game/AI/HeadTrack.h"
+#include "Game/AI/AiUtil.h"
+#include "Game/AI/Fielder.h"
+#include "Game/AI/Desire.h"
+#include "Game/AI/Powerups.h"
+#include "Game/AI/FielderActions.h"
+#include "Game/Audio/GameStreams.h"
+#include "Game/DB/StadiumInfo.h"
+#include "Game/Sys/audio.h"
+#include "Game/TweakRegistry.h"
+#include "Game/Team.h"
+#include "Game/AnimInventory.h"
+#include "Game/CharacterTweaks.h"
+#include "Game/Ball.h"
+#include "Game/Render/BirdoEgg.h"
+#include "Game/Render/YoshiEggObject.h"
+#include "Game/Physics/PhysicsYoshiEgg.h"
+#include "Game/Render/BulletBill.h"
+#include "Game/Physics/PhysicsShockwave.h"
+#include "Game/Render/KoopaShellObject.h"
+#include "Game/ExcitementSystem.h"
+#include "Game/BitPacker.h"
+#include "Game/CharacterTriggers.h"
+#include "Game/SAnim/pnBlender.h"
+#include "Game/Blinker.h"
+#include "Game/CharacterEffects.h"
+#include "Game/DB/CharacterInfo.h"
+#include "Game/EventRegistry.h"
+#include "Game/GameEventQueue.h"
+#include "Game/DebugWriteCache.h"
+#include "Game/Effects/EmissionController.h"
+#include "Game/Effects/EmissionManager.h"
+#include "Game/ObjectBlur.h"
+#include "Game/GL/GLInventory.h"
+#include "Game/GL/ShaderSkinMesh.h"
+#include "Game/Physics/CollisionSpace.h"
+#include "Game/Physics/PhysicsCharacter.h"
+#include "Game/Physics/PhysicsColumn.h"
+#include "Game/Physics/PhysicsGoalie.h"
+#include "Game/PoseAccumulator.h"
+#include "Game/SHierarchy.h"
+#include "Game/SAnim/pnSAnimController.h"
+#include "NL/nlBind_impl.h"
+#include "NL/nlFunction.inl"
+#include "NL/nlMain.h"
+#include "NL/nlMath.h"
+#include "NL/nlPrint.h"
+#include "NL/nlString.h"
+#include "NL/gl/glMemory.h"
+#include "NL/gl/glState.h"
+#include "NL/gl/glTexture.h"
+#include "NL/gl/glTextureManager.h"
+#include "NL/gl/glMaterialParameters.h"
+#include "NL/glx/GXCharacterDamageMaterialProgram.h"
+#include "math.h"
+#include <stddef.h>
+#include "Game/SharedStaticStorage.h"
+#include "Game/Audio/RegistryPools.h"
+#include "Game/Physics/Physics.h"
+
+static const nlVector3 v3Zero = { 0.0f, 0.0f, 0.0f };
+
+struct cCharacterSFX
+{
+    u32 m_pad00;
+};
+
+extern u16 g_headTrackSyncLogType;
+
+struct CharAnim
+{
+    void SyncLog(void* context, DebugWriteCache* cache);
+    float m_fFrame;
+    float m_fTotalFrames;
+    float m_fPlaybackSpeedScale;
+    float m_fTime;
+    unsigned int m_nHashID;
+    u32 m_nHS;
+    float m_fDuration;
+    unsigned int m_nNumRootKeys;
+    float m_fLinearSpeed;
+};
+
+inline float ClampMin(float speedRatio, const float min);
+inline float ClampMax(float speedRatio, const float max);
+extern "C" void fn_80015B38(cBall*, bool);
+extern "C" void fn_800156F8(cBall*, cPlayer*);
+
+
+float lbl_806DB5D8 = 12.5f;
+float lbl_806DB5DC = 0.4f;
+float lbl_806DB5E0 = 0.5f;
+float lbl_806DB5E4 = 5.0f;
+float lbl_806DB5E8 = 7.0f;
+float lbl_806DB5EC = 0.5f;
+float lbl_806DB5F0 = 0.8f;
+float lbl_806DB5F4 = 1.5f;
+float lbl_806DB5F8 = 15.0f;
+float lbl_806E0C18;
+float lbl_806E0C1C;
+bool lbl_806E0C20;
+bool lbl_806E0C21;
+unsigned char lbl_806E0C22;
+unsigned long lbl_8056B7B0[10] = {
+    nlStringLowerHash("NLG_DIFFUSE"),
+    nlStringLowerHash("NLG_DETAIL"),
+    nlStringLowerHash("NLG_SPECULAR"),
+    nlStringLowerHash("NLG_BUMPMAP"),
+    nlStringLowerHash("NLG_NORMALMAP"),
+    nlStringLowerHash("NLG_SHADOW"),
+    nlStringLowerHash("NLG_SELFILLUM"),
+    nlStringLowerHash("NLG_GLOSS"),
+    nlStringLowerHash("NLG_RAMP"),
+    nlStringLowerHash("NLG_MASK"),
+};
+nlVector3 g_v3PrevJointPosition = { 0.0f, 0.0f, 0.0f };
+
+extern "C" void fn_8001FE80();
+extern "C" void fn_80020B8C(cFielder* pFielder);
+extern "C" void fn_80020BB0(PlayerAttackData* pEventData);
+extern "C" void fn_80020C70(CollisionPowerupStatsData* pEventData);
+extern "C" void fn_80020CDC(GoalScoredData* pEventData);
+extern "C" void fn_80020E04(MegaStrikeEndData* pEventData);
+extern "C" void fn_80020E1C(CharacterDirectionData*);
+extern "C" void fn_80020E20(ReceiveBallData* pEventData);
+extern "C" void fn_80020EE8(CollisionBulletBillData* pEventData);
+extern "C" void fn_80020FB8(CollisionBulletBillData* pEventData);
+extern "C" void fn_80020FD4(CollisionBulletBillData* pEventData);
+extern "C" void fn_80021050(LightningStrikeData* pEventData);
+extern "C" void fn_80021120(CharacterImpactEvent* pEventData);
+extern "C" void fn_800212A0(CharacterImpactEvent* pEventData);
+extern "C" void fn_8002147C(CollisionPatchData* pEventData);
+extern "C" void fn_80021484(CollisionPlayerFreezeData* pEventData);
+extern "C" void fn_800216C4(CollisionPlayerShellData* pEventData);
+extern "C" void fn_80021924(CollisionPlayerBananaData* pEventData);
+extern "C" void fn_80021B68(CollisionBallShellData* pEventData);
+extern "C" void fn_80021BA8(CollisionBallChainData* pEventData);
+extern "C" void fn_80021BB4(CollisionBallGoalpostData* pEventData);
+extern "C" void fn_80021C98(CollisionPowerupWallData* pEventData);
+extern "C" void fn_80021D70(CollisionKoopaShellGoalieData* pEventData);
+extern "C" void fn_80021DCC(CollisionBirdoEggGoalieData* pEventData);
+extern "C" void fn_80021E30(CollisionKoopaShotBallPlayerData* pEventData);
+extern "C" void fn_80022050(CollisionBirdoShotBallPlayerData* pEventData);
+extern "C" void fn_80022280(CollisionHammerbroShotBallPlayerData* pEventData);
+extern "C" void fn_800224DC(CollisionBallWallData* pEventData);
+extern "C" void fn_80022594(CollisionBallGroundData* pEventData);
+extern "C" void fn_80022614(BallNetmeshEventData*);
+extern "C" void fn_80022664(CollisionPlayerPlayerData* pEventData);
+extern "C" void fn_8002268C(CollisionPlayerWallData* pEventData);
+extern "C" void fn_800226B4(CollisionPlayerBallData* pEventData);
+extern "C" void fn_8002276C();
+extern "C" void fn_800227C8();
+extern "C" void fn_80022810(MegaStrikeMeterData*);
+extern "C" void fn_80022824(cPlayer*);
+extern "C" void fn_80022908();
+extern "C" void fn_80022968(CollisionChainPlayerData* pEventData);
+extern "C" void fn_800229F0(CollisionWindDebrisPlayerData* pEventData);
+extern "C" void fn_80022A78(CollisionThwompPlayerData* pEventData);
+extern "C" void fn_80022A98(CollisionProjectileData* pEventData);
+extern "C" void fn_80022B04(CollisionPatchData* pEventData);
+extern "C" void fn_80022B1C(CollisionProjectileData* pEventData);
+extern "C" void fn_80022BD8(CollisionEggData* pEventData);
+
+inline void cCharacter::CreateWorldMatrix()
+{
+    nlMakeRotationMatrixZ(m_m4WorldMatrix,
+        0.0000958738f * (float)m_DetChar.m_aActualFacingDirection);
+    m_m4WorldMatrix.e2[3][0] = m_DetChar.m_v3Position.x;
+    m_m4WorldMatrix.e2[3][1] = m_DetChar.m_v3Position.y;
+    m_m4WorldMatrix.e2[3][2] = m_DetChar.m_v3Position.z;
+}
+
+static inline Blinker* MakeBlinker(eCharacterClass cc)
+{
+    const char* szBaseName = GetCharacterInfo(cc).mName;
+    char eyesName0[64];
+    char eyesName1[64];
+    char eyesName2[64];
+    nlSNPrintf(eyesName0, 64, "%s/%s_eye0", szBaseName, szBaseName);
+    nlSNPrintf(eyesName1, 64, "%s/%s_eye1", szBaseName, szBaseName);
+    nlSNPrintf(eyesName2, 64, "%s/%s_eye2", szBaseName, szBaseName);
+    unsigned long texture0 = glGetTexture(eyesName0);
+    unsigned long texture1 = glGetTexture(eyesName1);
+    unsigned long texture2 = glGetTexture(eyesName2);
+    if (glTextureLoad(texture0) && glTextureLoad(texture1)
+        && glTextureLoad(texture2))
+    {
+        return new (8, false) Blinker(texture0, texture1, texture2);
+    }
+    return 0;
+}
+
+static inline AnimRetarget* GetCharacterAnimRetarget(const cCharacter* character,
+    const cSAnim* pSAnim)
+{
+    AnimRetarget* result = 0;
+    if (character->m_pAnimRetargetList != 0)
+        result = character->m_pAnimRetargetList->GetAnimRetargetWithSignature(pSAnim);
+    return result;
+}
+
+inline float ClampMin(float speedRatio, const float min)
+{
+    if (speedRatio >= min)
+    {
+        return speedRatio;
+    }
+    return min;
+}
+
+inline float ClampMax(float speedRatio, const float max)
+{
+    if (speedRatio <= max)
+    {
+        return speedRatio;
+    }
+    return max;
+}
+
+inline void cCharacter::SetPlayerScale(float unidentifiedScale)
+{
+    m_DetChar.m_fPlayerScale = unidentifiedScale;
+    m_pPoseAccumulator->m_Scale = unidentifiedScale;
+    float unidentifiedRadius;
+    if (m_eClassType == FIELDER)
+        unidentifiedRadius = fn_8002BFA8(((cFielder*)this)->GetTweaks(), 1.0f);
+    else if (m_eClassType == GOALIE)
+        unidentifiedRadius = ((Goalie*)this)->m_pTweaks->fPhysCapsuleRadius;
+    unidentifiedRadius *= unidentifiedScale;
+    m_pPhysicsCharacter->m_pPlayerPlayerColumn->SetRadius(unidentifiedRadius);
+    m_pPhysicsCharacter->SetBoneVolumeScale(unidentifiedScale);
+}
+
+static inline float CharacterAnimSmoothStep(float x)
+{
+    return (x * (x * x)) * (x * (6.0f * x + (-15.0f)) + 10.0f);
+}
+
+cCharacter::cCharacter(eCharacterClass cc, const int* nModelID,
+    cSHierarchy* pHierarchy, cAnimInventory* pAnimInventory,
+    const CharacterPhysicsData* pPhysicsData, float fPhysicsCapsuleHeight,
+    float fPhysicsCapsuleWidth, AnimRetargetList* pAnimRetargetList,
+    int nIndex, eClassTypes eNewClassType)
+    : m_pPhysicsData(pPhysicsData)
+    , m_ModelType(CHAR_MODEL_NORMAL)
+    , m_pPhysicsCharacter(0)
+    , m_pAnimInventory(pAnimInventory)
+    , m_pPoseAccumulator(0)
+    , m_pPoseTree(0)
+    , m_pAILayer(0)
+    , m_pCurrentAnimController(0)
+    , m_eAnimID(0)
+    , m_pAnimRetargetList(pAnimRetargetList)
+    , m_szEffectsName(0)
+    , m_eClassType(eNewClassType)
+    , m_bIsUsingElectrocutionTexture(false)
+    , m_pCharacterSFX(0)
+    , m_pad0FC(0)
+    , m_uNormalTextureID(0)
+    , m_uSwapTextureID(0)
+    , m_uShockTextureID(0)
+    , m_bTexturesResolved(false)
+    , m_nCharacterIndex(nIndex)
+    , m_Dirt(0.0f)
+    , m_MinDirt(0.0f)
+    , m_pBlurHandler(0)
+    , m_pBlinker(0)
+    , m_fOpacity(1.0f)
+    , m_bShadowVisible(true)
+    , m_bCaughtInPhoto(false)
+    , m_bLeftPropAnimated(false)
+    , m_bRightPropAnimated(false)
+    , m_bHammerTransformFrozen(false)
+    , m_bPacketAVisible(false)
+    , m_bPacketBVisible(false)
+    , m_fMegaBlendRate(0.0f)
+    , m_fMegaBlend(0.0f)
+    , m_fMegaBlendTarget(0.0f)
+    , m_JointPositionCache(16, 16)
+{
+    cSHierarchy* hierarchy0;
+    m_DetChar.m_eCharacterClass = cc;
+    m_pCharacterInfo = &GetCharacterInfo(cc);
+    if (pPhysicsData != 0)
+    {
+        if (eNewClassType == GOALIE)
+        {
+            PhysicsGoalie* goalie = new (8, false)
+                PhysicsGoalie(fPhysicsCapsuleWidth, fPhysicsCapsuleHeight);
+            m_pPhysicsCharacter = goalie;
+        }
+        else
+        {
+            m_pPhysicsCharacter = new (8, false)
+                PhysicsCharacter(fPhysicsCapsuleWidth, fPhysicsCapsuleHeight);
+        }
+        m_pPhysicsCharacter->m_pAICharacter = this;
+    }
+    m_m4WorldMatrix.SetIdentity();
+    SetPosition(v3Zero);
+    m_DetChar.m_v3Velocity = v3Zero;
+    m_pPhysicsCharacter->SetCharacterVelocityXY(m_DetChar.m_v3Velocity);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        if (nModelID[i] != 0)
+        {
+            GLInventory& glInventory = *glGetCurrentResourcePool()->m_inventory;
+            m_pSkinMesh[i] = glInventory.MakeSkinMesh(
+                nModelID[i], pHierarchy);
+        }
+        else
+        {
+            m_pSkinMesh[i] = 0;
+        }
+    }
+
+    m_pPoseAccumulator = new (8, false) cPoseAccumulator(pHierarchy, true);
+    if (pPhysicsData != 0)
+    {
+        m_pPhysicsCharacter->AddBoneVolumes(g_PhysicsWorld,
+            g_CollisionSpace, m_pPoseAccumulator, m_pPhysicsData, 0x80, 0x20);
+        m_szEffectsName = 0;
+    }
+    m_pHeadTrack = new (8, false) cHeadTrack();
+    hierarchy0 = m_pPoseAccumulator->m_BaseSHierarchy;
+    m_nHeadJointIndex = hierarchy0->GetNodeIndexByID(nlStringLowerHash("bip01 head"));
+    hierarchy0 = m_pPoseAccumulator->m_BaseSHierarchy;
+    m_nBip01JointIndex_0xA4 = hierarchy0->GetNodeIndexByID(nlStringLowerHash("bip01"));
+    hierarchy0 = m_pPoseAccumulator->m_BaseSHierarchy;
+    m_nSpine1JointIndex = hierarchy0->GetNodeIndexByID(nlStringLowerHash("bip01 spine1"));
+    hierarchy0 = m_pPoseAccumulator->m_BaseSHierarchy;
+    m_nLFootJointIndex = hierarchy0->GetNodeIndexByID(
+        nlStringLowerHash("bip01 l foot"));
+    hierarchy0 = m_pPoseAccumulator->m_BaseSHierarchy;
+    m_nRFootJointIndex = hierarchy0->GetNodeIndexByID(
+        nlStringLowerHash("bip01 r foot"));
+    m_pCharacterSFX = new (8, false) cCharacterSFX;
+    m_pEffectsTexturing = 0;
+    m_pBlinker = MakeBlinker(m_DetChar.m_eCharacterClass);
+    nlVec3Set(m_v3ScreenPosition, 0.0f, 0.0f, 0.0f);
+    m_v3FrozenHammerTranslation = v3Zero;
+    m_qFrozenHammerRotation.z = 0.0f;
+    m_qFrozenHammerRotation.y = 0.0f;
+    m_qFrozenHammerRotation.x = 0.0f;
+    m_qFrozenHammerRotation.w = 1.0f;
+    m_fFrozenHammerScale = 0.0f;
+    for (int i = 0; i < 4; ++i)
+    {
+        unknown_0x018[i] = false;
+    }
+}
+
+cCharacter::~cCharacter()
+{
+    EmissionManager::Instance()->Destroy((unsigned long)this, 0);
+    m_pEffectsTexturing = 0;
+    if (m_pPhysicsData != 0)
+    {
+        delete m_pPoseTree;
+    }
+    delete m_pPoseAccumulator;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (m_pSkinMesh[i] != 0)
+        {
+            delete m_pSkinMesh[i];
+        }
+    }
+    if (m_pPhysicsCharacter != 0)
+    {
+        delete m_pPhysicsCharacter;
+    }
+    delete m_pHeadTrack;
+    delete m_pCharacterSFX;
+    if (m_pBlinker != 0)
+    {
+        delete m_pBlinker;
+    }
+    m_JointPositionCache.Clear();
+    m_JointPositionCache.GetAllocator()->FreeBlocks();
+}
+
+void cCharacter::SetModelType(int modelType)
+{
+    if (modelType == CHAR_MODEL_NORMAL || m_pSkinMesh[modelType] != NULL)
+    {
+        m_ModelType = modelType;
+    }
+}
+
+bool cCharacter::fn_8001C534(int modelType)
+{
+    return m_pSkinMesh[modelType] != NULL;
+}
+
+GLSkinMesh* cCharacter::GetSkinMesh(int modelType) const
+{
+    GLSkinMesh* skinMesh = m_pSkinMesh[modelType];
+    if (skinMesh != 0)
+    {
+        return skinMesh;
+    }
+    return m_pSkinMesh[0];
+}
+
+void cCharacter::fn_8001C574()
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        unknown_0x018[i] = false;
+    }
+}
+
+void cCharacter::AttachEffect(EmissionController* pEmissionController)
+{
+    pEmissionController->m_uUserData = (u32)this;
+    pEmissionController->SetPoseAccumulator(*m_pPoseAccumulator);
+    pEmissionController->SetAnimController(*m_pCurrentAnimController);
+    pEmissionController->m_aFacing = m_DetChar.m_aActualFacingDirection;
+}
+
+s16 cCharacter::CalcAnimTurnAdjust(unsigned short aFacingDirection,
+    unsigned short aDesiredFacingDirection, int nAnimID, float fParam)
+{
+    unsigned short aAnimRot;
+    cSAnim* const pAnim = m_pAnimInventory->GetAnim(nAnimID);
+    cPN_SAnimController* pAnimController = new cPN_SAnimController(
+        pAnim,
+        GetCharacterAnimRetarget(this, pAnim),
+        m_pAnimInventory->GetPlayMode(nAnimID),
+        NULL,
+        0,
+        m_pAnimInventory->GetMirrored(nAnimID));
+
+    pAnimController->SetTime(0.0f);
+    pAnimController->SetTime(fParam);
+    pAnimController->GetRootRot(&aAnimRot);
+    unsigned short aFinalFacingDirection = aFacingDirection + aAnimRot;
+    delete pAnimController;
+    return (signed short)(aDesiredFacingDirection - aFinalFacingDirection);
+}
+
+s16 cCharacter::GetFacingDeltaToPosition(const nlVector3& position)
+{
+    float dx = position.x - m_DetChar.m_v3Position.x;
+    float dy = position.y - m_DetChar.m_v3Position.y;
+    float angleRad = nlATan2f(dy, dx);
+    float angle16 = 10430.378f * angleRad;
+    u16 targetAngle = (u16)(s32)angle16;
+
+    return (s16)(targetAngle - m_DetChar.m_aActualFacingDirection);
+}
+
+nlVector3& cCharacter::GetJointPosition(int jointIndex) const
+{
+    const nlMatrix4& poseMatrix = m_pPoseAccumulator->GetNodeMatrix(jointIndex);
+    return *(nlVector3*)&poseMatrix.e2[3];
+}
+
+void cCharacter::GetJointPositionFuture(nlVector3* v3Out, int nAnimIndex,
+    int nJointIndex, float fTime, bool bAddRootTrans, bool bAddRootRot,
+    bool bUsePrevPosition, bool bParam4)
+{
+    bool unidentifiedPose = nJointIndex >= 0;
+    bool unidentifiedCache = bParam4 && unidentifiedPose;
+    if (unidentifiedCache)
+    {
+        if (nJointIndex > 50)
+            unidentifiedCache = false;
+        if (fTime > 1.0f)
+            unidentifiedCache = false;
+    }
+
+    nlMatrix4 m4RootMat;
+    m4RootMat.SetIdentity();
+    cPoseAccumulator poseAccumulator(m_pPoseAccumulator->m_BaseSHierarchy, false);
+    cSAnim* pAnim = m_pAnimInventory->GetAnim(nAnimIndex);
+    AnimRetarget* pRetarget = 0;
+    if (m_pAnimRetargetList != 0)
+        pRetarget = m_pAnimRetargetList->GetAnimRetargetWithSignature(pAnim);
+    cPN_SAnimController animController(pAnim, pRetarget, PM_CYCLIC, 0, 0, false);
+    animController.m_bMirror = m_pAnimInventory->GetMirrored(nAnimIndex);
+    animController.SetTime(fTime);
+
+    BitPacker unidentifiedKey;
+    if (unidentifiedCache)
+    {
+        unidentifiedKey.Pack(nAnimIndex, 0, 178);
+        unidentifiedKey.Pack(nJointIndex, 0, 50);
+        unidentifiedKey.Pack(fTime, 0.0f, 1.0f, 0.01f);
+        nlVector3* unidentifiedValue;
+        if (m_JointPositionCache.FindGet(unidentifiedKey.GetBits(), &unidentifiedValue))
+        {
+            static unsigned int lbl_806E0C24;
+            *v3Out = *unidentifiedValue;
+            ++lbl_806E0C24;
+            unidentifiedPose = false;
+        }
+    }
+    if (unidentifiedPose)
+    {
+        poseAccumulator.Pose(animController, m4RootMat);
+        const nlMatrix4& m4NodeMatrix = poseAccumulator.GetNodeMatrix(nJointIndex);
+        *v3Out = *(nlVector3*)&m4NodeMatrix.e2[3][0];
+        if (unidentifiedCache)
+        {
+            m_JointPositionCache.Add(unidentifiedKey.GetBits(), *v3Out);
+            nlVector3* unidentifiedValue;
+            m_JointPositionCache.Find(unidentifiedKey.GetBits(), &unidentifiedValue, 0);
+        }
+    }
+    if (bAddRootRot)
+    {
+        u16 aCurRotation = 0;
+        if (bUsePrevPosition)
+            aCurRotation = m_DetChar.m_aActualFacingDirection;
+        u16 aRootRotation;
+        animController.GetRootRot(&aRootRotation);
+        aCurRotation += aRootRotation;
+        nlMakeRotationMatrixZ(m4RootMat, 0.0000958738f * (float)aCurRotation);
+    }
+    if (bAddRootTrans)
+    {
+        u16 aCurRotation = 0;
+        if (bUsePrevPosition)
+            aCurRotation = m_DetChar.m_aActualFacingDirection;
+        nlVector3 v3RootVelocity;
+        animController.GetRootTrans(&v3RootVelocity, aCurRotation,
+            m_DetChar.m_fMovementScale);
+        v3RootVelocity.z = 0.0f;
+        if (bUsePrevPosition)
+        {
+            v3RootVelocity.x += m_DetChar.m_v3Position.x;
+            v3RootVelocity.y += m_DetChar.m_v3Position.y;
+        }
+        if (nJointIndex < 0)
+        {
+            *v3Out = v3RootVelocity;
+            return;
+        }
+        m4RootMat.SetTranslation(v3RootVelocity);
+    }
+    nlMatrix3 unidentifiedRotation;
+    unidentifiedRotation.e2[0][0] = m4RootMat.e2[0][0];
+    unidentifiedRotation.e2[0][1] = m4RootMat.e2[0][1];
+    unidentifiedRotation.e2[0][2] = m4RootMat.e2[0][2];
+    unidentifiedRotation.e2[1][0] = m4RootMat.e2[1][0];
+    unidentifiedRotation.e2[1][1] = m4RootMat.e2[1][1];
+    unidentifiedRotation.e2[1][2] = m4RootMat.e2[1][2];
+    unidentifiedRotation.e2[2][0] = m4RootMat.e2[2][0];
+    unidentifiedRotation.e2[2][1] = m4RootMat.e2[2][1];
+    unidentifiedRotation.e2[2][2] = m4RootMat.e2[2][2];
+    float desiredScale = m_DetChar.m_fDesiredPlayerScale;
+    nlVec3Scale(*v3Out, desiredScale);
+    nlMultVectorMatrix(*v3Out, *v3Out, unidentifiedRotation);
+    nlVec3Add(*v3Out, *v3Out, m4RootMat.GetTranslation());
+}
+
+void cCharacter::GetCurrentAnimFuture(int nJointIndex, float fTime,
+    nlVector3& v3Out, nlVector3& v3FutureRoot, unsigned short& outFacing)
+{
+    cPN_SAnimController* pAnim = m_pCurrentAnimController;
+    float savedTime;
+    float savedPrevTime = pAnim->m_fPrevTime;
+    savedTime = pAnim->m_fTime;
+    pAnim->SetTime(fTime);
+
+    outFacing = m_DetChar.m_aActualFacingDirection;
+    float movementScale = m_DetChar.m_fMovementScale;
+    m_pCurrentAnimController->GetRootTrans(&v3FutureRoot, outFacing,
+        movementScale);
+    unsigned short rootRot;
+    m_pCurrentAnimController->GetRootRot(&rootRot);
+    outFacing += rootRot;
+    v3FutureRoot.x += m_DetChar.m_v3Position.x;
+    v3FutureRoot.y += m_DetChar.m_v3Position.y;
+    v3FutureRoot.z = 0.0f;
+    if (nJointIndex < 0)
+    {
+        v3Out = v3FutureRoot;
+    }
+    else
+    {
+        cPoseAccumulator pAccumulator(m_pPoseAccumulator->m_BaseSHierarchy, true);
+        pAccumulator.m_Scale = m_DetChar.m_fPlayerScale;
+        nlMatrix4 m;
+        nlMakeRotationMatrixZ(m, 0.0000958738f * (float)outFacing);
+        m.e2[3][0] = v3FutureRoot.x;
+        m.e2[3][1] = v3FutureRoot.y;
+        m.e2[3][2] = v3FutureRoot.z;
+        m.e2[3][3] = 1.0f;
+        pAccumulator.Pose(*m_pCurrentAnimController, m);
+        v3Out = *(nlVector3*)&pAccumulator.GetNodeMatrix(nJointIndex).e2[3][0];
+    }
+    pAnim = m_pCurrentAnimController;
+    pAnim->SetTime(savedPrevTime);
+    pAnim = m_pCurrentAnimController;
+    pAnim->SetTime(savedTime);
+}
+
+nlVector3& cCharacter::GetPrevJointPosition(int jointIndex)
+{
+    nlMatrix4& prevMatrix = m_pPoseAccumulator->m_PrevNodeMatrices[jointIndex];
+    return *(nlVector3*)&prevMatrix.e2[3];
+}
+
+void cCharacter::EndBlur()
+{
+    if (m_pBlurHandler != 0)
+    {
+        m_pBlurHandler->Die(0.0f);
+        m_pBlurHandler = 0;
+    }
+}
+
+bool EmitCharacterComparisonConstants(float value)
+{
+    return nlNear(value, 0.1f);
+}
+
+void cCharacter::InitMovementCoast()
+{
+    m_DetChar.m_eMovementState = MOVEMENT_COAST;
+}
+
+void cCharacter::InitMovementDecelerateExponential(float fDecel)
+{
+    m_DetChar.m_eMovementState = MOVEMENT_DECELERATE_EXPONENTIAL;
+    m_DetChar.m_fDecel = fDecel;
+}
+
+void cCharacter::InitMovementFromAnim(short fDirectionSeekSpeed,
+    const nlVector3& v3AnimMoveAdjust, float fAdjustEndTime, bool bBlended)
+{
+    m_DetChar.m_eMovementState = MOVEMENT_FROM_ANIM;
+    m_DetChar.m_nAnimTurnAdjust = fDirectionSeekSpeed;
+    m_DetChar.m_v3AnimMoveAdjust = v3AnimMoveAdjust;
+    m_DetChar.m_fAnimAdjustBeginTime = m_pCurrentAnimController->m_fTime;
+    m_DetChar.m_fAnimAdjustEndTime = fAdjustEndTime;
+    m_DetChar.m_bFromAnimBlended = bBlended;
+}
+
+void cCharacter::InitMovementFromAnimSeek(
+    float fDirectionSeekSpeed, float fDirectionSeekFalloff)
+{
+    m_DetChar.m_eMovementState = MOVEMENT_FROM_ANIM_SEEK;
+    m_DetChar.m_fDirectionSeekSpeed = fDirectionSeekSpeed;
+    m_DetChar.m_fDirectionSeekFalloff = fDirectionSeekFalloff;
+}
+
+void cCharacter::InitMovementNone(
+    float fDirectionSeekSpeed, float fDirectionSeekFalloff)
+{
+    m_DetChar.m_eMovementState = MOVEMENT_NONE;
+    m_DetChar.m_fDirectionSeekSpeed = fDirectionSeekSpeed;
+    m_DetChar.m_fDirectionSeekFalloff = fDirectionSeekFalloff;
+}
+
+void cCharacter::InitMovementRunning(float fDirectionSeekSpeed,
+    float fDirectionSeekFalloff, float fAccel, float fDecel)
+{
+    m_DetChar.m_eMovementState = MOVEMENT_RUNNING;
+    m_DetChar.m_fDirectionSeekSpeed = fDirectionSeekSpeed;
+    m_DetChar.m_fDirectionSeekFalloff = fDirectionSeekFalloff;
+    m_DetChar.m_fAccel = fAccel;
+    m_DetChar.m_fDecel = fDecel;
+}
+
+void cCharacter::InitMovementRunningNoTurn(float fAccel, float fDecel)
+{
+    m_DetChar.m_eMovementState = MOVEMENT_RUNNING_NO_TURN;
+    m_DetChar.m_fAccel = fAccel;
+    m_DetChar.m_fDecel = fDecel;
+}
+
+void cCharacter::InitMovementStrafing(float fDirectionSeekSpeed,
+    float fDirectionSeekFalloff, float fAccel, float fDecel)
+{
+    m_DetChar.m_eMovementState = MOVEMENT_STRAFING;
+    m_DetChar.m_fDirectionSeekSpeed = fDirectionSeekSpeed;
+    m_DetChar.m_fDirectionSeekFalloff = fDirectionSeekFalloff;
+    m_DetChar.m_fAccel = fAccel;
+    m_DetChar.m_fDecel = fDecel;
+}
+
+void cCharacter::MatchAnimSpeedToCharacterSpeed(unsigned int nParam,
+    cPN_SAnimController* pController)
+{
+    cCharacter* pChar = (cCharacter*)nParam;
+    if (pChar->m_DetChar.m_eMovementState != MOVEMENT_FROM_ANIM
+        && pChar->m_DetChar.m_eMovementState != MOVEMENT_FROM_ANIM_SEEK)
+    {
+        float min = 0.6f;
+        float max = 1.4f;
+        pController->m_fPlaybackSpeedScale = ClampMax(ClampMin(
+            pChar->m_DetChar.m_fActualSpeed / pController->m_pSAnim->GetLinearSpeed(),
+            min), max);
+    }
+}
+
+cPN_SAnimController* cCharacter::NewAnimController(int animID, bool bRestartCyclic, bool bForceMirrorSwap, void (*funcPlaybackSpeedCallback)(unsigned int, cPN_SAnimController*), unsigned int nPlaybackSpeedCallbackParam)
+{
+    bool restartCyclic = bRestartCyclic;
+    bool forceMirrorSwap = bForceMirrorSwap;
+    void (*playbackSpeedCallback)(unsigned int, cPN_SAnimController*) = funcPlaybackSpeedCallback;
+    unsigned int playbackSpeedCallbackParam = (unsigned int)this;
+
+    if (m_pAnimInventory->GetMatchCharacterSpeed(animID))
+    {
+        playbackSpeedCallback = MatchAnimSpeedToCharacterSpeed;
+    }
+    else if (funcPlaybackSpeedCallback != 0)
+    {
+        playbackSpeedCallbackParam = nPlaybackSpeedCallbackParam;
+    }
+
+    bool bMirrorSwap = false;
+    float startTime = 0.0f;
+
+    if (m_pCurrentAnimController != 0)
+    {
+        if (m_eClassType == FIELDER)
+        {
+            if (restartCyclic || m_pAnimInventory->GetPlayMode(m_eAnimID) == PM_HOLD)
+            {
+                if (m_pAnimInventory->GetPlayMode(animID) == PM_CYCLIC)
+                {
+                    if (m_pAnimInventory->GetEndPhase(m_eAnimID) == GOOFY_FOOT)
+                    {
+                        bMirrorSwap = true;
+                    }
+                    else if (m_pAnimInventory->GetMirrored(m_eAnimID))
+                    {
+                        bMirrorSwap = true;
+                    }
+                }
+                else if (m_pAnimInventory->GetPlayMode(animID) == PM_HOLD)
+                {
+                    bMirrorSwap = forceMirrorSwap;
+                }
+            }
+            else if (m_pAnimInventory->GetPlayMode(m_eAnimID) == PM_CYCLIC)
+            {
+                if (m_pAnimInventory->GetPlayMode(animID) == PM_CYCLIC)
+                {
+                    startTime = m_pCurrentAnimController->m_fTime;
+                    if (m_pAnimInventory->GetMirrored(m_eAnimID) != m_pAnimInventory->GetMirrored(animID))
+                    {
+                        bMirrorSwap = true;
+                    }
+                }
+                else if (forceMirrorSwap)
+                {
+                    bMirrorSwap = true;
+                }
+            }
+        }
+        else
+        {
+            if (restartCyclic || m_pAnimInventory->GetPlayMode(m_eAnimID) == PM_HOLD)
+            {
+                if (m_pAnimInventory->GetPlayMode(animID) == PM_CYCLIC)
+                {
+                    if (m_pAnimInventory->GetEndPhase(m_eAnimID) == LEFT_FOOT_DOWN)
+                    {
+                        startTime = 0.5f;
+                    }
+                    else
+                    {
+                        startTime = 0.0f;
+                    }
+                }
+            }
+            else if (m_pAnimInventory->GetPlayMode(m_eAnimID) == PM_CYCLIC)
+            {
+                if (m_pAnimInventory->GetPlayMode(animID) == PM_CYCLIC)
+                {
+                    startTime = m_pCurrentAnimController->m_fTime;
+                    if (m_pAnimInventory->GetEndPhase(m_eAnimID) != m_pAnimInventory->GetEndPhase(animID))
+                    {
+                        startTime += 0.5f;
+                        if (startTime >= 1.0f)
+                        {
+                            startTime -= 1.0f;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    cSAnim* anim = m_pAnimInventory->GetAnim(animID);
+    cPN_SAnimController* controller = new cPN_SAnimController(
+        anim, GetCharacterAnimRetarget(this, anim),
+        m_pAnimInventory->GetPlayMode(animID), playbackSpeedCallback,
+        playbackSpeedCallbackParam,
+        bMirrorSwap ? !m_pAnimInventory->GetMirrored(animID) : m_pAnimInventory->GetMirrored(animID));
+    controller->SetTime(startTime);
+
+    return controller;
+}
+
+void cCharacter::PostPhysicsUpdate()
+{
+    m_DetChar.m_v3PrevPosition = m_DetChar.m_v3Position;
+    m_pPhysicsCharacter->GetCharacterPositionXY(&m_DetChar.m_v3Position);
+    m_pPhysicsCharacter->GetCharacterVelocityXY(&m_DetChar.m_v3Velocity);
+
+    float velY = m_DetChar.m_v3Velocity.y;
+    float velX = m_DetChar.m_v3Velocity.x;
+    m_DetChar.m_fActualSpeed =
+        nlSqrt(nlGetLengthSquared1D(velX) + nlGetLengthSquared1D(velY), true);
+
+    CreateWorldMatrix();
+
+    m_pPoseAccumulator->Pose(*m_pPoseTree, m_m4WorldMatrix);
+    m_pPhysicsCharacter->UpdatePose(
+        m_pPoseAccumulator, m_DetChar.m_v3Position.z, false);
+}
+
+void cCharacter::PoseSkinMesh(cPoseAccumulator* pPoseAccumulator, int modelType)
+{
+    if (m_pSkinMesh[modelType] == NULL)
+    {
+        modelType = CHAR_MODEL_NORMAL;
+    }
+    if (!unknown_0x018[modelType])
+    {
+        m_pSkinMesh[modelType]->Pose(pPoseAccumulator);
+        unknown_0x018[modelType] = true;
+    }
+}
+
+void cCharacter::Unknown7(float dt)
+{
+}
+
+void cCharacter::PreUpdate(float dt)
+{
+}
+
+void cCharacter::PrePhysicsUpdate()
+{
+}
+
+void cCharacter::ResetAnimState()
+{
+    SetAnimState(0, false, 0.0f, false, false);
+    m_pCurrentAnimController->SetTime(0.0f);
+    InitMovementNone(0.0f, 0.0f);
+}
+
+void cCharacter::ResetEffects()
+{
+    EmissionManager::Instance()->Destroy((unsigned long)this, 0);
+    m_pEffectsTexturing = 0;
+}
+
+float cCharacter::SeekSpeedExponential(float currentValue, float targetValue,
+    float responsiveness, float deltaTime)
+{
+    float adjustment;
+    float distance;
+    float difference;
+
+    difference = targetValue - currentValue;
+    distance = fabs(difference);
+
+    if (distance > 0.1f)
+    {
+        adjustment = distance
+                   - (1.0f
+                       / ((responsiveness * deltaTime) + (1.0f / distance)));
+        if (difference > 0.0f)
+        {
+            return currentValue + adjustment;
+        }
+        return currentValue - adjustment;
+    }
+
+    return targetValue;
+}
+
+void cCharacter::SetAnimID(int animID)
+{
+    if (m_eAnimID != animID)
+    {
+        m_eAnimID = animID;
+        ExcitementSystem& excitementSystem = ExcitementSystem::Instance();
+        nlVector3 toBall;
+        nlVec3Sub(toBall, m_DetChar.m_v3Position, g_pBall->m_v3Position);
+        if (nlVec3LengthSquared(toBall) < excitementSystem.mMaxBallDistanceSq)
+        {
+            if (m_eClassType == GOALIE)
+            {
+                u8 value = excitementSystem.mGoalieAnimExcitement[(u16)m_eAnimID];
+                if (value != 0)
+                {
+                    excitementSystem.mExcitement += value;
+                    excitementSystem.mExcitementCount++;
+                }
+            }
+            else if (m_eClassType == FIELDER)
+            {
+                u8 value = excitementSystem.mFielderAnimExcitement[(u16)m_eAnimID];
+                if (value != 0)
+                {
+                    excitementSystem.mExcitement += value;
+                    excitementSystem.mExcitementCount++;
+                }
+            }
+        }
+    }
+}
+
+void cCharacter::SetAnimState(int animID, bool useBlendTime,
+    float fNonDefaultBlendTime, bool bRestartCyclic, bool bForceMirrorSwap)
+{
+    float finalBlendTime;
+    cPN_SAnimController* newController;
+    cPN_Blender* blender;
+    if (useBlendTime)
+        finalBlendTime = m_pAnimInventory->GetBlendTime(animID);
+    else
+        finalBlendTime = fNonDefaultBlendTime;
+    newController = NewAnimController(animID, bRestartCyclic, bForceMirrorSwap, 0, 0);
+    if (m_pAILayer[0] != 0 && finalBlendTime != 0.0f)
+    {
+        if (m_pAILayer[0]->GetType() == POSE_NODE_BLENDER)
+        {
+            blender = (cPN_Blender*)m_pAILayer[0];
+            if (blender->GetNumChildren() == 2 && blender->m_fBlendTime < 0.001f)
+            {
+                m_pAILayer[0] = blender->GetChild(0);
+                blender->SetChild(0, 0);
+                delete blender;
+            }
+        }
+        blender = new cPN_Blender(m_pAILayer[0], newController, finalBlendTime);
+    }
+    else
+    {
+        delete m_pAILayer[0];
+        blender = (cPN_Blender*)newController;
+    }
+    m_pAILayer[0] = blender;
+    m_pCurrentAnimController = newController;
+    SetAnimID(animID);
+    if (m_eClassType == FIELDER && m_DetChar.m_eCharacterClass == HAMMERBROS)
+    {
+        m_bLeftPropAnimated = false;
+        m_bRightPropAnimated = false;
+        SetHammerTransformFrozen(false);
+    }
+}
+
+void cCharacter::SetFacingDirection(
+    unsigned short dir, bool bSetMovementDirection)
+{
+    m_DetChar.m_aPrevFacingDirection = m_DetChar.m_aActualFacingDirection;
+    m_DetChar.m_aActualFacingDirection = dir;
+    m_pPhysicsCharacter->SetFacingDirection(dir);
+    if (bSetMovementDirection)
+    {
+        m_DetChar.m_aActualMovementDirection = dir;
+    }
+}
+
+void cCharacter::SetPosition(const nlVector3& position)
+{
+    m_DetChar.m_v3Position = position;
+    m_DetChar.m_v3PrevPosition = m_DetChar.m_v3Position;
+    m_pPhysicsCharacter->SetCharacterPositionXY(m_DetChar.m_v3Position);
+}
+
+void cCharacter::SetVelocity(const nlVector3& velocity)
+{
+    m_DetChar.m_v3Velocity = velocity;
+    m_pPhysicsCharacter->SetCharacterVelocityXY(m_DetChar.m_v3Velocity);
+}
+
+bool cCharacter::ShouldStartCrossBlend(int nAnimID)
+{
+    float fCrossBlendTime = 0.5f * m_pAnimInventory->GetBlendTime(nAnimID);
+    return (1.0f - m_pCurrentAnimController->get_fTime()) * m_pCurrentAnimController->m_pSAnim->GetDuration() <= fCrossBlendTime;
+}
+
+void cCharacter::SetDesiredFacingDirection(unsigned short aDirection, bool bParam)
+{
+    m_DetChar.m_aDesiredFacingDirection = aDirection;
+    if (bParam)
+    {
+        m_DetChar.m_aDesiredMovementDirection = aDirection;
+    }
+}
+
+void cCharacter::fn_8001DCE0(unsigned short aDirection)
+{
+    m_DetChar.m_aDesiredMovementDirection = aDirection;
+    if (m_DetChar.m_eMovementState != MOVEMENT_STRAFING)
+    {
+        m_DetChar.m_aDesiredFacingDirection = aDirection;
+    }
+}
+
+void cCharacter::Update(float fDeltaT)
+{
+    if (fDeltaT > 0.0f)
+    {
+        if (m_DetChar.m_tScaleTimer.m_uPackedTime != 0)
+        {
+            if (!m_DetChar.m_tScaleTimer.Countdown(fDeltaT, 0.0f))
+            {
+                float unidentifiedFraction = fDeltaT / m_DetChar.m_tScaleTimer.GetSeconds();
+                unidentifiedFraction = nlMinEquals(unidentifiedFraction, 1.0f);
+                float unidentifiedScale = Interpolate(m_DetChar.m_fPlayerScale,
+                    m_DetChar.m_fDesiredPlayerScale, unidentifiedFraction);
+                SetPlayerScale(unidentifiedScale);
+                m_DetChar.m_fMovementScale = Interpolate(m_DetChar.m_fMovementScale,
+                    m_DetChar.m_fDesiredMovementScale, unidentifiedFraction);
+            }
+            else
+            {
+                SetPlayerScale(m_DetChar.m_fDesiredPlayerScale);
+                m_DetChar.m_tScaleTimer.Clear();
+                m_DetChar.m_fMovementScale = m_DetChar.m_fDesiredMovementScale;
+            }
+        }
+        fn_8001EF78(fDeltaT);
+        UpdateMovementState(fDeltaT);
+    }
+    if (m_bIsUsingElectrocutionTexture)
+    {
+        EmissionManager* unidentifiedManager = EmissionManager::Instance();
+        if (!unidentifiedManager->IsPlaying((unsigned long)this,
+                unidentifiedManager->GetEffectsGroup("electrocution")))
+        {
+            if (m_bIsUsingElectrocutionTexture)
+                m_pEffectsTexturing = 0;
+            m_bIsUsingElectrocutionTexture = false;
+        }
+    }
+    if (lbl_806E0C22 == 1)
+    {
+        float unidentifiedRate = 1.0f / lbl_806DB5F8;
+        if (m_Dirt > 0.0f)
+        {
+            m_Dirt -= unidentifiedRate * fDeltaT;
+            m_Dirt = nlMaxEquals(0.0f, m_Dirt);
+        }
+        if (m_MinDirt > 0.0f)
+        {
+            m_MinDirt -= unidentifiedRate * fDeltaT;
+            m_MinDirt = nlMaxEquals(0.0f, m_MinDirt);
+        }
+    }
+    if (fDeltaT > 0.0f && m_pBlurHandler != 0)
+    {
+        bool bIsZero = nlNear(v3Zero.x, g_v3PrevJointPosition.x)
+            && nlNear(v3Zero.y, g_v3PrevJointPosition.y)
+            && nlNear(v3Zero.z, g_v3PrevJointPosition.z);
+        if (bIsZero)
+            g_v3PrevJointPosition = m_DetChar.m_v3Position;
+        nlVector3 jointPosition;
+        nlVector3 forwardVector;
+        if (m_eClassType == FIELDER)
+        {
+            cSHierarchy* hierarchy = m_pPoseAccumulator->m_BaseSHierarchy;
+            const nlMatrix4& nodeMatrix = m_pPoseAccumulator->GetNodeMatrix(
+                hierarchy->GetNodeIndexByID(nlStringLowerHash("bip01 spine1")));
+            jointPosition = *(nlVector3*)&nodeMatrix.e2[3][0];
+            nlVec3Set(forwardVector,
+                m_DetChar.m_v3Position.x - m_DetChar.m_v3PrevPosition.x,
+                m_DetChar.m_v3Position.y - m_DetChar.m_v3PrevPosition.y,
+                m_DetChar.m_v3Position.z - m_DetChar.m_v3PrevPosition.z);
+        }
+        g_v3PrevJointPosition = jointPosition;
+        m_pBlurHandler->AddViewOrientedPoint(jointPosition, forwardVector);
+    }
+}
+
+bool cCharacter::fn_8001E160()
+{
+    return m_DetChar.m_bOnScreen;
+}
+
+bool cCharacter::IsCaptain() const
+{
+    return m_pCharacterInfo->mCaptainId != -1;
+}
+
+bool cCharacter::fn_8001E184()
+{
+    return fabsf(m_v3ScreenPosition.x) <= 0.95f
+        && fabsf(m_v3ScreenPosition.y) <= 0.95f
+        && fabsf(m_v3ScreenPosition.z) <= 1.0f;
+}
+
+void cCharacter::KillEffect(const EffectsGroup* effectGroup)
+{
+    EmissionManager::Instance()->Destroy(
+        (unsigned long)this, effectGroup);
+}
+
+void cCharacter::EndEffect(const EffectsGroup* effectGroup)
+{
+    EmissionManager::Instance()->Kill((unsigned long)this, effectGroup);
+}
+
+bool cCharacter::IsPlayingEffect(const EffectsGroup* effectGroup) const
+{
+    return EmissionManager::Instance()->IsPlaying(
+        (unsigned long)this, effectGroup);
+}
+
+bool cCharacter::IsEffectDying(const EffectsGroup* effectGroup) const
+{
+    return EmissionManager::Instance()->IsDying(
+        (unsigned long)this, effectGroup);
+}
+
+void cCharacter::fn_8001E304(float fSpeed, float fDeltaT)
+{
+    m_DetChar.m_fActualSpeed = SeekSpeed(m_DetChar.m_fActualSpeed,
+        fSpeed, m_DetChar.m_fAccel, m_DetChar.m_fDecel, fDeltaT);
+    if (m_DetChar.m_fActualSpeed > 25.0f)
+    {
+        m_DetChar.m_fActualSpeed = 25.0f;
+    }
+    nlPolarToCartesian(m_DetChar.m_v3Velocity.x,
+        m_DetChar.m_v3Velocity.y, m_DetChar.m_aActualMovementDirection,
+        m_DetChar.m_fActualSpeed);
+}
+
+void cCharacter::UpdateMovementState(float fDeltaT)
+{
+    float fDesiredSpeed = m_DetChar.m_fDesiredSpeed;
+    float fMinDistanceFromWall = 0.0f;
+    cFielder* pFielder = NULL;
+
+    if (m_eClassType == FIELDER)
+    {
+        pFielder = (cFielder*)this;
+        bool isCharging = pFielder->m_pShotMeter->IsCharging();
+        if (!isCharging)
+        {
+            fDesiredSpeed = pFielder->GetSpeedPowerupAdjusted(m_DetChar.m_fDesiredSpeed);
+        }
+    }
+
+    switch (m_DetChar.m_eMovementState)
+    {
+    case MOVEMENT_COAST:
+    {
+        nlVector3 unidentifiedVelocity = m_DetChar.m_v3Velocity;
+        float mag = unidentifiedVelocity.GetLengthSq2D();
+        if (mag > 625.0f)
+        {
+            nlPolar polar;
+            nlCartesianToPolar(polar, m_DetChar.m_v3Velocity.x, m_DetChar.m_v3Velocity.y);
+            nlPolarToCartesian(m_DetChar.m_v3Velocity.x, m_DetChar.m_v3Velocity.y, polar.a, 25.0f);
+        }
+        if (fabsf(m_DetChar.m_v3Position.y) > 100.0f || fabsf(m_DetChar.m_v3Position.x) > 100.0f)
+        {
+            nlVector3 unidentifiedZero;
+            nlVec3Set(unidentifiedZero, 0.0f, 0.0f, 0.0f);
+            SetVelocity(unidentifiedZero);
+        }
+        break;
+    }
+
+    case MOVEMENT_DECELERATE_EXPONENTIAL:
+    {
+        m_DetChar.m_fActualSpeed = SeekSpeedExponential(m_DetChar.m_fActualSpeed, fDesiredSpeed, m_DetChar.m_fDecel, fDeltaT);
+        nlPolarToCartesian(m_DetChar.m_v3Velocity.x, m_DetChar.m_v3Velocity.y, m_DetChar.m_aActualMovementDirection, m_DetChar.m_fActualSpeed);
+        break;
+    }
+
+    case MOVEMENT_FROM_ANIM:
+    {
+        s16 nAdjust;
+        cPoseNode* pSourceNode;
+        if (m_DetChar.m_bFromAnimBlended)
+        {
+            pSourceNode = *m_pAILayer;
+        }
+        else
+        {
+            pSourceNode = m_pCurrentAnimController;
+        }
+
+        nAdjust = 0;
+        nlVector3 v3ConsumedMove;
+        nlVec3Set(v3ConsumedMove, 0.0f, 0.0f, 0.0f);
+        float adjustTime = m_DetChar.m_fAnimAdjustEndTime - m_DetChar.m_fAnimAdjustBeginTime;
+
+        if (adjustTime > 0.0f)
+        {
+            float smoothStep1 = CharacterAnimSmoothStep((m_pCurrentAnimController->get_fTime() - m_DetChar.m_fAnimAdjustBeginTime) / adjustTime);
+            smoothStep1 = (smoothStep1 <= 1.0f) ? smoothStep1 : 1.0f;
+
+            float smoothStep2 = CharacterAnimSmoothStep((m_pCurrentAnimController->m_fPrevTime - m_DetChar.m_fAnimAdjustBeginTime) / adjustTime);
+            smoothStep2 = (smoothStep2 <= 1.0f) ? smoothStep2 : 1.0f;
+
+            if (smoothStep2 < 1.0f)
+            {
+                float fAdjustPercent = (smoothStep1 - smoothStep2) / (1.0f - smoothStep2);
+                nAdjust = (s16)((float)m_DetChar.m_nAnimTurnAdjust * fAdjustPercent);
+                m_DetChar.m_nAnimTurnAdjust -= nAdjust;
+
+                nlVec3Scale(v3ConsumedMove, m_DetChar.m_v3AnimMoveAdjust, fAdjustPercent);
+                nlVec3Sub(m_DetChar.m_v3AnimMoveAdjust, m_DetChar.m_v3AnimMoveAdjust, v3ConsumedMove);
+            }
+        }
+
+        u16 aRootRotation;
+        pSourceNode->GetRootRot(&aRootRotation);
+        u16 prevFacing = m_DetChar.m_aActualFacingDirection;
+        u16 newFacing = prevFacing + aRootRotation + (u16)nAdjust;
+        SetFacingDirection(newFacing, true);
+
+        float movementScale = m_DetChar.m_fMovementScale;
+        nlVector3 v3RootTrans;
+        pSourceNode->GetRootTrans(
+            &v3RootTrans, m_DetChar.m_aPrevFacingDirection, movementScale);
+        nlVec3Add(v3RootTrans, v3RootTrans, v3ConsumedMove);
+        m_DetChar.m_v3Velocity.x = v3RootTrans.x / fDeltaT;
+        m_DetChar.m_v3Velocity.y = v3RootTrans.y / fDeltaT;
+
+        nlPolar aSpeed;
+        nlCartesianToPolar(aSpeed, m_DetChar.m_v3Velocity.x, m_DetChar.m_v3Velocity.y);
+        m_DetChar.m_fActualSpeed = aSpeed.r;
+        break;
+    }
+
+    case MOVEMENT_FROM_ANIM_SEEK:
+    {
+        u16 aNewFacingDirection = SeekDirection(m_DetChar.m_aActualFacingDirection, m_DetChar.m_aDesiredFacingDirection, m_DetChar.m_fDirectionSeekSpeed, m_DetChar.m_fDirectionSeekFalloff, fDeltaT);
+        SetFacingDirection(aNewFacingDirection, true);
+
+        float movementScale = m_DetChar.m_fMovementScale;
+        nlVector3 v3RootTrans;
+        m_pCurrentAnimController->GetRootTrans(
+            &v3RootTrans, m_DetChar.m_aPrevFacingDirection, movementScale);
+        m_DetChar.m_v3Velocity.x = v3RootTrans.x / fDeltaT;
+        m_DetChar.m_v3Velocity.y = v3RootTrans.y / fDeltaT;
+        break;
+    }
+
+    case MOVEMENT_NONE:
+    {
+        u16 aNewFacingDirection = SeekDirection(m_DetChar.m_aActualFacingDirection, m_DetChar.m_aDesiredFacingDirection, m_DetChar.m_fDirectionSeekSpeed, m_DetChar.m_fDirectionSeekFalloff, fDeltaT);
+        SetFacingDirection(aNewFacingDirection, true);
+
+        m_DetChar.m_fActualSpeed = 0.0f;
+        nlPolarToCartesian(m_DetChar.m_v3Velocity.x, m_DetChar.m_v3Velocity.y, m_DetChar.m_aActualMovementDirection, m_DetChar.m_fActualSpeed);
+        break;
+    }
+
+    case MOVEMENT_RUNNING:
+    {
+        u16 aNewFacingDirection = SeekDirection(m_DetChar.m_aActualMovementDirection, m_DetChar.m_aDesiredMovementDirection, m_DetChar.m_fDirectionSeekSpeed, m_DetChar.m_fDirectionSeekFalloff, fDeltaT);
+
+        int delta = (s16)(aNewFacingDirection - m_DetChar.m_aActualMovementDirection);
+        int maxDelta = (int)(fDeltaT * m_DetChar.m_fDirectionSeekSpeed);
+        int sign = delta >> 31;
+        int absDelta = (sign ^ delta) - sign;
+
+        int unidentifiedLeanThreshold = 182;
+        if (absDelta <= unidentifiedLeanThreshold)
+        {
+            m_DetChar.m_fLeanAmount = 0.0f;
+        }
+        else
+        {
+            m_DetChar.m_fLeanAmount = NormalizeVal((float)absDelta, (float)unidentifiedLeanThreshold, (float)maxDelta);
+            if (delta < 0)
+            {
+                m_DetChar.m_fLeanAmount = -m_DetChar.m_fLeanAmount;
+            }
+        }
+
+        m_DetChar.m_aActualMovementDirection = aNewFacingDirection;
+        if (fDesiredSpeed < 0.1f)
+        {
+            u16 unidentifiedFacing = SeekDirection(m_DetChar.m_aActualFacingDirection, m_DetChar.m_aDesiredFacingDirection, m_DetChar.m_fDirectionSeekSpeed, m_DetChar.m_fDirectionSeekFalloff, fDeltaT);
+            SetFacingDirection(unidentifiedFacing, false);
+        }
+        else
+        {
+            SetFacingDirection(aNewFacingDirection, true);
+        }
+
+        fn_8001E304(fDesiredSpeed, fDeltaT);
+        break;
+    }
+
+    case MOVEMENT_RUNNING_NO_TURN:
+    {
+        fn_8001E304(fDesiredSpeed, fDeltaT);
+        break;
+    }
+
+    case MOVEMENT_STRAFING:
+    {
+        u16 aNewFacingDirection = SeekDirection(m_DetChar.m_aActualFacingDirection, m_DetChar.m_aDesiredFacingDirection, m_DetChar.m_fDirectionSeekSpeed, m_DetChar.m_fDirectionSeekFalloff, fDeltaT);
+        SetFacingDirection(aNewFacingDirection, false);
+
+        m_DetChar.m_aActualMovementDirection = SeekDirection(m_DetChar.m_aActualMovementDirection, m_DetChar.m_aDesiredMovementDirection, m_DetChar.m_fDirectionSeekSpeed, m_DetChar.m_fDirectionSeekFalloff, fDeltaT);
+
+        fn_8001E304(fDesiredSpeed, fDeltaT);
+        break;
+    }
+
+    case MOVEMENT_UNUSED:
+    default:
+        break;
+    }
+
+    if (pFielder != NULL && !fn_80014D38(g_pBall)
+        && pFielder->CanReactToGroundEffects() && pFielder->m_eActionState != ACTION_KNOCKDOWN_REACT)
+    {
+        float unidentifiedSlide = g_pGame->mpTerrain->GetSlideFactor();
+        unidentifiedSlide += pFielder->IsSlippery() ? gSlipperySlideFactor : 0.0f;
+        if (unidentifiedSlide > 1.0f)
+        {
+            unidentifiedSlide = 1.0f;
+        }
+        float unidentifiedBlend = InterpolateClamped(0.0f,
+            gGameTweaks.mFielderTweaks->fTerrainMaxSlipperyMomentum, unidentifiedSlide);
+        nlVector2 unidentifiedDelta;
+        nlVec2Sub(unidentifiedDelta, *(const nlVector2*)&m_DetChar.m_v3PrevVelocity,
+            *(const nlVector2*)&m_DetChar.m_v3Velocity);
+        float unidentifiedLengthSquared = nlVec2LengthSquared(unidentifiedDelta);
+        if (unidentifiedLengthSquared > lbl_806DB5D8 * lbl_806DB5D8)
+        {
+            nlVec2Scale(unidentifiedDelta, unidentifiedDelta,
+                lbl_806DB5D8 * nlRecipSqrt(unidentifiedLengthSquared, true));
+        }
+        nlVector2 unidentifiedPosition = *(const nlVector2*)&m_DetChar.m_v3Position;
+        nlVec2Set(unidentifiedPosition,
+            fDeltaT * unidentifiedDelta.x + unidentifiedPosition.x,
+            fDeltaT * unidentifiedDelta.y + unidentifiedPosition.y);
+        nlVec2Set(*(nlVector2*)&m_DetChar.m_v3Position, unidentifiedPosition.x, unidentifiedPosition.y);
+        if (m_pPhysicsCharacter->m_CanCollideWithWall && unidentifiedSlide > 0.0f)
+        {
+            cField::FixOutOfBoundsPosition(
+                m_DetChar.m_v3Position, fMinDistanceFromWall, false);
+            m_pPhysicsCharacter->SetCharacterPositionXY(m_DetChar.m_v3Position);
+        }
+        PhysicsAIBall* unidentifiedBall = g_pBall->m_pPhysicsBall;
+        if (unidentifiedBall->mbUseTiltForce || unidentifiedBall->mbUseWindForce)
+        {
+            nlVector3 unidentifiedForce;
+            float unidentifiedForceScale;
+            if (unidentifiedBall->mbUseTiltForce && unidentifiedBall->mbUseWindForce)
+            {
+                nlVec3Add(unidentifiedForce, unidentifiedBall->mv3TiltForce, unidentifiedBall->mv3WindForce);
+                unidentifiedForceScale = InterpolateClamped(
+                    lbl_806E0C1C + lbl_806DB5E0, lbl_806E0C18 + lbl_806DB5DC,
+                    pFielder->GetTweaks()->fDefenseSize);
+            }
+            else if (unidentifiedBall->mbUseTiltForce)
+            {
+                unidentifiedForce = unidentifiedBall->mv3TiltForce;
+                unidentifiedForceScale = InterpolateClamped(lbl_806DB5E0, lbl_806DB5DC,
+                    pFielder->GetTweaks()->fDefenseSize);
+            }
+            else
+            {
+                unidentifiedForce = unidentifiedBall->mv3WindForce;
+                unidentifiedForceScale = InterpolateClamped(lbl_806E0C1C, lbl_806E0C18,
+                    pFielder->GetTweaks()->fDefenseSize);
+            }
+            unidentifiedForceScale = InterpolateRangeClamped(0.0f, unidentifiedForceScale,
+                lbl_806DB5E4, lbl_806DB5E8, nlVec3Length(m_DetChar.m_v3Velocity));
+            unidentifiedForceScale = fDeltaT * unidentifiedForceScale;
+            nlVec2Set(*(nlVector2*)&m_DetChar.m_v3Position,
+                unidentifiedForceScale * unidentifiedForce.x + m_DetChar.m_v3Position.x,
+                unidentifiedForceScale * unidentifiedForce.y + m_DetChar.m_v3Position.y);
+            if (GameInfoManager::Instance()->GetStadium() != STAD_THUNDER_ISLAND && m_pPhysicsCharacter->m_CanCollideWithWall)
+            {
+                cField::FixOutOfBoundsPosition(
+                    m_DetChar.m_v3Position, fMinDistanceFromWall, false);
+            }
+            else if (m_pPhysicsCharacter->m_CanCollideWithGoalLine && !pFielder->IsInFallAction())
+            {
+                cField::FixOutOfBoundsX(
+                    m_DetChar.m_v3Position, false, fMinDistanceFromWall);
+            }
+            m_pPhysicsCharacter->SetCharacterPositionXY(m_DetChar.m_v3Position);
+        }
+        nlVecLerp(m_DetChar.m_v3PrevVelocity, m_DetChar.m_v3Velocity, m_DetChar.m_v3PrevVelocity, unidentifiedBlend);
+    }
+    else
+    {
+        m_DetChar.m_v3PrevVelocity = m_DetChar.m_v3Velocity;
+    }
+    if (m_DetChar.m_fActualSpeed > 0.01f)
+    {
+        nlPolar pMovement;
+        nlCartesianToPolar(pMovement, m_DetChar.m_v3Velocity.x, m_DetChar.m_v3Velocity.y);
+        m_DetChar.m_aActualMovementDirection = pMovement.a;
+    }
+    else
+    {
+        m_DetChar.m_aActualMovementDirection = m_DetChar.m_aActualFacingDirection;
+    }
+    m_pPhysicsCharacter->SetCharacterVelocityXY(m_DetChar.m_v3Velocity);
+}
+
+void cCharacter::fn_8001EE74(float fParam0, float fParam1, float fParam2)
+{
+    m_DetChar.m_fDesiredPlayerScale = fParam0;
+    if (fParam2 > 0.0f)
+    {
+        m_DetChar.m_fDesiredMovementScale = fParam2;
+    }
+    else
+    {
+        m_DetChar.m_fDesiredMovementScale = m_DetChar.m_fMovementScale;
+    }
+    if (fParam1 > 0.0f)
+    {
+        m_DetChar.m_tScaleTimer.SetSeconds(fParam1);
+    }
+    else
+    {
+        m_DetChar.m_tScaleTimer.Clear();
+        SetPlayerScale(fParam0);
+        m_DetChar.m_fMovementScale = m_DetChar.m_fDesiredMovementScale;
+    }
+}
+
+void cCharacter::fn_8001EF6C(float movementScale)
+{
+    m_DetChar.m_fMovementScale = movementScale;
+}
+
+void cCharacter::StopPlayingAllTrackedSFX()
+{
+}
+
+void cCharacter::fn_8001EF78(float fParam)
+{
+    m_pPoseTree = m_pPoseTree->Update(fParam);
+}
+
+void cCharacter::UpdateBlinking(float fDeltaT)
+{
+    Blinker* pBlinker = m_pBlinker;
+    if (pBlinker != 0)
+    {
+        pBlinker->Update(fDeltaT);
+    }
+}
+
+void cCharacter::PerformBlinking(GLSkinMesh* skinMesh, glModel* model) const
+{
+    Blinker* pBlinker = m_pBlinker;
+    if (pBlinker != 0)
+    {
+        pBlinker->Blink(model);
+    }
+}
+
+int lbl_806E0C28;
+
+void cCharacter::CaptureHammerTransform()
+{
+    cSHierarchy* hierarchy;
+    if (lbl_806E0C28 == 0)
+    {
+        hierarchy = m_pPoseAccumulator->m_BaseSHierarchy;
+        lbl_806E0C28 = hierarchy->GetNodeIndexByID(nlStringLowerHash("bip01 r prop"));
+    }
+    m_qFrozenHammerRotation = m_pPoseAccumulator->GetNodeQuaternion(lbl_806E0C28);
+    const nlMatrix4& m = m_pPoseAccumulator->GetNodeMatrix(lbl_806E0C28);
+    m_v3FrozenHammerTranslation = m.GetTranslation();
+    m_fFrozenHammerScale = nlVec3Length(*(nlVector3*)&m.e2[0][0]);
+}
+
+void cCharacter::SetHammerTransformFrozen(bool frozen)
+{
+    bool destroyHammer = false;
+    if (m_bHammerTransformFrozen && !frozen)
+        destroyHammer = true;
+    m_bHammerTransformFrozen = frozen;
+    if (frozen)
+    {
+        CaptureHammerTransform();
+    }
+    if (destroyHammer)
+        EmitHammerDestroyBig(m_v3FrozenHammerTranslation);
+}
+
+void cCharacter::SetElectrocutionTextureEnabled(bool isEnabled)
+{
+    if ((m_bIsUsingElectrocutionTexture == false) && (isEnabled != false))
+    {
+        m_pEffectsTexturing = fxGetTexturing(eFXTex_Electrocution);
+    }
+
+    if ((m_bIsUsingElectrocutionTexture != false) && (isEnabled == false))
+    {
+        m_pEffectsTexturing = 0;
+    }
+
+    m_bIsUsingElectrocutionTexture = isEnabled;
+}
+
+void cCharacter::AddRandomDirt()
+{
+    m_Dirt += 0.5f + nlRandomf(0.5f);
+    if (m_Dirt > 1.0f)
+    {
+        m_Dirt = 1.0f;
+    }
+}
+
+void cCharacter::fn_8001F1C0(int nParam)
+{
+    m_nDamageType = nParam;
+    if (nParam == DAMAGE_TEXTURE_SCORCH)
+    {
+        m_MinDirt = 0.0f;
+    }
+}
+
+void cCharacter::fn_8001F1D8()
+{
+    m_MinDirt += 0.5f + nlRandomf(0.5f);
+    if (m_MinDirt > 1.0f)
+    {
+        m_MinDirt = 1.0f;
+    }
+}
+
+void cCharacter::Reset(const nlVector3& v3Position, unsigned short aDirection)
+{
+    m_DetChar.Reset();
+    ResetAnimState();
+    m_pHeadTrack->Reset();
+    m_pPhysicsCharacter->Unknown0();
+    SetPosition(v3Position);
+    m_DetChar.m_v3PrevPosition = v3Position;
+    m_DetChar.m_aDesiredFacingDirection = aDirection;
+    SetFacingDirection(aDirection, false);
+    m_DetChar.m_aPrevFacingDirection = m_DetChar.m_aDesiredFacingDirection;
+    m_DetChar.m_aActualMovementDirection = m_DetChar.m_aDesiredFacingDirection;
+    m_DetChar.m_aDesiredMovementDirection = m_DetChar.m_aDesiredFacingDirection;
+    SetVelocity(v3Zero);
+    m_DetChar.m_fActualSpeed = 0.0f;
+    m_DetChar.m_fDesiredSpeed = 0.0f;
+    CreateWorldMatrix();
+    m_pPoseAccumulator->Pose(*m_pPoseTree, m_m4WorldMatrix);
+    m_pPhysicsCharacter->UpdatePose(m_pPoseAccumulator, 0.0f, false);
+    m_pPhysicsCharacter->UpdatePose(m_pPoseAccumulator, 0.0f, false);
+    m_bLeftPropAnimated = false;
+    m_bRightPropAnimated = false;
+    m_bHammerTransformFrozen = false;
+    m_bPacketAVisible = false;
+    m_bPacketBVisible = false;
+    m_bIsUsingElectrocutionTexture = false;
+    m_ModelType = CHAR_MODEL_NORMAL;
+    m_fOpacity = 1.0f;
+    m_bShadowVisible = true;
+    ResetEffects();
+    EndBlur();
+    fn_8001C574();
+}
+
+u16 lbl_806DB602 = 0xFFFF;
+u16 lbl_806DB604 = 0xFFFF;
+
+#define REGISTER_CHARACTER_FIELD(type, base, field, name) \
+    cache->AddField(type, gDebugFieldTypes[type].size, \
+        (u8*)&(field) - (u8*)&(base), name)
+
+inline void DetChar::SyncLog(void* context, DebugWriteCache* cache)
+{
+    if (lbl_806DB604 == 0xFFFF)
+    {
+        lbl_806DB604 = cache->BeginType("DetChar");
+        REGISTER_CHARACTER_FIELD(14, m_eCharacterClass,
+            m_eCharacterClass, "m_eCharacterClass");
+        REGISTER_CHARACTER_FIELD(14, m_eCharacterClass,
+            m_eMovementState, "m_eMovementState");
+        REGISTER_CHARACTER_FIELD(16, m_eCharacterClass,
+            m_bFromAnimBlended, "m_bFromAnimBlended");
+        REGISTER_CHARACTER_FIELD(16, m_eCharacterClass,
+            m_bOnScreen, "m_bOnScreen");
+        REGISTER_CHARACTER_FIELD(22, m_eCharacterClass,
+            m_v3Position, "m_v3Position");
+        REGISTER_CHARACTER_FIELD(22, m_eCharacterClass,
+            m_v3PrevPosition, "m_v3PrevPosition");
+        REGISTER_CHARACTER_FIELD(22, m_eCharacterClass,
+            m_v3Velocity, "m_v3Velocity");
+        REGISTER_CHARACTER_FIELD(22, m_eCharacterClass,
+            m_v3PrevVelocity, "m_v3PrevVelocity");
+        REGISTER_CHARACTER_FIELD(19, m_eCharacterClass,
+            m_aDesiredFacingDirection, "m_aDesiredFacingDirection");
+        REGISTER_CHARACTER_FIELD(19, m_eCharacterClass,
+            m_aActualFacingDirection, "m_aActualFacingDirection");
+        REGISTER_CHARACTER_FIELD(19, m_eCharacterClass,
+            m_aPrevFacingDirection, "m_aPrevFacingDirection");
+        REGISTER_CHARACTER_FIELD(19, m_eCharacterClass,
+            m_aDesiredMovementDirection, "m_aDesiredMovementDirection");
+        REGISTER_CHARACTER_FIELD(19, m_eCharacterClass,
+            m_aActualMovementDirection, "m_aActualMovementDirection");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fAnimAdjustBeginTime, "m_fAnimAdjustBeginTime");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fAnimAdjustEndTime, "m_fAnimAdjustEndTime");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fDirectionSeekSpeed, "m_fDirectionSeekSpeed");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fDirectionSeekFalloff, "m_fDirectionSeekFalloff");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fAccel, "m_fAccel");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fDecel, "m_fDecel");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fDesiredSpeed, "m_fDesiredSpeed");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fActualSpeed, "m_fActualSpeed");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fLeanAmount, "m_fLeanAmount");
+        REGISTER_CHARACTER_FIELD(10, m_eCharacterClass,
+            m_nAnimTurnAdjust, "m_nAnimTurnAdjust");
+        REGISTER_CHARACTER_FIELD(22, m_eCharacterClass,
+            m_v3AnimMoveAdjust, "m_v3AnimMoveAdjust");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fPlayerScale, "m_fPlayerScale");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fMovementScale, "m_fMovementScale");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fDesiredPlayerScale, "m_fDesiredPlayerScale");
+        REGISTER_CHARACTER_FIELD(17, m_eCharacterClass,
+            m_fDesiredMovementScale, "m_fDesiredMovementScale");
+        REGISTER_CHARACTER_FIELD(20, m_eCharacterClass,
+            m_tScaleTimer, "m_tScaleTimer");
+        cache->EndType();
+    }
+    cache->ChecksumData(lbl_806DB604, &m_eCharacterClass, context);
+    cache->WriteData(lbl_806DB604, &m_eCharacterClass,
+        sizeof(*this));
+}
+
+inline void cHeadTrack::SyncLog(void* context, DebugWriteCache* cache)
+{
+    if (g_headTrackSyncLogType == 0xFFFF)
+    {
+        g_headTrackSyncLogType = cache->BeginType("HeadTrack");
+        REGISTER_CHARACTER_FIELD(26, *this,
+            m_m4HeadMatrix, "m_m4HeadMatrix");
+        REGISTER_CHARACTER_FIELD(22, *this,
+            m_v3OOI, "m_v3OOI");
+        REGISTER_CHARACTER_FIELD(16, *this,
+            m_bTrackOOI, "m_bTrackOOI");
+        REGISTER_CHARACTER_FIELD(17, *this,
+            m_fHeadSpin, "m_fHeadSpin");
+        REGISTER_CHARACTER_FIELD(17, *this,
+            m_fHeadTilt, "m_fHeadTilt");
+        REGISTER_CHARACTER_FIELD(17, *this,
+            m_fDesiredHeadSpin, "m_fDesiredHeadSpin");
+        REGISTER_CHARACTER_FIELD(17, *this,
+            m_fDesiredHeadTilt, "m_fDesiredHeadTilt");
+        REGISTER_CHARACTER_FIELD(17, *this,
+            m_fHeadSpinSeekVel, "m_fHeadSpinSeekVel");
+        REGISTER_CHARACTER_FIELD(17, *this,
+            m_fHeadTiltSeekVel, "m_fHeadTiltSeekVel");
+        REGISTER_CHARACTER_FIELD(17, *this,
+            m_fSmoothTime, "mfSmoothTime");
+        cache->EndType();
+    }
+    cache->ChecksumData(g_headTrackSyncLogType, this, context);
+    cache->WriteData(g_headTrackSyncLogType, this, sizeof(cHeadTrack));
+}
+
+inline void CharAnim::SyncLog(void* context, DebugWriteCache* cache)
+{
+    if (lbl_806DB602 == 0xFFFF)
+    {
+        lbl_806DB602 = cache->BeginType("CharAnim");
+        REGISTER_CHARACTER_FIELD(17, *this, m_fFrame, "m_fFrame");
+        REGISTER_CHARACTER_FIELD(17, *this, m_fTotalFrames, "m_fTotalFrames");
+        REGISTER_CHARACTER_FIELD(17, *this, m_fPlaybackSpeedScale, "m_fPlaybackSpeedScale");
+        REGISTER_CHARACTER_FIELD(17, *this, m_fTime, "m_fTime");
+        REGISTER_CHARACTER_FIELD(9, *this, m_nHashID, "m_nHashID");
+        REGISTER_CHARACTER_FIELD(2, *this, m_nHS, "m_nHS");
+        REGISTER_CHARACTER_FIELD(17, *this, m_fDuration, "m_fDuration");
+        REGISTER_CHARACTER_FIELD(9, *this, m_nNumRootKeys, "m_nNumRootKeys");
+        REGISTER_CHARACTER_FIELD(17, *this, m_fLinearSpeed, "m_fLinearSpeed");
+        cache->EndType();
+    }
+    cache->ChecksumData(lbl_806DB602, this, context);
+    cache->WriteData(lbl_806DB602, this, sizeof(*this));
+}
+
+void cCharacter::SyncLog(void* context, DebugWriteCache* cache)
+{
+    m_DetChar.SyncLog(context, cache);
+
+    CharAnim state;
+    state.m_fFrame = m_pCurrentAnimController->m_fTime
+        * (float)m_pCurrentAnimController->m_pSAnim->m_nNumKeys;
+    state.m_fTotalFrames = (float)m_pCurrentAnimController->m_pSAnim->m_nNumKeys;
+    state.m_fPlaybackSpeedScale = m_pCurrentAnimController->m_fPlaybackSpeedScale;
+    state.m_fTime = m_pCurrentAnimController->m_fTime;
+    cSAnim* anim = m_pCurrentAnimController->m_pSAnim;
+    state.m_nHashID = anim->GetHashID();
+    state.m_nHS = anim->m_nHierarchySignature;
+    state.m_fDuration = anim->GetDuration();
+    state.m_nNumRootKeys = (unsigned int)(float)anim->m_nNumKeys;
+    state.m_fLinearSpeed = anim->GetLinearSpeed();
+
+    state.SyncLog(context, cache);
+    m_pHeadTrack->SyncLog(context, cache);
+}
+
+#undef REGISTER_CHARACTER_FIELD
+
+void cCharacter::ChecksumState(RunningChecksum* pChecksum)
+{
+    pChecksum->ChecksumData(&m_DetChar.m_eCharacterClass, sizeof(m_DetChar.m_eCharacterClass));
+    pChecksum->ChecksumData(&m_DetChar.m_eMovementState, sizeof(m_DetChar.m_eMovementState));
+    pChecksum->ChecksumData(&m_DetChar.m_bOnScreen, sizeof(m_DetChar.m_bOnScreen));
+    pChecksum->ChecksumData(&m_DetChar.m_v3Position, sizeof(m_DetChar.m_v3Position));
+    pChecksum->ChecksumData(&m_DetChar.m_v3Velocity, sizeof(m_DetChar.m_v3Velocity));
+    pChecksum->ChecksumData(&m_DetChar.m_aDesiredFacingDirection, sizeof(m_DetChar.m_aDesiredFacingDirection));
+    pChecksum->ChecksumData(&m_DetChar.m_aActualFacingDirection, sizeof(m_DetChar.m_aActualFacingDirection));
+    pChecksum->ChecksumData(&m_DetChar.m_aDesiredMovementDirection, sizeof(m_DetChar.m_aDesiredMovementDirection));
+    pChecksum->ChecksumData(&m_DetChar.m_aActualMovementDirection, sizeof(m_DetChar.m_aActualMovementDirection));
+    pChecksum->ChecksumData(&m_DetChar.m_fAccel, sizeof(m_DetChar.m_fAccel));
+    pChecksum->ChecksumData(&m_DetChar.m_fDecel, sizeof(m_DetChar.m_fDecel));
+    pChecksum->ChecksumData(&m_DetChar.m_fDesiredSpeed, sizeof(m_DetChar.m_fDesiredSpeed));
+    pChecksum->ChecksumData(&m_DetChar.m_fActualSpeed, sizeof(m_DetChar.m_fActualSpeed));
+    pChecksum->ChecksumData(&m_DetChar.m_nAnimTurnAdjust, sizeof(m_DetChar.m_nAnimTurnAdjust));
+}
+
+extern "C" void fn_8001FE80()
+{
+    FindEvent<CollisionChainPlayerData>("CollisionChainPlayer", -1)->Add(Function<CollisionChainPlayerData*>(fn_80022968), 0, -1);
+    FindEvent<CollisionWindDebrisPlayerData>("CollisionWindDebrisPlayer", -1)->Add(Function<CollisionWindDebrisPlayerData*>(fn_800229F0), 0, -1);
+    FindEvent<CollisionThwompPlayerData>("CollisionThwompPlayer", -1)->Add(Function<CollisionThwompPlayerData*>(fn_80022A78), 0, -1);
+    FindEvent<cFielder>("KnockYoshiTongue", -1)->Add(Function<cFielder*>(fn_80020B8C), 0, -1);
+    FindEvent<NoEventData>("GameOver", -1)->Add(Function<FnVoidVoid>(fn_8002276C), 0, -1);
+    FindEvent<NoEventData>("Kickoff", -1)->Add(Function<FnVoidVoid>(fn_800227C8), 0, -1);
+    FindEvent<MegaStrikeMeterData>("MegaStrikeMeterStart", -1)->Add(Function<MegaStrikeMeterData*>(fn_80022810), 0, -1);
+    FindEvent<NoEventData>("MegaStrikeMeterEnd", -1)->Add(Function<FnVoidVoid>(fn_80022908), 0, -1);
+    FindEvent<cPlayer>("MegaStrikeIntro", -1)->Add(Function<cPlayer*>(fn_80022824), 0, -1);
+    FindEvent<CollisionPlayerPlayerData>("CollisionPlayerPlayer", -1)->Add(Function<CollisionPlayerPlayerData*>(fn_80022664), 0, -1);
+    FindEvent<CollisionPlayerWallData>("CollisionPlayerWall", -1)->Add(Function<CollisionPlayerWallData*>(fn_8002268C), 0, -1);
+    FindEvent<CollisionPlayerBallData>("CollisionPlayerBall", -1)->Add(Function<CollisionPlayerBallData*>(fn_800226B4), 0, -1);
+    FindEvent<BallNetmeshEventData>("CollisionBallNetmesh", -1)->Add(Function<BallNetmeshEventData*>(fn_80022614), 0, -1);
+    FindEvent<CollisionBallGroundData>("CollisionBallGround", -1)->Add(Function<CollisionBallGroundData*>(fn_80022594), 0, -1);
+    FindEvent<CollisionBallWallData>("CollisionBallWall", -1)->Add(Function<CollisionBallWallData*>(fn_800224DC), 0, -1);
+    FindEvent<CollisionBallShellData>("CollisionBallShell", -1)->Add(Function<CollisionBallShellData*>(fn_80021B68), 0, -1);
+    FindEvent<CollisionBallChainData>("CollisionBallChain", -1)->Add(Function<CollisionBallChainData*>(fn_80021BA8), 0, -1);
+    FindEvent<CollisionBallGoalpostData>("CollisionBallGoalpost", -1)->Add(Function<CollisionBallGoalpostData*>(fn_80021BB4), 0, -1);
+    FindEvent<CollisionKoopaShotBallPlayerData>("CollisionKoopaShotBallPlayer", -1)->Add(Function<CollisionKoopaShotBallPlayerData*>(fn_80021E30), 0, -1);
+    FindEvent<CollisionBirdoShotBallPlayerData>("CollisionBirdoShotBallPlayer", -1)->Add(Function<CollisionBirdoShotBallPlayerData*>(fn_80022050), 0, -1);
+    FindEvent<CollisionKoopaShellGoalieData>("CollisionKoopaShellGoalie", -1)->Add(Function<CollisionKoopaShellGoalieData*>(fn_80021D70), 0, -1);
+    FindEvent<CollisionBirdoEggGoalieData>("CollisionBirdoEggGoalie", -1)->Add(Function<CollisionBirdoEggGoalieData*>(fn_80021DCC), 0, -1);
+    FindEvent<CollisionHammerbroShotBallPlayerData>("CollisionHammerbroShotBallPlayer", -1)->Add(Function<CollisionHammerbroShotBallPlayerData*>(fn_80022280), 0, -1);
+    FindEvent<CollisionPowerupWallData>("CollisionPowerupWall", -1)->Add(Function<CollisionPowerupWallData*>(fn_80021C98), 0, -1);
+    FindEvent<CollisionPlayerBananaData>("CollisionPlayerBanana", -1)->Add(Function<CollisionPlayerBananaData*>(fn_80021924), 0, -1);
+    FindEvent<CollisionPlayerShellData>("CollisionPlayerShell", -1)->Add(Function<CollisionPlayerShellData*>(fn_800216C4), 0, -1);
+    FindEvent<CollisionPlayerFreezeData>("CollisionPlayerFreeze", -1)->Add(Function<CollisionPlayerFreezeData*>(fn_80021484), 0, -1);
+    FindEvent<CollisionPatchData>("CollisionTongue", -1)->Add(Function<CollisionPatchData*>(fn_8002147C), 0, -1);
+    FindEvent<CharacterImpactEvent>("MontyReappear", -1)->Add(Function<CharacterImpactEvent*>(fn_800212A0), 0, -1);
+    FindEvent<CharacterImpactEvent>("HammerBroHammer", -1)->Add(Function<CharacterImpactEvent*>(fn_80021120), 0, -1);
+    FindEvent<CharacterImpactEvent>("WarioGroundPound", -1)->Add(Function<CharacterImpactEvent*>(fn_80021120), 0, -1);
+    FindEvent<ReceiveBallData>("ReceiveBall", -1)->Add(Function<ReceiveBallData*>(fn_80020E20), 0, -1);
+    FindEvent<CharacterDirectionData>("DirectionBegin", -1)->Add(Function<CharacterDirectionData*>(fn_80020E1C), 0, -1);
+    FindEvent<GoalScoredData>("GoalScored", -1)->Add(Function<GoalScoredData*>(fn_80020CDC), 0, -1);
+    FindEvent<MegaStrikeEndData>("MegastrikeEnd", -1)->Add(Function<MegaStrikeEndData*>(fn_80020E04), 0, -1);
+    FindEvent<LightningStrikeData>("LightningStrike", -1)->Add(Function<LightningStrikeData*>(fn_80021050), 0, -1);
+    FindEvent<CollisionBulletBillData>("CollisionBulletBillPlayer", -1)->Add(Function<CollisionBulletBillData*>(fn_80020EE8), 0, -1);
+    FindEvent<CollisionBulletBillData>("CollisionBulletBillFreeze", -1)->Add(Function<CollisionBulletBillData*>(fn_80020FB8), 0, -1);
+    FindEvent<CollisionBulletBillData>("ExplosionBulletBill", -1)->Add(Function<CollisionBulletBillData*>(fn_80020FD4), 0, -1);
+    FindEvent<CollisionBulletBillData>("BulletBillExplode", -1)->Add(Function<CollisionBulletBillData*>(fn_80020FD4), 0, -1);
+    FindEvent<CollisionPowerupStatsData>("PowerupStats", -1)->Add(Function<CollisionPowerupStatsData*>(fn_80020C70), 0, -1);
+    FindEvent<PlayerAttackData>("AttackSuccess", -1)->Add(Function<PlayerAttackData*>(fn_80020BB0), 0, -1);
+    FindEvent<CollisionProjectileData>("CollisionHammerPlayer", -1)->Add(Function<CollisionProjectileData*>(fn_80022B1C), 0, -1);
+    FindEvent<CollisionPatchData>("CollisionPatchPlayer", -1)->Add(Function<CollisionPatchData*>(fn_80022B04), 0, -1);
+    FindEvent<CollisionProjectileData>("CollisionHammerGround", -1)->Add(Function<CollisionProjectileData*>(fn_80022A98), 0, -1);
+    FindEvent<CollisionEggData>("CollisionEggPlayer", -1)->Add(Function<CollisionEggData*>(fn_80022BD8), 0, -1);
+    fn_80098750();
+}
+
+extern "C" void fn_80020B8C(cFielder* pFielder)
+{
+    pFielder->fn_80047240(pFielder,
+        (unsigned short)(pFielder->m_DetChar.m_aActualFacingDirection + 0x8000),
+        HIT_REACTION_LIGHT, false, false);
+}
+
+extern "C" void fn_80020BB0(PlayerAttackData* pEventData)
+{
+    if (GetStadiumUnknown0x10(GameInfoManager::Instance()->GetStadium())
+        && pEventData->pTarget != NULL && pEventData->pAttacker != NULL
+        && !pEventData->bIsSlideAttack)
+    {
+        if (pEventData->pAttacker->IsCaptain()
+            && pEventData->pTarget->IsCaptain())
+        {
+            PlayCrowdReaction(0x3648CBA4UL);
+        }
+        else if (pEventData->nHitReaction == HIT_REACTION_HEAVY)
+        {
+            PlayCrowdReaction(pEventData->pAttacker->m_pTeam->m_nSide == HOME
+                    ? 0xF2B4508FUL : 0x5F30D098UL);
+        }
+    }
+}
+
+extern "C" void fn_80020C70(CollisionPowerupStatsData* pEventData)
+{
+    if (GetStadiumUnknown0x10(GameInfoManager::Instance()->GetStadium())
+        && pEventData->pThrower != NULL)
+    {
+        PlayCrowdReaction(pEventData->pThrower->m_pTeam->m_nSide == HOME
+                ? 0x5087D7C9UL : 0xA7E73452UL);
+    }
+}
+
+extern "C" void fn_80020CDC(GoalScoredData* pEventData)
+{
+    if (pEventData != NULL && pEventData->uGoalType != GOAL_MEGA_STRIKE)
+    {
+        PlaySound(11, 0x8CEE6665UL, NULL, NULL);
+    }
+    if (!GetTweakBool("/user/no_presentation", false)
+        && g_pTeams[0] != NULL && g_pTeams[1] != NULL)
+    {
+        for (s32 i = 0; i < 2; i++)
+        {
+            cTeam* pTeam = g_pTeams[i];
+            if (lbl_806E0C20)
+            {
+                pTeam->ClearAllPowerUps();
+            }
+            else if (lbl_806E0C21
+                && pEventData->uTeamIndex == pTeam->m_nSide)
+            {
+                pTeam->ClearAllPowerUps();
+            }
+            for (s32 j = 0; j < 5; j++)
+            {
+                cPlayer* pPlayer = pTeam->GetPlayer(j);
+                bool bHasGlobalPad = pPlayer->GetGlobalPad() != NULL;
+                if (bHasGlobalPad)
+                {
+                    pPlayer->SetAIPad(NULL);
+                }
+            }
+        }
+    }
+}
+
+extern "C" void fn_80020E04(MegaStrikeEndData* pEventData)
+{
+    if (pEventData->goals > 0)
+    {
+        fn_80020CDC(NULL);
+    }
+}
+
+extern "C" void fn_80020E1C(CharacterDirectionData*)
+{
+}
+
+extern "C" void fn_80020E20(ReceiveBallData* pEventData)
+{
+    cPlayer* pReceiver = pEventData->pReceiver;
+    if (pReceiver == NULL)
+        return;
+    if (pReceiver->IsOnSameTeam(g_pBall->m_pPrevOwner))
+        return;
+
+    cTeam* pTeam = pReceiver->GetTeam();
+    pTeam->mtMarkTimer.Clear();
+    pTeam->mtRoleTimer.Clear();
+    cTeam* pOtherTeam = pTeam->GetOtherTeam();
+    pOtherTeam->mtMarkTimer.Clear();
+    pOtherTeam = pTeam->GetOtherTeam();
+    pOtherTeam->mtRoleTimer.Clear();
+}
+
+extern "C" void fn_80020EE8(CollisionBulletBillData* pEventData)
+{
+    if (pEventData->bulletBill->active)
+    {
+        cFielder* pAttacker;
+        cFielder* pFielder = (cFielder*)pEventData->player;
+        pAttacker = pEventData->bulletBill->target;
+        if (pAttacker != pFielder)
+        {
+            if (pFielder->IsSuperGrowActive() || pFielder->IsStarActive())
+            {
+                CollisionBulletBillData data = { pEventData->player, pEventData->bulletBill };
+                g_pGame->fn_80060BFC(data);
+            }
+            else if (pFielder->fn_800470B4(pFielder, pAttacker))
+            {
+                PlayOwnedSound(pFielder->m_uSoundSlotId, 0xFD0DC03DUL,
+                    (XSoundOwner*)g_pBall->m_pSoundOwner, NULL, NULL);
+            }
+        }
+    }
+}
+
+extern "C" void fn_80020FB8(CollisionBulletBillData* pEventData)
+{
+    if (pEventData->bulletBill->active)
+    {
+        pEventData->bulletBill->target->CollideWithFreezeCallback();
+    }
+}
+
+extern "C" void fn_80020FD4(CollisionBulletBillData* pEventData)
+{
+    if (g_pGame != NULL && pEventData->bulletBill->active)
+    {
+        CreateBulletBillShockwave(pEventData->bulletBill);
+        pEventData->bulletBill->Hide(false);
+        PlayOwnedSound(pEventData->bulletBill->target->m_uSoundSlotId,
+            0xFD0DC03DUL, (XSoundOwner*)g_pBall->m_pSoundOwner, NULL, NULL);
+    }
+}
+
+extern "C" void fn_80021050(LightningStrikeData* pEventData)
+{
+    if (g_pGame != NULL && g_pGame->IsGameplayOrOvertime())
+    {
+        if (nlSqrt(nlVec3DistanceSquared2D(g_pBall->m_v3Position,
+                pEventData->position), true) < pEventData->radius
+            && g_pBall->m_pOwner == NULL
+            && g_pBall->meBallState != BALL_STATE_FALLING && g_pBall->meBallState != BALL_STATE_LIGHTNING)
+        {
+            fn_80015C38(g_pBall, BALL_STATE_LIGHTNING);
+        }
+        CreateLightningShockwave(&pEventData->position, pEventData->radius);
+    }
+}
+
+extern "C" void fn_80021120(CharacterImpactEvent* pEventData)
+{
+    if (g_pGame != NULL && g_pGame->IsGameplayOrOvertime())
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            if (g_pTeams[i] != NULL)
+            {
+                cTeam* pTeam = g_pTeams[i];
+                for (int j = 0; j < 4; j++)
+                {
+                    cFielder* pFielder = pTeam->GetFielder(j);
+                    if (!pFielder->IsInvincible() && pFielder->mbTangible
+                        && !pFielder->IsSuperGrowActive() && pEventData->pCharacter != pFielder)
+                    {
+                        nlVector3 v3Delta;
+                        nlVec3Set(v3Delta, pEventData->v3Position.x - pFielder->m_DetChar.m_v3Position.x,
+                            pEventData->v3Position.y - pFielder->m_DetChar.m_v3Position.y,
+                            pEventData->v3Position.z - pFielder->m_DetChar.m_v3Position.z);
+                        float fDistance = nlVec3Length(v3Delta);
+                        if (fDistance < pEventData->fRadius)
+                        {
+                            if (fDistance >= pEventData->fRadius * lbl_806DB5EC)
+                            {
+                                pFielder->fn_800470B4(pFielder, (cPlayer*)pEventData->pCharacter);
+                            }
+                            else
+                            {
+                                pFielder->InitActionKnockdownReact(pFielder->m_DetChar.m_v3Velocity);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+extern "C" void fn_800212A0(CharacterImpactEvent* pEventData)
+{
+    if (g_pGame != NULL && g_pGame->IsGameplayOrOvertime())
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            cTeam* pTeam = g_pTeams[i];
+            if (pTeam != NULL)
+            {
+                for (int j = 0; j < 4; j++)
+                {
+                    cFielder* pFielder = pTeam->GetFielder(j);
+                    if (!pFielder->IsInvincible() && pFielder->mbTangible
+                        && !pFielder->IsSuperGrowActive() && pEventData->pCharacter != pFielder)
+                    {
+                        nlVector3 v3Delta;
+                        nlVec3Set(v3Delta, pEventData->v3Position.x - pFielder->m_DetChar.m_v3Position.x,
+                            pEventData->v3Position.y - pFielder->m_DetChar.m_v3Position.y,
+                            pEventData->v3Position.z - pFielder->m_DetChar.m_v3Position.z);
+                        float fDistance = nlVec3Length(v3Delta);
+                        if (fDistance < pEventData->fRadius)
+                        {
+                            if (fDistance >= pEventData->fRadius * lbl_806DB5F0)
+                            {
+                                pFielder->fn_800470B4(pFielder, (cPlayer*)pEventData->pCharacter);
+                            }
+                            else
+                            {
+                                pFielder->CollideWithBobombCallback(pEventData->v3Position, pEventData->GetRadius());
+                            }
+                        }
+                    }
+                }
+                Goalie* pGoalie = pTeam->GetGoalie();
+                nlVector3 v3Delta;
+                nlVec3Set(v3Delta, pEventData->v3Position.x - pGoalie->m_DetChar.m_v3Position.x,
+                            pEventData->v3Position.y - pGoalie->m_DetChar.m_v3Position.y,
+                            pEventData->v3Position.z - pGoalie->m_DetChar.m_v3Position.z);
+                if (nlVec3LengthSquared(v3Delta) < pEventData->fRadius * pEventData->fRadius)
+                {
+                    pGoalie->InitActionShockwaveReact();
+                }
+            }
+        }
+    }
+}
+
+extern "C" void fn_8002147C(CollisionPatchData* pEventData)
+{
+    ((cFielder*)pEventData->pPlayer)->EndAction();
+}
+
+extern "C" void fn_80021484(CollisionPlayerFreezeData* pEventData)
+{
+    if (pEventData->pPlayer != NULL)
+    {
+        bool bIsWeaponSuccessful = pEventData->pPlayer->CollideWithFreezeCallback();
+        if (pEventData->pThrower != NULL && bIsWeaponSuccessful
+            && !pEventData->pThrower->IsOnSameTeam(pEventData->pPlayer))
+        {
+            CollisionPowerupStatsData* pStatsData = NULL;
+            g_CollisionPowerupStatsDataPool.Allocate(pStatsData);
+            pStatsData->pThrower = pEventData->pThrower;
+            pStatsData->nThrowerPadID = pEventData->nThrowerPadID;
+            cPlayer* pPlayer = pEventData->pPlayer;
+            if (pPlayer->m_eClassType == FIELDER)
+            {
+                pStatsData->pPlayer = pPlayer;
+                bool bHasPad = pPlayer->GetGlobalPad() != NULL;
+                pStatsData->nPlayerPadID = bHasPad ? pPlayer->GetGlobalPad()->GetPadID() : -1;
+            }
+            else
+            {
+                pStatsData->pPlayer = NULL;
+                pStatsData->nPlayerPadID = -1;
+            }
+            g_pGame->mEventQueue.mEvent31.Queue(pStatsData,
+                Function<CollisionPowerupStatsData*>(FreeCollisionPowerupStatsData));
+        }
+    }
+}
+
+extern "C" void fn_800216C4(CollisionPlayerShellData* pEventData)
+{
+    if (pEventData->pPlayer != NULL)
+    {
+        bool bIsWeaponSuccessful = pEventData->pPlayer->CollideWithShellCallback(
+            (ePowerupSize)pEventData->eSize, (bool)pEventData->bIsExploder,
+            pEventData->v3CollisionLocation, pEventData->v3CollisionVelocity);
+        if (pEventData->pThrower != NULL && bIsWeaponSuccessful
+            && !pEventData->pThrower->IsOnSameTeam(pEventData->pPlayer))
+        {
+            CollisionPowerupStatsData* pStatsData = NULL;
+            g_CollisionPowerupStatsDataPool.Allocate(pStatsData);
+            pStatsData->pThrower = pEventData->pThrower;
+            pStatsData->nThrowerPadID = (s32)(s8)pEventData->nThrowerPadID;
+            cPlayer* pPlayer = pEventData->pPlayer;
+            if (pPlayer->m_eClassType == FIELDER)
+            {
+                pStatsData->pPlayer = pPlayer;
+                bool bHasPad = pPlayer->GetGlobalPad() != NULL;
+                pStatsData->nPlayerPadID = bHasPad ? pPlayer->GetGlobalPad()->GetPadID() : -1;
+            }
+            else
+            {
+                pStatsData->pPlayer = NULL;
+                pStatsData->nPlayerPadID = -1;
+            }
+            g_pGame->mEventQueue.mEvent31.Queue(pStatsData,
+                Function<CollisionPowerupStatsData*>(FreeCollisionPowerupStatsData));
+        }
+    }
+}
+
+extern "C" void fn_80021924(CollisionPlayerBananaData* pEventData)
+{
+    if (pEventData->pPlayer != NULL)
+    {
+        bool bIsWeaponSuccessful = pEventData->pPlayer->CollideWithBananaCallback(pEventData->v3CollisionLocation);
+        if (pEventData->pThrower != NULL && bIsWeaponSuccessful
+            && !pEventData->pThrower->IsOnSameTeam(pEventData->pPlayer))
+        {
+            CollisionPowerupStatsData* pStatsData = NULL;
+            g_CollisionPowerupStatsDataPool.Allocate(pStatsData);
+            pStatsData->pThrower = pEventData->pThrower;
+            pStatsData->nThrowerPadID = pEventData->nThrowerPadID;
+            cPlayer* pPlayer = pEventData->pPlayer;
+            if (pPlayer->m_eClassType == FIELDER)
+            {
+                pStatsData->pPlayer = pPlayer;
+                bool bHasPad = pPlayer->GetGlobalPad() != NULL;
+                pStatsData->nPlayerPadID = bHasPad ? pPlayer->GetGlobalPad()->GetPadID() : -1;
+            }
+            else
+            {
+                pStatsData->pPlayer = NULL;
+                pStatsData->nPlayerPadID = -1;
+            }
+            g_pGame->mEventQueue.mEvent31.Queue(pStatsData,
+                Function<CollisionPowerupStatsData*>(FreeCollisionPowerupStatsData));
+        }
+    }
+}
+
+extern "C" void fn_80021B68(CollisionBallShellData* pEventData)
+{
+    fn_80015B38(pEventData->pBall, false);
+    pEventData->pPowerup->m_pTarget = NULL;
+}
+
+extern "C" void fn_80021BA8(CollisionBallChainData* pEventData)
+{
+    fn_80015B38(pEventData->pBall, false);
+}
+
+extern "C" void fn_80021BB4(CollisionBallGoalpostData* pEventData)
+{
+    if (g_pBall != NULL)
+    {
+        EmissionManager* unidentifiedManager = EmissionManager::Instance();
+        EffectsGroup* pGroup = unidentifiedManager->GetEffectsGroup("ball_impact");
+        EmissionController* pControl = unidentifiedManager->Create(pGroup, 0, true, 0);
+        pControl->SetPosition(pEventData->v3CollisionPosition);
+        fn_80015B38(g_pBall, false);
+        if (g_pBall->m_pPrevOwner != NULL
+            && GetStadiumUnknown0x10(GameInfoManager::Instance()->GetStadium()))
+        {
+            PlayCrowdReaction(g_pBall->m_pPrevOwner->m_pTeam->m_nSide == HOME
+                    ? 0xEF359B65UL : 0xC6A6B1CEUL);
+        }
+        PlaySound(10, 0xEFE291A8UL, NULL, NULL);
+    }
+}
+
+extern "C" void fn_80021C98(CollisionPowerupWallData* pEventData)
+{
+    const nlVector3& pos = pEventData->position;
+    const nlVector3& nrm = pEventData->normal;
+    unsigned long powerupID = (unsigned long)pEventData->pPowerup;
+    if (GameInfoManager::Instance()->GetStadium() != STAD_THUNDER_ISLAND
+        || fabsf(pos.x) > cField::GetGoalLineX(1U) - 2.5f)
+    {
+        EmissionManager* unidentifiedManager = EmissionManager::Instance();
+        if (!unidentifiedManager->IsPlaying(powerupID, unidentifiedManager->GetEffectsGroup("electric_fence")))
+        {
+            EmitElectricFenceBallEffect(pos, nrm, powerupID, false);
+            PowerupBase::PlayPowerupSound(pEventData->eType, PowerupBase::PWRUP_SOUND_BOUNCE_WALL, pos, 0.0f, NULL);
+        }
+    }
+}
+
+extern "C" void fn_80021D70(CollisionKoopaShellGoalieData* pEventData)
+{
+    ((Goalie*)pEventData->goalie)->HandleSkillShotImpact(pEventData->shell->mOwner != NULL);
+    pEventData->shell->Deactivate(false);
+    fn_80015B38(g_pBall, false);
+}
+
+extern "C" void fn_80021DCC(CollisionBirdoEggGoalieData* pEventData)
+{
+    ((Goalie*)pEventData->goalie)->HandleSkillShotImpact(pEventData->egg->mShooter != NULL);
+    PlaySound(pEventData->egg->mShooter->m_uSoundSlotId, 0x16BA5AE9UL, NULL, NULL);
+}
+
+extern "C" void fn_80021E30(CollisionKoopaShotBallPlayerData* pEventData)
+{
+    if (!pEventData->player->CanBeHitBySkillshot())
+    {
+        return;
+    }
+    if (pEventData->player->IsShrunk())
+    {
+        pEventData->player->InitActionKnockdownReact(v3Zero);
+        return;
+    }
+
+    cBall* pBall = g_pBall;
+    const nlVector3& v3FielderPosition = pEventData->player->GetPosition();
+    nlVector4 plane;
+    nlVector3 v3Velocity;
+    if (nlGetLengthSquared2D(pBall->m_v3Velocity.x, pBall->m_v3Velocity.y) < 0.01f)
+    {
+        MakePerpendicularPlane(pBall->m_v3Position,
+            (unsigned short)(pEventData->shell->mOwner->m_DetChar.m_aActualFacingDirection + 0x4000), plane, 0.0f);
+        nlVec3Scale(v3Velocity, *(const nlVector3*)&plane, 40.0f);
+    }
+    else
+    {
+        nlVec3Set(v3Velocity, pBall->m_v3Velocity.y, -pBall->m_v3Velocity.x, 0.0f);
+        MakePerpendicularPlane(pBall->m_v3Position, v3Velocity, plane, 0.0f);
+    }
+    if (nlPlaneSide(v3FielderPosition, plane) < 0.0f)
+    {
+        v3Velocity.x = -v3Velocity.x;
+        v3Velocity.y = -v3Velocity.y;
+    }
+    v3Velocity.x += pBall->m_v3Velocity.x;
+    v3Velocity.y += pBall->m_v3Velocity.y;
+    unsigned short aDirection = RadToAng16(nlATan2f(v3Velocity.y, v3Velocity.x));
+    nlVector3 v3Position;
+    nlVec3ScaleAdd(v3Position, 0.015f, v3Velocity, v3FielderPosition);
+    pEventData->player->SetPosition(v3Position);
+    if (pEventData->player->fn_80047240(pEventData->shell->mOwner, aDirection, HIT_REACTION_HEAVY, false, false))
+    {
+        pEventData->player->PlayAttackReactionSounds(gGameTweaks.m_pGameTweaks->fShootToScoreBallHitReactionVolume.GetValue());
+    }
+}
+
+extern "C" void fn_80022050(CollisionBirdoShotBallPlayerData* pEventData)
+{
+    if (pEventData->player->CanBeHitBySkillshot())
+    {
+        if (pEventData->player->IsShrunk())
+        {
+            pEventData->player->InitActionKnockdownReact(v3Zero);
+        }
+        else
+        {
+            cBall* pBall = g_pBall;
+            const nlVector3& v3FielderPosition = pEventData->player->GetPosition();
+            nlVector4 plane;
+            nlVector3 v3Velocity;
+            if (nlGetLengthSquared2D(pBall->m_v3Velocity.x, pBall->m_v3Velocity.y) < 0.01f)
+            {
+                MakePerpendicularPlane(pBall->m_v3Position,
+                    (unsigned short)(pEventData->egg->mShooter->m_DetChar.m_aActualFacingDirection + 0x4000), plane, 0.0f);
+                nlVec3Scale(v3Velocity, *(const nlVector3*)&plane, 40.0f);
+            }
+            else
+            {
+                nlVec3Set(v3Velocity, pBall->m_v3Velocity.y, -pBall->m_v3Velocity.x, 0.0f);
+                MakePerpendicularPlane(pBall->m_v3Position, v3Velocity, plane, 0.0f);
+            }
+            if (nlPlaneSide(v3FielderPosition, plane) < 0.0f)
+            {
+                v3Velocity.x = -v3Velocity.x;
+                v3Velocity.y = -v3Velocity.y;
+            }
+            v3Velocity.x += pBall->m_v3Velocity.x;
+            v3Velocity.y += pBall->m_v3Velocity.y;
+            unsigned short aDirection = RadToAng16(nlATan2f(v3Velocity.y, v3Velocity.x));
+            nlVector3 v3Position;
+            nlVec3ScaleAdd(v3Position, 0.015f, v3Velocity, v3FielderPosition);
+            pEventData->player->SetPosition(v3Position);
+            if (pEventData->player->fn_80047240(pEventData->egg->mShooter, aDirection, HIT_REACTION_HEAVY, false, false))
+            {
+                pEventData->player->PlayAttackReactionSounds(gGameTweaks.m_pGameTweaks->fShootToScoreBallHitReactionVolume.GetValue());
+            }
+        }
+    }
+    fn_800156F8(g_pBall, pEventData->egg->mShooter);
+}
+
+extern "C" void fn_80022280(CollisionHammerbroShotBallPlayerData* pEventData)
+{
+    if (pEventData->pFielder->CanBeHitBySkillshot())
+    {
+        cFielder* pFielder;
+        cBall* pBall = pEventData->pBall;
+        if (pBall->m_pPrevOwner != NULL)
+        {
+            pFielder = pEventData->pFielder;
+            nlVector4 plane;
+            nlVector3 v3Velocity;
+            const nlVector3& v3BallVelocity = pBall->m_v3Velocity;
+            if (v3BallVelocity.GetLengthSq2D() < 0.01f)
+            {
+                MakePerpendicularPlane(g_pBall->m_v3Position,
+                    (unsigned short)(g_pBall->m_pShooter->m_DetChar.m_aActualFacingDirection + 0x4000), plane, 0.0f);
+                nlVec3Scale(v3Velocity, *(const nlVector3*)&plane, 40.0f);
+            }
+            else
+            {
+                nlVec3Set(v3Velocity, v3BallVelocity.y, -v3BallVelocity.x, 0.0f);
+                MakePerpendicularPlane(pEventData->pBall->m_v3Position, v3Velocity, plane, 0.0f);
+            }
+            if (nlPlaneSide(pFielder->m_DetChar.m_v3Position, plane) < 0.0f)
+            {
+                v3Velocity.x = -v3Velocity.x;
+                v3Velocity.y = -v3Velocity.y;
+            }
+            v3Velocity.x += v3BallVelocity.x;
+            v3Velocity.y += v3BallVelocity.y;
+            unsigned short aDirection = RadToAng16(nlATan2f(v3Velocity.y, v3Velocity.x));
+            nlVector3 v3Position;
+            nlVec3ScaleAdd(v3Position, 0.015f, v3Velocity, pFielder->m_DetChar.m_v3Position);
+            pEventData->pFielder->SetPosition(v3Position);
+            if (pEventData->pFielder->fn_80047240(pEventData->pBall->m_pPrevOwner, aDirection, HIT_REACTION_HEAVY, false, false))
+            {
+                pEventData->pFielder->PlayAttackReactionSounds(gGameTweaks.m_pGameTweaks->fShootToScoreBallHitReactionVolume.GetValue());
+            }
+
+            pEventData->pFielder->SetNoPickUpTime(0.06f);
+            Goalie* pGoalie = pEventData->pBall->m_pShooter->m_pTeam->GetOtherTeam()->GetGoalie();
+            pGoalie->mpSkillShooter = NULL;
+            fn_80015C38(pEventData->pBall, BALL_STATE_SHOT);
+        }
+    }
+    if (pEventData->pBall != NULL && pEventData->pFielder != NULL)
+    {
+        pEventData->pBall->m_pLastTouch = pEventData->pFielder;
+    }
+}
+
+extern "C" void fn_800224DC(CollisionBallWallData* pEventData)
+{
+    if (pEventData->pBall != NULL)
+    {
+        fn_800145A4(pEventData->pBall);
+        if (GameInfoManager::Instance()->GetStadium() != STAD_THUNDER_ISLAND
+            || fabsf(pEventData->pBall->m_v3Position.x) > cField::GetGoalLineX(1U) - 2.5f)
+        {
+            if (EmitElectricFenceBallEffect(pEventData->position, pEventData->normal, (unsigned long)pEventData->pBall, false))
+            {
+                PlaySound(10, 0x2AA0C2A9UL, NULL, NULL);
+            }
+        }
+    }
+}
+
+extern "C" void fn_80022594(CollisionBallGroundData* pEventData)
+{
+    if (pEventData->pBall != NULL
+        && (pEventData->pBall->meBallState == BALL_STATE_VOLLEY_PASS || pEventData->pBall->meBallState == BALL_STATE_GOALIE_DEFLECTION || pEventData->bIsShot))
+    {
+        fn_80014494(pEventData->pBall);
+    }
+    PlaySound(11, 0x94AC3A20UL, NULL, NULL);
+    SetLastSoundParameter(6, pEventData->fVecZComponent);
+}
+
+extern "C" void fn_80022614(BallNetmeshEventData*)
+{
+    if (g_pBall->m_tShotTimer.m_uPackedTime != 0)
+    {
+        PlaySound(10, 0xE07B30E9UL, NULL, NULL);
+    }
+    fn_80015B38(g_pBall, false);
+}
+
+extern "C" void fn_80022664(CollisionPlayerPlayerData* pEventData)
+{
+    if (pEventData->player1 != NULL)
+    {
+        pEventData->player1->CollideWithCharacterCallback(pEventData);
+    }
+}
+
+extern "C" void fn_8002268C(CollisionPlayerWallData* pEventData)
+{
+    if (pEventData->pPlayer != NULL)
+    {
+        pEventData->pPlayer->CollideWithWallCallback(pEventData);
+    }
+}
+
+extern "C" void fn_800226B4(CollisionPlayerBallData* pEventData)
+{
+    if (pEventData->pPlayer != NULL && pEventData->pBall != NULL)
+    {
+        pEventData->pPlayer->CollideWithBallCallback(pEventData->pBall);
+        pEventData->pBall->CollideWithCharacterCallback(pEventData->pPlayer, pEventData->velocity);
+
+        PhysicsAIBall* pPhysicsBall = pEventData->pBall->m_pPhysicsBall;
+        if (pPhysicsBall->mbUseMagnusEffect)
+        {
+            nlVector3 v3AngVel;
+            pPhysicsBall->GetAngularVelocity(&v3AngVel);
+            nlVec3Scale(v3AngVel, 0.6f);
+            pPhysicsBall->SetAngularVelocity(v3AngVel);
+        }
+    }
+}
+
+extern "C" void fn_8002276C()
+{
+    for (int i = 0; i < 2; i++)
+    {
+        if (g_pTeams[i] != NULL)
+        {
+            g_pTeams[i]->StopGameplayEffectsAndSounds();
+        }
+    }
+    GoalieOnGameOver();
+}
+
+extern "C" void fn_800227C8()
+{
+    if (g_pGame != NULL)
+    {
+        g_pGame->ChangeGameState(GS_GAMEPLAY);
+        PlaySound(10, 0xA21ADED3UL, NULL, NULL);
+    }
+}
+
+extern "C" void fn_80022810(MegaStrikeMeterData*)
+{
+    if (g_pGame != NULL)
+    {
+        g_pGame->fn_80058704();
+    }
+}
+
+extern "C" void fn_80022824(cPlayer*)
+{
+    if (g_pGame != NULL)
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            cTeam* pTeam = g_pTeams[i];
+            for (int j = 0; j < 4; j++)
+            {
+                cFielder* pFielder = pTeam->GetFielder(j);
+                if (pFielder->IsYoshiSuperPowerActive())
+                {
+                    pFielder->EndSuperPower(0);
+                }
+                else if (pFielder->m_DetChar.m_eCharacterClass == HAMMERBROS
+                    && pFielder->m_eActionState == ACTION_SKILLSHOT)
+                {
+                    pFielder->EndDesire();
+                    pFielder->EndAction();
+                }
+                else if (pFielder->m_DetChar.m_eCharacterClass == SHYGUY
+                    && pFielder->m_eActionState == ACTION_SKILLSHOT)
+                {
+                    pFielder->EndDesire();
+                    pFielder->EndAction();
+                }
+            }
+        }
+        gNPCManager->ResetActiveHammers();
+    }
+}
+
+extern "C" void fn_80022908()
+{
+    if (g_pGame != NULL)
+    {
+        ShootToScoreMeter::instance.TurnOffMeter();
+        if (g_pGame->IsGameplayOrOvertime())
+        {
+            g_pGame->fn_800586C0();
+        }
+    }
+}
+
+extern "C" void fn_80022968(CollisionChainPlayerData* pEventData)
+{
+    if (pEventData->pFielder != NULL && pEventData->pChain != NULL)
+    {
+        if (!pEventData->pFielder->IsInvinciblePowerups())
+        {
+            pEventData->pFielder->CollideWithChainCallback(pEventData->pChain);
+        }
+    }
+}
+
+extern "C" void fn_800229F0(CollisionWindDebrisPlayerData* pEventData)
+{
+    if (pEventData->pFielder != NULL && pEventData->pDebris != NULL)
+    {
+        if (!pEventData->pFielder->IsInvinciblePowerups())
+        {
+            pEventData->pFielder->CollideWithWindDebrisCallback(pEventData->pDebris);
+        }
+    }
+}
+
+extern "C" void fn_80022A78(CollisionThwompPlayerData* pEventData)
+{
+    if (pEventData->target->m_eClassType == FIELDER)
+    {
+        ((cFielder*)pEventData->target)->CollideWithThwompCallback(pEventData);
+    }
+}
+
+extern "C" void fn_80022A98(CollisionProjectileData* pEventData)
+{
+    CharacterImpactEvent event;
+    event.v3Position = pEventData->v3Position;
+    event.v3Position.z = 0.0f;
+    event.fRadius = lbl_806DB5F4;
+    event.pCharacter = pEventData->pFielder;
+    fn_80060FF4(g_pGame, &event);
+    pEventData->pFielder->PlayImpactCameraRumble();
+}
+
+extern "C" void fn_80022B04(CollisionPatchData* pEventData)
+{
+    pEventData->pPlayer->CollideWithPatchCallback(pEventData);
+}
+
+extern "C" void fn_80022B1C(CollisionProjectileData* pEventData)
+{
+    cCharacter* pCharacter = (cCharacter*)pEventData->pTarget;
+    if (pCharacter->m_eClassType == FIELDER)
+    {
+        cFielder* pFielder = (cFielder*)pCharacter;
+        if (!pFielder->IsFallenDown())
+        {
+            pFielder->InitActionKnockdownReact(v3Zero);
+        }
+        PlaySound(pEventData->pFielder->m_uSoundSlotId, 0x52641B7BUL, NULL, NULL);
+    }
+    else if (pCharacter->m_eClassType == GOALIE)
+    {
+        Goalie* pGoalie = (Goalie*)pCharacter;
+        if (pGoalie->mGoalieActionState != GOALIEACTION_HEAD_IMPACT)
+        {
+            pGoalie->InitActionHeadImpact(0.0f);
+            PlaySound(pEventData->pFielder->m_uSoundSlotId, 0xFD0DC03DUL, NULL, NULL);
+        }
+    }
+}
+
+extern "C" void fn_80022BD8(CollisionEggData* pEventData)
+{
+    cPlayer* pPlayer = pEventData->pPlayer;
+    if (pPlayer->m_eClassType == FIELDER)
+    {
+        cFielder* pFielder = (cFielder*)pPlayer;
+        if (pFielder->IsInvincible())
+        {
+            pEventData->pFielder->EndSuperPower(0);
+        }
+        else if (!pFielder->IsFallenDown())
+        {
+            if (pFielder->IsSuperGrowActive())
+            {
+                pFielder->InitActionShellReact(pEventData->pEgg->mPosition,
+                    pEventData->pFielder->m_DetChar.m_v3Velocity);
+            }
+            else if (pFielder->IsCharacterInAir(pEventData->pEgg->mPhysics->GetRadius())
+                || (pFielder->m_eActionState == ACTION_SUPER_POWER && pFielder->m_DetChar.m_eCharacterClass == DONKEYKONG)
+                || (pFielder->m_eActionState == ACTION_DEKE && pFielder->m_DetChar.m_eCharacterClass == WARIO)
+                || (pFielder->m_eActionState == ACTION_DEKE && pFielder->m_DetChar.m_eCharacterClass == BOWSERJR)
+                || (pFielder->m_eActionState == ACTION_DEKE && pFielder->m_DetChar.m_eCharacterClass == HAMMERBROS))
+            {
+                pFielder->InitActionBombReact(pEventData->pEgg->mPosition, 0.0f);
+                EmitTackleImpact(pFielder);
+            }
+            else
+            {
+                pFielder->InitActionKnockdownReact(pEventData->pFielder->m_DetChar.m_v3Velocity);
+            }
+        }
+    }
+}
+
+void cCharacter::fn_80022D3C(float fParam0, float fParam1)
+{
+    m_fMegaBlendRate = fParam0;
+    m_fMegaBlendTarget = fParam1;
+    if (fParam0 == 0.0f)
+    {
+        m_fMegaBlend = fParam1;
+    }
+}
+
+void cCharacter::fn_80022D58(float fDeltaT)
+{
+    m_fMegaBlend += m_fMegaBlendRate * fDeltaT;
+    if (m_fMegaBlendRate > 0.0f && m_fMegaBlend > m_fMegaBlendTarget)
+    {
+        m_fMegaBlend = m_fMegaBlendTarget;
+    }
+    if (m_fMegaBlendRate < 0.0f && m_fMegaBlend < m_fMegaBlendTarget)
+    {
+        m_fMegaBlend = m_fMegaBlendTarget;
+    }
+}
+
+void cCharacter::fn_80022DAC(unsigned long uTextureID)
+{
+    m_uNormalTextureID = uTextureID;
+    m_ResolvedNormalTexture.value = glGetTextureManager()->GetTextureIndex(m_uNormalTextureID);
+}
+
+void cCharacter::fn_80022DE8(unsigned long uTextureID)
+{
+    m_uSwapTextureID = uTextureID;
+    m_ResolvedSwapTexture.value = glGetTextureManager()->GetTextureIndex(m_uSwapTextureID);
+}
+
+void cCharacter::fn_80022E24(unsigned long uTextureID)
+{
+    m_uShockTextureID = uTextureID;
+    m_ResolvedShockTexture.value = glGetTextureManager()->GetTextureIndex(m_uShockTextureID);
+}
+
+void cCharacter::fn_80022E60()
+{
+    int i;
+    glModelPacket* packet;
+    if (m_bTexturesResolved)
+    {
+        return;
+    }
+    for (i = 0; i < 4; ++i)
+    {
+        if (m_pSkinMesh[i] != NULL)
+        {
+            int modelIndex = m_pSkinMesh[i]->GetModelIndex();
+            for (int j = 0; j < 2; ++j)
+            {
+                m_pSkinMesh[i]->m_Unknown0C = j;
+                if (m_pSkinMesh[i]->GetModel() != NULL)
+                {
+                    for (packet = m_pSkinMesh[i]->GetModel()->packets;
+                         packet < m_pSkinMesh[i]->GetModel()->packets
+                                      + m_pSkinMesh[i]->GetNumPackets();
+                         ++packet)
+                    {
+                        for (int k = 0; k < 10; ++k)
+                        {
+                            if (glHasMaterialParameter(packet, lbl_8056B7B0[k]))
+                            {
+                                unsigned long texture = glGetMaterialUnsignedParameter(packet, lbl_8056B7B0[k]);
+                                unsigned long resolvedTexture = glGetTextureManager()->GetTextureIndex(texture);
+                                glSetMaterialTextureIndexParameter(packet, lbl_8056B7B0[k], &resolvedTexture);
+                            }
+                        }
+                        if (packet->materialProgram == GXCharacterDamageMaterialProgram::Instance)
+                        {
+                            glGetTextureManager()->ResolveTextureIndex(
+                                &static_cast<GXCharacterDamageParameters*>(packet->materialParameters)->damage1Texture);
+                            glGetTextureManager()->ResolveTextureIndex(
+                                &static_cast<GXCharacterDamageParameters*>(packet->materialParameters)->damage2Texture);
+                            glGetTextureManager()->ResolveTextureIndex(
+                                &static_cast<GXCharacterDamageParameters*>(packet->materialParameters)->megaTexture);
+                        }
+                    }
+                }
+            }
+            m_pSkinMesh[i]->m_Unknown0C = modelIndex;
+        }
+    }
+    m_bTexturesResolved = true;
+}
+
+
+
+template <typename KeyType, typename ValueType, typename AllocatorType, typename CompareType>
+inline void AVLTreeBase<KeyType, ValueType, AllocatorType, CompareType>::DeleteEntry(AVLTreeUntemplated* tree, AVLTreeNode* entry)
+{
+    Entry* e = (Entry*)entry;
+    ((AVLTreeBase*)tree)->m_Allocator.Delete(e);
+}

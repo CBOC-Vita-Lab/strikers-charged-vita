@@ -1,0 +1,220 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/Physics/PhysicsBulletBill.h"
+#include "Game/Physics/PhysicsEventQueue.h"
+
+#include "Game/AI/Fielder.h"
+#include "Game/AI/Powerups.h"
+#include "Game/Ball.h"
+#include "Game/Render/BulletBill.h"
+#include "Game/EventDataTypes.h"
+#include "Game/Field.h"
+#include "Game/Game.h"
+#include "Game/Physics/Physics.h"
+#include "Game/Physics/PhysicsAIBall.h"
+#include "Game/Physics/PhysicsBanana.h"
+#include "Game/Physics/PhysicsCharacter.h"
+#include "Game/Physics/PhysicsShell.h"
+#include "Game/Player.h"
+#include "NL/nlSlotPool.h"
+
+#include <math.h>
+#include "Game/SharedStaticStorage.h"
+
+
+PhysicsBulletBill::PhysicsBulletBill(
+    BulletBillObject* bulletBill, float radius, float)
+    : PhysicsSphere(g_CollisionSpace, 0, radius)
+    , mPadding38(0)
+    , mBulletBill(bulletBill)
+{
+    SetCollide(0x62);
+    SetCategory(2);
+}
+
+ContactType PhysicsBulletBill::Contact(
+    PhysicsObject* other, dContact*, int)
+{
+    nlVector3 position;
+    CollisionBulletBillData* eventData;
+    cFielder* target;
+    GetPosition(&position);
+
+    switch (other->GetObjectType())
+    {
+    case PHYSOBJ_COLUMN:
+    {
+        cCharacter* character
+            = ((PhysicsCharacter*)other->m_parentObject)->m_pAICharacter;
+        target = mBulletBill->target;
+        if (character == target || target == 0)
+        {
+            return NO_CONTACT;
+        }
+
+        if (character->m_eClassType == FIELDER)
+        {
+            if (character != target && target->IsInvincibleChars())
+            {
+                eventData = 0;
+                g_CollisionBulletBillDataPool.Allocate(eventData);
+                eventData->player = character;
+                eventData->bulletBill = mBulletBill;
+                QueueCollisionBulletBillPlayer(eventData);
+            }
+        }
+        else
+        {
+            eventData = 0;
+            g_CollisionBulletBillDataPool.Allocate(eventData);
+            eventData->player = character;
+            eventData->bulletBill = mBulletBill;
+            QueueExplosionBulletBill(eventData);
+        }
+        break;
+    }
+    case PHYSOBJ_AI_BALL:
+    {
+        cPlayer* owner = ((PhysicsAIBall*)other)->m_pAIBall->m_pOwner;
+        target = mBulletBill->target;
+        if ((owner != 0 && target == owner) || target == 0)
+        {
+            return NO_CONTACT;
+        }
+
+        if (owner != 0)
+        {
+            if (owner->m_eClassType == FIELDER)
+            {
+                bool canHit = false;
+                if (!target->IsStuck() && (target->muInvincibleStatus & 1))
+                {
+                    canHit = true;
+                }
+                if (canHit)
+                {
+                    eventData = 0;
+                    g_CollisionBulletBillDataPool.Allocate(eventData);
+                    eventData->player = owner;
+                    eventData->bulletBill = mBulletBill;
+                    QueueCollisionBulletBillPlayer(eventData);
+                }
+            }
+            else
+            {
+                eventData = 0;
+                g_CollisionBulletBillDataPool.Allocate(eventData);
+                eventData->player = owner;
+                eventData->bulletBill = mBulletBill;
+                QueueExplosionBulletBill(eventData);
+            }
+            break;
+        }
+        return ONE_WAY_CONTACT_OTHER;
+    }
+    case PHYSOBJ_SHELL:
+    case PHYSOBJ_BANANA:
+    {
+        PowerupBase* powerup;
+        if (other->GetObjectType() == PHYSOBJ_SHELL)
+        {
+            powerup = ((PhysicsShell*)other)->m_pPowerupObject;
+        }
+        else
+        {
+            powerup = ((PhysicsBanana*)other)->m_pPowerupObject;
+        }
+        if (powerup->mtNoHitTimer.m_uPackedTime != 0
+            && powerup->m_pThrower == mBulletBill->target)
+        {
+            return NO_CONTACT;
+        }
+
+        if (powerup->m_eType == POWER_UP_FREEZE_SHELL)
+        {
+            eventData = 0;
+            g_CollisionBulletBillDataPool.Allocate(eventData);
+            eventData->player = mBulletBill->target;
+            eventData->bulletBill = mBulletBill;
+            QueueCollisionBulletBillFreeze(eventData);
+            powerup->m_bShouldDestroy = true;
+            return NO_CONTACT;
+        }
+
+        if (powerup->m_eType == POWER_UP_BANANA
+            && powerup->meSize == POWERUPSIZE_SMALL)
+        {
+            powerup->m_bShouldDestroy = true;
+            return NO_CONTACT;
+        }
+
+        eventData = 0;
+        g_CollisionBulletBillDataPool.Allocate(eventData);
+        eventData->player = 0;
+        eventData->bulletBill = mBulletBill;
+        QueueExplosionBulletBill(eventData);
+        break;
+    }
+    case PHYSOBJ_WALL:
+        if (mBulletBill->target->m_pBall != 0)
+        {
+            break;
+        }
+        // fall through
+    case PHYSOBJ_NPC:
+    case PHYSOBJ_NET:
+    case PHYSOBJ_PATCH:
+    case PHYSOBJ_WALUIGI_WALL:
+    case PHYSOBJ_BULLET_BILL:
+    case PHYSOBJ_HAMMER:
+    case PHYSOBJ_BIRDO_EGG:
+    case PHYSOBJ_KOOPA_SHELL:
+    case PHYSOBJ_THWOMP:
+    {
+        eventData = 0;
+        g_CollisionBulletBillDataPool.Allocate(eventData);
+        eventData->player = 0;
+        eventData->bulletBill = mBulletBill;
+        QueueExplosionBulletBill(eventData);
+        break;
+    }
+    default:
+        break;
+    }
+
+    return NO_CONTACT;
+}
+
+bool PhysicsBulletBill::SetContactInfo(
+    dContact* contact, PhysicsObject*, bool first)
+{
+    if (first)
+    {
+        SetDefaultContactInfo(contact);
+    }
+    contact->surface.bounce = 0.01f;
+    contact->surface.bounce_vel = 0.0f;
+    contact->surface.mu = 5.0f;
+    return true;
+}
+
+void PhysicsBulletBill::PreCollide()
+{
+    if (mBulletBill->active && g_pGame->IsGameplayOrOvertime()
+        && fabsf(GetPosition().x) > cField::GetGoalLineX(1U) + 2.5f)
+    {
+        CollisionBulletBillData* eventData = 0;
+        g_CollisionBulletBillDataPool.Allocate(eventData);
+        eventData->player = mBulletBill->target;
+        eventData->bulletBill = mBulletBill;
+        QueueExplosionBulletBill(eventData);
+    }
+}
+
+int PhysicsBulletBill::GetObjectType() const
+{
+    return PHYSOBJ_BULLET_BILL;
+}
+
+PhysicsBulletBill::~PhysicsBulletBill()
+{
+}

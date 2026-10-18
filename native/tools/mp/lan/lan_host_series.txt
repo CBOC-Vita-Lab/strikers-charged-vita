@@ -1,0 +1,61 @@
+# LAN host: boot to the main menu, Multiplayer (old Wi-Fi entry), Create Game, wait for a player,
+# start, then follow whatever the game shows. Scene ids: 1 main menu, 24 network lobby.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 24 2400
+log STATE lobby
+idle 120
+press 100
+log created game
+wait peers >= 2 7200
+log STATE peer joined
+idle 120
+mash 100 60 scene != 24 3600
+log STATE launched
+# Draft, captains, sidekicks, stadium: accept whatever is highlighted until the match is loaded.
+mash 100 45 ingame == 1 12000
+log STATE in match
+wait gs == 5 6000
+log STATE open play
+# Nobody scores in a scripted match; the runner sets MSC_LAN_TEST_SCORE so the home team leads
+# and each match ends in regulation. A LAN session plays a series: the results newspaper counts
+# down by itself and the next match starts until a side has won the series.
+wait gs == 3 30000
+log STATE game over 1
+wait gs == 5 || paused == 1 || scene == 24 || scene == 1 6000
+if gs == 5
+log STATE game 2 started
+wait gs == 3 30000
+log STATE game over 2
+wait gs == 5 || paused == 1 || scene == 24 || scene == 1 6000
+endif
+if gs == 5
+log STATE game 3 started
+wait gs == 3 30000
+log STATE game over 3
+wait gs == 5 || paused == 1 || scene == 24 || scene == 1 6000
+endif
+log STATE after series
+idle 1500
+log STATE end
+exit

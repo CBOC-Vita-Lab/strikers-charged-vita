@@ -1,0 +1,34 @@
+# W5 CTL generated (tools/ctl/gen_scripts.py): touchmeter. MODERN; the own Mega Strike meter stopped with a finger.
+vmash cross 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=0 home=0 away=7 hsk=0,1,2 ask=3,4,5 human=0 skill=0 time=300
+wait ingame == 1 4000
+wait gs == 5 6000
+log STATE open play
+stopwhen cmeterpress >= 2
+repeat 600
+if chave == 1 && cplayer == 0
+log ACTION mega strike try (captain holds circle)
+vchase 10 none goal
+try vmash circle 1 cmode == 2 || chave == 0 200
+if cmode == 2
+log MINIGAME our mega strike meter (touch)
+touch 480 272 10 12
+touch 480 272 10 12
+endif
+endif
+if chave == 1 && cplayer != 0
+vchase 8 none goal
+vpress cross 3 20
+endif
+if chave == 0 && cplayer != 0
+vhold 18 cross
+endif
+if chave == 0
+vchase 20 none ball
+vpress square 3 5
+endif
+endrepeat
+log STATE script end
+exit

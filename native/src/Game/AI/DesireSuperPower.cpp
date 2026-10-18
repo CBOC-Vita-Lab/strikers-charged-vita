@@ -1,0 +1,1774 @@
+#include "Game/AI/FielderDesireTypes.h"
+#include "NL/nlDLListContainer.inl"
+#include "NL/nlIntersection.h"
+#include "Game/AI/FielderAbility.h"
+#include "Game/AI/DesireSuperPower.h"
+#include "Game/AI/Fuzzy.h"
+
+#include "Game/AI/AIPad.h"
+#include "Game/AI/AiUtil.h"
+#include "Game/AI/AvoidableObject.h"
+#include "Game/AI/DesireUpdate.inl"
+#include "Game/AI/Fielder.h"
+#include "Game/AI/Powerups.h"
+#include "Game/AI/FuzzyAIRuntime.h"
+#include "Game/AI/Scripts/ScriptQuestions.h"
+#include "Game/AI/ScriptMachine.h"
+#include "Game/BaseGameSceneManager.h"
+#include "Game/CharacterTriggers.h"
+#include "Game/DB/CharacterInfo.h"
+#include "Game/DebugWriteCache.h"
+#include "Game/Effects/EmissionController.h"
+#include "Game/Effects/EmissionManager.h"
+#include "Game/Effects/EmitterCallbacks.h"
+#include "Game/Event.h"
+#include "Game/Game.h"
+#include "Game/Goalie.h"
+#include "Game/MathHelpers.h"
+#include "Game/EventDataTypes.h"
+#include "Game/Field.h"
+#include "Game/PoseAccumulator.h"
+#include "Game/GameInfo.h"
+#include "Game/Physics/PhysicsPatch.h"
+#include "Game/Render/NPCManager.h"
+#include "Game/Render/DaisyFist.h"
+#include "Game/Render/FlyingCamera.h"
+#include "Game/SAnim/pnSAnimController.h"
+#include "Game/RumbleActions.h"
+#include "Game/Sys/audio.h"
+#include "Game/Team.h"
+#include "NL/nlMath.h"
+#include "NL/nlString.h"
+#include "Game/Render/YoshiEggObject.h"
+#include "Game/FE/Overlay/OverlayHandlerSuperAbility.h"
+#include "Game/Physics/PhysicsWaluigiWall.h"
+#include <stdlib.h>
+#include "Game/SharedStaticStorage.h"
+#include "Game/Audio/RegistryPools.h"
+#include "Game/Audio/AudioResourceRuntime.h"
+#include "Game/EventRegistry.h"
+#include "NL/nlFunction.inl"
+
+int ChooseRunDirection(cFielder*, const unsigned short*, int,
+    const nlVector2*, float*);
+// Shared position constants used by the super-power desires.
+extern const nlVector3 gSuperPowerZeroVector = { 0.0f, 0.0f, 0.0f };
+extern const nlVector2 gPathPointsWithBall[6] = {
+    { 3.5f, -6.0f }, { 8.0f, -6.0f }, { 8.0f, 3.0f },
+    { 12.0f, 3.0f }, { 12.0f, 10.0f }, { 15.0f, 10.0f }
+};
+extern const nlVector2 gPathPointsWithoutBall[2] = {
+    { -5.15f, 9.375f }, { -5.15f, -9.375f }
+};
+extern const nlVector3 gFielderDesireZeroVector = { 0.0f, 0.0f, 0.0f };
+
+// Runtime tunables and script parameters retained in small data.
+float gSuperGrowShootToScoreTimeScale = 2e+01f;
+float gWarioGasStartRadius = 2.1f;
+float gWarioGasEndRadius = 2.95f;
+float gWarioGasLifetime = 7.2f;
+float gSuperGrowTime = 0.45f;
+float gSuperShrinkTime = 0.25f;
+float gSuperGrowTimeLimit = 1e+01f;
+float gSuperGrowScale = 3.73f;
+float lbl_806DC260 = 1.35f;
+float gSuperGrowHitMovementScale = 1.75f;
+float lbl_806DC268 = 0.6f;
+float gBowserFireBallSpawnOffset = 0.5f;
+float gBowserFireBallRampTime = 0.5f;
+float gBowserFireBallStartRadius = 0.3f;
+float gBowserFireBallMinEndRadius = 0.5f;
+float gBowserFireBallMaxEndRadius = 1.0f;
+float gBowserFireBallMinLifetime = 0.13f;
+float gBowserFireBallMaxLifetime = 0.21f;
+float gBowserFireBallMinSpeed = 1e+01f;
+float gBowserFireBallMaxSpeed = 23.0f;
+float gBowserFireBallMinInterval = 0.02f;
+float gBowserFireBallMaxInterval = 0.02f;
+float gWarioGasInterval = 0.38f;
+float gWarioGasOffset = -1.5f;
+int gPeteyMuckBallCount = 40;
+float gPeteyMuckBallSpreadAngle = 9e+01f;
+float gPeteyMuckBallMinSpeed = 8.0f;
+float gPeteyMuckBallMaxSpeed = 27.0f;
+float gPeteyMuckBallSpeedRate = 6e+01f;
+float gPeteyMuckBallInterval = 0.02f;
+float gPeteyMuckBallSpawnOffset = 0.6f;
+float gPeteyMuckBallUpSpeed = 3.0f;
+float gPeteyMuckBallGravity = 45.0f;
+float gPeteyMuckBallRadius = 0.4f;
+float gPeteyMuckHoleRadius = 1.33f;
+float gPeteyMuckHoleSpacing = 1.6f;
+float gPeteyMuckHoleLifetime = 1e+01f;
+float gDaisySuperPowerTimeLimit = 1234567.0f;
+float gDaisyFistSpawnTime = 0.1f;
+int gDaisyFistCount = 6;
+float gBowserJrSuperPowerTimeLimit = 1234567.0f;
+float gBowserJrShriekStartRadius = 0.25f;
+float gBowserJrShriekEndRadius = 5.0f;
+float gBowserJrShriekLifetime = 0.7f;
+float gBowserJrShriekEndRadiusTime = 1.0f;
+float gBowserJrShriekSpeed = 18.5f;
+bool gBowserJrFaceTarget = true;
+float gDiddySuperPowerTimeLimit = 1234567.0f;
+float gHeavenlyLightStartRadius = 2.75f;
+float gHeavenlyLightOffset = 0.6f;
+float gHeavenlyLightEndRadius = 2.75f;
+float gHeavenlyLightLifetime = 3.0f;
+float gHeavenlyLightEndRadiusTime = 0.05f;
+bool gDiddyFaceTarget = true;
+float gDKSuperPowerTimeLimit = 1234567.0f;
+float gPeachSuperPowerTimeLimit = 1234567.0f;
+float gBowserSuperPowerTimeLimit = 1234567.0f;
+float gWaluigiWarioSuperPowerTimeLimit = 1234567.0f;
+float gPeteySuperPowerTimeLimit = 1234567.0f;
+float gYoshiSuperPowerTimeLimit = 5.5f;
+static unsigned short sDesireSuperPowerType = 0xFFFF;
+float gFollowPathTimeLimit = 3.0f;
+#pragma explicit_zero_data on
+int gFollowPathStartIndex = 0;
+#pragma explicit_zero_data off
+float gFollowPathSpeed = 2.0f;
+float gChooseDirectionTimeLimit = 2.0f;
+float gChooseDirectionMaxDistance = 5.5f;
+float gChooseDirectionSpeed = 3.0f;
+float gInterceptBallTimeLimit = 2.0f;
+float gInterceptBallSpeed = 3.0f;
+#pragma explicit_zero_data on
+int gFollowPathContinueResult = 0;
+#pragma explicit_zero_data off
+int gFollowPathFinishedResult = 1;
+eFielderDesireState gFollowPathWindupShotState = FIELDER_DESIRE_WINDUP_SHOT;
+eFielderDesireState gFollowPathRunState = FIELDER_DESIRE_RUN_IN_DIRECTION;
+bool gFollowPathReinitialize = true;
+float gFollowPathNextSpeed = 2.0f;
+#pragma explicit_zero_data on
+int gChooseDirectionContinueResult = 0;
+#pragma explicit_zero_data off
+int gChooseDirectionFinishedResult = 1;
+eFielderDesireState gChooseDirectionWindupShotState = FIELDER_DESIRE_WINDUP_SHOT;
+eFielderDesireState gChooseDirectionBlockedWindupShotState = FIELDER_DESIRE_WINDUP_SHOT;
+eFielderDesireState gChooseDirectionRunState = FIELDER_DESIRE_RUN_IN_DIRECTION;
+bool gChooseDirectionReinitialize = true;
+float gChooseDirectionNextMaxDistance = 5.5f;
+float gChooseDirectionNextSpeed = 3.0f;
+float gWarioRunTimeLimit = 3.0f;
+float gWarioRunSpeed = 3.0f;
+#pragma explicit_zero_data on
+int gWarioRunTransitionHash = 0;
+#pragma explicit_zero_data off
+
+/**
+ * Offset/Address/Size: 0x0 | 0x800C86FC | size: 0x60
+ */
+DesireSuperPower::DesireSuperPower()
+    : Desire(FIELDER_DESIRE_SUPER_POWER, UnsetTransitionFunc(g_UnsetTransitionFunc))
+    , mpDKShockAvoidable(0)
+    , mpTarget(0)
+{
+}
+
+/**
+ * Offset/Address/Size: 0x60 | 0x800C875C | size: 0x274
+ */
+void DesireSuperPower::SetContext(
+    ScriptMachine* context)
+{
+    Desire::SetContext(context);
+
+    if (m_pFielder->m_DetChar.m_eCharacterClass == PETEY)
+    {
+        FindEvent<void>("CollisionPatchGround", -1)->Add(Function<void*>(HandleMuckBallCollision), 0, -1);
+        FindEvent<void>("CollisionPatchPlayer", -1)->Add(Function<void*>(HandleMuckBallCollision), 0, -1);
+        FindEvent<void>("CollisionPatchWall", -1)->Add(Function<void*>(HandleMuckBallWallCollision), 0, -1);
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x2D4 | 0x800C89D0 | size: 0x5A8
+ */
+bool DesireSuperPower::Initialize(void* context)
+{
+    bool result = Desire::Initialize(context);
+    m_pFielder->EndShrink();
+
+    switch (m_pFielder->m_DetChar.m_eCharacterClass)
+    {
+    case BOWSER:
+    {
+        mpTarget = 0;
+        m_pFielder->EndFrozenOrDazed();
+        mMaxDuration = gBowserSuperPowerTimeLimit;
+        m_pFielder->InitSuperPowerTank(
+            (bool)UserControlledT(m_pFielder->m_pTeam));
+        EmitBowserSmoke(m_pFielder);
+        bool userControlled = (bool)m_pFielder->GetGlobalPad();
+        if (!userControlled
+            && (m_pFielder->GetDesireState() == 21
+                || m_pFielder->GetDesireState() == 18
+                || m_pFielder->GetDesireState() == 9))
+        {
+            m_pFielder->EndDesire();
+        }
+        result = true;
+        break;
+    }
+    case BOWSERJR:
+        result = InitializeBowserJr(this, context);
+        break;
+    case DAISY:
+        m_pFielder->InitDesire(
+            FIELDER_DESIRE_FINISH_ACTION, 0.5f, -1.0f, fvNotSet, fvNotSet);
+        m_pFielder->SetAction(ACTION_SUPER_POWER);
+        m_pFielder->muInvincibleStatus |= 1;
+        m_pFielder->SetAnimState(104, true, 0.2f, false, false);
+        m_pFielder->InitMovementFromAnim(
+            0, gSuperPowerZeroVector, 1.0f, false);
+        mMaxDuration = gDaisySuperPowerTimeLimit;
+        result = m_pFielder->m_eActionState == ACTION_SUPER_POWER;
+        break;
+    case DIDDYKONG:
+        result = InitializeDiddy(this, context);
+        break;
+    case DONKEYKONG:
+        mpDKShockAvoidable = new (nlMalloc(sizeof(AvoidablePoint), 8, false))
+            AvoidablePoint(AVOID_BOWSER,
+                (const nlVector2&)m_pFielder->m_DetChar.m_v3Position,
+                4.0f + gDKSuperShockwaveRadius);
+        m_pFielder->InitActionDKSuper();
+        mMaxDuration = gDKSuperPowerTimeLimit;
+        result = m_pFielder->m_eActionState == ACTION_SUPER_POWER;
+        break;
+    case LUIGI:
+        m_pFielder->m_pTweaks = m_pFielder->m_pSuperPowerTweaks;
+        m_pFielder->fn_8001EE74(gSuperGrowScale, gSuperGrowTime, -1.0f);
+        EmitSuperGrow(m_pFielder);
+        mMaxDuration = gSuperGrowTimeLimit;
+        m_pFielder->PlayImpactCameraRumble();
+        result = true;
+        break;
+    case MARIO:
+        m_pFielder->m_pTweaks = m_pFielder->m_pSuperPowerTweaks;
+        m_pFielder->fn_8001EE74(gSuperGrowScale, gSuperGrowTime, -1.0f);
+        EmitSuperGrow(m_pFielder);
+        mMaxDuration = gSuperGrowTimeLimit;
+        m_pFielder->PlayImpactCameraRumble();
+        result = true;
+        break;
+    case PEACH:
+        m_pFielder->InitActionPeachSuper();
+        mMaxDuration = gPeachSuperPowerTimeLimit;
+        result = m_pFielder->m_eActionState == ACTION_SUPER_POWER;
+        break;
+    case PETEY:
+    {
+        mpTarget = 0;
+        m_pFielder->EndFrozenOrDazed();
+        mMaxDuration = gPeteySuperPowerTimeLimit;
+        m_pFielder->InitSuperPowerTank(
+            (bool)UserControlledT(m_pFielder->m_pTeam));
+        m_pFielder->m_fPeteyMuckBallSpeed = 0.0f;
+        m_pFielder->m_fPeteySuperPowerTime = 0.0f;
+        bool userControlled = (bool)m_pFielder->GetGlobalPad();
+        if (!userControlled
+            && (m_pFielder->GetDesireState() == 21
+                || m_pFielder->GetDesireState() == 18
+                || m_pFielder->GetDesireState() == 9))
+        {
+            m_pFielder->EndDesire();
+        }
+        result = true;
+        break;
+    }
+    case WALUIGI:
+        mpTarget = 0;
+        mMaxDuration = gWaluigiWarioSuperPowerTimeLimit;
+        m_pFielder->InitSuperPowerTank(
+            (bool)UserControlledT(m_pFielder->m_pTeam));
+        result = true;
+        break;
+    case WARIO:
+    {
+        mpTarget = 0;
+        mMaxDuration = gWaluigiWarioSuperPowerTimeLimit;
+        m_pFielder->InitSuperPowerTank(
+            (bool)UserControlledT(m_pFielder->m_pTeam));
+        bool userControlled = (bool)m_pFielder->GetGlobalPad();
+        if (!userControlled
+            && (m_pFielder->GetDesireState() == 21
+                || m_pFielder->GetDesireState() == 18
+                || m_pFielder->GetDesireState() == 9))
+        {
+            m_pFielder->EndDesire();
+        }
+        result = true;
+        break;
+    }
+    case YOSHI:
+        result = fn_800D0DB0(this, context);
+        break;
+    }
+
+    if (result)
+    {
+        mScriptMachine->SetTransition("SuperPowerPlayDesire");
+        DeactivateScriptMachine(fn_800A6968(m_pFielder->m_pTeam));
+        cFielder* fielder = m_pFielder;
+        if (fielder->m_pBall != 0 && g_pGame->IsGameplayOrOvertime())
+        {
+            gSuperAbilityTeam = (eTeamID)GameInfoManager::Instance()->GetTeam(fielder->m_pTeam->m_nSide);
+            ((SuperAbilityOverlay*)g_pOverlayManager->GetScene(OVERLAY_SUPER_ABILITY))->Start();
+            PlaySound(fielder->m_uSoundSlotId, 0x790F135F, 0, 0);
+            fn_80060A00(g_pGame, fielder);
+        }
+
+        unsigned long sound = PowerupBase::GetSoundType(
+            (ePowerUpType)m_pFielder->m_pCharacterInfo->mCaptainPowerup,
+            PowerupBase::PWRUP_SOUND_ACTIVATE);
+        if (m_pFielder->m_DetChar.m_eCharacterClass == MARIO
+            || m_pFielder->m_DetChar.m_eCharacterClass == LUIGI)
+        {
+            PlayCaptainPowerupStream(18, sound, m_pFielder);
+            u32 hash = nlStringLowerHash("MarioPowerup");
+            ApplyAudioTransition(&hash, 0, 0);
+            PauseSuddenDeathMusic();
+        }
+        else
+        {
+            PlayCaptainPowerupStream(m_pFielder->m_uSoundSlotId,
+                sound, m_pFielder);
+        }
+    }
+    return result;
+}
+
+/**
+ * Offset/Address/Size: 0x87C | 0x800C8F78 | size: 0x174
+ */
+void DesireSuperPower::Update(
+    DesireUpdate* update, float fDeltaT)
+{
+    if (!IsGameplayOrOvertime(g_pGame))
+    {
+        *update = 1;
+        return;
+    }
+
+    switch (GetCharacterClass(m_pFielder))
+    {
+    case BOWSER:
+        UpdateBowser(update, fDeltaT);
+        break;
+    case BOWSERJR:
+        UpdateBowserJr(update, fDeltaT);
+        break;
+    case DAISY:
+        UpdateDaisy(update, fDeltaT);
+        break;
+    case DIDDYKONG:
+        UpdateDiddy(update, fDeltaT);
+        break;
+    case DONKEYKONG:
+        UpdateDK(update, fDeltaT);
+        break;
+    case LUIGI:
+        UpdateLuigi(update, fDeltaT);
+        break;
+    case MARIO:
+        UpdateMario(update, fDeltaT);
+        break;
+    case PEACH:
+        UpdatePeach(update, fDeltaT);
+        break;
+    case PETEY:
+        UpdatePetey(update, fDeltaT);
+        break;
+    case WALUIGI:
+        UpdateWaluigi(update, fDeltaT);
+        break;
+    case WARIO:
+        UpdateWario(update, fDeltaT);
+        break;
+    case YOSHI:
+        UpdateYoshi(update, fDeltaT);
+        break;
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x9F0 | 0x800C90EC | size: 0x2B8
+ */
+void DesireSuperPower::Cleanup()
+{
+    DeactivateScriptMachine(fn_800A6968(m_pFielder->m_pTeam));
+
+    switch (m_pFielder->m_DetChar.m_eCharacterClass)
+    {
+    case BOWSER:
+        m_pFielder->ClearSuperPowerTank();
+        m_pFielder->m_pTeam->ClearCurrentPowerUp();
+        EndBowserSmoke(m_pFielder);
+        break;
+    case BOWSERJR:
+        m_pFielder->ClearInvincibility(0);
+        {
+            EffectsGroup* group = EmissionManager::Instance()->GetEffectsGroup(
+                "bowserjr_shriek_mouth");
+            if (group != 0)
+            {
+                EmissionManager::Instance()->Kill(group);
+            }
+        }
+        break;
+    case DAISY:
+        m_pFielder->ClearInvincibility(0);
+        break;
+    case DIDDYKONG:
+        m_pFielder->m_bPacketAVisible = false;
+        m_pFielder->m_bPacketBVisible = false;
+        m_pFielder->ClearInvincibility(0);
+        break;
+    case DONKEYKONG:
+        KillDKSuperCharge(m_pFielder);
+        m_pFielder->ClearInvincibility(0);
+        delete (AvoidablePoint*)mpDKShockAvoidable;
+        mpDKShockAvoidable = 0;
+        break;
+    case LUIGI:
+        m_pFielder->m_pTweaks
+            = m_pFielder->m_pNormalTweaks;
+        m_pFielder->fn_8001EE74(1.0f, gSuperShrinkTime, 1.0f);
+        EmitSuperShrink(m_pFielder);
+        break;
+    case MARIO:
+        m_pFielder->m_pTweaks
+            = m_pFielder->m_pNormalTweaks;
+        m_pFielder->fn_8001EE74(1.0f, gSuperShrinkTime, 1.0f);
+        EmitSuperShrink(m_pFielder);
+        break;
+    case PEACH:
+        m_pFielder->CleanUpPeachSuper();
+        SetFlyingCameraTarget((cFielder*)0);
+        break;
+    case PETEY:
+        m_pFielder->ClearInvincibility(0);
+        m_pFielder->m_fPeteyLastMuckBallTime = 0.0f;
+        m_pFielder->m_fPeteyMuckBallSpeed = 0.0f;
+        m_pFielder->ClearSuperPowerTank();
+        m_pFielder->m_pTeam->ClearCurrentPowerUp();
+        if (m_pFielder->m_eAnimID == 104)
+        {
+            m_pFielder->EndDesire();
+            m_pFielder->StartRunning();
+        }
+        break;
+    case WALUIGI:
+        if (m_pFielder->GetDesireState() == 12)
+        {
+            m_pFielder->EndDesire();
+        }
+        m_pFielder->ClearSuperPowerTank();
+        m_pFielder->m_pTeam->ClearCurrentPowerUp();
+        break;
+    case WARIO:
+        m_pFielder->ClearSuperPowerTank();
+        m_pFielder->m_pTeam->ClearCurrentPowerUp();
+        if (m_pFielder->m_eAnimID == 104)
+        {
+            m_pFielder->EndDesire();
+            m_pFielder->StartRunning();
+        }
+        break;
+    case YOSHI:
+        m_pFielder->m_pTweaks
+            = m_pFielder->m_pNormalTweaks;
+        m_pFielder->RestoreTangibility(false);
+        m_pFielder->bYoshiInWindup = false;
+        EmitYoshiShellBreak(m_pFielder);
+        gNPCManager->mpYoshiEgg->Break();
+        break;
+    }
+
+    unsigned long sound = PowerupBase::GetSoundType(
+        (ePowerUpType)m_pFielder->m_pCharacterInfo->mCaptainPowerup,
+        PowerupBase::PWRUP_SOUND_ACTIVATE);
+    StopCaptainPowerupStream(sound, m_pFielder);
+    if ((m_pFielder->m_DetChar.m_eCharacterClass == MARIO)
+        || (m_pFielder->m_DetChar.m_eCharacterClass == LUIGI))
+    {
+        ResumeSuddenDeathMusic();
+        u32 hash = nlStringLowerHash("MarioPowerup");
+        ApplyAudioTransition(&hash, 1, 0);
+    }
+}
+
+void DesireSuperPower::UpdateBowser(DesireUpdate* update, float fDeltaT)
+{
+    if (update->mData.i == 3)
+    {
+        if (update->ExtraData.Get(11)->mData.b)
+        {
+            mpTarget = (cFielder*)update->ExtraData.Get(14)->mData.pointer;
+            if (!m_pFielder->m_bSuperPowerTankOn)
+            {
+                m_pFielder->TurnOnSuperPowerTank();
+            }
+        }
+        else if (m_pFielder->m_bSuperPowerTankOn)
+        {
+            m_pFielder->TurnOffSuperPowerTank(false);
+        }
+        *update = 0;
+    }
+    if (update->mData.i == 0)
+    {
+        bool active = m_pFielder->m_fSuperPowerTankLevel > 0.0f;
+        if (!active)
+        {
+            *update = 1;
+            return;
+        }
+        if (m_pFielder->m_bSuperPowerTankOn)
+        {
+            if (!CanUsePowerup(m_pFielder, -1))
+            {
+                m_pFielder->TurnOffSuperPowerTank(true);
+                return;
+            }
+            m_pFielder->DrainSuperPowerTank(fDeltaT);
+            bool active = m_pFielder->m_fSuperPowerTankLevel > 0.0f;
+            if (active)
+            {
+                m_pFielder->mActionBowserSuper.fireballStageTime += fDeltaT;
+                m_pFielder->mActionBowserSuper.nextFireballTime -= fDeltaT;
+                if (m_pFielder->mActionBowserSuper.nextFireballTime <= 0.0f)
+                {
+                    nlVector3 pos;
+                    nlVector3 direction;
+                    const nlMatrix4& mat = m_pFielder->m_pPoseAccumulator->GetNodeMatrix(
+                        m_pFielder->m_nHeadJointIndex);
+                    nlVec3Set(direction, mat.m21, mat.m22, mat.m23);
+                    nlVec3ScaleAdd(pos, gBowserFireBallSpawnOffset, direction, (const nlVector3&)mat.m41);
+                    nlVector3 flat = direction;
+                    flat.z = -0.01f;
+                    float inverseLength = nlRecipSqrt(nlVec3DotProduct(flat, flat), true);
+                    nlVec3Set(flat, inverseLength * flat.x, inverseLength * flat.y, inverseLength * flat.z);
+                    if (nlVec3DotProduct(direction, flat) > 0.9f)
+                    {
+                        direction = flat;
+                    }
+                    float stage = InterpolateRangeClamped(0.0f, 1.0f, 0.0f, gBowserFireBallRampTime,
+                        m_pFielder->mActionBowserSuper.fireballStageTime);
+                    m_pFielder->mActionBowserSuper.nextFireballTime
+                        += Interpolate(gBowserFireBallMinInterval, gBowserFireBallMaxInterval, stage);
+                    float speed = Interpolate(gBowserFireBallMinSpeed, gBowserFireBallMaxSpeed, stage);
+                    nlVec3ScaleAdd(direction, speed,
+                        direction, m_pFielder->m_DetChar.m_v3Velocity);
+                    float radius = Interpolate(gBowserFireBallMinEndRadius, gBowserFireBallMaxEndRadius, stage);
+                    float lifetime = Interpolate(gBowserFireBallMinLifetime, gBowserFireBallMaxLifetime, stage);
+                    lbl_806E12C8->CreatePatch(PATCH_FIRE_BALL, m_pFielder, pos, direction,
+                        gBowserFireBallStartRadius, radius, lifetime);
+                    PlayRumbleAction(RUMBLE_SMALL_CONTACT, m_pFielder->GetGlobalPad());
+                }
+            }
+            else
+            {
+                *update = 1;
+            }
+        }
+        else
+        {
+            m_pFielder->mActionBowserSuper.nextFireballTime = 0.0f;
+        }
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x1678 | 0x800C9D74 | size: 0x40
+ */
+extern "C" void fn_800C9D74(DesireSuperPower* self, int param)
+{
+    if (param != 0)
+    {
+        self->m_pFielder->fn_8004FF40();
+    }
+    RequestStateMachineDeactivation(self);
+}
+
+/**
+ * Offset/Address/Size: 0x16B8 | 0x800C9DB4 | size: 0x198
+ */
+void EmitBowserJrShriek(DesireSuperPower* self)
+{
+    self->m_pFielder->ClearInvincibility(0);
+    nlVector3 vel;
+    vel.z = 0.0f;
+    nlPolarToCartesian(vel.x, vel.y,
+        self->m_pFielder->m_DetChar.m_aActualFacingDirection, 1.0f);
+    nlVec3Scale(vel, vel, gBowserJrShriekSpeed);
+    nlVector3 pos = self->m_pFielder->GetJointPosition(
+        self->m_pFielder->m_nHeadJointIndex);
+    PhysicsPatch* patch = lbl_806E12C8->CreatePatch(PATCH_SHRINKER,
+        self->m_pFielder, pos, vel,
+        gBowserJrShriekStartRadius, gBowserJrShriekEndRadius, gBowserJrShriekLifetime);
+    patch->SetEndRadiusTime(gBowserJrShriekEndRadiusTime);
+    PlayRumbleAction(RUMBLE_SMALL_CONTACT, self->m_pFielder->GetGlobalPad());
+    EffectsGroup* group = EmissionManager::Instance()->GetEffectsGroup(
+        "bowserjr_shriek_mouth");
+    if (group != 0)
+    {
+        EmissionController* controller = EmissionManager::Instance()->Create(
+            group, 3, true, 0);
+        controller->m_uUserData = (u32)self->m_pFielder;
+        controller->SetPosition(
+            self->m_pFielder->m_DetChar.m_v3Position);
+        controller->SetVelocity(
+            self->m_pFielder->m_DetChar.m_v3Velocity);
+        controller->SetUpdateCallback(
+            Function1<void, EmissionController&>(
+                UpdateEmitterFromCharacterForward));
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x1850 | 0x800C9F4C | size: 0x130
+ */
+bool InitializeBowserJr(DesireSuperPower* self, void*)
+{
+    if (self->m_pFielder->GetGlobalPad() != 0)
+    {
+        if (self->m_pFielder->m_pController
+                ->GetMovementStickMagnitude() > 0.01f)
+        {
+            self->m_pFielder->m_pController
+                ->GetMovementStickDirection();
+        }
+    }
+    short dir = 0;
+    cFielder* target = FindPowerupTarget(
+        self->m_pFielder, POWER_UP_NONE);
+    self->mpTarget = target;
+    if ((target != 0) && (gBowserJrFaceTarget != 0))
+    {
+        dir = self->m_pFielder->GetFacingDeltaToPosition(
+            target->m_DetChar.m_v3Position);
+    }
+    self->m_pFielder->InitDesire(
+        FIELDER_DESIRE_FINISH_ACTION, 0.5f, -1.0f, fvNotSet, fvNotSet);
+    self->m_pFielder->SetAction(ACTION_SUPER_POWER);
+    self->m_pFielder->muInvincibleStatus |= 1;
+    self->m_pFielder->SetAnimState(104, true, 0.2f, false, false);
+    self->m_pFielder->InitMovementFromAnim(
+        dir, gSuperPowerZeroVector, 0.15f, false);
+    self->mMaxDuration = gBowserJrSuperPowerTimeLimit;
+    return self->m_pFielder->m_eActionState
+        == ACTION_SUPER_POWER;
+}
+
+/**
+ * Offset/Address/Size: 0x1980 | 0x800CA07C | size: 0x500
+ */
+void DesireSuperPower::UpdateBowserJr(DesireUpdate* update, float fDeltaT)
+{
+    if (m_pFielder->ShouldStartCrossBlend(4))
+    {
+        m_pFielder->EndAction();
+    }
+
+    if (m_pFielder->IsActionDone() || !g_pGame->IsGameplayOrOvertime())
+    {
+        m_pFielder->EndDesire();
+        *update = 1;
+    }
+    if (m_pFielder->m_eActionState != ACTION_SUPER_POWER)
+    {
+        *update = 1;
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x1E80 | 0x800CA57C | size: 0x59C
+ */
+void DesireSuperPower::UpdateDaisy(DesireUpdate* update, float fDeltaT)
+{
+    if (m_pFielder->ShouldStartCrossBlend(4))
+    {
+        m_pFielder->EndAction();
+    }
+
+    if (m_pFielder->IsActionDone() || !g_pGame->IsGameplayOrOvertime())
+    {
+        m_pFielder->EndDesire();
+        *update = 1;
+    }
+    if (m_pFielder->m_eActionState != ACTION_SUPER_POWER)
+    {
+        *update = 1;
+    }
+
+    if (m_pFielder->m_pCurrentAnimController->TestTrigger(gDaisyFistSpawnTime))
+    {
+        int step = 65536 / gDaisyFistCount;
+        unsigned short angle = m_pFielder->m_DetChar.m_aActualFacingDirection;
+        for (int i = 0; i < gDaisyFistCount; i++)
+        {
+            DaisyFistObject* fist = gNPCManager->GetDaisyFist(-1);
+            if (fist != 0)
+            {
+                fist->Spawn(m_pFielder, angle);
+            }
+            angle += step;
+        }
+    }
+    else if (m_pFielder->m_pCurrentAnimController->TestTrigger(0.04f + gDaisyFistSpawnTime))
+    {
+        m_pFielder->ClearInvincibility(0);
+    }
+}
+
+void DesireSuperPower::EmitHeavenlyLight()
+{
+    m_pFielder->ClearInvincibility(0);
+    nlVector3 direction;
+    nlPolarToCartesian(direction.x, direction.y,
+        m_pFielder->m_DetChar.m_aActualFacingDirection, 1.0f);
+    direction.z = 0.0f;
+    nlVector3 pos = m_pFielder->GetJointPosition(
+        m_pFielder->m_nRightHandJointIndex);
+    nlVector3 offset = direction;
+    pos.z = 0.0f;
+    float inverseLength = nlRecipSqrt(nlVec3DotProduct(offset, offset), true);
+    nlVec3Set(offset, inverseLength * offset.x, inverseLength * offset.y, inverseLength * offset.z);
+    nlVec3Scale(offset, offset, gHeavenlyLightStartRadius + gHeavenlyLightOffset);
+    nlVec3Add(pos, pos, offset);
+    cField::FixOutOfBoundsPosition(pos, 0.9f * gHeavenlyLightEndRadius, true);
+    PhysicsPatch* patch = lbl_806E12C8->CreatePatch(PATCH_HEAVENLY_LIGHT,
+        m_pFielder, pos, gSuperPowerZeroVector,
+        gHeavenlyLightStartRadius, gHeavenlyLightEndRadius, gHeavenlyLightLifetime);
+    patch->SetEndRadiusTime(gHeavenlyLightEndRadiusTime);
+    PlayRumbleAction(RUMBLE_SMALL_CONTACT, m_pFielder->GetGlobalPad());
+}
+
+/**
+ * Offset/Address/Size: 0x2590 | 0x800CAC8C | size: 0x130
+ */
+bool InitializeDiddy(DesireSuperPower* self, void*)
+{
+    if (self->m_pFielder->GetGlobalPad() != 0)
+    {
+        if (self->m_pFielder->m_pController
+                ->GetMovementStickMagnitude() > 0.01f)
+        {
+            self->m_pFielder->m_pController
+                ->GetMovementStickDirection();
+        }
+    }
+    short dir = 0;
+    cFielder* target = FindPowerupTarget(
+        self->m_pFielder, POWER_UP_NONE);
+    self->mpTarget = target;
+    if ((target != 0) && (gDiddyFaceTarget != 0))
+    {
+        dir = self->m_pFielder->GetFacingDeltaToPosition(
+            target->m_DetChar.m_v3Position);
+    }
+    self->m_pFielder->InitDesire(
+        FIELDER_DESIRE_FINISH_ACTION, 0.5f, -1.0f, fvNotSet, fvNotSet);
+    self->m_pFielder->SetAction(ACTION_SUPER_POWER);
+    self->m_pFielder->muInvincibleStatus |= 1;
+    self->m_pFielder->SetAnimState(104, true, 0.2f, false, false);
+    self->m_pFielder->InitMovementFromAnim(
+        dir, gSuperPowerZeroVector, 0.15f, false);
+    self->mMaxDuration = gDiddySuperPowerTimeLimit;
+    return self->m_pFielder->m_eActionState
+        == ACTION_SUPER_POWER;
+}
+
+/**
+ * Offset/Address/Size: 0x26C0 | 0x800CADBC | size: 0x500
+ */
+void DesireSuperPower::UpdateDiddy(DesireUpdate* update, float fDeltaT)
+{
+    if (m_pFielder->ShouldStartCrossBlend(4))
+    {
+        m_pFielder->EndAction();
+    }
+
+    if (m_pFielder->IsActionDone() || !g_pGame->IsGameplayOrOvertime())
+    {
+        m_pFielder->EndDesire();
+        *update = 1;
+    }
+    if (m_pFielder->m_eActionState != ACTION_SUPER_POWER)
+    {
+        *update = 1;
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x2BC0 | 0x800CB2BC | size: 0x4EC
+ */
+void DesireSuperPower::UpdateDK(DesireUpdate* update, float fDeltaT)
+{
+    m_pFielder->ActionDKSuper(fDeltaT);
+
+    if (m_pFielder->IsActionDone() || !g_pGame->IsGameplayOrOvertime())
+    {
+        m_pFielder->EndDesire();
+        *update = 1;
+    }
+    if (m_pFielder->m_eActionState != ACTION_SUPER_POWER)
+    {
+        *update = 1;
+    }
+}
+
+void DesireSuperPower::UpdateLuigi(DesireUpdate* update, float fDeltaT)
+{
+    m_pFielder->SetAvoidanceMultiplier(lbl_806DC268);
+    if (m_pFielder->m_eActionState == ACTION_SHOOT_TO_SCORE)
+    {
+        float scaledDelta = fDeltaT * gSuperGrowShootToScoreTimeScale;
+        mAgeTimer.Countup(scaledDelta - fDeltaT, 10.0f);
+    }
+    if (update->mData.i != 0)
+    {
+        switch (m_pFielder->m_eActionState)
+        {
+        case ACTION_ELECTROCUTION:
+        case ACTION_LOOSE_BALL_PASS:
+        case ACTION_LOOSE_BALL_SHOT:
+        case ACTION_ONETIMER:
+        case ACTION_RECEIVE_PASS:
+            *update = 0;
+            break;
+        default:
+            return;
+        }
+    }
+    m_pFielder->fn_8001EF6C(1.0f);
+    switch (m_pFielder->m_eActionState)
+    {
+    case ACTION_DEKE:
+        m_pFielder->fn_8001EF6C(lbl_806DC260);
+        break;
+    case ACTION_HIT:
+        m_pFielder->fn_8001EF6C(gSuperGrowHitMovementScale);
+        break;
+    case ACTION_MEGA_STRIKE:
+        *update = 1;
+        break;
+    default:
+        if (!g_pGame->IsGameplayOrOvertime())
+        {
+            *update = 1;
+        }
+        break;
+    }
+}
+
+void DesireSuperPower::UpdateMario(DesireUpdate* update, float fDeltaT)
+{
+    m_pFielder->SetAvoidanceMultiplier(lbl_806DC268);
+    if (m_pFielder->m_eActionState == ACTION_SHOOT_TO_SCORE)
+    {
+        float scaledDelta = fDeltaT * gSuperGrowShootToScoreTimeScale;
+        mAgeTimer.Countup(scaledDelta - fDeltaT, 10.0f);
+    }
+    if (update->mData.i != 0)
+    {
+        switch (m_pFielder->m_eActionState)
+        {
+        case ACTION_ELECTROCUTION:
+        case ACTION_LOOSE_BALL_PASS:
+        case ACTION_LOOSE_BALL_SHOT:
+        case ACTION_ONETIMER:
+        case ACTION_RECEIVE_PASS:
+            *update = 0;
+            break;
+        default:
+            return;
+        }
+    }
+    m_pFielder->fn_8001EF6C(1.0f);
+    switch (m_pFielder->m_eActionState)
+    {
+    case ACTION_DEKE:
+        m_pFielder->fn_8001EF6C(lbl_806DC260);
+        break;
+    case ACTION_HIT:
+        m_pFielder->fn_8001EF6C(gSuperGrowHitMovementScale);
+        break;
+    case ACTION_MEGA_STRIKE:
+        *update = 1;
+        break;
+    default:
+        if (!g_pGame->IsGameplayOrOvertime())
+        {
+            *update = 1;
+        }
+        break;
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x4024 | 0x800CC720 | size: 0x4EC
+ */
+void DesireSuperPower::UpdatePeach(DesireUpdate* update, float fDeltaT)
+{
+    m_pFielder->ActionPeachSuper(fDeltaT);
+
+    if (m_pFielder->IsActionDone() || !g_pGame->IsGameplayOrOvertime())
+    {
+        m_pFielder->EndDesire();
+        *update = 1;
+    }
+    if (m_pFielder->m_eActionState != ACTION_SUPER_POWER)
+    {
+        *update = 1;
+    }
+}
+
+inline bool DesireSuperPower::IsMuckBallReady() const
+{
+    bool fire = false;
+    if (m_pFielder->m_fPeteySuperPowerTime - m_pFielder->m_fPeteyLastMuckBallTime > gPeteyMuckBallInterval
+        && m_pFielder->IsFallenDown() != true)
+        fire = true;
+    return fire;
+}
+
+void DesireSuperPower::UpdatePetey(DesireUpdate* update, float fDeltaT)
+{
+    m_pFielder->m_fPeteySuperPowerTime += fDeltaT;
+    m_pFielder->m_fPeteyMuckBallSpeed += gPeteyMuckBallSpeedRate * fDeltaT;
+    m_pFielder->m_fPeteyMuckBallSpeed = nlMinEquals(
+        nlMaxEquals(m_pFielder->m_fPeteyMuckBallSpeed, gPeteyMuckBallMinSpeed), gPeteyMuckBallMaxSpeed);
+    if (update->mData.i == 3)
+    {
+        if (update->ExtraData.Get(11)->mData.b)
+        {
+            mpTarget = (cFielder*)update->ExtraData.Get(14)->mData.pointer;
+            if (!m_pFielder->m_bSuperPowerTankOn)
+            {
+                m_pFielder->TurnOnSuperPowerTank();
+            }
+        }
+        else if (m_pFielder->m_bSuperPowerTankOn)
+        {
+            m_pFielder->TurnOffSuperPowerTank(false);
+        }
+        *update = 0;
+    }
+    if (update->mData.i == 0)
+    {
+        bool active = m_pFielder->m_fSuperPowerTankLevel > 0.0f;
+        if (active)
+        {
+            if (m_pFielder->m_eAnimID == 104
+                && m_pFielder->ShouldStartCrossBlend(4))
+            {
+                m_pFielder->EndDesire();
+                m_pFielder->StartRunning();
+            }
+            if (m_pFielder->m_bSuperPowerTankOn)
+            {
+                if (IsMuckBallReady() == true)
+                {
+                    m_pFielder->m_fPeteyLastMuckBallTime = m_pFielder->m_fPeteySuperPowerTime;
+                    m_pFielder->DrainSuperPowerTank(1.0f / (float)gPeteyMuckBallCount);
+                    nlVector3 pos;
+                    nlVector3 direction;
+                    const nlMatrix4& mat = m_pFielder->m_pPoseAccumulator->GetNodeMatrix(
+                        m_pFielder->m_nHeadJointIndex);
+                    nlVec3Set(direction, mat.m21, mat.m22, mat.m23);
+                    nlVec3ScaleAdd(pos, gPeteyMuckBallSpawnOffset, direction, (const nlVector3&)mat.m41);
+                    nlPolar polar;
+                    nlCartesianToPolar(polar, direction);
+                    unsigned short angle = polar.a;
+                    unsigned short range = DegreesToAngle(gPeteyMuckBallSpreadAngle);
+                    angle += nlRandom(range) - 0.5f * range;
+                    direction.x = m_pFielder->m_fPeteyMuckBallSpeed * nlSin(angle + 0x4000);
+                    direction.y = m_pFielder->m_fPeteyMuckBallSpeed * nlSin(angle);
+                    direction.z = gPeteyMuckBallUpSpeed;
+                    nlVec3Add(direction, direction, m_pFielder->m_DetChar.m_v3Velocity);
+                    PhysicsPatch* patch = lbl_806E12C8->CreatePatch(PATCH_MUCK_BALL, m_pFielder,
+                        pos, direction, gPeteyMuckBallRadius, gPeteyMuckBallRadius, 9999.0f);
+                    patch->m_Gravity = gPeteyMuckBallGravity;
+                }
+            }
+        }
+        else if (m_pFielder->m_eAnimID == 104)
+        {
+            if (m_pFielder->ShouldStartCrossBlend(4))
+            {
+                m_pFielder->EndDesire();
+                m_pFielder->StartRunning();
+                *update = 1;
+            }
+        }
+        else
+        {
+            *update = 1;
+        }
+    }
+}
+
+void DesireSuperPower::UpdateWaluigi(DesireUpdate* update, float fDeltaT)
+{
+    bool userControlled = (bool)m_pFielder->GetGlobalPad();
+    if (!userControlled)
+    {
+        UpdateWaluigiAI(update, fDeltaT);
+    }
+    if (update->mData.i == 0)
+    {
+        bool active = m_pFielder->m_fSuperPowerTankLevel > 0.0f;
+        if (!active)
+        {
+            *update = 1;
+        }
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x51E8 | 0x800CD8E4 | size: 0x14
+ */
+void CopyVector2(nlVector2* dst, const nlVector2* src)
+{
+    *dst = *src;
+}
+
+inline bool AvoidablePolygon::IntersectsSegment(const nlVector2& start, const nlVector2& end) const
+{
+    int i;
+    const nlVector2* points = mPoints;
+    for (i = 0; i < 4; i++)
+    {
+        nlVector2 edgeStart;
+        nlVector2 edgeEnd;
+        if (i < 3)
+        {
+            edgeStart = points[i];
+            edgeEnd = points[i + 1];
+        }
+        else
+        {
+            edgeStart = points[i];
+            edgeEnd = points[0];
+        }
+        float a, b;
+        if (nlIntersectLineSegments2D(&start, &end, &edgeStart, &edgeEnd, &a, &b))
+            return true;
+    }
+    return false;
+}
+
+bool IsWaluigiWallAhead(const nlVector2* direction, cFielder* fielder)
+{
+    float distance = 5.0f;
+    nlVector2 normal;
+    nlVector2 left[2], right[2];
+    float c, s;
+    nlSinCos(&s, &c, 0x4000);
+    normal.x = direction->x * c - direction->y * s;
+    normal.y = direction->y * c + direction->x * s;
+    float radius = fielder->m_pAvoidableObject->GetRadius();
+    nlVec2Set(left[1], radius * normal.x + fielder->m_DetChar.m_v3Position.x,
+        radius * normal.y + fielder->m_DetChar.m_v3Position.y);
+    nlVec2Set(left[1], distance * direction->x + left[1].x, distance * direction->y + left[1].y);
+    nlVec2Set(left[0], -(distance - 1.2f) * direction->x + left[1].x,
+        -(distance - 1.2f) * direction->y + left[1].y);
+    float c2, s2;
+    nlSinCos(&s2, &c2, 0xC000);
+    normal.x = direction->x * c2 - direction->y * s2;
+    normal.y = direction->y * c2 + direction->x * s2;
+    radius = fielder->m_pAvoidableObject->GetRadius();
+    nlVec2Set(right[1], radius * normal.x + fielder->m_DetChar.m_v3Position.x,
+        radius * normal.y + fielder->m_DetChar.m_v3Position.y);
+    nlVec2Set(right[1], distance * direction->x + right[1].x, distance * direction->y + right[1].y);
+    nlVec2Set(right[0], -(distance - 1.2f) * direction->x + right[1].x,
+        -(distance - 1.2f) * direction->y + right[1].y);
+    bool result = false;
+    for (int i = 0; i < 20; i++)
+    {
+        PhysicsWaluigiWall* wall = fielder->mWaluigiWallState.mWallManager->GetWall(i);
+        if (wall != 0)
+        {
+            AvoidablePolygon* polygon = wall->GetAvoidablePolygon();
+            if (polygon->IntersectsSegment(left[0], left[1])
+                || polygon->IntersectsSegment(right[0], right[1]))
+            {
+                result = true;
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+void DesireSuperPower::UpdateWaluigiAI(DesireUpdate*, float)
+{
+    if (m_pFielder->GetDesireState() == 13 && m_pFielder->m_bSuperPowerTankOn)
+    {
+        nlVector2 direction;
+        nlSinCos(&direction.y, &direction.x, m_pFielder->m_DetChar.m_aActualFacingDirection);
+        if (m_pFielder->m_pBall == 0 && NearToBall(m_pFielder) >= 0.7f
+            || IsWaluigiWallAhead(&direction, m_pFielder))
+            m_pFielder->TurnOffSuperPowerTank(true);
+    }
+    else if (!m_pFielder->m_bSuperPowerTankOn
+        && (m_pFielder->GetDesireState() == 12 || m_pFielder->GetDesireState() == 13))
+    {
+        if (!(bool)UserControlledT(m_pFielder->m_pTeam))
+        {
+            m_pFielder->SetAvoidanceMultiplier(0.0f);
+            nlVector3 direction;
+            const nlVector3& target = m_pFielder->GetDesiredPosition();
+            nlVec3Sub(direction, target, m_pFielder->m_DetChar.m_v3Position);
+            bool valid;
+            float lengthSq = direction.GetLengthSq3D();
+            if (lengthSq == 0.0f)
+            {
+                valid = false;
+            }
+            else
+            {
+                nlVec3Scale(direction, nlRecipSqrt(lengthSq, true));
+                valid = true;
+            }
+            if (valid)
+            {
+                unsigned short angle = nlATan2Angle(direction.y, direction.x);
+                short delta = m_pFielder->m_DetChar.m_aActualFacingDirection - angle;
+                float sideline = CloseToSideline(m_pFielder);
+                float question = fn_800DD744(m_pFielder);
+                int difference = nlAbsAngle(delta);
+                bool near = difference < 0x800
+                    && (m_pFielder->m_pBall != 0 || (bool)(NearToBall(m_pFielder) < 0.7f));
+                bool clear = false;
+                if (near && sideline < 0.9f && question < 0.9f)
+                    clear = true;
+                bool moving = clear && m_pFielder->m_DetChar.m_fActualSpeed > 1.0f;
+                bool start = moving && !IsWaluigiWallAhead((const nlVector2*)&direction, m_pFielder);
+                if (start)
+                {
+                    bool active = m_pFielder->m_fSuperPowerTankLevel > 0.0f;
+                    if (active && CanUsePowerup(m_pFielder, -1))
+                    {
+                        m_pFielder->TurnOnSuperPowerTank();
+                        m_pFielder->SetThingsToAvoid(0);
+                    }
+                }
+            }
+        }
+    }
+    else if (m_pFielder->GetDesireState() != 12
+        && m_pFielder->GetDesireState() != 13
+        && (!(bool)UserControlledT(m_pFielder->m_pTeam) || m_pFielder->m_bSuperPowerTankOn)
+        && (bool)(1.0f - ReceivingPass(m_pFielder))
+        && (bool)(1.0f - fn_800DEAB4(m_pFielder))
+        && CanUsePowerup(m_pFielder, -1))
+    {
+        if ((bool)UserControlledT(m_pFielder->m_pTeam))
+        {
+            int count = BuildPathPoints();
+            nlVector3 pos;
+            nlVec3Set(pos, mvPathPoints[0].x, mvPathPoints[0].y, 0.0f);
+            nlVector3 direction;
+            nlVec3Sub(direction, pos, m_pFielder->m_DetChar.m_v3Position);
+            float distance = nlVec2Length((const nlVector2&)direction);
+            unsigned short angle = nlATan2Angle(direction.y, direction.x);
+            FuzzyVariantCollection params;
+            params.Set(7, FuzzyVariant(gFollowPathTimeLimit));
+            params.Set(17, FuzzyVariant((unsigned long)angle));
+            params.Set(18, FuzzyVariant(distance));
+            params.Set(0, FuzzyVariant(gFollowPathStartIndex));
+            params.Set(1, FuzzyVariant(count));
+            params.Set(13, FuzzyVariant(gFollowPathSpeed));
+            params.Set(10, FuzzyVariant((void*)FollowPathTransition));
+            m_pFielder->ActivateDesire(FIELDER_DESIRE_RUN_IN_DIRECTION, &params);
+        }
+        else if (m_pFielder->m_bSuperPowerTankOn)
+        {
+            m_pFielder->TurnOffSuperPowerTank(true);
+        }
+        else if (m_pFielder->m_pBall != 0 && InDefensiveZone(m_pFielder) < 0.5f)
+        {
+            float x;
+            if (m_pFielder->m_pBall != 0)
+                x = AIsgn(m_pFielder->GetAIOffNetLocation(0).x);
+            else
+                x = AIsgn(m_pFielder->GetAIDefNetLocation(0).x);
+            nlVector2 direction;
+            nlVec2Set(direction, x, 0.0f);
+            unsigned short facing = m_pFielder->m_DetChar.m_aActualFacingDirection;
+            unsigned short angles[4] = { facing, facing + 0x4000, facing - 0x4000, facing + 0x8000 };
+            float score = 0.0f;
+            unsigned short angle = angles[ChooseRunDirection(m_pFielder, angles, 4, &direction, &score)];
+            if (score > 0.0f)
+            {
+                FuzzyVariantCollection params;
+                params.Set(7, FuzzyVariant(gChooseDirectionTimeLimit));
+                params.Set(17, FuzzyVariant((unsigned long)angle));
+                params.Set(18, FuzzyVariant(gChooseDirectionMaxDistance));
+                params.Set(13, FuzzyVariant(gChooseDirectionSpeed));
+                params.Set(10, FuzzyVariant((void*)ChooseDirectionTransition));
+                m_pFielder->ActivateDesire(FIELDER_DESIRE_RUN_IN_DIRECTION, &params);
+            }
+        }
+        else if (!(bool)Offensive(m_pFielder->m_pTeam)
+            && NearToBall(fn_800D66C4(m_pFielder)) < 0.35f
+            && NearToBall(fn_800D66A0(m_pFielder)) < 0.35f
+            && FarToBall(m_pFielder) < 0.35f)
+        {
+            FuzzyVariantCollection params;
+            params.Set(7, FuzzyVariant(gInterceptBallTimeLimit));
+            params.Set(14, FuzzyVariant(g_pBall));
+            params.Set(13, FuzzyVariant(gInterceptBallSpeed));
+            params.Set(10, FuzzyVariant((unsigned long)nlStringHash("TransDesireInterceptBall")));
+            m_pFielder->ActivateDesire(FIELDER_DESIRE_RUN_TO_TARGET, &params);
+        }
+    }
+}
+
+DesireUpdate DesireSuperPower::FollowPathTransition(
+    const FuzzyVariant& value, shdStateMachine* machine)
+{
+    DesireUpdate result(gFollowPathContinueResult, -1.0f, -1.0f);
+    if (GetStateMachineState(machine) != 12)
+        return DesireUpdate(gFollowPathFinishedResult, -1.0f, -1.0f);
+    cFielder* fielder = (cFielder*)value.GetPlayer();
+    DesireSuperPower* desire = (DesireSuperPower*)GetFielderDesire(fielder, FIELDER_DESIRE_SUPER_POWER);
+    int index = GetStateMachineParameters(machine)->Get(0)->fn_800C2BD4();
+    int count = GetStateMachineParameters(machine)->Get(1)->fn_800C2BD4();
+    nlVector2& current = desire->mvPathPoints[index];
+    nlVector3 oldPos;
+    oldPos.Set(current.x, current.y, 0.0f);
+    GetRunInDirectionMaxDistance((DesireRunInDirection*)machine);
+    GetRunInDirectionDistanceTravelled((DesireRunInDirection*)machine);
+    if (fabsf(GetRunInDirectionDistanceTravelled((DesireRunInDirection*)machine)
+            - GetRunInDirectionMaxDistance((DesireRunInDirection*)machine)) < 1.5f)
+    {
+        ++index;
+        if (index == count)
+        {
+            if ((bool)UserControlledT(fielder->GetTeam()))
+                result = 1;
+            else if (fn_800DBAB0(fielder) > 0.1f && fielder->fn_800C2F40())
+            {
+                result = 3;
+                result.SetParameter(8, FuzzyVariant(gFollowPathWindupShotState));
+                result.SetParameter(10, FuzzyVariant((unsigned long)nlStringHash("TransDesireWindupMegastrike")));
+            }
+            else
+            {
+                fielder->TurnOffSuperPowerTank(false);
+                result = 1;
+            }
+        }
+        else
+        {
+            CopyVector2(&current, &desire->mvPathPoints[index]);
+            nlVector3 pos;
+            pos.Set(current.x, current.y, 0.0f);
+            nlVector3 delta;
+            nlVec3Difference(&delta, &pos, GetCharacterPosition(fielder));
+            float distance = nlVec3Distance2D(oldPos, pos);
+            unsigned short angle = nlATan2Angle(delta.y, delta.x);
+            result = 3;
+            result.SetParameter(8, FuzzyVariant(gFollowPathRunState));
+            result.SetParameter(12, FuzzyVariant(gFollowPathReinitialize));
+            result.SetParameter(17, FuzzyVariant((unsigned long)angle));
+            result.SetParameter(18, FuzzyVariant(distance));
+            result.SetParameter(0, FuzzyVariant(index));
+            result.SetParameter(1, FuzzyVariant(count));
+            result.SetParameter(13, FuzzyVariant(gFollowPathNextSpeed));
+            result.SetParameter(10, FuzzyVariant((void*)FollowPathTransition));
+            if (IsFielderSuperPowerTankOn(fielder) && GetStateMachineState(machine) == 12)
+            {
+                unsigned short absolute = nlAbsAngle(nlAbsAngle(nlAngleDelta(GetCharacterFacing(fielder), angle)));
+                short folded = absolute % 0x4000;
+                bool okay = folded < 0x2000 || (unsigned int)nlAbsInt(folded - 0x4000) < 0x2000;
+                if (!okay)
+                    fielder->TurnOffSuperPowerTank(true);
+            }
+        }
+    }
+    return DesireUpdate(result, -1.0f, -1.0f);
+}
+
+struct FielderRef
+{
+    cFielder* mFielder;
+};
+
+DesireUpdate DesireSuperPower::ChooseDirectionTransition(
+    const FuzzyVariant& value, shdStateMachine* machine)
+{
+    DesireUpdate result(FT_INT, gChooseDirectionContinueResult);
+    if (machine->GetState() != FIELDER_DESIRE_RUN_IN_DIRECTION)
+        return DesireUpdate(FT_INT, gChooseDirectionFinishedResult);
+    FielderRef fielder = { (cFielder*)value.mData.pointer };
+    GetFielderDesire(fielder.mFielder, FIELDER_DESIRE_SUPER_POWER);
+    float maxDistance = ((DesireRunInDirection*)machine)->GetMaxDistance();
+    float distanceTravelled = ((DesireRunInDirection*)machine)->GetDistanceTravelled();
+    float danger = CallFielderFuzzyFunction(((FuzzyRuntimeContext*)&value)->GetRuntime(),
+        fielder.mFielder, "InDangerForMegastrike").mData.f;
+    float question = fn_800DBB0C(fielder.mFielder);
+    bool good = ((1.0f - danger) / 2.0f + question / 2.0f) > 0.75f;
+    bool ready = good
+        || (CloseToSideline(fielder.mFielder) > 0.9f && fn_800DD744(fielder.mFielder) > 0.7f);
+    bool shoot = true;
+    if (!ready)
+    {
+        bool active = fielder.mFielder->m_fSuperPowerTankLevel > 0.0f;
+        if (active)
+            shoot = false;
+    }
+    if (fielder.mFielder->m_pBall != 0 && shoot && InOffensiveZone(fielder.mFielder) > 0.9f)
+    {
+        result = 3;
+        result.SetParameter(8, FuzzyVariant(gChooseDirectionWindupShotState));
+        result.SetParameter(10, FuzzyVariant((unsigned long)nlStringHash("TransDesireWindupMegastrike")));
+        if (fielder.mFielder->m_bSuperPowerTankOn)
+            fielder.mFielder->TurnOffSuperPowerTank(true);
+    }
+    else if (fielder.mFielder->m_bSuperPowerTankOn && distanceTravelled >= 2.0f)
+    {
+        bool turn = false;
+        cPlayer* bestPlayer = fn_800D674C(fielder.mFielder);
+        float q = CloseTo(fielder.mFielder, bestPlayer);
+        float pass = fn_800DDF54(fielder.mFielder, bestPlayer);
+        float best = pass / 2.0f + q / 2.0f;
+        for (int i = 0; i < 5; i++)
+        {
+            cPlayer* player = fn_800D6688(fielder.mFielder)->GetPlayer(i);
+            if (player != bestPlayer)
+            {
+                float q = CloseTo(fielder.mFielder, bestPlayer);
+                float pass = fn_800DDF54(fielder.mFielder, bestPlayer);
+                float score = pass / 2.0f + q / 2.0f;
+                if (score > best)
+                {
+                    best = score;
+                    bestPlayer = player;
+                }
+            }
+        }
+        float question1 = fn_800DD234(fielder.mFielder);
+        float question2 = fn_800DD744(fielder.mFielder);
+        nlVector2 facingDirection;
+        nlSinCos(&facingDirection.y, &facingDirection.x,
+            fielder.mFielder->m_DetChar.m_aActualFacingDirection);
+        if (best > 0.6f || FMIN(question1, question2) > 0.75f
+            || (float)fabs(distanceTravelled - maxDistance) < 1.5f
+            || IsWaluigiWallAhead(&facingDirection, fielder.mFielder))
+            turn = true;
+        if (turn)
+        {
+            float x;
+            if (fielder.mFielder->m_pBall != 0)
+                x = AIsgn(fielder.mFielder->GetAIOffNetLocation(0).x);
+            else
+                x = AIsgn(fielder.mFielder->GetAIDefNetLocation(0).x);
+            nlVector2 direction;
+            nlVec2Set(direction, x, 0.0f);
+            unsigned short facing = fielder.mFielder->m_DetChar.m_aActualFacingDirection;
+            unsigned short angles[3] = { facing, facing + 0x4000, facing - 0x4000 };
+            float score = 0.0f;
+            unsigned short angle = angles[ChooseRunDirection(fielder.mFielder, angles, 3, &direction, &score)];
+            if (score == 0.0f && fielder.mFielder->m_pBall != 0 && InOffensiveZone(fielder.mFielder) > 0.0f)
+            {
+                result = 3;
+                result.SetParameter(8, FuzzyVariant(gChooseDirectionBlockedWindupShotState));
+                result.SetParameter(10, FuzzyVariant((unsigned long)nlStringHash("TransDesireWindupMegastrike")));
+                if (fielder.mFielder->m_bSuperPowerTankOn)
+                    fielder.mFielder->TurnOffSuperPowerTank(true);
+            }
+            else
+            {
+                result = 3;
+                result.SetParameter(8, FuzzyVariant(gChooseDirectionRunState));
+                result.SetParameter(12, FuzzyVariant(gChooseDirectionReinitialize));
+                result.SetParameter(17, FuzzyVariant((unsigned long)angle));
+                result.SetParameter(18, FuzzyVariant(gChooseDirectionNextMaxDistance));
+                result.SetParameter(13, FuzzyVariant(gChooseDirectionNextSpeed));
+                result.SetParameter(10, FuzzyVariant((void*)ChooseDirectionTransition));
+            }
+            if (fielder.mFielder->m_bSuperPowerTankOn && machine->GetState() == FIELDER_DESIRE_RUN_IN_DIRECTION)
+            {
+                unsigned short absolute = nlAbsAngle(nlAbsAngle(
+                    nlAngleDelta(fielder.mFielder->m_DetChar.m_aActualFacingDirection, angle)));
+                short folded = absolute % 0x4000;
+                bool okay = folded < 0x2000 || (unsigned int)nlAbsInt(folded - 0x4000) < 0x2000;
+                if (!okay)
+                    fielder.mFielder->TurnOffSuperPowerTank(true);
+            }
+        }
+    }
+    return result;
+}
+
+int ChooseRunDirection(cFielder* fielder, const unsigned short* angles,
+    int count, const nlVector2* forward, float* bestScore)
+{
+    unsigned short desiredAngle = nlATan2Angle(forward->y, forward->x);
+    float best = 0.0f;
+    int bestIndex = 0;
+    float question1 = fn_800DD234(fielder);
+    float question2 = fn_800DD744(fielder);
+    nlVector3 farPos;
+    nlVector3 nearPos;
+    nlVector3 zero = gSuperPowerZeroVector;
+    for (int i = 0; i < count; i++)
+    {
+        unsigned short angle = angles[i];
+        if (forward->x * fielder->m_DetChar.m_v3Position.x < 12.360001f
+            && nlAbsAngle((short)(angle - desiredAngle)) > 0x5555)
+            continue;
+        farPos = zero;
+        nearPos = zero;
+        nlPolarToCartesian(farPos.x, farPos.y, angle, 6.0f);
+        nlPolarToCartesian(nearPos.x, nearPos.y, angle, 4.0f);
+        nlVec3Add(nearPos, nearPos, fielder->m_DetChar.m_v3Position);
+        nlVec3Add(farPos, farPos, fielder->m_DetChar.m_v3Position);
+        cField::FixOutOfBoundsPosition(nearPos, 0.2f, true);
+        cField::FixOutOfBoundsPosition(farPos, 0.2f, true);
+        nlVector2 direction;
+        nlSinCos(&direction.y, &direction.x, angle);
+        if (!IsWaluigiWallAhead(&direction, fielder))
+        {
+            float lane = LaneOpenness(fielder->m_DetChar.m_v3Position, farPos,
+                fielder, 0, 0.0f, 1.0f, 1.0f, 0.0f);
+            float support = FuzzyNot(NearToGoaliePosition(&nearPos,
+                &fn_800D66C4(fielder)->m_DetChar.m_v3Position));
+            float sideline = 1.0f;
+            if (question1 > 0.1f
+                || (angle == fielder->m_DetChar.m_aActualFacingDirection && question2 >= 0.9f))
+                sideline = FuzzyNot(CloseToSideline(nearPos, 0, false, 0));
+            support = FMIN(support, sideline);
+            lane = FMIN(lane, support);
+            if (lane > best)
+            {
+                bestIndex = i;
+                best = lane;
+            }
+        }
+    }
+    *bestScore = best;
+    return bestIndex;
+}
+
+int DesireSuperPower::BuildPathPoints()
+{
+    int count;
+    if (UserControlledT(m_pFielder->m_pTeam))
+    {
+        mvPathPoints[0] = (const nlVector2&)m_pFielder->m_DetChar.m_v3Position;
+        count = 2;
+        nlVector3 pos;
+        pos.z = 0.0f;
+        nlPolarToCartesian(pos.x, pos.y,
+            m_pFielder->m_DetChar.m_aActualFacingDirection, 4.0f);
+        nlVec3Add(pos, m_pFielder->m_DetChar.m_v3Position, pos);
+        cField::FixOutOfBoundsPosition(pos,
+            m_pFielder->m_pAvoidableObject->GetRadius(), true);
+        mvPathPoints[1] = (const nlVector2&)pos;
+    }
+    else
+    {
+        const nlVector2* positions;
+        if (m_pFielder->m_pBall != 0)
+        {
+            count = 6;
+            positions = gPathPointsWithBall;
+        }
+        else
+        {
+            count = 2;
+            positions = gPathPointsWithoutBall;
+        }
+        bool flip = m_pFielder->m_DetChar.m_v3Position.y > 0.0f;
+        for (int i = 0; i < count; i++)
+        {
+            mvPathPoints[i] = positions[i];
+            if (flip)
+            {
+                mvPathPoints[i].y = -mvPathPoints[i].y;
+            }
+            if (m_pFielder->m_pTeam->m_nSide == 1)
+            {
+                nlVec2Scale(mvPathPoints[i], mvPathPoints[i], -1.0f);
+            }
+        }
+    }
+    return count;
+}
+
+void DesireSuperPower::UpdateWario(DesireUpdate* update, float fDeltaT)
+{
+    if (update->mData.i == 3)
+    {
+        if (update->ExtraData.Get(11)->mData.b)
+        {
+            mpTarget = (cFielder*)update->ExtraData.Get(14)->mData.pointer;
+            if (!m_pFielder->m_bSuperPowerTankOn)
+                m_pFielder->TurnOnSuperPowerTank();
+        }
+        else if (m_pFielder->m_bSuperPowerTankOn)
+            m_pFielder->TurnOffSuperPowerTank(false);
+        *update = 0;
+    }
+    if (update->mData.i == 0)
+    {
+        bool active = m_pFielder->m_fSuperPowerTankLevel > 0.0f;
+        if (active)
+        {
+            if (m_pFielder->m_eAnimID == 104
+                && m_pFielder->ShouldStartCrossBlend(4))
+            {
+                m_pFielder->EndDesire();
+                m_pFielder->StartRunning();
+            }
+            if (m_pFielder->m_bSuperPowerTankOn)
+            {
+                if (!CanUsePowerup(m_pFielder, -1))
+                {
+                    m_pFielder->TurnOffSuperPowerTank(true);
+                    return;
+                }
+                m_pFielder->m_fNextGasTime -= fDeltaT;
+                if (m_pFielder->m_fNextGasTime <= 0.0f)
+                {
+                    unsigned long sound = PowerupBase::GetSoundType(
+                        (ePowerUpType)m_pFielder->m_pCharacterInfo->mCaptainPowerup,
+                        PowerupBase::PWRUP_SOUND_ACTIVATE);
+                    PlaySound(m_pFielder->m_uSoundSlotId, sound, 0, 0);
+                    m_pFielder->PlayImpactCameraRumble();
+                    m_pFielder->DrainSuperPowerTank(gWarioGasInterval);
+                    m_pFielder->m_fNextGasTime = gWarioGasInterval;
+                    nlVector3 pos;
+                    nlVector3 offset;
+                    nlPolarToCartesian(offset.x, offset.y,
+                        m_pFielder->m_DetChar.m_aActualFacingDirection, gWarioGasOffset);
+                    offset.z = 0.0f;
+                    const nlMatrix4& mat = m_pFielder->m_pPoseAccumulator->GetNodeMatrix(
+                        m_pFielder->m_nBip01JointIndex_0xA4);
+                    nlVec3Add(pos, (const nlVector3&)mat.m41, offset);
+                    lbl_806E12C8->CreatePatch(PATCH_GAS_BALL, m_pFielder, pos, gSuperPowerZeroVector,
+                        gWarioGasStartRadius, gWarioGasEndRadius, gWarioGasLifetime);
+                    PlayRumbleAction(RUMBLE_SMALL_CONTACT, m_pFielder->GetGlobalPad());
+                    EffectsGroup* group = EmissionManager::Instance()->GetEffectsGroup("wario_ignition");
+                    if (group != 0)
+                    {
+                        EmissionController* emitter = EmissionManager::Instance()->Create(group, 3, true, 0);
+                        emitter->m_uUserData = (unsigned int)m_pFielder;
+                        emitter->SetPosition(m_pFielder->m_DetChar.m_v3Position);
+                        emitter->SetVelocity(m_pFielder->m_DetChar.m_v3Velocity);
+                        emitter->SetUpdateCallback(UpdateEmitterFromCharacterBackward);
+                    }
+                }
+                if ((bool)UserControlledT(m_pFielder->m_pTeam))
+                {
+                    bool userControlled = (bool)m_pFielder->GetGlobalPad();
+                    if (!userControlled && m_pFielder->GetDesireState() != 12)
+                    {
+                        nlVector3 pos;
+                        pos.z = 0.0f;
+                        nlPolarToCartesian(pos.x, pos.y,
+                            m_pFielder->m_DetChar.m_aActualFacingDirection, 5.0f);
+                        nlVec3Add(pos, m_pFielder->m_DetChar.m_v3Position, pos);
+                        cField::FixOutOfBoundsPosition(pos, m_pFielder->m_pAvoidableObject->GetRadius(), true);
+                        nlVector3 delta;
+                        nlVec3Sub(delta, pos, m_pFielder->m_DetChar.m_v3Position);
+                        float distance = nlSqrt(delta.GetLengthSq2D(), true);
+                        unsigned short angle = nlATan2Angle(delta.y, delta.x);
+                        FuzzyVariantCollection params;
+                        params.Set(7, FuzzyVariant(gWarioRunTimeLimit));
+                        params.Set(17, FuzzyVariant((unsigned long)angle));
+                        params.Set(18, FuzzyVariant(distance));
+                        params.Set(13, FuzzyVariant(gWarioRunSpeed));
+                        params.Set(10, FuzzyVariant(gWarioRunTransitionHash));
+                        m_pFielder->ActivateDesire(FIELDER_DESIRE_RUN_IN_DIRECTION, &params);
+                    }
+                }
+            }
+            else
+            {
+                m_pFielder->m_fNextGasTime = 0.0f;
+            }
+        }
+        else if (m_pFielder->m_eAnimID == 104)
+        {
+            if (m_pFielder->ShouldStartCrossBlend(4))
+            {
+                m_pFielder->EndDesire();
+                m_pFielder->StartRunning();
+                *update = 1;
+            }
+        }
+        else
+        {
+            *update = 1;
+        }
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x86B4 | 0x800D0DB0 | size: 0xFC
+ */
+extern "C" bool fn_800D0DB0(DesireSuperPower* self, void*)
+{
+    gNPCManager->mpYoshiEgg->Activate(self->m_pFielder);
+    self->m_pFielder->m_pTweaks
+        = self->m_pFielder->m_pSuperPowerTweaks;
+    self->m_pFielder->EndConfusion();
+    if (self->m_pFielder->m_DetPlayer.m_tFireTimer.m_uPackedTime != 0)
+    {
+        self->m_pFielder->fn_8009750C();
+        self->m_pFielder->EndAction();
+    }
+    self->m_pFielder->bYoshiInWindup
+        = (self->m_pFielder->m_eActionState
+            == ACTION_SHOT_WINDUP);
+    if ((self->m_pFielder->GetDesireState() == 21)
+        || (self->m_pFielder->GetDesireState() == 19)
+        || (self->m_pFielder->GetDesireState() == 18)
+        || (self->m_pFielder->GetDesireState() == 9))
+    {
+        self->m_pFielder->EndDesire();
+        self->m_pFielder->StartRunning();
+    }
+    else if (self->m_pFielder->m_eActionState
+        == ACTION_SHOT_WINDUP)
+    {
+        self->m_pFielder->StartRunning();
+    }
+    self->m_pFielder->BeginDekeIntangibility();
+    self->mMaxDuration = gYoshiSuperPowerTimeLimit;
+    return true;
+}
+
+void DesireSuperPower::UpdateYoshi(DesireUpdate* update, float)
+{
+    if (update->mData.i != 0)
+    {
+        switch (m_pFielder->m_eActionState)
+        {
+        case ACTION_ELECTROCUTION:
+        case ACTION_LOOSE_BALL_PASS:
+        case ACTION_LOOSE_BALL_SHOT:
+        case ACTION_ONETIMER:
+        case ACTION_RECEIVE_PASS:
+            *update = 0;
+            break;
+        }
+    }
+}
+
+static inline bool IsClearOfMuckHoles(nlVector3 point)
+{
+    if (lbl_806E12C8 != 0)
+    {
+        for (int i = 0; i < 60; i++)
+        {
+            PhysicsPatch* patch = lbl_806E12C8->fn_801745B8(i);
+            if (patch != 0 && patch->m_Type == PATCH_MUCK_HOLE)
+            {
+                nlVector3 delta;
+                nlVec3Sub(delta, point, patch->GetPosition());
+                if (nlVec3DotProduct(delta, delta) < gPeteyMuckHoleSpacing * gPeteyMuckHoleSpacing)
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+void HandleMuckBallCollision(void* context)
+{
+    CollisionPatchData* event = (CollisionPatchData*)context;
+    bool hit = false;
+    if (event->pPatch->GetPosition().z < 0.0f
+        && event->pPatch->m_Velocity.z < 0.0f)
+    {
+        hit = true;
+    }
+    if (event->pPlayer != 0
+        && event->pPlayer->m_DetChar.m_eCharacterClass != PETEY)
+    {
+        hit = true;
+    }
+    if (hit == true && event->pPatch->m_Type == PATCH_MUCK_BALL)
+    {
+        nlVector3 pos = event->pPatch->GetPosition();
+        pos.z = 0.0f;
+        if (IsClearOfMuckHoles(pos) == true)
+        {
+            lbl_806E12C8->CreatePatch(PATCH_MUCK_HOLE, event->pPatch->m_pOwner,
+                pos, gSuperPowerZeroVector, gPeteyMuckHoleRadius, gPeteyMuckHoleRadius, gPeteyMuckHoleLifetime);
+        }
+        event->pPatch->Unknown0();
+    }
+}
+
+void HandleMuckBallWallCollision(void* context)
+{
+    PhysicsPatch* patch = (PhysicsPatch*)context;
+    if (patch->m_Type == PATCH_MUCK_BALL)
+    {
+        float length = fabs(cField::GetGoalLineX(0U));
+        float width = fabs(0.5f * (2.0f * cField::mv3FieldPosition.y));
+        float x = patch->GetPosition().x;
+        float y = patch->GetPosition().y;
+        float threshold = 0.05f * patch->GetRadius();
+        nlVector3 velocity = patch->m_Velocity;
+        if (x - length < threshold || x - (-1.0f * length) < threshold)
+        {
+            velocity.x *= -0.5f;
+        }
+        if (y - width < threshold || y - (-1.0f * width) < threshold)
+        {
+            velocity.y *= -0.5f;
+        }
+        patch->m_Velocity = velocity;
+    }
+}
+
+/**
+ * Offset/Address/Size: 0x8D44 | 0x800D1440 | size: 0x8
+ */
+eCharacterClass GetCharacterClass(const cCharacter* character)
+{
+    return character->m_DetChar.m_eCharacterClass;
+}
+
+/**
+ * Offset/Address/Size: 0x8D4C | 0x800D1448 | size: 0x8
+ */
+unsigned short GetCharacterFacing(const cCharacter* character)
+{
+    return character->m_DetChar.m_aActualFacingDirection;
+}
+
+/**
+ * Offset/Address/Size: 0x8D54 | 0x800D1450 | size: 0x8
+ */
+const nlVector3* GetCharacterPosition(const cCharacter* character)
+{
+    return &character->m_DetChar.m_v3Position;
+}
+
+/**
+ * Offset/Address/Size: 0x8D5C | 0x800D1458 | size: 0x20
+ */
+bool IsGameplayOrOvertime(const cGame* game)
+{
+    return game->m_eGameState == GS_GAMEPLAY || game->m_eGameState == GS_OVERTIME;
+}
+
+#include "Game/AI/Fielder.inl"
+#include "NL/nlMath.inl"
+#include "Game/AI/Desire.inl"
+#include "Game/AI/DesireSuperPower.inl"

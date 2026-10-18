@@ -1,0 +1,845 @@
+diff --git a/src/NL/glx/GXBlackTextureAlphaMaterialProgram.cpp b/src/NL/glx/GXBlackTextureAlphaMaterialProgram.cpp
+index 88f4bd6..4e09389 100644
+--- a/src/NL/glx/GXBlackTextureAlphaMaterialProgram.cpp
++++ b/src/NL/glx/GXBlackTextureAlphaMaterialProgram.cpp
+@@ -61,9 +61,9 @@ void GXBlackTextureAlphaMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXBlackTextureAlphaMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
+ }
+ 
+ void GXBlackTextureAlphaMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXCameraScrolledOverlayMaterialProgram.cpp b/src/NL/glx/GXCameraScrolledOverlayMaterialProgram.cpp
+index 2d57655..797d15c 100644
+--- a/src/NL/glx/GXCameraScrolledOverlayMaterialProgram.cpp
++++ b/src/NL/glx/GXCameraScrolledOverlayMaterialProgram.cpp
+@@ -78,12 +78,12 @@ void GXCameraScrolledOverlayMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXCameraScrolledOverlayMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXCameraScrolledOverlayMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXCharacterDamageMaterialProgram.cpp b/src/NL/glx/GXCharacterDamageMaterialProgram.cpp
+index 86c13dd..549e824 100644
+--- a/src/NL/glx/GXCharacterDamageMaterialProgram.cpp
++++ b/src/NL/glx/GXCharacterDamageMaterialProgram.cpp
+@@ -93,14 +93,14 @@ void GXCharacterDamageMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXCharacterDamageMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX3, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX4, streams[6].address, 4);
+-    GXSetArray(GX_VA_TEX5, streams[7].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX4, streams[6], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX5, streams[7], 4);
+ }
+ 
+ void GXCharacterDamageMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXCharacterSkinCustomMaterialProgram.cpp b/src/NL/glx/GXCharacterSkinCustomMaterialProgram.cpp
+index 5c0f122..2768c1d 100644
+--- a/src/NL/glx/GXCharacterSkinCustomMaterialProgram.cpp
++++ b/src/NL/glx/GXCharacterSkinCustomMaterialProgram.cpp
+@@ -69,10 +69,10 @@ void GXCharacterSkinCustomMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXCharacterSkinCustomMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
+ }
+ 
+ void GXCharacterSkinCustomMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXColourFresnelMaterialProgram.cpp b/src/NL/glx/GXColourFresnelMaterialProgram.cpp
+index 7aacb29..9b1b2bc 100644
+--- a/src/NL/glx/GXColourFresnelMaterialProgram.cpp
++++ b/src/NL/glx/GXColourFresnelMaterialProgram.cpp
+@@ -73,11 +73,11 @@ void GXColourFresnelMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXColourFresnelMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXColourFresnelMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXCompactColourMaterialProgram.cpp b/src/NL/glx/GXCompactColourMaterialProgram.cpp
+index f768ef3..f9f74a9 100644
+--- a/src/NL/glx/GXCompactColourMaterialProgram.cpp
++++ b/src/NL/glx/GXCompactColourMaterialProgram.cpp
+@@ -61,9 +61,9 @@ void GXCompactColourMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXCompactColourMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 6);
+-    GXSetArray(GX_VA_CLR0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 6);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
+ }
+ 
+ void GXCompactColourMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXConstantColourMaterialProgram.cpp b/src/NL/glx/GXConstantColourMaterialProgram.cpp
+index 1d61d6f..38fc188 100644
+--- a/src/NL/glx/GXConstantColourMaterialProgram.cpp
++++ b/src/NL/glx/GXConstantColourMaterialProgram.cpp
+@@ -59,8 +59,8 @@ void GXConstantColourMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXConstantColourMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
+ }
+ 
+ void GXConstantColourMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXCrystalMaterialProgram.cpp b/src/NL/glx/GXCrystalMaterialProgram.cpp
+index 069e795..5c7ca48 100644
+--- a/src/NL/glx/GXCrystalMaterialProgram.cpp
++++ b/src/NL/glx/GXCrystalMaterialProgram.cpp
+@@ -84,12 +84,12 @@ void GXCrystalMaterialProgram::BindVertexArrays(
+     const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXCrystalMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXDetailModulateMaterialProgram.cpp b/src/NL/glx/GXDetailModulateMaterialProgram.cpp
+index 9ffb3aa..6d5a66f 100644
+--- a/src/NL/glx/GXDetailModulateMaterialProgram.cpp
++++ b/src/NL/glx/GXDetailModulateMaterialProgram.cpp
+@@ -71,11 +71,11 @@ void GXDetailModulateMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXDetailModulateMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
+ }
+ 
+ void GXDetailModulateMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXFixedLightMaterialProgram.cpp b/src/NL/glx/GXFixedLightMaterialProgram.cpp
+index 44eddc9..33e7ed8 100644
+--- a/src/NL/glx/GXFixedLightMaterialProgram.cpp
++++ b/src/NL/glx/GXFixedLightMaterialProgram.cpp
+@@ -64,9 +64,9 @@ void GXFixedLightMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXFixedLightMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 8);
+ }
+ 
+ void GXFixedLightMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXFloatTexturedColourMaterialProgram.cpp b/src/NL/glx/GXFloatTexturedColourMaterialProgram.cpp
+index 048538d..065c2af 100644
+--- a/src/NL/glx/GXFloatTexturedColourMaterialProgram.cpp
++++ b/src/NL/glx/GXFloatTexturedColourMaterialProgram.cpp
+@@ -61,9 +61,9 @@ void GXFloatTexturedColourMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXFloatTexturedColourMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 8);
+ }
+ 
+ void GXFloatTexturedColourMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXFourTextureAddMaterialProgram.cpp b/src/NL/glx/GXFourTextureAddMaterialProgram.cpp
+index aef8572..d120a15 100644
+--- a/src/NL/glx/GXFourTextureAddMaterialProgram.cpp
++++ b/src/NL/glx/GXFourTextureAddMaterialProgram.cpp
+@@ -72,12 +72,12 @@ void GXFourTextureAddMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXFourTextureAddMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 8);
+-    GXSetArray(GX_VA_TEX1, streams[2].address, 8);
+-    GXSetArray(GX_VA_TEX2, streams[3].address, 8);
+-    GXSetArray(GX_VA_TEX3, streams[4].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[2], 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[3], 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[4], 8);
+ }
+ 
+ void GXFourTextureAddMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXMaskedDetailBlendMaterialProgram.cpp b/src/NL/glx/GXMaskedDetailBlendMaterialProgram.cpp
+index e399efe..7646fca 100644
+--- a/src/NL/glx/GXMaskedDetailBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXMaskedDetailBlendMaterialProgram.cpp
+@@ -75,12 +75,12 @@ void GXMaskedDetailBlendMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXMaskedDetailBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXMaskedDetailBlendMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXMaskedDiffuseBlendMaterialProgram.cpp b/src/NL/glx/GXMaskedDiffuseBlendMaterialProgram.cpp
+index 21dc6e1..4851537 100644
+--- a/src/NL/glx/GXMaskedDiffuseBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXMaskedDiffuseBlendMaterialProgram.cpp
+@@ -68,11 +68,11 @@ void GXMaskedDiffuseBlendMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXMaskedDiffuseBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 8);
+-    GXSetArray(GX_VA_TEX1, streams[2].address, 8);
+-    GXSetArray(GX_VA_TEX2, streams[3].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[2], 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[3], 8);
+ }
+ 
+ void GXMaskedDiffuseBlendMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXMaskedSpecularFresnelMaterialProgram.cpp b/src/NL/glx/GXMaskedSpecularFresnelMaterialProgram.cpp
+index 0fbdd88..b68af3b 100644
+--- a/src/NL/glx/GXMaskedSpecularFresnelMaterialProgram.cpp
++++ b/src/NL/glx/GXMaskedSpecularFresnelMaterialProgram.cpp
+@@ -78,12 +78,12 @@ void GXMaskedSpecularFresnelMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXMaskedSpecularFresnelMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXMaskedSpecularFresnelMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXMegaDiffuseMaterialProgram.cpp b/src/NL/glx/GXMegaDiffuseMaterialProgram.cpp
+index 9625254..88eeb0e 100644
+--- a/src/NL/glx/GXMegaDiffuseMaterialProgram.cpp
++++ b/src/NL/glx/GXMegaDiffuseMaterialProgram.cpp
+@@ -74,11 +74,11 @@ void GXMegaDiffuseMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXMegaDiffuseMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXMegaDiffuseMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXMegaSpecularFresnelMaterialProgram.cpp b/src/NL/glx/GXMegaSpecularFresnelMaterialProgram.cpp
+index e4350a8..d013325 100644
+--- a/src/NL/glx/GXMegaSpecularFresnelMaterialProgram.cpp
++++ b/src/NL/glx/GXMegaSpecularFresnelMaterialProgram.cpp
+@@ -87,13 +87,13 @@ void GXMegaSpecularFresnelMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXMegaSpecularFresnelMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX3, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX4, streams[6].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX4, streams[6], 4);
+ }
+ 
+ void GXMegaSpecularFresnelMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXMegaSpecularMaterialProgram.cpp b/src/NL/glx/GXMegaSpecularMaterialProgram.cpp
+index 284ed3d..daf44e1 100644
+--- a/src/NL/glx/GXMegaSpecularMaterialProgram.cpp
++++ b/src/NL/glx/GXMegaSpecularMaterialProgram.cpp
+@@ -81,12 +81,12 @@ void GXMegaSpecularMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXMegaSpecularMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX3, streams[5].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[5], 4);
+ }
+ 
+ void GXMegaSpecularMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXMovieMaterialProgram.cpp b/src/NL/glx/GXMovieMaterialProgram.cpp
+index fbb66ed..1efb3f3 100644
+--- a/src/NL/glx/GXMovieMaterialProgram.cpp
++++ b/src/NL/glx/GXMovieMaterialProgram.cpp
+@@ -58,8 +58,8 @@ void GXMovieMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXMovieMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 8);
+ }
+ 
+ void GXMovieMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXRedColourMaterialProgram.cpp b/src/NL/glx/GXRedColourMaterialProgram.cpp
+index c70d4e8..f66a3b3 100644
+--- a/src/NL/glx/GXRedColourMaterialProgram.cpp
++++ b/src/NL/glx/GXRedColourMaterialProgram.cpp
+@@ -48,7 +48,7 @@ void GXRedColourMaterialProgram::ConfigureVertexFormat(bool indexed)
+ 
+ void GXRedColourMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+-    GXSetArray(GX_VA_POS, packet->streams[0].address, 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, packet->streams[0], 12);
+ }
+ 
+ void GXRedColourMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXScissoredVertexColourTextureMaterialProgram.cpp b/src/NL/glx/GXScissoredVertexColourTextureMaterialProgram.cpp
+index 561271d..a46f119 100644
+--- a/src/NL/glx/GXScissoredVertexColourTextureMaterialProgram.cpp
++++ b/src/NL/glx/GXScissoredVertexColourTextureMaterialProgram.cpp
+@@ -62,9 +62,9 @@ void GXScissoredVertexColourTextureMaterialProgram::ConfigureVertexFormat(bool i
+ void GXScissoredVertexColourTextureMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 8);
+ }
+ 
+ void GXScissoredVertexColourTextureMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXScrollingCameraOverlayMaterialProgram.cpp b/src/NL/glx/GXScrollingCameraOverlayMaterialProgram.cpp
+index e57b6f9..8e8e321 100644
+--- a/src/NL/glx/GXScrollingCameraOverlayMaterialProgram.cpp
++++ b/src/NL/glx/GXScrollingCameraOverlayMaterialProgram.cpp
+@@ -81,12 +81,12 @@ void GXScrollingCameraOverlayMaterialProgram::ConfigureVertexFormat(bool indexed
+ void GXScrollingCameraOverlayMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXScrollingCameraOverlayMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXScrollingDiffuseMaterialProgram.cpp b/src/NL/glx/GXScrollingDiffuseMaterialProgram.cpp
+index e4bb0c3..02c3c50 100644
+--- a/src/NL/glx/GXScrollingDiffuseMaterialProgram.cpp
++++ b/src/NL/glx/GXScrollingDiffuseMaterialProgram.cpp
+@@ -71,10 +71,10 @@ void GXScrollingDiffuseMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXScrollingDiffuseMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
+ }
+ 
+ void GXScrollingDiffuseMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXScrollingMaskedDetailBlendMaterialProgram.cpp b/src/NL/glx/GXScrollingMaskedDetailBlendMaterialProgram.cpp
+index c0e0f45..5d3de85 100644
+--- a/src/NL/glx/GXScrollingMaskedDetailBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXScrollingMaskedDetailBlendMaterialProgram.cpp
+@@ -81,12 +81,12 @@ void GXScrollingMaskedDetailBlendMaterialProgram::ConfigureVertexFormat(bool ind
+ void GXScrollingMaskedDetailBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[5].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[5], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXScrollingMaskedDetailBlendMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXScrollingShadowedDetailBlendMaterialProgram.cpp b/src/NL/glx/GXScrollingShadowedDetailBlendMaterialProgram.cpp
+index 60b6030..838f54f 100644
+--- a/src/NL/glx/GXScrollingShadowedDetailBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXScrollingShadowedDetailBlendMaterialProgram.cpp
+@@ -86,13 +86,13 @@ void GXScrollingShadowedDetailBlendMaterialProgram::ConfigureVertexFormat(bool i
+ void GXScrollingShadowedDetailBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[6].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX3, streams[5].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[6], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[5], 4);
+ }
+ 
+ void GXScrollingShadowedDetailBlendMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXScrollingSpecularMaterialProgram.cpp b/src/NL/glx/GXScrollingSpecularMaterialProgram.cpp
+index 6d722cf..8bccd4a 100644
+--- a/src/NL/glx/GXScrollingSpecularMaterialProgram.cpp
++++ b/src/NL/glx/GXScrollingSpecularMaterialProgram.cpp
+@@ -76,11 +76,11 @@ void GXScrollingSpecularMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXScrollingSpecularMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
+ }
+ 
+ void GXScrollingSpecularMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXShadowVolumeMaterialProgram.cpp b/src/NL/glx/GXShadowVolumeMaterialProgram.cpp
+index 182aa82..710c896 100644
+--- a/src/NL/glx/GXShadowVolumeMaterialProgram.cpp
++++ b/src/NL/glx/GXShadowVolumeMaterialProgram.cpp
+@@ -62,9 +62,9 @@ void GXShadowVolumeMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXShadowVolumeMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[1].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[1], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 8);
+ }
+ 
+ void GXShadowVolumeMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXShadowedDetailBlendMaterialProgram.cpp b/src/NL/glx/GXShadowedDetailBlendMaterialProgram.cpp
+index f1ff8f0..8850a06 100644
+--- a/src/NL/glx/GXShadowedDetailBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXShadowedDetailBlendMaterialProgram.cpp
+@@ -81,13 +81,13 @@ void GXShadowedDetailBlendMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXShadowedDetailBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[6].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX3, streams[5].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[6], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[5], 4);
+ }
+ 
+ void GXShadowedDetailBlendMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXShadowedDiffuseMaterialProgram.cpp b/src/NL/glx/GXShadowedDiffuseMaterialProgram.cpp
+index e33d54f..2cd47f0 100644
+--- a/src/NL/glx/GXShadowedDiffuseMaterialProgram.cpp
++++ b/src/NL/glx/GXShadowedDiffuseMaterialProgram.cpp
+@@ -61,9 +61,9 @@ void GXShadowedDiffuseMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXShadowedDiffuseMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
+ }
+ 
+ void GXShadowedDiffuseMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXSkinnedMultiLightMaterialProgram.cpp b/src/NL/glx/GXSkinnedMultiLightMaterialProgram.cpp
+index f2694d8..3f6f186 100644
+--- a/src/NL/glx/GXSkinnedMultiLightMaterialProgram.cpp
++++ b/src/NL/glx/GXSkinnedMultiLightMaterialProgram.cpp
+@@ -99,10 +99,10 @@ void GXSkinnedMultiLightMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXSkinnedMultiLightMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 8);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 8);
+ }
+ 
+ void GXSkinnedMultiLightMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXSkinnedUnlitTextureMaterialProgram.cpp b/src/NL/glx/GXSkinnedUnlitTextureMaterialProgram.cpp
+index 7dba88c..6636cf6 100644
+--- a/src/NL/glx/GXSkinnedUnlitTextureMaterialProgram.cpp
++++ b/src/NL/glx/GXSkinnedUnlitTextureMaterialProgram.cpp
+@@ -62,9 +62,9 @@ void GXSkinnedUnlitTextureMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXSkinnedUnlitTextureMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 8);
+ }
+ 
+ void GXSkinnedUnlitTextureMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXSpecularDetailBlendMaterialProgram.cpp b/src/NL/glx/GXSpecularDetailBlendMaterialProgram.cpp
+index 6286150..40f4651 100644
+--- a/src/NL/glx/GXSpecularDetailBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXSpecularDetailBlendMaterialProgram.cpp
+@@ -82,13 +82,13 @@ void GXSpecularDetailBlendMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXSpecularDetailBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_CLR0, streams[6].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX3, streams[5].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[6], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[5], 4);
+ }
+ 
+ void GXSpecularDetailBlendMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXSpecularFresnelMaterialProgram.cpp b/src/NL/glx/GXSpecularFresnelMaterialProgram.cpp
+index a69091b..05b5d5a 100644
+--- a/src/NL/glx/GXSpecularFresnelMaterialProgram.cpp
++++ b/src/NL/glx/GXSpecularFresnelMaterialProgram.cpp
+@@ -81,12 +81,12 @@ void GXSpecularFresnelMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXSpecularFresnelMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
+-    GXSetArray(GX_VA_TEX3, streams[5].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX3, streams[5], 4);
+ }
+ 
+ void GXSpecularFresnelMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXSpecularLookupMaterialProgram.cpp b/src/NL/glx/GXSpecularLookupMaterialProgram.cpp
+index a80026e..76aab97 100644
+--- a/src/NL/glx/GXSpecularLookupMaterialProgram.cpp
++++ b/src/NL/glx/GXSpecularLookupMaterialProgram.cpp
+@@ -62,9 +62,9 @@ void GXSpecularLookupMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXSpecularLookupMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 3);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 3);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
+ }
+ 
+ void GXSpecularLookupMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXSpecularMaterialProgram.cpp b/src/NL/glx/GXSpecularMaterialProgram.cpp
+index def21b9..1d51d39 100644
+--- a/src/NL/glx/GXSpecularMaterialProgram.cpp
++++ b/src/NL/glx/GXSpecularMaterialProgram.cpp
+@@ -76,11 +76,11 @@ void GXSpecularMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXSpecularMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX2, streams[4].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX2, streams[4], 4);
+ }
+ 
+ void GXSpecularMaterialProgram::BindParameters(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXTextureBlendMaterialProgram.cpp b/src/NL/glx/GXTextureBlendMaterialProgram.cpp
+index 35230c9..f08897e 100644
+--- a/src/NL/glx/GXTextureBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXTextureBlendMaterialProgram.cpp
+@@ -63,9 +63,9 @@ void GXTextureBlendMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXTextureBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[2].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[2], 4);
+ }
+ 
+ void GXTextureBlendMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXTextureColourAddMaterialProgram.cpp b/src/NL/glx/GXTextureColourAddMaterialProgram.cpp
+index b3ab1b5..dda253b 100644
+--- a/src/NL/glx/GXTextureColourAddMaterialProgram.cpp
++++ b/src/NL/glx/GXTextureColourAddMaterialProgram.cpp
+@@ -59,8 +59,8 @@ void GXTextureColourAddMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXTextureColourAddMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 8);
+ }
+ 
+ void GXTextureColourAddMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXThreeLightDiffuseMaterialProgram.cpp b/src/NL/glx/GXThreeLightDiffuseMaterialProgram.cpp
+index ae1b168..fc1bda6 100644
+--- a/src/NL/glx/GXThreeLightDiffuseMaterialProgram.cpp
++++ b/src/NL/glx/GXThreeLightDiffuseMaterialProgram.cpp
+@@ -68,9 +68,9 @@ void GXThreeLightDiffuseMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXThreeLightDiffuseMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_NRM, streams[1].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[2].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_NRM, streams[1], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[2], 8);
+ }
+ 
+ void GXThreeLightDiffuseMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXUnlitTextureMaterialProgram.cpp b/src/NL/glx/GXUnlitTextureMaterialProgram.cpp
+index 5087ccf..dcb2386 100644
+--- a/src/NL/glx/GXUnlitTextureMaterialProgram.cpp
++++ b/src/NL/glx/GXUnlitTextureMaterialProgram.cpp
+@@ -58,8 +58,8 @@ void GXUnlitTextureMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXUnlitTextureMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 8);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 8);
+ }
+ 
+ void GXUnlitTextureMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXVertexColourDetailBlendMaterialProgram.cpp b/src/NL/glx/GXVertexColourDetailBlendMaterialProgram.cpp
+index 24cfd01..65317f9 100644
+--- a/src/NL/glx/GXVertexColourDetailBlendMaterialProgram.cpp
++++ b/src/NL/glx/GXVertexColourDetailBlendMaterialProgram.cpp
+@@ -66,10 +66,10 @@ void GXVertexColourDetailBlendMaterialProgram::ConfigureVertexFormat(bool indexe
+ void GXVertexColourDetailBlendMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[3].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 4);
+-    GXSetArray(GX_VA_TEX1, streams[2].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[3], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX1, streams[2], 4);
+ }
+ 
+ void GXVertexColourDetailBlendMaterialProgram::DrawIndexed(
+diff --git a/src/NL/glx/GXVertexColourMaterialProgram.cpp b/src/NL/glx/GXVertexColourMaterialProgram.cpp
+index 1c95a5d..45801de 100644
+--- a/src/NL/glx/GXVertexColourMaterialProgram.cpp
++++ b/src/NL/glx/GXVertexColourMaterialProgram.cpp
+@@ -53,8 +53,8 @@ void GXVertexColourMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXVertexColourMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[1].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[1], 4);
+ }
+ 
+ void GXVertexColourMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXVertexColourTextureMaterialProgram.cpp b/src/NL/glx/GXVertexColourTextureMaterialProgram.cpp
+index 1fbc4a5..24cfd49 100644
+--- a/src/NL/glx/GXVertexColourTextureMaterialProgram.cpp
++++ b/src/NL/glx/GXVertexColourTextureMaterialProgram.cpp
+@@ -61,9 +61,9 @@ void GXVertexColourTextureMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXVertexColourTextureMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
+ }
+ 
+ void GXVertexColourTextureMaterialProgram::DrawIndexed(const glModelPacket* packet)
+diff --git a/src/NL/glx/GXWarbleMaterialProgram.cpp b/src/NL/glx/GXWarbleMaterialProgram.cpp
+index 72d1cfa..43f023c 100644
+--- a/src/NL/glx/GXWarbleMaterialProgram.cpp
++++ b/src/NL/glx/GXWarbleMaterialProgram.cpp
+@@ -60,9 +60,9 @@ void GXWarbleMaterialProgram::ConfigureVertexFormat(bool indexed)
+ void GXWarbleMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+ {
+     glModelStream* streams = packet->streams;
+-    GXSetArray(GX_VA_POS, streams[0].address, 12);
+-    GXSetArray(GX_VA_CLR0, streams[2].address, 4);
+-    GXSetArray(GX_VA_TEX0, streams[1].address, 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
++    NP_GX_SETARRAY_STREAM(GX_VA_CLR0, streams[2], 4);
++    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
+ }
+ 
+ void GXWarbleMaterialProgram::DrawIndexed(const glModelPacket* packet)

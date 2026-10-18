@@ -1,0 +1,80 @@
+#ifndef GAME_SYS_AUDIO_H
+#define GAME_SYS_AUDIO_H
+
+#include "Game/Audio/AudioSystem.h"
+#include "Game/Audio/GameStreams.h"
+#include "Game/Audio/AudioResourceLoader.h"
+#include "Game/Audio/XSoundHandle.h"
+#include "types.h"
+#include "Game/Sys/audio_fwd.h"
+
+extern bool gAudioEnabled;
+
+struct AudioHandleState
+{
+    void Set(int slotId, unsigned long cueId,
+        void* context, bool resumable)
+    {
+        m_CueId = cueId;
+        m_Context = context;
+        m_SlotId = slotId;
+        m_CanResume = resumable;
+        m_PauseDepth = 0;
+    }
+
+    unsigned long m_CueId;
+    void* m_Context;
+    unsigned long m_SlotId : 16;
+    unsigned long m_CanResume : 1;
+    unsigned long m_PauseDepth : 3;
+    unsigned long : 12;
+};
+
+class GameAudio : public AudioSystem
+{
+public:
+    GameAudio();
+
+    bool Initialize();
+    virtual void Shutdown();
+    void Update(float deltaTime);
+
+    unsigned long m_PlayRequestCount;
+};
+
+typedef AudioResourceLoadCallback AudioPlayCallback;
+
+void LoadSoundBank(GameAudio* audio, int slotId,
+    unsigned long cueId, AudioPlayCallback callback,
+    void* context);
+void UnloadSoundBanks(GameAudio* audio);
+bool PlayOwnedSound(int slotId, unsigned long cueId,
+    XSoundOwner* owner, const void* debugName,
+    void* context);
+XSoundHandle* CreateSoundHandle(int slotId,
+    unsigned long cueId, XSoundOwner* owner,
+    const void* debugName, void* context, bool findExisting);
+bool IsSoundTracked(unsigned long cueId, void* context);
+XSoundHandle* FindSoundHandle(
+    unsigned long cueId, void* context);
+bool PlayTrackedSound(int slotId, unsigned long cueId,
+    const void* debugName, void* context, bool resumable);
+bool PlayTrackedOwnedSound(int slotId, unsigned long cueId,
+    XSoundOwner* owner, const void* debugName,
+    void* context, bool resumable);
+void StopSound(unsigned long cueId, void* context);
+void PauseSound(unsigned long cueId, void* context);
+void ResumeSound(unsigned long cueId, void* context);
+void SetLastSoundParameter(unsigned long parameter, float value);
+int GetSoundState(unsigned long cueId, void* context);
+void SetSoundCallbackEnabled(
+    unsigned long cueId, void* context, unsigned char enabled);
+bool PrepareTrackedSound(int slotId, unsigned long cueId,
+    XSoundOwner* owner, const void* debugName,
+    void* context, bool resumable);
+bool StartTrackedSound(unsigned long cueId, void* context);
+void PauseAllAudio();
+void ResumeAllAudio();
+int GetAudioPauseDepth();
+
+#endif // GAME_SYS_AUDIO_H

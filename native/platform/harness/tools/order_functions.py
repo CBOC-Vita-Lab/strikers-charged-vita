@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""order_functions.py: function ordering by heat from a qemu block profile (profile-guided layout
+without libgcov: np/docs/vita.md "LTO and PGO", step "hot first").
+
+Input
+  profile   the file of libframecount.so's profile=<file>,from=<mark>,to=<mark> option: "pc insns0 insns1"
+            per executed translated block (insns0 = game thread, insns1 = the other threads)
+  binary    the armhf executable the profile was taken from (nm -S gives function addresses, sizes, names)
+  --maps L  a log with MSC_DUMP_MAPS=1 lines when the executable is PIE (load address); not needed otherwise
+Output
+  --out F   an ordering file for GNU ld's --section-ordering-file (VitaSDK's ld 2.46 has it), hot first:
+                .text : {
+                    *(.text._ZN...)
+                    ...
+                }
+            The section names are the names -ffunction-sections gives (.text.<mangled name>): the armhf
+            build and the Vita build compile the same source, so a function has the same mangled name in
+            both (clang and GCC mangle alike). Functions the Vita build inlines or does not have are ignored by the linker.
+  --report  the coverage table: how many bytes of text hold 50 / 75 / 90 / 95 / 99 % of the executed instructions
+Heat = executed instructions per byte of function (density): small hot functions go first, a big function that
+runs once does not push them apart. Only functions that executed at all are listed; the linker keeps the rest
+in link order behind them.
+  order_functions.py prof.txt build/np/NPB/armhf/np-armhf --out order.txt --report [--thread 0|1|all]
+"""
+import argparse, bisect, re, subprocess, sys, collections
+
+NM = 'arm-linux-gnueabihf-nm'
+READELF = 'arm-linux-gnueabihf-readelf'
+
+def load_funcs(path):
+    out = subprocess.run([NM, '-S', '-n', '--defined-only', path], capture_output=True, text=True).stdout
+    funcs = []
+    for line in out.splitlines():
+        p = line.split()
+        if len(p) == 4 and p[2] in 'TtWwi':
+            funcs.append((int(p[0], 16) & ~1, int(p[1], 16), p[3]))
+    funcs.sort()
+    return funcs
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('profile'); ap.add_argument('binary')
+    ap.add_argument('--maps'); ap.add_argument('--out'); ap.add_argument('--report', action='store_true')
+    ap.add_argument('--thread', default='0', help='0 = game thread, 1 = other threads, all')
+    a = ap.parse_args()
+    funcs = load_funcs(a.binary)
+    addrs = [f[0] for f in funcs]
+    typ = subprocess.run([READELF, '-h', a.binary], capture_output=True, text=True).stdout
+    is_pie = 'DYN' in typ.split('Type:')[1].split('\n')[0]
+    bias = 0
+    if is_pie:
+        if not a.maps:
+            print('the binary is PIE: pass --maps <log with MSC_DUMP_MAPS lines>', file=sys.stderr); return 2
+        base = None
+        for line in open(a.maps, errors='replace'):
+            m = re.match(r'\[maps\] ([0-9a-f]+)-([0-9a-f]+) \S+ ([0-9a-f]+) \S+ \S+\s+(\S+)', line)
+            if m and a.binary.rsplit('/', 1)[-1] in m.group(4):
+                base = int(m.group(1), 16) - int(m.group(3), 16); break
+        if base is None: print('no mapping of the binary in the maps log', file=sys.stderr); return 2
+        bias = base
+    heat = collections.Counter()
+    for line in open(a.profile):
+        pc, d0, d1 = line.split()
+        n = {'0': int(d0), '1': int(d1), 'all': int(d0) + int(d1)}[a.thread]
+        if not n: continue
+        pc = int(pc, 16) - bias
+        i = bisect.bisect_right(addrs, pc) - 1
+        if i < 0: continue
+        addr, size, name = funcs[i]
+        if size and pc >= addr + size: continue
+        heat[(addr, size, name)] += n
+    if not heat:
+        print('no executed functions found (wrong thread or binary?)', file=sys.stderr); return 1
+    total = sum(heat.values())
+    ranked = sorted(heat.items(), key=lambda kv: kv[1] / max(kv[0][1], 4), reverse=True)
+    if a.report:
+        print('%d functions executed, %.2f M instructions in the window, %d KiB of text in those functions' %
+              (len(ranked), total / 1e6, sum(k[1] for k, _ in ranked) // 1024))
+        acc = 0; bytes_ = 0; targets = [0.50, 0.75, 0.90, 0.95, 0.99]; t = 0
+        for (addr, size, name), n in ranked:
+            acc += n; bytes_ += size
+            while t < len(targets) and acc >= targets[t] * total:
+                print('  %2d%% of the instructions are in %6d bytes (%4d pages of 4 KiB) of the hottest functions (%d functions)' %
+                      (int(targets[t] * 100), bytes_, (bytes_ + 4095) // 4096, ranked.index(((addr, size, name), n)) + 1))
+                t += 1
+        print('  hottest by density:')
+        for (addr, size, name), n in ranked[:12]:
+            print('    %9.0f instr/byte  %8.3f M  %5d B  %s' % (n / max(size, 4), n / 1e6, size, name))
+    if a.out:
+        with open(a.out, 'w') as f:
+            f.write('/* generated by order_functions.py from %s: %d functions, hot first */\n.text : {\n' % (a.profile, len(ranked)))
+            for (addr, size, name), n in ranked:
+                f.write('    *(.text.%s)\n' % name)
+            f.write('}\n')
+        print('wrote %s (%d functions)' % (a.out, len(ranked)))
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())

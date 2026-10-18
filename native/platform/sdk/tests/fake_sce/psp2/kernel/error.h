@@ -1,0 +1,4 @@
+#ifndef FAKE_PSP2_ERROR_H
+#define FAKE_PSP2_ERROR_H
+#define SCE_KERNEL_ERROR_WAIT_TIMEOUT ((int)0x80028005)
+#endif

@@ -1,0 +1,234 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/DB/UserOptions.h"
+#ifdef NP_NATIVE
+#include "np/camzoom.h"
+#endif
+
+#include "Game/Audio/AudioSystem.h"
+#include "Game/Audio/AudioCalculation.h"
+#include "Game/Audio/RegistryPools.h"
+
+#include <string.h>
+
+// Audio category names hashed with nlStringLowerHash, kept in hash order, and
+// the index of each category's calculation slider.
+struct AudioCategorySliderEntry
+{
+    AudioCategorySliderEntry(u32 hash, s16 index) : mCategoryHash(hash), mSliderIndex(index) {}
+
+    u32 mCategoryHash;
+    s16 mSliderIndex;
+};
+
+static AudioCategorySliderEntry sAudioCategorySliderLookup[] = {
+    AudioCategorySliderEntry(0x00016A70, 4), // "sfx"
+    AudioCategorySliderEntry(0x05A165C0, 2), // "music"
+    AudioCategorySliderEntry(0x1883E244, 1), // "default"
+    AudioCategorySliderEntry(0x52030129, 3), // "dialogue"
+    AudioCategorySliderEntry(0xAB29FE50, 0), // "global"
+};
+
+static const float VOLUME_TABLE[] = {
+    -96.0f,
+    -36.0f,
+    -18.0f,
+    -15.0f,
+    -12.0f,
+    -9.0f,
+    -6.0f,
+    -4.5f,
+    -3.0f,
+    -1.5f,
+    0.0f,
+};
+
+AudioSettings::AudioSettings()
+{
+    memset(this, 0, sizeof(AudioSettings));
+    MusicVolume = 10;
+    SFXVolume = 10;
+    VoiceVolume = 10;
+    DefaultMusicVolume = 10;
+    DefaultSFXVolume = 10;
+    DefaultVoiceVolume = 10;
+}
+
+void AudioSettings::ApplySettings()
+{
+    MusicVolume = MusicVolume < 0 ? 0 : MusicVolume;
+    MusicVolume = MusicVolume > 10 ? 10 : MusicVolume;
+    AudioCalculationSlider* sliders = ((AudioCalculationTable*)
+        g_pAudioSystem->GetBundleManager()->GetCalculationTable())->sliders;
+    float volume = VOLUME_TABLE[MusicVolume];
+    if (volume < sliders[2].minimum)
+    {
+        sliders[2].target = sliders[2].minimum;
+    }
+    else if (volume > sliders[2].maximum)
+    {
+        sliders[2].target = sliders[2].maximum;
+    }
+    else
+    {
+        sliders[2].target = volume;
+    }
+    sliders[2].remainingTime = 0.0f;
+
+    SFXVolume = SFXVolume < 0 ? 0 : SFXVolume;
+    SFXVolume = SFXVolume > 10 ? 10 : SFXVolume;
+    sliders = ((AudioCalculationTable*)
+        g_pAudioSystem->GetBundleManager()->GetCalculationTable())->sliders;
+    volume = VOLUME_TABLE[SFXVolume];
+    if (volume < sliders[4].minimum)
+    {
+        sliders[4].target = sliders[4].minimum;
+    }
+    else if (volume > sliders[4].maximum)
+    {
+        sliders[4].target = sliders[4].maximum;
+    }
+    else
+    {
+        sliders[4].target = volume;
+    }
+    sliders[4].remainingTime = 0.0f;
+
+    VoiceVolume = VoiceVolume < 0 ? 0 : VoiceVolume;
+    VoiceVolume = VoiceVolume > 10 ? 10 : VoiceVolume;
+    sliders = ((AudioCalculationTable*)
+        g_pAudioSystem->GetBundleManager()->GetCalculationTable())->sliders;
+    volume = VOLUME_TABLE[VoiceVolume];
+    if (volume < sliders[3].minimum)
+    {
+        sliders[3].target = sliders[3].minimum;
+    }
+    else if (volume > sliders[3].maximum)
+    {
+        sliders[3].target = sliders[3].maximum;
+    }
+    else
+    {
+        sliders[3].target = volume;
+    }
+    sliders[3].remainingTime = 0.0f;
+}
+
+void AudioSettings::ApplyMusicVolume()
+{
+    MusicVolume = MusicVolume < 0 ? 0 : MusicVolume;
+    MusicVolume = MusicVolume > 10 ? 10 : MusicVolume;
+    AudioCalculationSlider* sliders = ((AudioCalculationTable*)
+        g_pAudioSystem->GetBundleManager()->GetCalculationTable())->sliders;
+    float volume = VOLUME_TABLE[MusicVolume];
+    if (volume < sliders[2].minimum)
+    {
+        sliders[2].target = sliders[2].minimum;
+    }
+    else if (volume > sliders[2].maximum)
+    {
+        sliders[2].target = sliders[2].maximum;
+    }
+    else
+    {
+        sliders[2].target = volume;
+    }
+    sliders[2].remainingTime = 0.0f;
+}
+
+void AudioSettings::ApplySFXVolume()
+{
+    SFXVolume = SFXVolume < 0 ? 0 : SFXVolume;
+    SFXVolume = SFXVolume > 10 ? 10 : SFXVolume;
+    AudioCalculationSlider* sliders = ((AudioCalculationTable*)
+        g_pAudioSystem->GetBundleManager()->GetCalculationTable())->sliders;
+    float volume = VOLUME_TABLE[SFXVolume];
+    if (volume < sliders[4].minimum)
+    {
+        sliders[4].target = sliders[4].minimum;
+    }
+    else if (volume > sliders[4].maximum)
+    {
+        sliders[4].target = sliders[4].maximum;
+    }
+    else
+    {
+        sliders[4].target = volume;
+    }
+    sliders[4].remainingTime = 0.0f;
+}
+
+void AudioSettings::ApplyVoiceVolume()
+{
+    VoiceVolume = VoiceVolume < 0 ? 0 : VoiceVolume;
+    VoiceVolume = VoiceVolume > 10 ? 10 : VoiceVolume;
+    AudioCalculationSlider* sliders = ((AudioCalculationTable*)
+        g_pAudioSystem->GetBundleManager()->GetCalculationTable())->sliders;
+    float volume = VOLUME_TABLE[VoiceVolume];
+    if (volume < sliders[3].minimum)
+    {
+        sliders[3].target = sliders[3].minimum;
+    }
+    else if (volume > sliders[3].maximum)
+    {
+        sliders[3].target = sliders[3].maximum;
+    }
+    else
+    {
+        sliders[3].target = volume;
+    }
+    sliders[3].remainingTime = 0.0f;
+}
+
+GameplaySettings::GameplaySettings()
+{
+    memset(this, 0, sizeof(GameplaySettings));
+    SkillLevel = ROOKIE;
+    NumGames = 3;
+    GameLimitType = GAME_LIMIT_TIME;
+    GoalLimit = 5;
+    GameTime = 180;
+    mHomePowerupsEnabled = true;
+    mAwayPowerupsEnabled = true;
+    mHomeMegastrikeEnabled = true;
+    mAwayMegastrikeEnabled = true;
+    m_unk18 = true;
+    m_unk19 = true;
+    m_unk1A = true;
+}
+
+void GameplaySettings::InitializeDefaults()
+{
+}
+
+void GameplaySettings::OnSettingsUpdated() const
+{
+}
+
+CheatSettings::CheatSettings()
+{
+    memset(this, 0, sizeof(CheatSettings));
+    mCustomPowerups = POWERUP_CHEAT_NONE;
+    mEnvironmentCheat = ENV_CHEAT_NONE;
+    mPlayerCheat = PLAYER_CHEAT_NONE;
+}
+
+void CheatSettings::InitializeDefaults()
+{
+    mCustomPowerups = POWERUP_CHEAT_NONE;
+    mEnvironmentCheat = ENV_CHEAT_NONE;
+    mPlayerCheat = PLAYER_CHEAT_NONE;
+}
+
+void CheatSettings::OnSettingsUpdated() const
+{
+}
+
+VisualSettings::VisualSettings()
+{
+    memset(this, 0, sizeof(VisualSettings));
+    mIsAutoZoomCamera = true;
+    mCameraZoomLevel = 0.5f;
+#ifdef NP_NATIVE
+    NpCameraZoomNewSettings(&mIsAutoZoomCamera, &mCameraZoomLevel);   // W5-CAM: level 5 on the Vita, 3 elsewhere (np/camzoom.h)
+#endif
+}

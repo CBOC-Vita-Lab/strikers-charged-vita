@@ -1,0 +1,9 @@
+# native check 1: the game boots (SDK layer, disc, renderer start-up), presents 300 frames of the boot, the harness exits, the application reloads.
+# Expect in log.txt: "[vita] ===== Mario Strikers Charged, PS Vita native port", "[vita] stage: the game's start-up", "first frame presented",
+# "reached MSC_MAX_FRAMES=300". The first 120 frames are the black boot frames of the game (no draw calls).
+MSC_MAX_FRAMES=300
+MSC_WATCH=1
+MSC_WATCH_EVERY=60
+MSC_VITA_SHOT=120,290
+# saves of the native game go to their own directory (all native builds default to it): the native NAND layout is the recompiled build's own, so ux0:data/mscharged would be the owner's save
+NP_DATA_DIR=ux0:data/mscharged/np-data

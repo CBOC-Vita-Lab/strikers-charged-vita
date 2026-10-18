@@ -1,0 +1,52 @@
+diff --git a/src/Game/Render/Nis.cpp b/src/Game/Render/Nis.cpp
+index 9363cfd..f287425 100644
+--- a/src/Game/Render/Nis.cpp
++++ b/src/Game/Render/Nis.cpp
+@@ -29,6 +29,7 @@
+ #include "NL/gl/glTexture.h"
+ #include "Game/RenderSnapshot.h"
+ #include "Game/ReplayManager.h"
++#include "port/endian.h"
+ #include "NL/MemAlloc.h"
+ #include "NL/gl/glMaterialParameters.h"
+ #include "NL/gl/glModel.h"
+@@ -107,9 +108,20 @@ Nis::Nis(NisHeader& header, char* data, int size)
+     int numBalls = 0;
+     while (chunk != end)
+     {
+-        if (chunk->GetID() == 0x80017000)
++        // NP: the file is big-endian and each item converts its own subtree (cSAnim::Initialize,
++        // PortConvertCameraChunk), so this walk reads the top-level header through the swap and finds
++        // the next chunk before the item has touched the header.
++        const unsigned long uChunkID = port_disc32(&chunk->m_ID) & 0x80FFFFFF;
++        const unsigned long uChunkSize = port_disc32(&chunk->m_Size);
++        nlChunk* nextChunk = (nlChunk*)((unsigned char*)chunk + sizeof(nlChunk) + ((uChunkSize + 3) & ~3UL));
++        if (uChunkID == 0x80017000)
+         {
+             cSAnim* anim = cSAnim::Initialize(chunk);
++            if (anim == 0)
++            {
++                chunk = nextChunk;
++                continue;
++            }
+             NPCTemplate* npcTemplate = gNPCManager->FindNPCTemplate(anim->m_szName);
+             if (npcTemplate != 0)
+             {
+@@ -192,7 +204,7 @@ Nis::Nis(NisHeader& header, char* data, int size)
+                 ++numAnimations;
+             }
+         }
+-        if (chunk->GetID() == 0x8002500B)
++        if (uChunkID == 0x8002500B && mNumCameras < 10 && PortConvertCameraChunk(chunk, uChunkSize + sizeof(nlChunk)))
+         {
+             char name[32];
+             nlSNPrintf(name, sizeof(name), "%s_%d", mHeader->name, mNumCameras);
+@@ -204,7 +216,7 @@ Nis::Nis(NisHeader& header, char* data, int size)
+                 ++mNumCameras;
+             }
+         }
+-        chunk = chunk->GetNextChunk();
++        chunk = nextChunk;
+     }
+     NisPlayer* player = NisPlayer::Instance();
+     LoadByteCode(player->mAnimProxyByteCode);

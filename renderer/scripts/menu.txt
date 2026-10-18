@@ -1,0 +1,6 @@
+# skip notices+movie (A at 300..600), A at 700 on the start screen -> main menu, then idle
+300 303 100 0 0
+400 403 100 0 0
+500 503 100 0 0
+600 603 100 0 0
+700 703 100 0 0

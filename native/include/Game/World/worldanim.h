@@ -1,0 +1,143 @@
+#ifndef GAME_WORLD_WORLDANIM_H
+#define GAME_WORLD_WORLDANIM_H
+
+#include "Game/Inventory.h"
+#include "Game/PoseAccumulator.h"
+#include "Game/SHierarchy.h"
+#include "Game/SAnim/pnSAnimController.h"
+#include "Game/World/WorldObject.h"
+#include "NL/nlAVLTree.h"
+#include "NL/nlMath.h"
+
+struct WorldAnimBinding;
+class WorldAnimController;
+
+class WorldAnimObject : public WorldObject
+{
+public:
+    virtual ~WorldAnimObject();
+    virtual void ReleaseResources();
+    virtual nlMatrix4* GetWorldMatrix();
+    virtual void SetWorldMatrix(const nlMatrix4& transform);
+    virtual void Initialize(WorldObjectLoadContext* context);
+
+    /* 0x04 */ unsigned long m_uHashID;
+    /* 0x08 */ u8 m_pad08[0x08];
+    /* 0x10 */ World* m_pWorld;
+    /* 0x14 */ int m_nAnimNode;
+    /* 0x18 */ WorldAnimController* m_pAnimController;
+    /* 0x1C */ u8 m_pad1C[0x04];
+    /* 0x20 */ nlMatrix4 mWorldMatrix;
+    /* 0x60 */ int m_nBindings;
+    /* 0x64 */ unsigned long m_uHierarchyHash;
+    /* 0x68 */ WorldAnimBinding* m_pBindings;
+    /* 0x6C */ u8 m_pad6C[0x04];
+    /* 0x70 */ int m_nAnimations;
+    /* 0x74 */ unsigned long* m_pAnimationHashes;
+    /* 0x78 */ u8 m_pad78[0x08];
+    /* 0x80 */ ePlayMode m_ePlayMode;
+    /* 0x84 */ float m_fAnimationSpeed;
+    /* 0x88 */ float m_fAnimationTime;
+};
+
+class AnimationSet
+{
+public:
+    AnimationSet()
+        : m_pHierarchy(0)
+    {
+    }
+
+    ~AnimationSet()
+    {
+        m_animInventory.Clear();
+    }
+
+    /* 0x00 */ cSHierarchy* m_pHierarchy;
+    /* 0x04 */ cInventory<cSAnim> m_animInventory;
+};
+
+class WorldAnimController
+{
+public:
+    WorldAnimController()
+        : m_pPoseAccumulator(0)
+        , m_pPoseTree(0)
+        , m_pAnimationSet(0)
+        , m_pad4C(0)
+        , m_pWorldAnimObject(0)
+    {
+        m_worldMatrix.SetIdentity();
+    }
+
+
+    ~WorldAnimController()
+    {
+        delete m_pPoseAccumulator;
+        if (m_pPoseTree != 0)
+        {
+            delete m_pPoseTree;
+        }
+    }
+
+    float GetAnimationTime();
+    void SetAnimationTime(float fTime);
+    nlMatrix4& GetNodeMatrix(int nNode) const;
+    int GetNodeIndexByID(unsigned long uHashID) const;
+    float GetMorphWeight(int nChannel) const;
+    void SetAnimation(unsigned long uHashID, ePlayMode playMode);
+    void SetAnimationSpeed(float fSpeed);
+    void SetWorldMatrix(const nlMatrix4& worldMatrix);
+
+    /* 0x00 */ cPoseAccumulator* m_pPoseAccumulator;
+    /* 0x04 */ cPN_SAnimController* m_pPoseTree;
+    /* 0x08 */ AnimationSet* m_pAnimationSet;
+    /* 0x0C */ nlMatrix4 m_worldMatrix;
+    /* 0x4C */ void* m_pad4C;
+    /* 0x50 */ WorldAnimObject* m_pWorldAnimObject;
+};
+
+class WorldAnimManager
+{
+public:
+    WorldAnimManager();
+    ~WorldAnimManager();
+
+    void fn_80342324();
+    void Clear();
+    void BindHierarchy(
+        WorldAnimController* pController, unsigned long uHierarchyHash);
+    AnimationSet* FindAnimationSet(unsigned long uHashID)
+    {
+        AnimationSet** ppAnimationSet;
+        if (m_animationSetMap.FindGet(uHashID, &ppAnimationSet))
+        {
+            return *ppAnimationSet;
+        }
+        return 0;
+    }
+    WorldAnimController* GetOrCreateController(unsigned long uHashID);
+    WorldAnimController* FindController(unsigned long uHashID);
+    AnimationSet* GetOrCreateAnimationSet(unsigned long uHierarchyHash);
+    AnimationSet* LoadHierarchy(nlChunk* pChunk);
+    void LoadAnimationSet(AnimationSet* pAnimationSet, nlChunk* pChunk);
+    void BindObjects();
+    inline float GetFrame(int nFrames, int nFrameRate) const;
+    void UpdateControllers(float fDeltaT);
+    void Update(float fDeltaT);
+
+    /* 0x00 */ cInventory<cSHierarchy>* m_pHierarchyInventory;
+    /* 0x04 */ nlAVLTree<unsigned long, AnimationSet*,
+        DefaultKeyCompare<unsigned long> > m_animationSetMap;
+    /* 0x14 */ nlAVLTree<unsigned long, WorldAnimController*,
+        DefaultKeyCompare<unsigned long> > m_animationControllerMap;
+    /* 0x24 */ float m_fTime;
+};
+
+typedef char AnimationSet_size_check[sizeof(AnimationSet) == 0x20 ? 1 : -1];
+typedef char WorldAnimController_size_check[
+    sizeof(WorldAnimController) == 0x54 ? 1 : -1];
+typedef char WorldAnimManager_size_check[
+    sizeof(WorldAnimManager) == 0x28 ? 1 : -1];
+
+#endif // GAME_WORLD_WORLDANIM_H

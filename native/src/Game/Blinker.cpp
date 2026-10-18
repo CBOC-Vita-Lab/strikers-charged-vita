@@ -1,0 +1,117 @@
+#include "Game/Blinker.h"
+#include "NL/gl/glTexture.h"
+
+#include "Game/Effects/EffectsTemplate.h"
+#include "Game/NisPlayer.h"
+#include "NL/gl/glMaterialParameters.h"
+#include "NL/glx/glxTexture.h"
+#include "np/framepace.h"
+
+#include <string.h>
+#include "NL/gl/glTexture.h"
+
+extern "C"
+{
+    bool gBlinkingEnabled = true;
+}
+
+const float BlinkTimes[4] = {
+    1.25f, 0.016666667f, 0.033333335f, 0.016666667f
+};
+
+void Blinker::Blink(glModel* model)
+{
+    if (m_State != Blink_Open)
+    {
+        unsigned long texture;
+        glModelPacket* packet = model->packets;
+        for (; packet < model->packets + model->numPackets; ++packet)
+        {
+            texture = m_Textures[0];
+            if (texture == glGetMaterialUnsignedParameter(packet, gDiffuseTextureSemantic))
+            {
+                glSetMaterialTextureParameter(packet, gDiffuseTextureSemantic, texture);
+                unsigned long resolvedTexture = m_ResolvedTextures[(unsigned long)m_State];
+                glSetMaterialTextureIndexParameter(packet, gDiffuseTextureSemantic, &resolvedTexture);
+            }
+        }
+    }
+}
+
+void Blinker::Update(float fDeltaT)
+{
+    if (!gBlinkingEnabled || fDeltaT < 0.0f)
+    {
+        m_State = Blink_Open;
+        m_fTime = 0.0f;
+        return;
+    }
+
+    if (NisPlayer::Instance()->WorldIsFrozen())
+    {
+        fDeltaT = 0.0f;
+    }
+    // MSP: the eyes change at most once per drawn frame in the original; a 30 fps drawn frame covers NpPaceSteps(NP_PACE_BLINK) original frames, each
+    // with its share of the time (np/framepace.h).
+    int paceSteps = NpPaceSteps(NP_PACE_BLINK);
+    float stepDt = fDeltaT / (float)paceSteps;
+    for (int paceStep = 0; paceStep < paceSteps; ++paceStep)
+    {
+        m_fTime += stepDt;
+
+        if (m_fTime > m_fBlinkTimes[m_State])
+        {
+            NpPaceCountChange();
+            m_fTime = 0.0f;
+            switch (m_State)
+            {
+            case Blink_Open:
+            {
+                m_State = Blink_HalfClosed;
+                if (m_bJustDoubleBlinked == 0)
+                {
+                    bool doubleBlink = RandomizedValue(0.5f, 1.0f) < 0.2f;
+                    if (doubleBlink)
+                    {
+                        float doubleBlinkInterval = 0.06666667f;
+                        m_fBlinkTimes[0] = RandomizedValue(doubleBlinkInterval, 0.06666667f);
+                        m_bJustDoubleBlinked = 1;
+                        continue;
+                    }
+                }
+                m_fBlinkTimes[0] = RandomizedValue(1.2f, 1.0f);
+                m_bJustDoubleBlinked = 0;
+                break;
+            }
+            case Blink_HalfClosed:
+                m_State = Blink_Closed;
+                break;
+            case Blink_Closed:
+                m_State = Blink_HalfOpen;
+                break;
+            case Blink_HalfOpen:
+                m_State = Blink_Open;
+                break;
+            }
+        }
+    }
+}
+
+Blinker::Blinker(unsigned long texture0, unsigned long texture1,
+    unsigned long texture2)
+{
+    m_Textures[0] = texture0;
+    m_Textures[1] = texture1;
+    m_Textures[2] = texture2;
+    m_Textures[3] = texture1;
+
+    m_ResolvedTextures[0] = glGetTextureManager()->GetTextureIndex(m_Textures[0]);
+    m_ResolvedTextures[1] = glGetTextureManager()->GetTextureIndex(m_Textures[1]);
+    m_ResolvedTextures[2] = glGetTextureManager()->GetTextureIndex(m_Textures[2]);
+    m_ResolvedTextures[3] = glGetTextureManager()->GetTextureIndex(m_Textures[3]);
+
+    memcpy(m_fBlinkTimes, BlinkTimes, sizeof(m_fBlinkTimes));
+    m_State = Blink_Open;
+    m_fTime = 0.0f;
+    m_bJustDoubleBlinked = false;
+}

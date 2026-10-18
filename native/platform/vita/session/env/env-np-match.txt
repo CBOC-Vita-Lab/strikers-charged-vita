@@ -1,0 +1,16 @@
+# native check 4: a TIMED scripted match. The script (nav/match60.txt = the oracle's nav_match60.txt with the first-run pop-up fix) walks from the ESRB screen
+# through the intro movie (skipped with A), title, main menu, Domination Mode options, captains (Donkey Kong against Waluigi), sidekicks, sides, stadium, loading, the
+# walk-out cut-scene and the kick-off into open play, plays 62 seconds of the match clock by holding scripted stick moves, and exits by itself ("stopwhen clock >= 62").
+# REAL TIME (no virtual clock): this is the run that measures the console. Read, in log.txt:
+#   "[watch] f=... rt=<real seconds> ret=<retraces>"  every 300 frames: frames per real second = (f2-f1)/(rt2-rt1); retraces advance 59.94 Hz of game time,
+#                                                     so a game that keeps up shows ret growing as fast as rt (a slow one falls behind)
+#   "[frame-timing] ..." windows of 300 frames: p50 / p95 / max frame interval and the share of frames over 33 ms
+#   "[nav]" scene changes with the frame numbers; "[script] ... STATE open play"; the memory report at the end ("[mem]")
+# Upload with: vitalab.py cycle env/env-np-match.txt np-match 900 --input nav/match60.txt   (repeat while the status is 4)
+MSC_INPUT_SCRIPT=match60.txt
+MSC_MAX_FRAMES=12000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=300
+MSC_VITA_MEMSTATS=1
+NP_DATA_DIR=ux0:data/mscharged/np-data

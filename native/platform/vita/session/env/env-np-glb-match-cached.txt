@@ -1,0 +1,23 @@
+# GLB (wave 5): the timed scripted match (nav/match60.txt) with the glb vitaGL (build/np/W5GLB/deps-glb): the census csv files and, every 100 presented frames,
+# '[vgx] prof ...' (PROF=3: the clock is read per frame, not per command; the console cost of the profiler of PROF=2 was ~5.6 ms/frame) and '[vgx] vitaGL: ...' (pool,
+# stream arena, uniform ring, programs, shader patcher peaks, skipped sceGxm sets).
+# GLB: as env-np-glb-match.txt with the new switches ON: a 2 MiB CACHED stream arena per display buffer (written back with MSC_VITA_VGL_FLUSH: none in the emulator, which has no cache to write back; kubridge on the console), redundant sceGxm sets skipped,
+# uniform blocks whose values the program already holds not re-uploaded (MSC_VGX_UNIDUP=2).
+# Run: RUNS_DIR=.../W5GLB/v3k-runs PROFILE_DIR=.../W5GLB/v3k FILES=platform/vita/session/nav/match60.txt platform/vita/tools/job_v3k.sh <tag> 640 <this file> 'script end' <vpk> MSCN00001
+MSC_INPUT_SCRIPT=match60.txt
+MSC_MAX_FRAMES=12000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=300
+MSC_VITA_MEMSTATS=1
+MSC_VITA_RENDER=320x224
+MSC_VGX_PROF=3
+MSC_VGX_GLSTATS=ux0:data/mscharged/glstats.csv
+MSC_VGX_FRAMESTATS=ux0:data/mscharged/vgx_frames.csv
+NP_DATA_DIR=ux0:data/mscharged/np-data
+MSC_VITA_VGL_STREAM_KIB=2048
+MSC_VITA_VGL_STREAM_MEM=cached
+MSC_VITA_VGL_FLUSH=none
+MSC_VITA_VGL_RING_MEM=cdram
+MSC_VITA_VGL_SKIP=1
+MSC_VGX_UNIDUP=2

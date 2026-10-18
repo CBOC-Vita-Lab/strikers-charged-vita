@@ -1,0 +1,513 @@
+#include "NL/glx/glxSwap.h"
+#include "NL/nlDebug.h"
+#include "NL/nlConfig.h"
+#include <stdio.h>
+#include <revolution/vi/vi_fwd.h>
+#include <revolution/os/OSTime_fwd.h>
+#include <revolution/os/OSError_fwd.h>
+#include <revolution/gx/GXFifo_fwd.h>
+#include <revolution/gx/GXMisc_fwd.h>
+#include <revolution/gx/GXFrameBuf_fwd.h>
+
+#include "NL/gl/glPlat.h"
+#include "NL/gl/glDrawSyncLog.h"
+#include "NL/glx/glxGX.h"
+#include "NL/MemAlloc.h"
+#include "NL/nlMemory.h"
+#include "NL/nlEndian.h"
+#include "NL/nlPrint.h"
+#include "NL/nlTicker.h"
+#include "NL/nlAllocatorStack.h"
+#ifdef NP_NATIVE
+#include "np/fps.h"
+#endif
+
+#pragma push
+#pragma pack(1)
+struct TargaHeader
+{
+    /* 0x00 */ u8 imageIDLength;
+    /* 0x01 */ u8 colorMapType;
+    /* 0x02 */ u8 imageType;
+    /* 0x03 */ u16 firstEntry;
+    /* 0x05 */ u16 mapLength;
+    /* 0x07 */ u8 paletteBitsPerPixel;
+    /* 0x08 */ u16 xOrigin;
+    /* 0x0A */ u16 yOrigin;
+    /* 0x0C */ u16 width;
+    /* 0x0E */ u16 height;
+    /* 0x10 */ u8 bitsPerPixel;
+    /* 0x11 */ u8 imageDescriptor;
+};
+#pragma pop
+
+static void HandleSoftReset();
+static void glx_ScreenCapture(bool isMovie);
+static void PutPixel(u8* dst, u32 argbColor);
+static void loading_indicator();
+static void vi_pre_cb(unsigned long);
+static void vi_post_cb(unsigned long);
+static void draw_done_cb();
+static void AdvanceFrame();
+static void ReportGPStatus();
+static void WaitDrawDone();
+static void swap_Post();
+static void swap_Pre();
+
+static u8 glx_bAllowDrawSync = true;
+static s32 glx_SwapMode = 1;
+
+static void (*glx_pSoftReset)();
+static int _shotno;
+u8 glx_bLoadingIndicator;
+s32 glx_nBlitXor;
+static volatile int glx_nFrame;
+u8 glx_MovieOutput;
+u8 glx_ScreenShot;
+static void* glx_FrameBuffer[2];
+static int glx_nBuffer;
+static int nFirstFrame;
+static volatile u8 bInRetrace;
+static unsigned long long glx_LastRetraceTick;
+static int glx_nLoadFrame;
+static int glx_nLoadWaitFrames;
+static void (*glx_pLoadingIndicator)(void*);
+static u8 glx_bDrawWaitComplete;
+static u32 glx_nRetraceAtSwap;
+static f32 glx_DrawSyncTimeout;
+static GXColor glx_ClearColour;
+#ifdef NP_NATIVE
+static u32 glx_nRetraceAtFork;
+static volatile u32 glx_bForkedSend;   // (volatile: LLVM shrinks a global that only ever holds 0 and 1 to one byte. A word of its own: the race-check plugin works on words, and bInRetrace is a byte written by the retrace callback)
+#endif
+
+static void HandleSoftReset()
+{
+    if (glx_pSoftReset)
+    {
+        glx_pSoftReset();
+    }
+}
+
+s32 glxGetFrameCount()
+{
+    return glx_nFrame;
+}
+
+void glxSwapSetBlack(bool black)
+{
+    if (black)
+    {
+        VISetBlack(1);
+        nFirstFrame = 3;
+    }
+    else
+    {
+        VISetBlack(0);
+        nFirstFrame = 0;
+    }
+}
+
+void glxSetSwapMode(s32 mode)
+{
+    glx_SwapMode = mode;
+}
+
+void glxRequestScreenShot()
+{
+    glx_ScreenShot = 1;
+}
+
+static void glx_ScreenCapture(bool isMovie)
+{
+    char filename[0x40];
+    FILE* file;
+    TargaHeader header;
+    unsigned long argbColor;
+    s32 pixelOffset;
+    s32 y, x;
+    u8* imageData;
+
+    if (isMovie != 0)
+    {
+        nlSNPrintf(filename, 0x40, "../shot%03d.tga", _shotno);
+    }
+    else
+    {
+        nlSNPrintf(filename, 0x40, "shot%03d.tga", _shotno);
+    }
+
+    _shotno++;
+    file = fopen(filename, "wb");
+
+    if (file != 0)
+    {
+        header.imageIDLength = 0;
+        header.colorMapType = 0;
+        header.imageType = 2;
+        header.firstEntry = 0;
+        header.mapLength = 0;
+        header.paletteBitsPerPixel = 0;
+        header.xOrigin = 0;
+        header.yOrigin = 0;
+        header.width = 0x280;
+        header.height = 0x1C0;
+        header.bitsPerPixel = 0x18;
+        header.imageDescriptor = 0x20;
+
+        nlSwapEndian(header.width, &(header.width));
+        nlSwapEndian(header.height, &(header.height));
+
+        PushMemoryAllocator(&VirtualAllocator);
+        imageData = (u8*)ConfigParserAllocate(0xD2000, 8, false);
+        PopMemoryAllocator();
+
+        GXDrawDone();
+
+        for (y = 0; y < 0x1C0; y++)
+        {
+            for (x = 0; x < 0x280; x++)
+            {
+                GXPeekARGB((u16)x, (u16)y, &argbColor);
+                pixelOffset = (y * 0x280 + x) * 3;
+                PutPixel(&imageData[pixelOffset], argbColor);
+            }
+        }
+
+        fwrite(&header, 1, sizeof(TargaHeader), file);
+        fwrite(imageData, 3, 0x46000, file);
+        fclose(file);
+        delete[] imageData;
+    }
+}
+
+static void PutPixel(u8* dst, u32 argbColor)
+{
+    union
+    {
+        u32 word;
+        u8 bytes[4];
+    } colorBytes;
+
+    colorBytes.word = argbColor;
+    dst[0] = colorBytes.bytes[3];
+    dst[1] = colorBytes.bytes[2];
+    dst[2] = colorBytes.bytes[1];
+}
+
+void* glxGetDisplayedBuffer()
+{
+    return glx_FrameBuffer[glx_nBuffer ^ 1];
+}
+
+void* glxGetBackBuffer()
+{
+    return glx_FrameBuffer[glx_nBuffer];
+}
+
+static void loading_indicator()
+{
+    if (nFirstFrame == 0)
+    {
+        glx_pLoadingIndicator(glx_FrameBuffer[glx_nBuffer ^ glx_nBlitXor]);
+        VISetNextFrameBuffer(glx_FrameBuffer[glx_nBuffer]);
+        VIFlush();
+        glx_nBuffer ^= 1;
+    }
+    if (nFirstFrame > 0)
+    {
+        nFirstFrame--;
+        if (nFirstFrame == 0)
+        {
+            glx_ClearXFB(glx_FrameBuffer[0]);
+            glx_ClearXFB(glx_FrameBuffer[1]);
+            VISetBlack(0);
+            VIFlush();
+        }
+    }
+}
+
+static void vi_pre_cb(unsigned long)
+{
+    bInRetrace = 1;
+}
+
+static void vi_post_cb(unsigned long)
+{
+    HandleSoftReset();
+    if (glx_bLoadingIndicator != 0)
+    {
+        glx_nLoadFrame++;
+        if (glx_nLoadFrame >= glx_nLoadWaitFrames)
+        {
+            loading_indicator();
+        }
+    }
+    glx_nFrame++;
+    bInRetrace = 0;
+    glx_LastRetraceTick = OSGetTick();
+}
+
+void glxSwapWaitDrawDone()
+{
+    GXSetDrawDone();
+    GXFlush();
+    GXWaitDrawDone();
+}
+
+static void draw_done_cb()
+{
+    glx_bDrawWaitComplete = 1;
+}
+
+void glxInitSwap(void* fb0, void* fb1)
+{
+    glx_FrameBuffer[0] = fb0;
+    glx_FrameBuffer[1] = fb1;
+    glx_nBuffer = 0;
+    nFirstFrame = 3;
+    glx_bAllowDrawSync = 1;
+
+    GXSetDrawDone();
+    GXSetDrawDoneCallback(draw_done_cb);
+    GXFlush();
+    VISetPreRetraceCallback(vi_pre_cb);
+    VISetPostRetraceCallback(vi_post_cb);
+}
+
+void glxSwapPost(bool)
+{
+    if (glx_bLoadingIndicator == 0)
+    {
+        swap_Post();
+    }
+}
+
+void glxSwapPre(bool)
+{
+    if (glx_bLoadingIndicator == 0)
+    {
+        swap_Pre();
+    }
+}
+
+static void AdvanceFrame()
+{
+    VISetNextFrameBuffer(glx_FrameBuffer[glx_nBuffer]);
+    if (nFirstFrame > 0)
+    {
+        nFirstFrame--;
+        if (nFirstFrame == 0)
+        {
+            VISetBlack(0);
+        }
+    }
+    VIFlush();
+}
+
+void glxSwapBuffers()
+{
+    glx_nBuffer ^= 1;
+}
+
+void glxSetDrawSyncTimeout(f32 seconds)
+{
+    glx_DrawSyncTimeout = seconds;
+}
+
+static void ReportGPStatus()
+{
+    u8 overhi;
+    u8 underlow;
+    u8 readIdle;
+    u8 cmdIdle;
+    u8 brkpt;
+
+    GXGetGPStatus(&overhi, &underlow, &readIdle, &cmdIdle, &brkpt);
+    OSReport("overhi = %s\n", overhi ? "true" : "false");
+    OSReport("underlow = %s\n", underlow ? "true" : "false");
+    OSReport("readIdle = %s\n", readIdle ? "true" : "false");
+    OSReport("cmdIdle = %s\n", cmdIdle ? "true" : "false");
+    OSReport("brkpt = %s\n", brkpt ? "true" : "false");
+
+    u16 token = GXReadDrawSync();
+    const char* view = glGetDrawSyncLog()->GetViewName(token);
+    const char* name = glGetDrawSyncLog()->GetMarkerName(token);
+    OSReport("current view = %s\n", view);
+    OSReport("token string = %s\n", name);
+}
+
+static void WaitDrawDone()
+{
+    static u8 glx_bAllowAbortFrame = true;
+
+    if (glx_DrawSyncTimeout == 0.0f)
+    {
+        GXWaitDrawDone();
+        return;
+    }
+
+    if (glx_bDrawWaitComplete != 0)
+    {
+        return;
+    }
+
+    u32 start = nlGetTicker();
+    while (glx_bDrawWaitComplete == 0)
+    {
+        if (nlGetTickerDifference(start, nlGetTicker()) > glx_DrawSyncTimeout)
+        {
+            glx_bDrawWaitComplete = 1;
+            OSReport("Warning: Hung in WaitDrawDone, had to abort frame.\n");
+            ReportGPStatus();
+            if (glx_bAllowAbortFrame != 0)
+            {
+                GXAbortFrame();
+                gxInit();
+                return;
+            }
+            nlBreak();
+        }
+    }
+}
+
+static void swap_Post()
+{
+    GXSetDrawDone();
+    if (glx_DrawSyncTimeout == 0.0f)
+    {
+        GXWaitDrawDone();
+    }
+    else
+    {
+        WaitDrawDone();
+    }
+
+    // R4QE01 tests the four swap modes in this order and keeps no jump table.
+    // The stripped DOL does not preserve their names, so they stay numeric.
+    u32 retrace = VIGetRetraceCount();
+#ifdef NP_NATIVE
+    // NP (FPS, np/fps.h): MSC_FPS picks the wait for this frame. 0..3 are the game's own modes below; 4 is the 30 fps cap: at least two retraces
+    // after the previous picture was handed over (glx_nRetraceAtSwap), and no further wait for a frame that is already later than that.
+    // The time spent waiting is counted (the controller of MSC_FPS=auto wants the cost of the frame without it).
+    s32 swapMode = NpFpsSwapMode(glx_SwapMode);
+    NpFpsSwapWaitBegin();
+#else
+    s32 swapMode = glx_SwapMode;
+#endif
+    if (swapMode == 2)
+    {
+        AdvanceFrame();
+        VIWaitForRetrace();
+        if (VIGetRetraceCount() < glx_nRetraceAtSwap + 2)
+        {
+            VIWaitForRetrace();
+        }
+    }
+    else if (swapMode == 1)
+    {
+        AdvanceFrame();
+        VIWaitForRetrace();
+    }
+    else if (swapMode == 3)
+    {
+        AdvanceFrame();
+        if (OSTicksToMicroseconds(OSGetTick() - (u32)glx_LastRetraceTick) > 0x2EE0 || retrace == glx_nRetraceAtSwap)
+        {
+            VIWaitForRetrace();
+        }
+    }
+    else if (swapMode == 0)
+    {
+        AdvanceFrame();
+    }
+#ifdef NP_NATIVE
+    else if (swapMode == 4)
+    {
+        AdvanceFrame();
+        if (NpFpsLateWait(4, glx_nRetraceAtSwap + 2))
+        {
+            // W5 RT (MSC_LATE_WAIT, np/fps.h): 1: this wait is made after the send (NpFpsLateWaitAfterSend); 2: it was made before the pads were
+            // read (FixedUpdateTask), a frame that did not get there makes it now
+            NpFpsLateWaitRun(1);
+        }
+        else
+        {
+            while (VIGetRetraceCount() < glx_nRetraceAtSwap + 2)
+            {
+                VIWaitForRetrace();
+            }
+        }
+    }
+#endif
+    else
+    {
+        nlBreak();
+    }
+#ifdef NP_NATIVE
+    NpFpsSwapWaitEnd();
+#endif
+
+    glxSwapBuffers();
+}
+
+static void swap_Pre()
+{
+    if (glx_ScreenShot != 0)
+    {
+        glx_ScreenCapture(false);
+        glx_ScreenShot = 0;
+    }
+    if (glx_MovieOutput != 0)
+    {
+        glx_ScreenCapture(true);
+    }
+
+    GXSetCopyClear(glx_ClearColour, 0xFFFFFF);
+    gxSetZMode(true, GX_LEQUAL, true);
+    gxSetColourUpdate(true);
+    gxSetAlphaUpdate(true);
+    GXCopyDisp(glx_FrameBuffer[glx_nBuffer], 1);
+    GXSetDrawDone();
+    glx_bDrawWaitComplete = 0;
+    GXFlush();
+#ifdef NP_NATIVE
+    // NP (frame-send worker): when the send runs as a job, the retrace count is the one the game thread read at the fork
+    // (glxSwapPreFork); a read on the worker would see whatever the retrace handler has counted by then. Nothing happens
+    // between the fork and this point in the serial order, so the values are the same.
+    glx_nRetraceAtSwap = glx_bForkedSend ? glx_nRetraceAtFork : VIGetRetraceCount();
+    if (!glx_bForkedSend)
+    {
+        NpFpsLateWaitOwe(glx_nRetraceAtSwap + 2);   // W5 RT: the hand-over (serial send); the next frame waits for this + 2 before it reads the pads
+    }
+#else
+    glx_nRetraceAtSwap = VIGetRetraceCount();
+#endif
+}
+
+#ifdef NP_NATIVE
+// NP: the frame send as a job (src/NL/gl/glPlat.cpp glplatSendFrameForked). Both run swap_Pre's work without the loading-indicator
+// test: the fork is only made when the indicator is off, and the job must not skip the display copy if it came on meanwhile.
+void glxSwapPreFork()
+{
+    glx_nRetraceAtFork = VIGetRetraceCount();
+    NpFpsLateWaitOwe(glx_nRetraceAtFork + 2);   // W5 RT: the hand-over (forked send); see swap_Pre
+}
+
+void glxSwapPreJob()
+{
+    glx_bForkedSend = 1;
+    swap_Pre();
+    glx_bForkedSend = 0;
+}
+
+bool glxSwapLoadingIndicator()
+{
+    return glx_bLoadingIndicator != 0;
+}
+
+bool glxSwapScreenCaptureWanted()
+{
+    return glx_ScreenShot != 0 || glx_MovieOutput != 0;
+}
+#endif

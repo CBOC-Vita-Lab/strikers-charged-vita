@@ -1,0 +1,192 @@
+#ifndef NL_STRING_TMPL_H
+#define NL_STRING_TMPL_H
+
+#include "NL/nlString.h"
+
+template <typename CharT>
+CharT nlToUpper(CharT value);
+
+template <typename CharT>
+inline unsigned long nlStrLen(const CharT* str)
+{
+    unsigned long n = 0;
+    if (str)
+    {
+        while (str[n])
+            n++;
+    }
+    return n;
+}
+
+template <typename CharT>
+inline CharT* nlStrNCpy(CharT* str1, const CharT* str2, unsigned long len)
+{
+    unsigned long n;
+    int p;
+    unsigned long c;
+    // NP: a null source read as an empty string on the console (it dereferenced the zero page);
+    // natively it faults.
+    if (str2 == 0)
+    {
+        if (len)
+            str1[0] = (CharT)0;
+        return str1;
+    }
+    n = len - 1;
+    p = 0;
+    goto test;
+loop:
+    p++;
+test:
+    if (n-- == 0)
+        goto done;
+    c = str2[p];
+    if ((str1[p] = c) != 0)
+        goto loop;
+done:
+    str1[p] = '\0';
+    return str1;
+}
+
+template <typename CharT>
+inline CharT nlToLower(CharT c)
+{
+    if ((c >= 0x41) && (c <= 0x5A))
+    {
+        c = (CharT)(c | 0x20);
+    }
+    return c;
+}
+
+template <typename CharT>
+inline CharT* nlToLower(CharT* str)
+{
+    CharT* cp = str;
+    while (*cp)
+    {
+        *cp = nlToLower<CharT>(*cp);
+        cp++;
+    }
+    return str;
+}
+
+template <typename CharT>
+inline int nlStrCmp(const CharT* a, const CharT* b)
+{
+    CharT c1;
+    CharT c2;
+
+    do
+    {
+        c1 = *a++;
+        c2 = *b++;
+    } while (c1 != 0 && c2 != 0 && c1 == c2);
+
+    return c1 - c2;
+}
+
+template <typename CharT>
+inline int nlStrICmp(const CharT* str1, const CharT* str2)
+{
+    CharT c1;
+    CharT c2;
+
+    do
+    {
+        c1 = nlToUpper<CharT>(const_cast<CharT&>(*str1++));
+        c2 = nlToUpper<CharT>(const_cast<CharT&>(*str2++));
+    } while (c1 != 0 && c2 != 0 && c1 == c2);
+
+    return c1 - c2;
+}
+
+template <>
+inline int nlStrICmp<char>(const char* str1, const char* str2)
+{
+    char c1;
+    char c2;
+    do
+    {
+        c1 = *str1++;
+        if (c1 >= 0x61)
+        {
+            if (c1 <= 0x7A)
+                c1 = (char)(c1 & 0x5F);
+        }
+        c2 = *str2++;
+        if (c2 >= 0x61)
+        {
+            if (c2 <= 0x7A)
+                c2 = (char)(c2 & 0x5F);
+        }
+        if (c1 == 0)
+            break;
+        if (c2 == 0)
+            break;
+    } while (c1 == c2);
+    return c1 - c2;
+}
+
+template <typename CharT>
+inline int nlStrNICmp(const CharT* a, const CharT* b, unsigned long maxsize)
+{
+    CharT c1;
+    CharT c2;
+    do
+    {
+        c1 = *a++;
+        if (c1 >= 0x61 && c1 <= 0x7A)
+        {
+            c1 = (CharT)(c1 & 0x5F);
+        }
+        c2 = *b++;
+        if (c2 >= 0x61 && c2 <= 0x7A)
+        {
+            c2 = (CharT)(c2 & 0x5F);
+        }
+    } while (--maxsize != 0 && c1 != 0 && c2 != 0 && c1 == c2);
+    return c1 - c2;
+}
+
+template <typename CharT>
+inline int nlStrNCmp(const CharT* lhs, const CharT* rhs, unsigned long count)
+{
+    CharT left;
+    CharT right;
+    do
+    {
+        left = *lhs++;
+        right = *rhs++;
+    } while (--count != 0 && left != 0 && right != 0 && left == right);
+    return left - right;
+}
+
+template <typename CharT>
+inline CharT* nlStrChr(const CharT* str, CharT c)
+{
+    const CharT* cp = str;
+    while (*cp != 0)
+    {
+        if (*cp == c)
+        {
+            return (CharT*)cp;
+        }
+        cp++;
+    }
+    return 0;
+}
+
+template <typename CharT>
+CharT nlToUpper(CharT c)
+{
+    if (c >= 0x61)
+    {
+        if (c <= 0x7A)
+        {
+            return c & 0x5F;
+        }
+    }
+    return c;
+}
+
+#endif // NL_STRING_TMPL_H

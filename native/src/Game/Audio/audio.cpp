@@ -1,0 +1,557 @@
+#include "Game/Task/GameTaskState.h"
+#include "revolution/types.h"
+#include "NL/nlDLListContainer.inl"
+#include "Game/Audio/AudioBackend.h"
+#include "Game/Audio/AudioGlobals.h"
+#include "Game/Audio/Plat3dSoundSrc.h"
+#include "Game/Audio/AudioEffects.h"
+#include "Game/Sys/audio.h"
+#include "Game/Sys/debug.h"
+
+#include "Game/Task/TextWindowTask.h"
+#include "Game/Task/ResetTask.h"
+
+#include "Game/Audio/AudioBankTable.h"
+#include "Game/Audio/AudioSlider.h"
+#include "Game/Audio/XSoundCueHandle.h"
+#include "revolution/sc.h"
+#include "Game/Audio/AudioBundleManager.h"
+#include "Game/Camera/CameraMan.h"
+#include "Game/TweakRegistry.h"
+#include "NL/nlAVLTree.h"
+#include "NL/nlDebugString.h"
+#include "NL/nlPrint.h"
+#include "NL/nlTask.h"
+#include "Game/Audio/RegistryPools.h"
+#include "Game/SharedStaticStorage.h"
+
+#include "Game/Audio/AudioListener.inl"
+
+
+static char sNoAudio[] = "user/NoAudio";
+static char sDisableControllerSpeaker[] = "user/DisableControllerSpeaker";
+static char sResidentVoiceDrops[] = "Total resident voice drop count: %d\n";
+static char sStreamVoiceDrops[] = "Total stream voice drop count: %d\n";
+static char sMissingSlot[] = "SafePlay: No slot id %d";
+static char sMissingCue[] = "SafePlay: No Cue \"%s\" (%d)";
+static char sResumedCue[] = "Resumed cue";
+
+bool gAudioEnabled = true;
+unsigned long sAudioPauseDepth = 1;
+char gAudioResourcePath[] = "audio/";
+
+typedef nlAVLTreeSlotPool<unsigned long, XSoundHandle*,
+    DefaultKeyCompare<unsigned long> > AudioHandleMap;
+typedef nlAVLTreeSlotPool<unsigned long, AudioHandleState,
+    DefaultKeyCompare<unsigned long> > AudioHandleStateMap;
+typedef nlAVLTreeSlotPool<unsigned long, bool,
+    DefaultKeyCompare<unsigned long> > PausedAudioHandleMap;
+
+static AudioHandleMap sAudioHandles(0x10, 0x10);
+static AudioHandleStateMap sAudioHandleStates(0x10, 0x10);
+static PausedAudioHandleMap sPausedAudioHandles(0x60, 0);
+
+static inline unsigned long MakeAudioHandleKey(
+    unsigned long cueId, const void* context)
+{
+    return cueId ^ (unsigned long)context;
+}
+
+static inline XSoundHandle** FindAudioHandleSlot(
+    unsigned long cueId, void* context)
+{
+    XSoundHandle** slot = 0;
+    unsigned long key = MakeAudioHandleKey(cueId, context);
+    sAudioHandles.FindGet(key, &slot);
+    return slot;
+}
+
+GameAudio::GameAudio()
+    : AudioSystem()
+    , m_PlayRequestCount(0)
+{
+}
+
+bool GameAudio::Initialize()
+{
+    AllocatorStack[AllocatorStackDepth++] = &VirtualAllocator;
+    CurrentAllocator = &VirtualAllocator;
+    gAudioMemorySize = 0x800000;
+
+    ResetTask::s_AudioInInit = true;
+    SetResourcePath(gAudioResourcePath);
+    ResetTask::s_AudioInInit = false;
+
+    if (SCGetSoundMode() == 0)
+    {
+        g_pAudioBackend->SetOutputMode(AUDIO_OUTPUT_MONO);
+    }
+
+    gAudioEnabled = !GetTweakBool(sNoAudio, !gAudioEnabled);
+    SetControllerSpeakerEnabled(!GetTweakBool(sDisableControllerSpeaker, false));
+    m_Listener->SetEnabled(true);
+
+    --AllocatorStackDepth;
+    AllocatorStack[AllocatorStackDepth] = 0;
+    CurrentAllocator = AllocatorStack[AllocatorStackDepth - 1];
+    return true;
+}
+
+void GameAudio::Shutdown()
+{
+    AudioSystem::Shutdown();
+
+    sAudioHandles.Clear();
+    sAudioHandles.m_Allocator.FreeBlocks();
+    sAudioHandleStates.Clear();
+    sAudioHandleStates.m_Allocator.FreeBlocks();
+
+    tDebugPrintManager::Print(DC_SOUND, sResidentVoiceDrops, gResidentVoiceDropCount);
+    tDebugPrintManager::Print(DC_SOUND, sStreamVoiceDrops, gStreamVoiceDropCount);
+    gResidentVoiceDropCount = 0;
+    gStreamVoiceDropCount = 0;
+}
+
+void GameAudio::Update(float deltaTime)
+{
+    bool transformValid = false;
+
+    if (nlTaskManager::m_pInstance->mCurrentState == TASK_GAMEPLAY
+        && GetNextCamera() != 0)
+    {
+        nlVector3 listenerVector;
+        cCameraManager::GetUpVector(listenerVector);
+        m_Listener->SetUp(listenerVector);
+        cCameraManager::GetViewVector(listenerVector);
+        m_Listener->SetView(listenerVector);
+        listenerVector = cCameraManager::m_cameraPosition;
+        nlVec3ScaleAdd(listenerVector, 15.0f, m_Listener->m_View, listenerVector);
+        m_Listener->SetPosition(listenerVector);
+
+        transformValid = nlNear((float)(double)nlVec3Length(m_Listener->m_View), 1.0f)
+                      && nlNear((float)(double)nlVec3Length(m_Listener->m_Up), 1.0f);
+    }
+
+    m_Listener->SetTransformValid(transformValid);
+    UpdateAudioSystem(this, deltaTime);
+}
+
+void LoadSoundBank(GameAudio* audio, int slotId,
+    unsigned long cueId, AudioPlayCallback callback,
+    void* context)
+{
+    if (!gAudioEnabled)
+    {
+        return;
+    }
+
+    if (gExclusiveAudioContext != 0 && context != gExclusiveAudioContext)
+    {
+        callback(0, context);
+        return;
+    }
+
+    AudioSliderTable* sliders = (AudioSliderTable*)
+        audio->GetBundleManager()->GetSliderTable();
+    sSpeedOfSound = sliders->globalDefinitionsCopy[0].initialValue;
+    ++audio->m_PlayRequestCount;
+
+    if (!audio->IsInitialized())
+    {
+        return;
+    }
+
+    audio->GetBundleManager()->GetSoundMap()->LoadBank(slotId,
+        cueId, callback, context, 0);
+}
+
+void UnloadSoundBanks(GameAudio* audio)
+{
+    if (gAudioEnabled
+        && audio->GetBundleManager()->GetSoundMap() != 0)
+    {
+        audio->GetBundleManager()->GetSoundMap()->UnloadAllBanks();
+    }
+}
+
+bool PlaySound(int slotId, unsigned long cueId,
+    const void* debugName, void* context)
+{
+    if (cueId == 0xFFFFFFFF)
+    {
+        return true;
+    }
+
+    XSoundHandle* handle = CreateSoundHandle(
+        slotId, cueId, 0, debugName, context, false);
+    if (handle != 0)
+    {
+        handle->Play(context == 0);
+    }
+    return handle != 0;
+}
+
+bool PlayOwnedSound(int slotId, unsigned long cueId,
+    XSoundOwner* owner, const void* debugName, void* context)
+{
+    if (cueId == 0xFFFFFFFF)
+    {
+        return true;
+    }
+
+    XSoundHandle* handle = CreateSoundHandle(
+        slotId, cueId, owner, debugName, context, false);
+    if (handle != 0)
+    {
+        handle->Play(context == 0);
+    }
+    return handle != 0;
+}
+
+XSoundHandle* CreateSoundHandle(int slotId,
+    unsigned long cueId, XSoundOwner* owner,
+    const void* debugName, void* context, bool findExisting)
+{
+    if (gExclusiveAudioContext != 0)
+    {
+        return 0;
+    }
+    if (!gAudioEnabled)
+    {
+        return 0;
+    }
+
+    AudioSystem* audio = g_pAudioSystem;
+    g_pLastAudioHandle = 0;
+    AudioResourceLoadOwner* resource = audio->GetBundleManager()
+        ->GetSoundMap()->records_0C[slotId].field_10;
+    if (resource == 0)
+    {
+        PrintTextWindowMessage(sMissingSlot, slotId);
+        return 0;
+    }
+    if (FindAudioResourceCue(resource, cueId, 0, 0, 0) == 0xFFFF)
+    {
+        PrintTextWindowMessage(sMissingCue,
+            nlLookupDebugString(g_pDebugStringTable, cueId), cueId);
+        return 0;
+    }
+
+    XSoundCueHandle* handle = CreateAudioSoundHandle(
+        audio, slotId, owner, cueId, 0, 0, 0, 0, 0);
+    g_pLastAudioHandle = handle;
+
+    if (context != 0)
+    {
+        if (!findExisting)
+        {
+            XSoundHandle* soundHandle;
+            unsigned long key;
+            key = (unsigned long)context ^ cueId;
+            soundHandle = handle;
+            sAudioHandles.Add(key, soundHandle);
+        }
+        else
+        {
+            unsigned long key = (unsigned long)context ^ cueId;
+            sAudioHandles.FindGet(key);
+        }
+    }
+    return handle;
+}
+
+bool IsSoundTracked(unsigned long cueId, void* context)
+{
+    XSoundHandle** slot = 0;
+    unsigned long key = MakeAudioHandleKey(cueId, context);
+    return sAudioHandles.FindGet(key, &slot);
+}
+
+XSoundHandle* FindSoundHandle(
+    unsigned long cueId, void* context)
+{
+    if (!gAudioEnabled)
+    {
+        return 0;
+    }
+    XSoundHandle** slot = 0;
+    unsigned long key = MakeAudioHandleKey(cueId, context);
+    sAudioHandles.FindGet(key, &slot);
+    return slot != 0 ? *slot : 0;
+}
+
+bool PlayTrackedSound(int slotId, unsigned long cueId,
+    const void* debugName, void* context, bool resumable)
+{
+    if (PlaySound(slotId, cueId, debugName, context))
+    {
+        AudioHandleState state;
+        state.Set(slotId, cueId, context, resumable);
+        unsigned long key = MakeAudioHandleKey(cueId, context);
+        sAudioHandleStates.Add(key, state);
+        return true;
+    }
+    return false;
+}
+
+bool PlayTrackedOwnedSound(int slotId, unsigned long cueId,
+    XSoundOwner* owner, const void* debugName,
+    void* context, bool resumable)
+{
+    if (PlayOwnedSound(slotId, cueId, owner, debugName, context))
+    {
+        AudioHandleState state;
+        state.Set(slotId, cueId, context, resumable);
+        unsigned long key = MakeAudioHandleKey(cueId, context);
+        sAudioHandleStates.Add(key, state);
+        return true;
+    }
+    return false;
+}
+
+void StopSound(unsigned long cueId, void* context)
+{
+    if (gExclusiveAudioContext == 0 && gAudioEnabled
+        && cueId != 0xFFFFFFFF)
+    {
+        XSoundHandle** slot = 0;
+        unsigned long key = MakeAudioHandleKey(cueId, context);
+        if (sAudioHandles.FindGet(key, &slot))
+        {
+            sAudioHandleStates.Remove(key);
+            XSoundHandle* handle = *slot;
+            if (handle != 0)
+            {
+                switch (handle->m_State)
+                {
+                case SOUND_HANDLE_PREPARING:
+                case SOUND_HANDLE_PREPARED:
+                case SOUND_HANDLE_PLAYING:
+                case SOUND_HANDLE_PAUSED:
+                    handle->Stop(1, 0);
+                    break;
+                case SOUND_HANDLE_STOPPING:
+                    handle->SetCallbackEnabled(1);
+                    break;
+                case SOUND_HANDLE_STOPPED:
+                    handle->Release();
+                    break;
+                case SOUND_HANDLE_RELEASED:
+                    break;
+                }
+            }
+            sAudioHandles.Remove(key);
+        }
+    }
+}
+
+void PauseSound(unsigned long cueId, void* context)
+{
+    if (cueId != 0xFFFFFFFF)
+    {
+        unsigned long key = MakeAudioHandleKey(cueId, context);
+        XSoundHandle** slot = 0;
+        if (sAudioHandles.FindGet(key, &slot))
+        {
+            AudioHandleState* state;
+            sAudioHandleStates.FindGet(key, &state);
+            if (state->m_CanResume != 0 && *slot != 0)
+            {
+                if ((*slot)->m_State == SOUND_HANDLE_STOPPED)
+                {
+                    (*slot)->Release();
+                    *slot = 0;
+                }
+                else if ((*slot)->m_State != SOUND_HANDLE_PAUSED)
+                {
+                    (*slot)->Pause();
+                }
+            }
+            else if (*slot != 0)
+            {
+                (*slot)->Stop(1, 0);
+                *slot = 0;
+            }
+
+            if (state->m_PauseDepth == 0)
+            {
+                state->m_PauseDepth = sAudioPauseDepth;
+            }
+        }
+    }
+}
+
+void ResumeSound(unsigned long cueId, void* context)
+{
+    if (cueId == 0xFFFFFFFF)
+    {
+        return;
+    }
+    unsigned long key = MakeAudioHandleKey(cueId, context);
+    XSoundHandle** slot = 0;
+    if (!sAudioHandles.FindGet(key, &slot))
+    {
+        return;
+    }
+    AudioHandleState* state;
+    sAudioHandleStates.FindGet(key, &state);
+    if (state->m_PauseDepth < sAudioPauseDepth)
+    {
+        return;
+    }
+    if (state->m_CanResume != 0)
+    {
+        if (*slot != 0)
+        {
+            (*slot)->Resume();
+        }
+    }
+    else
+    {
+        *slot = CreateSoundHandle(state->m_SlotId,
+            state->m_CueId,
+            0,
+            sResumedCue,
+            context,
+            true);
+        (*slot)->Play(false);
+    }
+    state->m_PauseDepth = 0;
+}
+
+void SetLastSoundParameter(unsigned long parameter, float value)
+{
+    if (g_pLastAudioHandle == 0)
+    {
+        return;
+    }
+
+    GetSoundParameter(g_pLastAudioHandle, parameter)->SetTarget(value, 0.0f);
+}
+
+int GetSoundState(
+    unsigned long cueId, void* context)
+{
+    XSoundHandle* handle = FindSoundHandle(cueId, context);
+    return handle != 0 ? handle->m_State : SOUND_HANDLE_STOPPED;
+}
+
+void SetSoundCallbackEnabled(unsigned long cueId, void* context,
+    unsigned char enabled)
+{
+    XSoundHandle* handle = FindSoundHandle(cueId, context);
+    if (handle != 0)
+    {
+        handle->SetCallbackEnabled(enabled);
+    }
+}
+
+static inline void AddAudioHandleState(int slotId, unsigned long cueId,
+    void* context, bool resumable)
+{
+    AudioHandleState state;
+    state.Set(slotId, cueId, context, resumable);
+    unsigned long key = MakeAudioHandleKey(cueId, context);
+    sAudioHandleStates.Add(key, state);
+}
+
+bool PrepareTrackedSound(int slotId, unsigned long cueId,
+    XSoundOwner* owner, const void* debugName,
+    void* context, bool resumable)
+{
+    XSoundHandle* handle = CreateSoundHandle(
+        slotId, cueId, owner, debugName, context, false);
+    if (handle != 0)
+    {
+        AddAudioHandleState(slotId, cueId, context, resumable);
+    }
+    if (handle != 0)
+    {
+        handle->Prepare(false);
+    }
+    return handle != 0;
+}
+
+bool StartTrackedSound(unsigned long cueId, void* context)
+{
+    XSoundHandle* handle = FindSoundHandle(cueId, context);
+    if (handle == 0)
+    {
+        return false;
+    }
+    handle->Play(false);
+    return true;
+}
+
+void PauseAllAudio()
+{
+    ++sAudioPauseDepth;
+    sAudioHandles.Walk(
+        g_pAudioSystem, &AudioSystem::PauseTrackedSound);
+    nlDLListIterator<XSoundHandle*> sounds;
+    sounds = g_pAudioSystem->m_ActiveSoundList.Begin();
+    while (sounds.hasNext())
+    {
+        unsigned long key = (unsigned long)*sounds;
+        bool* paused;
+        if (!sPausedAudioHandles.FindGet(key, &paused))
+        {
+            XSoundHandle* handle = (XSoundHandle*)key;
+            switch (handle->m_State)
+            {
+            case SOUND_HANDLE_PREPARING:
+            case SOUND_HANDLE_PREPARED:
+            case SOUND_HANDLE_PLAYING:
+            case SOUND_HANDLE_PAUSED:
+                handle->Stop(1, 0);
+                break;
+            case SOUND_HANDLE_STOPPING:
+                handle->SetCallbackEnabled(1);
+                break;
+            case SOUND_HANDLE_STOPPED:
+                handle->Release();
+                break;
+            case SOUND_HANDLE_RELEASED:
+                break;
+            }
+        }
+        sounds.next();
+    }
+    sPausedAudioHandles.Clear();
+}
+
+void ResumeAllAudio()
+{
+    AudioSystem* audio = g_pAudioSystem;
+    sAudioHandleStates.Walk(audio, &AudioSystem::ResumeTrackedSound);
+    --sAudioPauseDepth;
+}
+
+int GetAudioPauseDepth()
+{
+    return sAudioPauseDepth;
+}
+
+void AudioSystem::PauseTrackedSound(
+    const unsigned long& key, XSoundHandle** handle)
+{
+    AudioHandleState* state;
+    if (sAudioHandleStates.FindGet(key, &state))
+    {
+        PauseSound(state->m_CueId, state->m_Context);
+    }
+    else
+    {
+        (*handle)->Stop(0, 0);
+    }
+
+    sPausedAudioHandles.Add(*(unsigned long*)handle, false);
+}
+
+void AudioSystem::ResumeTrackedSound(
+    const unsigned long&, AudioHandleState* state)
+{
+    ResumeSound(state->m_CueId, state->m_Context);
+}
+
+#include "Game/Audio/AudioSystem.inl"

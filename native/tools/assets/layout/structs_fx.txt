@@ -1,0 +1,7 @@
+EffectsBundleData
+EffectsTemplate
+fxAnimatedRange
+fxCurveKey
+EffectsGroup
+EffectsSpec
+UserEffectSource

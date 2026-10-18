@@ -1,0 +1,67 @@
+# W5-ITEM generated script: replay / celebration with freeze
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=13 home=5 away=6 hsk=0,1,2 ask=5,6,7 human=0 time=300 skill=0
+wait ingame == 1 4000
+log STATE match object
+mash 100 30 gs == 1 4000
+log STATE kick-off
+wait gs == 5 6000
+log STATE open play
+idle 20
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+log ITEM rp_freeze phase replay0
+tap 100 20 task == 2 && ctl >= 0 900
+item me freeze 1 set
+tap 0 1 item0 == 3 120
+aim opp 0 dopp < 5 200
+log ITEM rp_freeze use replay0
+tap 400 12 item0 != 3 240
+idle 20
+aim ball 0 own == 0 400
+aim goal 0 dgoal < 11 400
+hold 24 200 0 0
+idle 10
+tap 0 1 score0 > 0 240
+tap 0 1 task == 2 2400
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+log ITEM rp_freeze phase replay1
+tap 100 20 task == 2 && ctl >= 0 900
+item me freeze 1 set
+tap 0 1 item0 == 3 120
+aim opp 0 dopp < 5 200
+log ITEM rp_freeze use replay1
+tap 400 12 item0 != 3 240
+idle 20
+aim ball 0 own == 0 400
+aim goal 0 dgoal < 11 400
+hold 24 200 0 0
+idle 10
+tap 0 1 score0 > 1 240
+tap 0 1 task == 2 2400
+if gs != 5
+mash 100 30 gs == 5 3000
+endif
+log ITEM rp_freeze phase replay2
+tap 100 20 task == 2 && ctl >= 0 900
+item me freeze 1 set
+tap 0 1 item0 == 3 120
+aim opp 0 dopp < 5 200
+log ITEM rp_freeze use replay2
+tap 400 12 item0 != 3 240
+idle 20
+aim ball 0 own == 0 400
+aim goal 0 dgoal < 11 400
+hold 24 200 0 0
+idle 10
+tap 0 1 score0 > 2 240
+tap 0 1 task == 2 2400
+log STATE script end
+idle 60
+exit

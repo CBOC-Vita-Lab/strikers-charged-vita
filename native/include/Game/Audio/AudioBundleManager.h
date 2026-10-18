@@ -1,0 +1,71 @@
+#ifndef GAME_AUDIO_AUDIO_BUNDLE_MANAGER_H
+#define GAME_AUDIO_AUDIO_BUNDLE_MANAGER_H
+
+#include "types.h"
+#include "Game/Audio/AudioResourceRuntime.h"
+
+class nlChunk;
+class AudioBackend;
+struct AudioBankTable;
+struct AudioRpcController;
+
+class AudioBundleManager
+{
+public:
+    AudioBundleManager();
+
+    virtual bool IsLoaded() { return m_Loaded; }
+    virtual bool IsInitialized() { return m_Initialized; }
+    virtual void Load(const char* path);
+    virtual bool Initialize();
+    virtual void Shutdown() = 0;
+    virtual void Update(float deltaTime) = 0;
+    virtual void OnLoadStarted() { }
+    virtual void ParseChunk(nlChunk* chunk);
+    virtual void OnLoadComplete() { m_Loaded = true; }
+
+    AudioBankTable* GetSoundMap() const { return m_BankTable; }
+    void* GetSliderTable() const { return m_SliderTable; }
+    void* GetCalculationTable() const { return m_CalculationTable; }
+    AudioBackend* GetBackend() const { return m_Backend; }
+    AudioResourceRuntime* GetResourceRuntime() { return &m_Runtime; }
+
+protected:
+    static void OnBundleLoaded(
+        void* data, unsigned long size, void* manager);
+
+    AudioBackend* m_Backend;
+    bool m_Initialized;
+    u8 m_Unknown09[3];
+    void* m_SliderTable;
+    void* m_CalculationTable;
+    AudioBankTable* m_BankTable;
+    AudioResourceRuntime m_Runtime;
+    bool m_Loaded;
+    u8 m_Unknown45[3];
+    void* m_LoadedData;
+};
+
+class AudioRpcBundleManager : public AudioBundleManager
+{
+public:
+    AudioRpcBundleManager()
+        : m_Unknown4C(0)
+        , m_RpcController(0)
+    {
+    }
+
+    virtual bool Initialize();
+    virtual void Shutdown();
+    virtual void Update(float dt);
+    virtual void ParseChunk(nlChunk* chunk);
+    virtual ~AudioRpcBundleManager();
+
+private:
+    void* m_Unknown4C;
+
+public:
+    AudioRpcController* m_RpcController;
+};
+
+#endif // GAME_AUDIO_AUDIO_BUNDLE_MANAGER_H

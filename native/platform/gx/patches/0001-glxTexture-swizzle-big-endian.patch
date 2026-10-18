@@ -1,0 +1,17 @@
+diff --git a/src/NL/glx/glxTexture.cpp b/src/NL/glx/glxTexture.cpp
+index 3c25a20..db6278d 100644
+--- a/src/NL/glx/glxTexture.cpp
++++ b/src/NL/glx/glxTexture.cpp
+@@ -372,7 +372,12 @@ void PlatTexture::Create(int width, int height, eGXTextureFormat format,
+ 
+ void PlatTexture::Swizzle(bool deleteLinear)
+ {
++#ifdef NP_NATIVE
++    // Textures generated in the game (grid, font, light ramps) hold host-order 16-bit texels; GX reads them big-endian.
++    GCSwizzle(m_SwizzledData, m_LinearData, m_Width, m_Height, m_Format, true);
++#else
+     GCSwizzle(m_SwizzledData, m_LinearData, m_Width, m_Height, m_Format, false);
++#endif
+     if (deleteLinear)
+     {
+         nlFree(m_LinearData);

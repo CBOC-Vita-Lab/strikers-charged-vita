@@ -1,0 +1,558 @@
+diff --git a/source/buffers.c b/source/buffers.c
+index 9ef4257..9608d5d 100644
+--- a/source/buffers.c
++++ b/source/buffers.c
+@@ -376,6 +376,7 @@ inline void glNamedBufferData(GLuint buffer, GLsizei size, const void *data, GLe
+ #endif
+ #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)
+ 	GLboolean was_scratch = gpu_buf->scratch;
++	GLboolean from_stream_arena = GL_FALSE; // GLB: cached stream arena (vglSetupCachedStream)
+ #endif
+ 	switch (usage) {
+ 	case GL_STREAM_DRAW:
+@@ -383,6 +384,7 @@ inline void glNamedBufferData(GLuint buffer, GLsizei size, const void *data, GLe
+ 	case GL_STREAM_READ:
+ #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)
+ 		gpu_buf->scratch = vgl_stream_wants_scratch;
++		from_stream_arena = gpu_buf->scratch && vgl_stream_cached;
+ #endif
+ 		gpu_buf->alloc_func = gpu_alloc_mapped_for_cpu;
+ 		break;
+@@ -418,7 +420,7 @@ inline void glNamedBufferData(GLuint buffer, GLsizei size, const void *data, GLe
+ 	// Allocating a new buffer
+ #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)
+ 	if (gpu_buf->scratch)
+-		gpu_buf->ptr = vgl_reserve_data_pool(size);
++		gpu_buf->ptr = from_stream_arena ? vgl_reserve_stream_pool(size) : vgl_reserve_data_pool(size);
+ 	else
+ #endif
+ 		gpu_buf->ptr = gpu_buf->alloc_func(size);	
+@@ -508,6 +510,9 @@ inline void glNamedBufferSubData(GLuint buffer, GLintptr offset, GLsizeiptr size
+ #endif
+ 	{
+ 		vgl_memcpy((uint8_t *)gpu_buf->ptr + offset, data, size);
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++		vgl_stream_touch((uint8_t *)gpu_buf->ptr + offset); // GLB
++#endif
+ 	}
+ }
+ 
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 3b91d11..5e120f6 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -801,6 +801,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
+ 	uint32_t draw_start = sceKernelGetProcessTimeLow();
+ #endif
+ 	program *p = &progs[cur_program - 1];
++	VGL_STREAM_FLUSH_IF_NEEDED() // GLB
+ 
+ 	// Check if a blend info rebuild is required and upload fragment program
+ 	setup_frag_program();
+@@ -1059,6 +1060,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean
+ 	uint32_t draw_start = sceKernelGetProcessTimeLow();
+ #endif
+ 	program *p = &progs[cur_program - 1];
++	VGL_STREAM_FLUSH_IF_NEEDED() // GLB
+ 
+ 	// Check if a blend info rebuild is required and upload fragment program
+ 	setup_frag_program();
+@@ -1346,6 +1348,9 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
+ #endif
+ 	program *p = &progs[cur_program - 1];
+ 
++	// GLB: stream buffers in the cached arena are written back before the first draw that can read them
++	VGL_STREAM_FLUSH_IF_NEEDED()
++
+ 	// Check if a blend info rebuild is required and upload fragment program
+ 	setup_frag_program();
+ 
+@@ -1683,6 +1688,7 @@ void _vglDrawObjects_CustomShadersIMPL() {
+ 	uint32_t draw_start = sceKernelGetProcessTimeLow();
+ #endif
+ 	program *p = &progs[cur_program - 1];
++	VGL_STREAM_FLUSH_IF_NEEDED() // GLB
+ 
+ 	// Check if a blend info rebuild is required
+ 	setup_frag_program();
+@@ -2112,6 +2118,21 @@ void glGetAttachedShaders(GLuint prog, GLsizei maxCount, GLsizei *count, GLuint
+ 	}
+ }
+ 
++// GLB: how many entries of the program and shader tables are in use (vglGlbGetStats).
++void vgl_glb_count_tables(uint32_t *progs_live, uint32_t *shaders_live, uint32_t *progs_max, uint32_t *shaders_max) {
++	uint32_t p = 0, s = 0;
++	for (int i = 0; i < MAX_CUSTOM_PROGRAMS; i++)
++		if (progs[i].status)
++			p++;
++	for (int i = 0; i < MAX_CUSTOM_SHADERS; i++)
++		if (shaders[i])
++			s++;
++	*progs_live = p;
++	*shaders_live = s;
++	*progs_max = MAX_CUSTOM_PROGRAMS;
++	*shaders_max = MAX_CUSTOM_SHADERS;
++}
++
+ GLuint glCreateProgram(void) {
+ 	// Looking for a free program slot
+ 	GLuint i, j, res = 0xFFFFFFFF;
+diff --git a/source/gxm.c b/source/gxm.c
+index ffa0279..a539e9c 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -814,8 +814,10 @@ void vglSwapBuffers(GLboolean has_commondialog) {
+ 		vgl_log("%s:%d Circular pool overrun on frame %u (Total of %u bytes). This can cause performance issues. Consider increasing its size with vglSetCircularPoolSize.\n", __FILE__, __LINE__, vgl_framecount - 1, circular_data_pool_ptr[vgl_circular_idx] - circular_data_pool_limit[vgl_circular_idx]);
+ 	}
+ #endif
++	vgl_glb_frame_end();
+ 	vgl_circular_idx = vgl_framecount % gxm_display_buffer_count;
+ 	circular_data_pool_ptr[vgl_circular_idx] = circular_data_pool[vgl_circular_idx];
++	vgl_stream_next_slice();
+ #endif
+ 
+ 	// Marking uniform values as dirty at each frame end just to be safe
+diff --git a/source/shared.h b/source/shared.h
+index 07d8f47..fcc28a5 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -109,6 +109,22 @@ extern uint32_t circular_data_pool_size;
+ extern GLboolean vgl_dynamic_wants_scratch;
+ extern GLboolean vgl_stream_wants_scratch;
+ #endif
++// GLB: statistics, cached stream arena (vgl.c)
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++extern uint32_t vgl_glb_pool_overruns, vgl_glb_pool_overrun_bytes, vgl_glb_pool_frame_peak, vgl_glb_pool_peak, vgl_glb_pool_odd;
++extern GLboolean vgl_stream_cached, vgl_stream_unflushed;
++uint8_t *vgl_reserve_stream_pool(uint32_t size);
++void vgl_stream_flush(void);
++void vgl_glb_frame_end(void);
++void vgl_stream_next_slice(void);
++void vgl_stream_init(int count);
++void vgl_stream_touch(const void *addr);
++#define VGL_STREAM_FLUSH_IF_NEEDED() if (vgl_stream_unflushed) vgl_stream_flush();
++#else
++#define VGL_STREAM_FLUSH_IF_NEEDED()
++#endif
++void vgl_glb_count_tables(uint32_t *progs, uint32_t *shaders, uint32_t *progs_max, uint32_t *shaders_max); // custom_shaders.c
++extern uint32_t vgl_glb_ring_frame_bytes, vgl_glb_ring_frame_peak, vgl_glb_ring_peak, vgl_glb_ring_wraps, vgl_glb_ring_size;
+ 
+ enum {
+ 	VGL_CONTEXT_MAIN,
+@@ -287,6 +303,8 @@ extern int NEW_DISPLAY_HEIGHT; // Requested new display height in pixels
+ #include <psp2/sharedfb.h>
+ #include <psp2/sysmodule.h>
+ 
++#include "utils/gxm_cache.h"
++
+ #include "utils/atitc_utils.h"
+ #include "utils/eac_utils.h"
+ #include "utils/etc1_utils.h"
+diff --git a/source/utils/gxm_cache.h b/source/utils/gxm_cache.h
+new file mode 100644
+index 0000000..18c4bb5
+--- /dev/null
++++ b/source/utils/gxm_cache.h
+@@ -0,0 +1,106 @@
++/*
++ * gxm_cache.h (GLB, wave 5): optional elimination of redundant sceGxm state calls.
++ *
++ * vitaGL sets the vertex program, the fragment program, every vertex stream and every fragment texture again for each draw. With
++ * vglSetSkipRedundantSets(GL_TRUE) the calls that would set what the context already has are not forwarded. The cache records every call that passes
++ * through these wrappers (all of vitaGL includes this header through shared.h, so no call can bypass it) and is forgotten at sceGxmBeginScene /
++ * sceGxmEndScene (libgxm does not promise that state survives a scene; the aurora-vita audit found that it did not after a suspend/resume) and after the
++ * calls that set state behind its back (precomputed draws and vertex states, the reserve-uniform-buffer calls).
++ *   vertex program   skipped when the same pointer is current
++ *   fragment program same (a rebuilt blend variant is a different pointer: the patcher keeps one object per combination)
++ *   vertex stream    skipped when the same pointer was set under the same current vertex program
++ *   fragment texture skipped when the 16 bytes of the texture object equal what the unit has (vitaGL edits filters and modes in place before the call)
++ */
++#ifndef _GXM_CACHE_H_
++#define _GXM_CACHE_H_
++
++typedef struct {
++	const SceGxmVertexProgram *vprog;
++	const SceGxmFragmentProgram *fprog;
++	const void *vstream[SCE_GXM_MAX_VERTEX_STREAMS];
++	const SceGxmVertexProgram *vstream_prog[SCE_GXM_MAX_VERTEX_STREAMS];
++	uint32_t ftex[SCE_GXM_MAX_TEXTURE_UNITS][4];
++	uint32_t ftex_valid;
++} vgl_gxc_t;
++
++extern vgl_gxc_t vgl_gxc;
++extern GLboolean vgl_gxc_enabled;
++extern uint32_t vgl_gxc_calls[4], vgl_gxc_skipped[4];
++
++static inline __attribute__((always_inline)) void vgl_gxc_reset(void) {
++	vgl_gxc.vprog = NULL;
++	vgl_gxc.fprog = NULL;
++	vgl_gxc.ftex_valid = 0;
++	for (int i = 0; i < SCE_GXM_MAX_VERTEX_STREAMS; i++) {
++		vgl_gxc.vstream[i] = NULL;
++		vgl_gxc.vstream_prog[i] = NULL;
++	}
++}
++
++static inline __attribute__((always_inline)) void vgl_gxc_SetVertexProgram(SceGxmContext *ctx, const SceGxmVertexProgram *p) {
++	vgl_gxc_calls[0]++;
++	if (vgl_gxc_enabled) {
++		if (vgl_gxc.vprog == p) {
++			vgl_gxc_skipped[0]++;
++			return;
++		}
++		vgl_gxc.vprog = p;
++	}
++	sceGxmSetVertexProgram(ctx, p);
++}
++
++static inline __attribute__((always_inline)) void vgl_gxc_SetFragmentProgram(SceGxmContext *ctx, const SceGxmFragmentProgram *p) {
++	vgl_gxc_calls[1]++;
++	if (vgl_gxc_enabled) {
++		if (vgl_gxc.fprog == p) {
++			vgl_gxc_skipped[1]++;
++			return;
++		}
++		vgl_gxc.fprog = p;
++	}
++	sceGxmSetFragmentProgram(ctx, p);
++}
++
++static inline __attribute__((always_inline)) int vgl_gxc_SetVertexStream(SceGxmContext *ctx, uint32_t idx, const void *ptr) {
++	vgl_gxc_calls[2]++;
++	if (vgl_gxc_enabled && idx < SCE_GXM_MAX_VERTEX_STREAMS) {
++		if (vgl_gxc.vstream[idx] == ptr && vgl_gxc.vstream_prog[idx] == vgl_gxc.vprog && vgl_gxc.vprog) {
++			vgl_gxc_skipped[2]++;
++			return 0;
++		}
++		vgl_gxc.vstream[idx] = ptr;
++		vgl_gxc.vstream_prog[idx] = vgl_gxc.vprog;
++	}
++	return sceGxmSetVertexStream(ctx, idx, ptr);
++}
++
++static inline __attribute__((always_inline)) int vgl_gxc_SetFragmentTexture(SceGxmContext *ctx, uint32_t idx, const SceGxmTexture *tex) {
++	vgl_gxc_calls[3]++;
++	if (vgl_gxc_enabled && idx < SCE_GXM_MAX_TEXTURE_UNITS) {
++		const uint32_t *w = (const uint32_t *)tex;
++		uint32_t *c = vgl_gxc.ftex[idx];
++		if ((vgl_gxc.ftex_valid & (1u << idx)) && c[0] == w[0] && c[1] == w[1] && c[2] == w[2] && c[3] == w[3]) {
++			vgl_gxc_skipped[3]++;
++			return 0;
++		}
++		c[0] = w[0];
++		c[1] = w[1];
++		c[2] = w[2];
++		c[3] = w[3];
++		vgl_gxc.ftex_valid |= 1u << idx;
++	}
++	return sceGxmSetFragmentTexture(ctx, idx, tex);
++}
++
++// (the real functions are called inside the wrappers above: a function-like macro is not expanded in its own expansion or when the name is not
++// followed by a parenthesis)
++#define sceGxmSetVertexProgram(ctx, p) vgl_gxc_SetVertexProgram(ctx, p)
++#define sceGxmSetFragmentProgram(ctx, p) vgl_gxc_SetFragmentProgram(ctx, p)
++#define sceGxmSetVertexStream(ctx, i, p) vgl_gxc_SetVertexStream(ctx, i, p)
++#define sceGxmSetFragmentTexture(ctx, i, t) vgl_gxc_SetFragmentTexture(ctx, i, t)
++#define sceGxmBeginScene(...) ({ vgl_gxc_reset(); int vgl_gxc_r_ = sceGxmBeginScene(__VA_ARGS__); vgl_gxc_reset(); vgl_gxc_r_; })
++#define sceGxmEndScene(...) ({ vgl_gxc_reset(); int vgl_gxc_r_ = sceGxmEndScene(__VA_ARGS__); vgl_gxc_reset(); vgl_gxc_r_; })
++#define sceGxmDrawPrecomputed(...) ({ int vgl_gxc_r_ = sceGxmDrawPrecomputed(__VA_ARGS__); vgl_gxc_reset(); vgl_gxc_r_; })
++#define sceGxmSetPrecomputedVertexState(...) ({ sceGxmSetPrecomputedVertexState(__VA_ARGS__); vgl_gxc_reset(); })
++
++#endif
+diff --git a/source/utils/gxm_utils.c b/source/utils/gxm_utils.c
+index 61803f3..d1de166 100644
+--- a/source/utils/gxm_utils.c
++++ b/source/utils/gxm_utils.c
+@@ -218,15 +218,35 @@ void vglVertexProgramCacheInvalidate(SceGxmShaderPatcherId id) {
+ 	sceGxmShaderPatcherForceUnregisterProgram(gxm_shader_patcher, id);
+ }
+ 
++// GLB: the uniform ring may live in CDRAM (write-combined) instead of the uncached RAM of the CPU-visible pool (vglSetUniformRingMem, off by default):
++// the ring takes ~330 KB of whole-buffer copies per open-play frame.
++GLboolean vgl_glb_ring_cdram_req = GL_FALSE, vgl_glb_ring_cdram = GL_FALSE;
+ void vglSetupUniformCircularPool() {
++	if (!unif_pool && vgl_glb_ring_cdram_req) {
++		const uint32_t size = (UNIFORM_CIRCULAR_POOL_SIZE + 0x3FFFFu) & ~0x3FFFFu; // CDRAM blocks are multiples of 256 KiB
++		SceUID uid = sceKernelAllocMemBlock("vgl_uring", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, NULL);
++		void *base = NULL;
++		if (uid >= 0 && sceKernelGetMemBlockBase(uid, &base) >= 0 && base) {
++			sceGxmMapMemory(base, size, SCE_GXM_MEMORY_ATTRIB_READ);
++			unif_pool = (uint8_t *)base;
++			vgl_glb_ring_cdram = GL_TRUE;
++		} else {
++			vgl_log("%s:%d Uniform ring in CDRAM not available (0x%08X): it stays in the pool memory.\n", __FILE__, __LINE__, uid);
++		}
++	}
+ 	if (!unif_pool) {
+ 		unif_pool = gpu_alloc_mapped_for_cpu(UNIFORM_CIRCULAR_POOL_SIZE);
+ 	}
+ }
+ 
++// GLB: ring statistics (the size is the compile-time constant UNIFORM_CIRCULAR_POOL_SIZE, 8 MiB in our builds: Makefile.vitadeps VGL_UNIFORM_RING_MIB)
++uint32_t vgl_glb_ring_frame_bytes = 0, vgl_glb_ring_frame_peak = 0, vgl_glb_ring_peak = 0, vgl_glb_ring_wraps = 0, vgl_glb_ring_size = UNIFORM_CIRCULAR_POOL_SIZE;
++
+ void *vglReserveUniformCircularPoolBuffer(uint32_t size) {
+ 	void *r;
++	vgl_glb_ring_frame_bytes += size;
+ 	if (unif_idx + size >= UNIFORM_CIRCULAR_POOL_SIZE) {
++		vgl_glb_ring_wraps++;
+ #ifndef SKIP_ERROR_HANDLING
+ 		static uint32_t last_frame_swap = 0;
+ 		if (last_frame_swap == vgl_framecount) {
+diff --git a/source/vgl.c b/source/vgl.c
+index bf5e4d4..9126741 100644
+--- a/source/vgl.c
++++ b/source/vgl.c
+@@ -146,11 +146,19 @@ static uint8_t *circular_data_pool_ptr;
+ static uint8_t *circular_data_pool_limit;
+ #endif
+ uint32_t circular_data_pool_size = CIRCULAR_POOL_SIZE_DEF;
++// GLB: every reservation is rounded up to 16 bytes, so the next one starts on a 16-byte boundary. Upstream added `size` as it came: an odd-sized U16 index
++// upload (2 bytes per index) left the next float vertex data unaligned and the NEON copy took a data abort (strikersVita found it).
++uint32_t vgl_glb_pool_overruns = 0, vgl_glb_pool_overrun_bytes = 0, vgl_glb_pool_frame_peak = 0, vgl_glb_pool_peak = 0, vgl_glb_pool_odd = 0;
+ uint8_t *vgl_reserve_data_pool(uint32_t size) {
++	if (size & 3u)
++		vgl_glb_pool_odd++; // upstream: the next reservation (float vertex data) started 2 bytes off a 4-byte boundary after an odd-sized U16 index upload (counted: vglGlbStats.pool_odd)
++	size = (size + 15u) & ~15u;
+ #ifndef CIRCULAR_POOL_SPEEDHACK
+ 	uint8_t *res = circular_data_pool_ptr[vgl_circular_idx];
+ 	circular_data_pool_ptr[vgl_circular_idx] += size;
+ 	if (circular_data_pool_ptr[vgl_circular_idx] > circular_data_pool_limit[vgl_circular_idx]) {
++		vgl_glb_pool_overruns++;
++		vgl_glb_pool_overrun_bytes += size;
+ 		res = (uint8_t *)gpu_alloc_mapped_for_cpu(size);
+ #ifdef LOG_ERRORS
+ 		if (!res) {
+@@ -428,6 +436,9 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
+ 	circular_data_pool_ptr = circular_data_pool;
+ 	circular_data_pool_limit = (uint8_t *)circular_data_pool + circular_data_pool_size;
+ #endif
++#ifndef CIRCULAR_POOL_SPEEDHACK
++	vgl_stream_init(gxm_display_buffer_count);
++#endif
+ #endif
+ 
+ 	// Init constant index buffers
+@@ -780,6 +791,172 @@ void vglSetTextureCacheFrequency(GLuint freq) {
+ #endif
+ }
+ 
++// ---- GLB: cached stream arena -------------------------------------------------------------------------------------------------------------------------
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++GLboolean vgl_stream_cached = GL_FALSE, vgl_stream_unflushed = GL_FALSE;
++static uint32_t stream_slice_req = 0, stream_slice = 0;
++static int stream_mem = 0; // vglStreamMem: 0 cached RAM + write-back, 1 CDRAM (write-combined, nothing to write back), 2 uncached RAM (diagnostic)
++static vglCacheFlushFn stream_flush_fn = NULL;
++static SceUID stream_uid = -1;
++static uint8_t *stream_base[DISPLAY_MAX_BUFFER_COUNT], *stream_ptr[DISPLAY_MAX_BUFFER_COUNT], *stream_flushed[DISPLAY_MAX_BUFFER_COUNT];
++static uint32_t stream_frame_peak = 0, stream_peak = 0, stream_overruns = 0, stream_overrun_bytes = 0, stream_flushes = 0, stream_flushed_bytes = 0;
++
++// vglInit*: after the circular pool. One memblock, `count` slices (one per display buffer, like the circular pool).
++void vgl_stream_init(int count) {
++	if (!stream_slice_req || !count)
++		return;
++	stream_slice = (stream_slice_req + 0xFFFu) & ~0xFFFu;
++	if (stream_mem == 1)
++		stream_slice = (stream_slice + 0x3FFFFu) & ~0x3FFFFu; // CDRAM blocks are multiples of 256 KiB
++	uint32_t total = stream_slice * count;
++	SceKernelMemBlockType type = stream_mem == 1 ? SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW : (stream_mem == 2 ? SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE : SCE_KERNEL_MEMBLOCK_TYPE_USER_RW);
++	stream_uid = sceKernelAllocMemBlock("vgl_stream", type, total, NULL);
++	void *base = NULL;
++	if (stream_uid < 0 || sceKernelGetMemBlockBase(stream_uid, &base) < 0 || !base) {
++		vgl_log("%s:%d Stream arena of %u bytes (memory kind %d) not available (0x%08X): GL_STREAM_DRAW buffers stay in the circular pool.\n", __FILE__, __LINE__, total, stream_mem, stream_uid);
++		stream_uid = -1;
++		return;
++	}
++	sceGxmMapMemory(base, total, SCE_GXM_MEMORY_ATTRIB_READ);
++	for (int i = 0; i < count; i++) {
++		stream_base[i] = (uint8_t *)base + stream_slice * i;
++		stream_ptr[i] = stream_flushed[i] = stream_base[i];
++	}
++	vgl_stream_cached = GL_TRUE;
++	vgl_log("Stream arena: %u bytes per slice, %d slices at 0x%08X, memory kind %d (%s).\n", stream_slice, count, (unsigned)base, stream_mem, stream_mem == 1 ? "CDRAM, write-combined" : (stream_mem == 2 ? "uncached RAM" : "cached RAM, written back before draws"));
++}
++
++// 64-byte steps: two reservations never share a cache line, so writing one back never touches a neighbour that is still being filled.
++uint8_t *vgl_reserve_stream_pool(uint32_t size) {
++	size = (size + 63u) & ~63u;
++	uint8_t *p = stream_ptr[vgl_circular_idx];
++	if (p + size <= stream_base[vgl_circular_idx] + stream_slice) {
++		stream_ptr[vgl_circular_idx] = p + size;
++		if (stream_mem == 0)
++			vgl_stream_unflushed = GL_TRUE;
++		return p;
++	}
++	stream_overruns++;
++	stream_overrun_bytes += size;
++	return vgl_reserve_data_pool(size);
++}
++
++// Writes back what was reserved since the last flush. Called before a draw (VGL_STREAM_FLUSH_IF_NEEDED) and at the frame end.
++void vgl_stream_flush(void) {
++	vgl_stream_unflushed = GL_FALSE;
++	uint8_t *from = stream_flushed[vgl_circular_idx], *to = stream_ptr[vgl_circular_idx];
++	if (to <= from)
++		return;
++	stream_flushed[vgl_circular_idx] = to;
++	stream_flushes++;
++	stream_flushed_bytes += to - from;
++	if (stream_flush_fn)
++		stream_flush_fn(from, to - from);
++	else
++		sceKernelSyncVMDomain(stream_uid, from, to - from);
++}
++
++// A CPU write into a buffer of the arena after its range was written back (glBufferSubData in place): write that part back again before the next draw.
++void vgl_stream_touch(const void *addr) {
++	if (!vgl_stream_cached || stream_mem != 0)
++		return;
++	uint8_t *a = (uint8_t *)((uintptr_t)addr & ~63u);
++	if (a >= stream_base[vgl_circular_idx] && a < stream_ptr[vgl_circular_idx]) {
++		if (a < stream_flushed[vgl_circular_idx])
++			stream_flushed[vgl_circular_idx] = a;
++		vgl_stream_unflushed = GL_TRUE;
++	}
++}
++
++// Frame end (gxm.c, before the pool index moves on): peaks, then the slice the next frame will use starts empty.
++void vgl_glb_frame_end(void) {
++	if (vgl_stream_cached) {
++		if (vgl_stream_unflushed)
++			vgl_stream_flush();
++		stream_frame_peak = stream_ptr[vgl_circular_idx] - stream_base[vgl_circular_idx];
++		if (stream_frame_peak > stream_peak)
++			stream_peak = stream_frame_peak;
++	}
++	vgl_glb_pool_frame_peak = (uint32_t)(circular_data_pool_ptr[vgl_circular_idx] - circular_data_pool[vgl_circular_idx]);
++	if (vgl_glb_pool_frame_peak > vgl_glb_pool_peak)
++		vgl_glb_pool_peak = vgl_glb_pool_frame_peak;
++	if (vgl_glb_ring_frame_bytes > vgl_glb_ring_peak)
++		vgl_glb_ring_peak = vgl_glb_ring_frame_bytes;
++	vgl_glb_ring_frame_peak = vgl_glb_ring_frame_bytes;
++	vgl_glb_ring_frame_bytes = 0;
++}
++
++// The next slice (vgl_circular_idx has just moved on).
++void vgl_stream_next_slice(void) {
++	if (vgl_stream_cached)
++		stream_ptr[vgl_circular_idx] = stream_flushed[vgl_circular_idx] = stream_base[vgl_circular_idx];
++}
++#endif
++
++void vglSetupStreamArena(uint32_t slice_bytes, int mem, vglCacheFlushFn flush) {
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK) && defined(HAVE_SCRATCH_MEMORY)
++	stream_slice_req = slice_bytes;
++	stream_mem = mem;
++	stream_flush_fn = flush;
++	if (slice_bytes)
++		vgl_stream_wants_scratch = GL_TRUE; // the arena serves scratch stream buffers only
++#endif
++}
++
++void vglSetupCachedStream(uint32_t slice_bytes, vglCacheFlushFn flush) {
++	vglSetupStreamArena(slice_bytes, VGL_STREAM_CACHED, flush);
++}
++
++extern GLboolean vgl_glb_ring_cdram_req, vgl_glb_ring_cdram;
++void vglSetUniformRingMem(int cdram) {
++	vgl_glb_ring_cdram_req = cdram ? GL_TRUE : GL_FALSE;
++}
++
++void vglSetSkipRedundantSets(GLboolean enable) {
++	vgl_gxc_enabled = enable;
++}
++
++void vglGlbGetStats(vglGlbStats *s) {
++	vgl_memset(s, 0, sizeof(*s));
++	s->version = 1;
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++	s->pool_slice_bytes = circular_data_pool_size / (gxm_display_buffer_count ? gxm_display_buffer_count : 1);
++	s->pool_frame_peak = vgl_glb_pool_frame_peak;
++	s->pool_peak = vgl_glb_pool_peak;
++	s->pool_overruns = vgl_glb_pool_overruns;
++	s->pool_overrun_bytes = vgl_glb_pool_overrun_bytes;
++	s->pool_odd = vgl_glb_pool_odd;
++	s->stream_slice_bytes = stream_slice;
++	s->stream_mem = vgl_stream_cached ? stream_mem + 1 : 0;
++	s->stream_frame_peak = stream_frame_peak;
++	s->stream_peak = stream_peak;
++	s->stream_overruns = stream_overruns;
++	s->stream_overrun_bytes = stream_overrun_bytes;
++	s->stream_flushes = stream_flushes;
++	s->stream_flushed_bytes = stream_flushed_bytes;
++#endif
++	s->ring_bytes = vgl_glb_ring_size;
++	s->ring_cdram = vgl_glb_ring_cdram;
++	s->ring_frame_peak = vgl_glb_ring_frame_peak;
++	s->ring_peak = vgl_glb_ring_peak;
++	s->ring_wraps = vgl_glb_ring_wraps;
++	vgl_glb_count_tables(&s->programs_live, &s->shaders_live, &s->programs_max, &s->shaders_max);
++	if (gxm_shader_patcher) {
++		s->patcher_host = sceGxmShaderPatcherGetHostMemAllocated(gxm_shader_patcher);
++		s->patcher_buffer = sceGxmShaderPatcherGetBufferMemAllocated(gxm_shader_patcher);
++		s->patcher_vusse = sceGxmShaderPatcherGetVertexUsseMemAllocated(gxm_shader_patcher);
++		s->patcher_fusse = sceGxmShaderPatcherGetFragmentUsseMemAllocated(gxm_shader_patcher);
++	}
++	for (int i = 0; i < 4; i++) {
++		s->skip_calls[i] = vgl_gxc_calls[i];
++		s->skip_skipped[i] = vgl_gxc_skipped[i];
++	}
++}
++
++GLboolean vgl_gxc_enabled = GL_FALSE;
++vgl_gxc_t vgl_gxc;
++uint32_t vgl_gxc_calls[4], vgl_gxc_skipped[4];
++
+ void vglSetupScratchMemory(GLboolean scratch_for_dynamic, GLboolean scratch_for_stream) {
+ #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)
+ 	vgl_dynamic_wants_scratch = scratch_for_dynamic;
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index dac9fa0..c3e1aad 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1319,6 +1319,44 @@ void vglUseExtraMem(GLboolean usage);
+ // Simplified function to enable or disable V-Sync. For more fine granularity on the swap interval use eglSwapInterval.
+ void vglWaitVblankStart(GLboolean enable);
+ 
++// ---- GLB (wave 5 of the Mario Strikers Charged port): added on top of cdbba42, see platform/vita/vitagl/*.patch ----
++#define VITAGL_GLB 1
++
++typedef void (*vglCacheFlushFn)(void *addr, uint32_t size);
++
++// GL_STREAM_DRAW buffers (with scratch memory for streams) are placed in an ARENA of slice_bytes per display buffer instead of the circular pool (uncached RAM):
++//   VGL_STREAM_CACHED   cached RAM: CPU writes run at cache speed; the used range is written back with flush(addr, size) (addr and size are multiples of 64)
++//                       before the first draw that can read it. flush == NULL: sceKernelSyncVMDomain on the arena's memblock (only meaningful for VM-domain blocks:
++//                       use a kubridge callback on the console).
++//   VGL_STREAM_CDRAM    CDRAM (write-combined, what the GPU reads fastest): nothing to write back, flush is ignored.
++//   VGL_STREAM_UNCACHED uncached RAM, as the circular pool (diagnostic: the arena mechanism alone).
++// slice_bytes == 0: off (the default). Must be called before vglInit*. A frame that streams more than a slice falls back to the circular pool for the excess
++// (slower, correct). Requires HAVE_SCRATCH_MEMORY.
++typedef enum { VGL_STREAM_CACHED = 0, VGL_STREAM_CDRAM = 1, VGL_STREAM_UNCACHED = 2 } vglStreamMem;
++void vglSetupStreamArena(uint32_t slice_bytes, int mem, vglCacheFlushFn flush);
++void vglSetupCachedStream(uint32_t slice_bytes, vglCacheFlushFn flush); // = vglSetupStreamArena(slice_bytes, VGL_STREAM_CACHED, flush)
++
++// The uniform ring (8 MiB in our builds; every draw copies its uniform buffers into it, ~330 KB per open-play frame) in CDRAM (write-combined) instead of the
++// uncached RAM of the CPU-visible pool. Default: off. Must be called before vglInit*; if the CDRAM block cannot be had the ring stays where it was.
++void vglSetUniformRingMem(int cdram);
++
++// Skip sceGxm calls that would set what the context already has (vertex program, fragment program, vertex streams, fragment textures); the cache is
++// forgotten at every sceGxmBeginScene / sceGxmEndScene and after calls that change state behind its back. Default: off.
++void vglSetSkipRedundantSets(GLboolean enable);
++
++typedef struct {
++	uint32_t version;
++	uint32_t pool_slice_bytes, pool_frame_peak, pool_peak, pool_overruns, pool_overrun_bytes, pool_odd; // circular pool (bytes per display-buffer slice, peaks over the run); pool_odd: reservations whose size was not a multiple of 4 (upstream: the next one started misaligned)
++	uint32_t stream_slice_bytes, stream_frame_peak, stream_peak, stream_overruns, stream_overrun_bytes, stream_flushes, stream_flushed_bytes; // stream arena
++	uint32_t stream_mem; // 0 no arena, else 1 + vglStreamMem
++	uint32_t ring_bytes, ring_frame_peak, ring_peak, ring_wraps, ring_cdram; // uniform ring (ring_cdram: 1 when it is in CDRAM)
++	uint32_t programs_live, shaders_live, programs_max, shaders_max; // custom program / shader tables
++	uint32_t patcher_host, patcher_buffer, patcher_vusse, patcher_fusse; // shader patcher memory in use (bytes)
++	uint32_t skip_calls[4], skip_skipped[4]; // vertex program, fragment program, vertex stream, fragment texture: calls seen / not forwarded
++} vglGlbStats;
++// Fills *s (all counters are cumulative; the *_frame_peak ones are the last finished frame's).
++void vglGlbGetStats(vglGlbStats *s);
++
+ #ifdef __cplusplus
+ }
+ #endif

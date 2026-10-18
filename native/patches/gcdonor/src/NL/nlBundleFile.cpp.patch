@@ -1,0 +1,48 @@
+diff --git a/src/NL/nlBundleFile.cpp b/src/NL/nlBundleFile.cpp
+index 4243c5e..b94663e 100644
+--- a/src/NL/nlBundleFile.cpp
++++ b/src/NL/nlBundleFile.cpp
+@@ -1,6 +1,7 @@
+ #include "NL/nlBundleFile.h"
+ #include "NL/nlFile.h"
+ #include "NL/nlFileGC.h"
++#include "port/endian.h"
+ 
+ #include <string.h>
+ #include "NL/nlstring_tmpl.h"
+@@ -19,6 +20,8 @@ static void cbFileReadAsyncCallback(nlFile*, void* buffer, unsigned int size, un
+ static void cbBundleHeaderReadAsyncCallback(nlFile*, void*, unsigned int, unsigned long userParam)
+ {
+     BundleFile* bundle = (BundleFile*)userParam;
++    // NP: the header was read straight into the first four words of the BundleFile; big-endian on disc.
++    port_disc32_array(bundle, 4);
+     nlSeek(bundle->m_pFile, bundle->nDirectoryOffsetInSectors * bundle->nSectorSize, 0);
+     bundle->m_pDirectory = (BundleFileDirectoryEntry*)nlMalloc(bundle->nNumFiles * sizeof(BundleFileDirectoryEntry), 0x20, true);
+     nlReadAsync(bundle->m_pFile, bundle->m_pDirectory, bundle->nNumFiles * sizeof(BundleFileDirectoryEntry), cbBundleDirectoryReadAsyncCallback, (unsigned long)bundle, 0);
+@@ -27,6 +30,8 @@ static void cbBundleHeaderReadAsyncCallback(nlFile*, void*, unsigned int, unsign
+ static void cbBundleDirectoryReadAsyncCallback(nlFile*, void* buffer, unsigned int size, unsigned long userParam)
+ {
+     BundleFile* bundle = (BundleFile*)userParam;
++    // NP: three big-endian u32s per entry (hash, block number, length); every lookup reads them directly.
++    port_disc32_array(bundle->m_pDirectory, bundle->nNumFiles * 3);
+     bundle->m_pOpenCallback(buffer, size, bundle->m_openUserParam);
+     bundle->m_pOpenCallback = 0;
+     bundle->m_openUserParam = 0;
+@@ -102,6 +107,8 @@ bool BundleFile::Open(const char* filename, bool keepFilename)
+ 
+     BundleFileHeader* header = (BundleFileHeader*)nlMalloc(sizeof(BundleFileHeader), 0x20, true);
+     nlRead(m_pFile, header, sizeof(BundleFileHeader), 0);
++    // NP: four big-endian u32s, all four used before anything else runs.
++    port_disc32_array(header, 4);
+     memcpy(this, header, sizeof(BundleFileHeader));
+     delete header;
+ 
+@@ -114,6 +121,8 @@ bool BundleFile::Open(const char* filename, bool keepFilename)
+         nlSeek(m_pFile, nDirectoryOffsetInSectors * nSectorSize, 0);
+         m_pDirectory = (BundleFileDirectoryEntry*)nlMalloc(nNumFiles * sizeof(BundleFileDirectoryEntry), 0x20, true);
+         nlRead(m_pFile, m_pDirectory, nNumFiles * sizeof(BundleFileDirectoryEntry), 0);
++        // NP: three big-endian u32s per entry; every lookup reads them directly.
++        port_disc32_array(m_pDirectory, nNumFiles * 3);
+     }
+     return true;
+ }

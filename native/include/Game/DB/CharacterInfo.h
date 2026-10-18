@@ -1,0 +1,72 @@
+#ifndef GAME_DB_CHARACTERINFO_H
+#define GAME_DB_CHARACTERINFO_H
+
+#include "types.h"
+#include "NL/nlColour.h"
+
+/**
+ * The eight-byte pair at CharacterInfo+0x30. R4QE01 copies its two raw words;
+ * the twelve goalie rows share one runtime-initialised value. These copies
+ * establish the storage layout, without identifying the original grouping.
+ */
+struct CharacterValuePair
+{
+    /* 0x0 */ float unknown_0x0;
+    /* 0x4 */ float unknown_0x4;
+};
+
+enum eCharacterPlayStyle
+{
+    PLAYSTYLE_OFFENSIVE = 0,
+    PLAYSTYLE_DEFENSIVE = 1,
+    PLAYSTYLE_PLAYMAKER = 2,
+    PLAYSTYLE_POWER = 3,
+    PLAYSTYLE_BALANCED = 4,
+};
+
+/**
+ * Charged's static character database entry. R4QE01 holds 33 of them: twelve
+ * captains, eight sidekicks, twelve goalies and one INVALID fallback that every
+ * out-of-range lookup returns.
+ *
+ * Fields are named where their roles are established by their consumers.
+ */
+struct CharacterInfo
+{
+    const char* GetName() const;
+    const char* GetDisplayNameKey() const { return mDisplayNameKey; }
+
+    /* 0x00 */ int mIndex;
+    /* 0x04 */ const char* mName;
+    /* 0x08 */ const char* mDisplayNameKey;
+    /* 0x0C */ int unknown_0x0C;
+    /* 0x10 */ int mCaptainId;
+    /* 0x14 */ int mCaptainPowerup;
+    /* 0x18 */ int mSidekickId;
+    /* 0x1C */ int mSoundBankId;
+    /* 0x20 */ int unknown_0x20;
+    /* 0x24 */ int mRandomSelectionAvailability;
+    /* 0x28 */ int unknown_0x28;
+    /* 0x2C */ int unknown_0x2C;
+    /* 0x30 */ CharacterValuePair unknown_0x30;
+    /* 0x38 */ float unknown_0x38;
+    /* 0x3C */ float unknown_0x3C;
+    /* 0x40 */ float unknown_0x40;
+    /* 0x44 */ float unknown_0x44;
+    /* 0x48 */ eCharacterPlayStyle mPlayStyle;
+    /* 0x4C */ int mColourMask;
+    /* 0x50 */ int mColourRank;
+    /* 0x54 */ int mPrimaryColour;
+    /* 0x58 */ int mAlternateColour;
+};
+
+const CharacterInfo& GetCharacterInfo(int index);
+int GetCharacterIndexFromCaptain(int captain);
+int GetCharacterIndexFromSidekick(int sidekick);
+int GetCharacterIndexFromName(const char* name);
+int GetGoalieCharacterIndex(const CharacterInfo& character);
+nlColour GetTeamColour(const CharacterInfo& team, const CharacterInfo& opponent, bool useAlternate);
+bool NeedsAlternateColour(const CharacterInfo& team, const CharacterInfo& opponent);
+bool CaptainsNeedAlternateColour(int captain, int opponentCaptain);
+
+#endif // GAME_DB_CHARACTERINFO_H

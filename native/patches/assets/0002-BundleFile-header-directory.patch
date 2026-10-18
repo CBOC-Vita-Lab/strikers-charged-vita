@@ -1,0 +1,78 @@
+diff --git a/include/NL/nlBundleFile.h b/include/NL/nlBundleFile.h
+index 765c466..229b4f3 100644
+--- a/include/NL/nlBundleFile.h
++++ b/include/NL/nlBundleFile.h
+@@ -125,6 +125,9 @@ public:
+     unsigned long m_openUserParam;
+     char* m_pFilename;
+     BundleFileDirectoryEntry* m_pDirectory;
++#ifdef NP_NATIVE
++    int m_npaBE; /* the header read from disc was big-endian and was swapped: the directory is too */
++#endif
+ };
+ 
+ #endif // NL_BUNDLE_FILE_H
+diff --git a/src/NL/nlBundleFile.cpp b/src/NL/nlBundleFile.cpp
+index 4243c5e..7e17a67 100644
+--- a/src/NL/nlBundleFile.cpp
++++ b/src/NL/nlBundleFile.cpp
+@@ -4,6 +4,9 @@
+ 
+ #include <string.h>
+ #include "NL/nlstring_tmpl.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_assets.h" /* npa_bundle_* : byte order of the bundle directory (NPA) */
++#endif
+ 
+ char gBundleFileNotFoundFormat[] = "ERROR: Failed to find file with hash ID: %d\n";
+ 
+@@ -19,6 +22,9 @@ static void cbFileReadAsyncCallback(nlFile*, void* buffer, unsigned int size, un
+ static void cbBundleHeaderReadAsyncCallback(nlFile*, void*, unsigned int, unsigned long userParam)
+ {
+     BundleFile* bundle = (BundleFile*)userParam;
++#ifdef NP_NATIVE
++    bundle->m_npaBE = npa_bundle_fix_header(bundle); /* header words are the first 16 bytes of the object */
++#endif
+     nlSeek(bundle->m_pFile, bundle->nDirectoryOffsetInSectors * bundle->nSectorSize, 0);
+     bundle->m_pDirectory = (BundleFileDirectoryEntry*)nlMalloc(bundle->nNumFiles * sizeof(BundleFileDirectoryEntry), 0x20, true);
+     nlReadAsync(bundle->m_pFile, bundle->m_pDirectory, bundle->nNumFiles * sizeof(BundleFileDirectoryEntry), cbBundleDirectoryReadAsyncCallback, (unsigned long)bundle, 0);
+@@ -27,6 +33,9 @@ static void cbBundleHeaderReadAsyncCallback(nlFile*, void*, unsigned int, unsign
+ static void cbBundleDirectoryReadAsyncCallback(nlFile*, void* buffer, unsigned int size, unsigned long userParam)
+ {
+     BundleFile* bundle = (BundleFile*)userParam;
++#ifdef NP_NATIVE
++    if (bundle->m_npaBE) npa_bundle_swap_directory(bundle->m_pDirectory, bundle->nNumFiles);
++#endif
+     bundle->m_pOpenCallback(buffer, size, bundle->m_openUserParam);
+     bundle->m_pOpenCallback = 0;
+     bundle->m_openUserParam = 0;
+@@ -41,6 +50,9 @@ static void cbFileReadAsyncCallback(nlFile*, void* buffer, unsigned int size, un
+ 
+ BundleFile::BundleFile()
+ {
++#ifdef NP_NATIVE
++    m_npaBE = 0;
++#endif
+     m_pFile = 0;
+     m_pOpenCallback = 0;
+     m_openUserParam = 0;
+@@ -102,6 +114,9 @@ bool BundleFile::Open(const char* filename, bool keepFilename)
+ 
+     BundleFileHeader* header = (BundleFileHeader*)nlMalloc(sizeof(BundleFileHeader), 0x20, true);
+     nlRead(m_pFile, header, sizeof(BundleFileHeader), 0);
++#ifdef NP_NATIVE
++    m_npaBE = npa_bundle_fix_header(header);
++#endif
+     memcpy(this, header, sizeof(BundleFileHeader));
+     delete header;
+ 
+@@ -114,6 +129,9 @@ bool BundleFile::Open(const char* filename, bool keepFilename)
+         nlSeek(m_pFile, nDirectoryOffsetInSectors * nSectorSize, 0);
+         m_pDirectory = (BundleFileDirectoryEntry*)nlMalloc(nNumFiles * sizeof(BundleFileDirectoryEntry), 0x20, true);
+         nlRead(m_pFile, m_pDirectory, nNumFiles * sizeof(BundleFileDirectoryEntry), 0);
++#ifdef NP_NATIVE
++        if (m_npaBE) npa_bundle_swap_directory(m_pDirectory, nNumFiles);
++#endif
+     }
+     return true;
+ }

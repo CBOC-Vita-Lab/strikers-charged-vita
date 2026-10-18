@@ -1,0 +1,38 @@
+diff --git a/src/NL/glx/glxDisplayList.cpp b/src/NL/glx/glxDisplayList.cpp
+index fbe4ab5..4e71b70 100644
+--- a/src/NL/glx/glxDisplayList.cpp
++++ b/src/NL/glx/glxDisplayList.cpp
+@@ -81,7 +81,10 @@ DisplayList* dlMakeDisplayList(
+     nlZeroMemory(p + actualSize, size - actualSize);
+ 
+     p[0] = opcodes[(unsigned char)packet->primType];
+-    *(unsigned short*)(p + 1) = packet->numVertices;
++    // NP: a display list is a big-endian byte stream (the GX FIFO reads it that way), and p + 1 is
++    // not 2-byte aligned. Byte stores give both the order and the alignment.
++    p[1] = (unsigned char)(packet->numVertices >> 8);
++    p[2] = (unsigned char)(packet->numVertices & 0xFF);
+ 
+     unsigned char* p8 = p + 3;
+     unsigned char hasColor = bStitch;
+@@ -97,7 +100,9 @@ DisplayList* dlMakeDisplayList(
+ 
+             for (unsigned long j = 0; j < numStreams; ++j)
+             {
+-                *(unsigned short*)p8 = *pInd;
++                // NP: *pInd is a host-order index (the loader converts the index buffer); the FIFO is big-endian.
++                p8[0] = (unsigned char)(*pInd >> 8);
++                p8[1] = (unsigned char)(*pInd & 0xFF);
+                 p8 += 2;
+             }
+ 
+@@ -112,7 +117,9 @@ DisplayList* dlMakeDisplayList(
+         {
+             for (unsigned long j = 0; j < numStreams; ++j)
+             {
+-                *(unsigned short*)p8 = *pInd;
++                // NP: *pInd is a host-order index (the loader converts the index buffer); the FIFO is big-endian.
++                p8[0] = (unsigned char)(*pInd >> 8);
++                p8[1] = (unsigned char)(*pInd & 0xFF);
+                 p8 += 2;
+             }
+ 

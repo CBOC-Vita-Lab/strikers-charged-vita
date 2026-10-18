@@ -1,0 +1,53 @@
+--- a/Makefile.vitadeps	2026-10-05 07:40:17.760646529 -0400
++++ b/Makefile.vitadeps	2026-10-05 07:40:17.763955653 -0400
+@@ -127,6 +127,19 @@
+ $(LIBDIR)/libvitashark.a: $(SHARK_OBJ)
+ 	@mkdir -p $(LIBDIR); rm -f $@; $(AR) -rc $@ $^
+ 
++# vitaGL's ring for uniform buffers is 2 MiB and not fenced against the frames the GPU has
++# not drawn yet (source/utils/gxm_utils.c, vglReserveUniformCircularPoolBuffer). The renderer
++# puts 330-400 KiB a frame into it in play and more in loading frames; the one GameCube port
++# on vitaGL that runs on consoles builds with 8 MiB after a ring that wrapped under frames
++# in flight showed as garbage that changed every frame (docs/acgc-vita-port-findings.md,
++# item 1). The size is an unconditional #define, so a patched COPY of that one file is
++# compiled; the clone is not written to. (Its "../shared.h" resolves through the extra -I.)
++VGL_UNIFORM_RING_MIB ?= 8
++$(O)/vitagl/utils/gxm_utils.o: $(VGL)/source/utils/gxm_utils.c $(HEADERS)
++	@mkdir -p $(dir $@) $(O)/vitagl-patched
++	sed 's/^#define UNIFORM_CIRCULAR_POOL_SIZE .*/#define UNIFORM_CIRCULAR_POOL_SIZE ($(VGL_UNIFORM_RING_MIB) * 1024 * 1024)/' $< > $(O)/vitagl-patched/gxm_utils.c
++	grep -q '^#define UNIFORM_CIRCULAR_POOL_SIZE ($(VGL_UNIFORM_RING_MIB) \* 1024 \* 1024)' $(O)/vitagl-patched/gxm_utils.c
++	$(CC) $(VGL_CFLAGS) -I$(VGL)/source/utils -c $(O)/vitagl-patched/gxm_utils.c -o $@
+ $(O)/vitagl/%.o: $(VGL)/source/%.c $(HEADERS)
+ 	@mkdir -p $(dir $@)
+ 	$(CC) $(VGL_CFLAGS) -c $< -o $@
+@@ -135,7 +148,7 @@
+ 	$(CXX) $(VGL_CXXFLAGS) -c $< -o $@
+ $(LIBDIR)/libvitaGL.a: $(VGL_OBJ)
+ 	@mkdir -p $(LIBDIR); rm -f $@; $(AR) -rc $@ $^
+-	@echo "vitaGL $(VGL_HASH) built with: $(VGL_OPTS)" | tee $(O)/vitagl/options.txt
++	@echo "vitaGL $(VGL_HASH) built with: $(VGL_OPTS) uniform-ring-$(VGL_UNIFORM_RING_MIB)MiB" | tee $(O)/vitagl/options.txt
+ 
+ clean:
+ 	rm -rf $(O)
+--- a/Makefile.vita	2026-10-05 07:40:17.760683592 -0400
++++ b/Makefile.vita	2026-10-05 07:40:17.988318906 -0400
+@@ -137,9 +137,18 @@
+ obj/gl/hle/%.o: $(GXHLE)/%.cpp
+ 	@mkdir -p $(dir $@)
+ 	@clang++ $(RTFLAGS) -DMSC_VGX -I$(VGXSRC) -MMD -c $< -o $@ 2> $@.err || (echo "FAIL $<"; grep -m12 "error" $@.err; false)
++# The folder of vitaGL's compiled-shader cache is keyed on the vitaGL build (ShaderCacheFolder
++# in vgx_host_vita.cpp): the line Makefile.vitadeps writes when it links the library. With it
++# a new package reuses the console's compiled shaders as long as vitaGL, its options and the
++# renderer's shader generator are the same; without it every compile of the host file starts
++# an empty cache folder.
++VGL_ID := $(shell cat $(VDEPS)/vitagl/options.txt 2>/dev/null)
++ifeq ($(strip $(VGL_ID)),)
++VGL_ID := unidentified vitaGL, host compiled $(shell date +%Y%m%d%H%M%S)
++endif
+ obj/gl/vgx/vgx_host_vita.o: $(VGX)/vita/vgx_host_vita.cpp
+ 	@mkdir -p $(dir $@)
+-	@clang++ $(VGXFLAGS) -MMD -c $< -o $@ 2> $@.err || (echo "FAIL $<"; grep -m12 "error" $@.err; false)
++	@clang++ $(VGXFLAGS) '-DMSC_VGL_ID="$(VGL_ID)"' -MMD -c $< -o $@ 2> $@.err || (echo "FAIL $<"; grep -m12 "error" $@.err; false)
+ obj/gl/vgx/vgx_host_stubs.o: $(VGXSRC)/vgx_host_stubs.c
+ 	@mkdir -p $(dir $@)
+ 	clang $(TARGET) $(CSYS) -O1 -w -c $< -o $@

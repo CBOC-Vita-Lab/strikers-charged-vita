@@ -1,0 +1,113 @@
+#include "Game/Drawable/DrawableHammer.h"
+#include "Game/Drawable/RenderObject.h"
+#include "NL/gl/glModel.h"
+#include "NL/nlMath.h"
+#include "Game/Render/HammerObject.h"
+#include "Game/Render/RenderShadow.h"
+#include "Game/SharedStaticStorage.h"
+
+u8 gHammerShadowEnabled = 1;
+
+DrawableHammer::DrawableHammer()
+{
+    mVisible = false;
+    mScale = 1.0f;
+    mPosition.x = 0.0f;
+    mPosition.y = 0.0f;
+    mPosition.z = 0.0f;
+    mOrientation.z = 0.0f;
+    mOrientation.y = 0.0f;
+    mOrientation.x = 0.0f;
+    mOrientation.w = 1.0f;
+}
+
+void DrawableHammer::Grab(const HammerObject* object)
+{
+    if (object == 0)
+    {
+        mVisible = false;
+        return;
+    }
+
+    mVisible = object->mActive;
+    mScale = object->mRadiusScale;
+    mPosition = *object->GetPosition();
+    mOrientation = *((HammerObject*)object)->GetOrientation();
+}
+
+void DrawableHammer::Render(const HammerObject* object) const
+{
+    nlMatrix4 matrix;
+    RenderObject* drawable;
+
+    if (object == 0)
+    {
+        return;
+    }
+
+    drawable = object->mDrawable;
+    if (drawable == 0)
+    {
+        return;
+    }
+
+    if (mVisible)
+    {
+        drawable->m_uObjectFlags |= 1;
+    }
+    else
+    {
+        drawable->m_uObjectFlags &= ~1;
+    }
+
+    if (!mVisible)
+    {
+        return;
+    }
+
+    nlQuatToMatrix(matrix, mOrientation, true);
+    nlVec3Scale(*(nlVector3*)matrix.e2[0], mScale);
+    nlVec3Scale(*(nlVector3*)matrix.e2[1], mScale);
+    nlVec3Scale(*(nlVector3*)matrix.e2[2], mScale);
+
+    matrix.m41 = mPosition.x;
+    matrix.m42 = mPosition.y;
+    matrix.m43 = mPosition.z;
+    matrix.m44 = 1.0f;
+
+    drawable->SetWorldMatrix(matrix);
+    drawable->Draw();
+
+    if (gHammerShadowEnabled != 0)
+    {
+        nlMatrix4* source;
+        glModel* model;
+        model = drawable->m_pModel;
+        source = drawable->GetWorldMatrix();
+        glModel* geometry = glModelDupNoStreams(model, false, 0);
+        DrawPlanarShadow(geometry, *source, 1, 0, this, 0.5f);
+    }
+}
+
+void DrawableHammer::Blend(const float* factors, const DrawableHammer& lhs, const DrawableHammer& rhs)
+{
+    bool visible = false;
+
+    if (lhs.mVisible && rhs.mVisible)
+    {
+        visible = true;
+    }
+
+    mVisible = visible;
+    if (!visible)
+    {
+        return;
+    }
+
+    float t = factors[2];
+    mScale = (1.0f - t) * lhs.mScale + t * rhs.mScale;
+    nlQuatNLerp(mOrientation, lhs.mOrientation, rhs.mOrientation, t);
+    mPosition.x = (1.0f - t) * lhs.mPosition.x + t * rhs.mPosition.x;
+    mPosition.y = (1.0f - t) * lhs.mPosition.y + t * rhs.mPosition.y;
+    mPosition.z = (1.0f - t) * lhs.mPosition.z + t * rhs.mPosition.z;
+}

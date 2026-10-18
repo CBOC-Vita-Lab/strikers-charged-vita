@@ -1,0 +1,145 @@
+# W5-SEED generated script: whole 25 s match in pipelinecentral: full time, post-game, results
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=8 home=7 away=1 hsk=1,2,3 ask=4,5,6 human=0 time=25
+wait ingame == 1 4000
+log STATE match object
+mash 100 30 gs == 1 4000
+log STATE kick-off
+wait gs == 5 6000
+log STATE open play
+hold 4 0 -20 -69
+hold 20 0 -29 -65
+hold 8 0 26 67
+hold 6 0 -72 0
+hold 20 0 -7 -71
+hold 6 0 72 0
+hold 10 200 -72 0
+hold 8 0 56 -44
+hold 8 100 69 18
+hold 6 0 29 -65
+hold 10 0 25 -67
+hold 8 800 72 0
+hold 30 0 60 -39
+hold 30 100 -59 -40
+hold 8 800 -9 71
+hold 6 10 -49 -52
+hold 30 20 39 59
+hold 10 0 -26 -66
+hold 14 100 -72 0
+hold 20 400 62 -34
+hold 10 40 -72 0
+hold 8 0 -57 43
+hold 8 0 -58 -41
+hold 20 200 -56 45
+hold 14 800 -72 0
+hold 10 30 20 68
+hold 14 400 61 37
+hold 10 10 -71 -5
+hold 20 0 72 0
+hold 6 40 -72 0
+hold 20 0 59 39
+hold 8 400 13 -70
+hold 10 0 72 0
+hold 8 800 -63 33
+hold 20 40 -71 -1
+hold 6 400 -72 0
+hold 30 0 72 0
+hold 30 0 15 70
+hold 30 0 38 -60
+hold 6 40 -2 71
+hold 4 10 -71 7
+hold 20 10 16 -70
+hold 10 0 -69 18
+hold 8 0 -72 0
+hold 4 0 22 -68
+hold 30 0 -58 -42
+hold 8 410 -65 30
+hold 8 0 72 0
+hold 8 0 71 4
+hold 4 0 72 0
+hold 10 0 6 -71
+hold 14 0 -34 -62
+hold 6 0 -72 0
+hold 10 0 72 0
+hold 4 10 -63 33
+hold 4 20 59 40
+hold 8 810 -56 -44
+hold 8 10 70 -16
+hold 8 0 -72 0
+hold 14 10 -8 71
+hold 14 0 65 -30
+hold 6 40 65 -30
+hold 8 0 -72 0
+hold 10 20 -22 -68
+hold 6 0 -72 0
+hold 30 0 -24 67
+hold 6 0 -8 -71
+hold 14 0 72 0
+hold 4 0 72 0
+hold 6 10 -72 0
+hold 10 0 72 0
+hold 4 800 71 -6
+hold 14 20 72 0
+hold 4 0 -72 0
+hold 20 800 -68 22
+hold 8 40 62 -36
+hold 20 40 25 67
+hold 8 20 -72 0
+hold 4 0 -72 0
+hold 8 40 -69 -18
+hold 30 0 61 36
+hold 6 400 72 0
+hold 14 10 -72 0
+hold 6 0 -55 -45
+hold 6 10 54 -47
+hold 8 0 -33 -63
+hold 30 40 -72 0
+hold 30 800 -42 -57
+hold 14 800 72 0
+hold 6 20 72 0
+hold 14 200 -71 -1
+hold 10 0 -71 -10
+hold 4 40 -72 0
+hold 20 40 72 0
+hold 20 0 71 6
+hold 20 100 -69 19
+hold 4 20 68 -23
+hold 10 200 68 23
+hold 14 200 33 -63
+hold 4 0 52 49
+hold 14 800 60 -39
+hold 10 0 -45 55
+hold 4 200 38 60
+hold 10 10 72 0
+hold 8 200 -62 -35
+hold 14 200 -45 55
+hold 4 100 -72 0
+hold 8 10 72 0
+hold 8 400 18 -69
+hold 10 10 72 0
+hold 8 200 -49 -52
+hold 14 20 -71 3
+hold 14 400 -72 0
+hold 14 0 -72 0
+hold 6 20 72 0
+hold 20 0 70 13
+hold 10 10 -22 68
+hold 14 200 69 18
+hold 30 20 -17 -69
+hold 30 0 -5 71
+hold 20 800 8 71
+hold 16 40 72 0
+# the match is over: full time banner, post-game screen, results (as tools/nav/nav_fulltime.txt)
+wait gs == 3 || gs == 6 || gs == 4 || ingame == 0 3000
+log STATE full time (gs 3 / 6)
+idle 120
+press 100
+idle 200
+mash 100 40 ingame == 0 2400
+log STATE back out of the match
+idle 600
+log STATE script end
+exit

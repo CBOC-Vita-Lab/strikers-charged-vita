@@ -1,0 +1,291 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/Physics/PhysicsKoopaShell.h"
+
+#include "Game/AI/Fielder.h"
+#include "Game/AI/Powerups.h"
+#include "Game/EventDataTypes.h"
+#include "Game/Physics/Physics.h"
+#include "Game/Physics/PhysicsBanana.h"
+#include "Game/Physics/PhysicsCharacter.h"
+#include "Game/Physics/PhysicsEventQueue.h"
+#include "Game/Physics/PhysicsHammer.h"
+#include "Game/Physics/PhysicsNPC.h"
+#include "Game/Physics/PhysicsPatch.h"
+#include "Game/Physics/PhysicsShell.h"
+#include "Game/Physics/PhysicsYoshiEgg.h"
+#include "Game/Render/SkinAnimatedNPC.h"
+#include "Game/Render/HammerObject.h"
+#include "Game/Render/KoopaShellObject.h"
+#include "Game/Render/YoshiEggObject.h"
+#include "Game/SharedStaticStorage.h"
+
+PhysicsKoopaShell::PhysicsKoopaShell(KoopaShellObject* shell, float radius)
+    : PhysicsSphere(g_CollisionSpace, 0, radius)
+    , mPadding38(0)
+    , mKoopaShell(shell)
+{
+    SetCategory(0x4000);
+    SetCollide(0x1F042);
+}
+
+ContactType PhysicsKoopaShell::Contact(PhysicsObject* other, dContact*, int)
+{
+    nlVector3 shellPosition;
+    YoshiEggObject* egg;
+    GetPosition(&shellPosition);
+
+    switch (other->GetObjectType())
+    {
+    case PHYSOBJ_COLUMN:
+    {
+        cCharacter* character
+            = ((PhysicsCharacter*)other->m_parentObject)->m_pAICharacter;
+        if (character->m_eClassType == FIELDER)
+        {
+            cFielder* fielder = (cFielder*)character;
+            if (!fielder->mbTangible)
+            {
+                return NO_CONTACT;
+            }
+            if (fielder->IsCharacterInAir(GetPosition().z + GetRadius()))
+            {
+                return NO_CONTACT;
+            }
+            if (fielder == mKoopaShell->mOwner)
+            {
+                break;
+            }
+
+            bool isInvincible = false;
+            if (!fielder->IsStuck()
+                && (fielder->muInvincibleStatus & 0x1F) == 0x1F)
+            {
+                isInvincible = true;
+            }
+            if (isInvincible)
+            {
+                CollisionKoopaShellEndData* eventData = 0;
+                g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+                eventData->shell = mKoopaShell;
+                eventData->cracked = true;
+                QueueCollisionKoopaShellEnd(eventData);
+                return NO_CONTACT;
+            }
+
+            CollisionKoopaShotBallPlayerData* eventData = 0;
+            g_CollisionKoopaShotBallPlayerDataPool.Allocate(eventData);
+            eventData->player = fielder;
+            eventData->shell = mKoopaShell;
+            QueueCollisionKoopaShotBallPlayer(eventData);
+        }
+        else
+        {
+            CollisionKoopaShellGoalieData* eventData = 0;
+            g_CollisionKoopaShellGoalieDataPool.Allocate(eventData);
+            eventData->goalie = character;
+            eventData->shell = mKoopaShell;
+            QueueCollisionKoopaShellGoalie(eventData);
+        }
+        break;
+    }
+    case PHYSOBJ_WALL:
+    {
+        bool isGrowing = mKoopaShell->mRadiusTimer > 0.0f;
+        if (isGrowing)
+        {
+            return NO_CONTACT;
+        }
+    }
+    // fall through
+    case PHYSOBJ_NET:
+    {
+        CollisionKoopaShellEndData* eventData = 0;
+        g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+        eventData->shell = mKoopaShell;
+        eventData->cracked = false;
+        QueueCollisionKoopaShellEnd(eventData);
+        break;
+    }
+    case PHYSOBJ_BANANA:
+    {
+        PowerupBase* powerup = ((PhysicsBanana*)other)->m_pPowerupObject;
+        if (mKoopaShell->mOwner == powerup->m_pThrower
+            && powerup->mtNoHitTimer.m_uPackedTime != 0)
+        {
+            return NO_CONTACT;
+        }
+        QueueKoopaShellDestroyPowerup(powerup);
+        if (((PhysicsBanana*)other)->m_pPowerupObject->m_eType == POWER_UP_BOBOMB
+            || ((PhysicsBanana*)other)->m_pPowerupObject->m_unk44.m_uPackedTime != 0)
+        {
+            CollisionKoopaShellEndData* eventData = 0;
+            g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+            eventData->shell = mKoopaShell;
+            eventData->cracked = false;
+            QueueCollisionKoopaShellEnd(eventData);
+        }
+        break;
+    }
+    case PHYSOBJ_SHELL:
+    {
+        PowerupBase* powerup = ((PhysicsShell*)other)->m_pPowerupObject;
+        if (mKoopaShell->mOwner == powerup->m_pThrower
+            && powerup->mtNoHitTimer.m_uPackedTime != 0)
+        {
+            return NO_CONTACT;
+        }
+        QueueKoopaShellDestroyPowerup(powerup);
+        if (((PhysicsShell*)other)->m_pPowerupObject->m_unk44.m_uPackedTime != 0)
+        {
+            CollisionKoopaShellEndData* eventData = 0;
+            g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+            eventData->shell = mKoopaShell;
+            eventData->cracked = false;
+            QueueCollisionKoopaShellEnd(eventData);
+        }
+        break;
+    }
+    case PHYSOBJ_HAMMER:
+    {
+        HammerObject* hammer = ((PhysicsHammer*)other)->mHammer;
+        if (mKoopaShell->mOwner == hammer->mOwner)
+        {
+            bool isTimerRunning = hammer->mRadiusTimer > 0.0f;
+            if (isTimerRunning)
+            {
+                return NO_CONTACT;
+            }
+        }
+        QueueKoopaShellDestroyHammer(hammer);
+        break;
+    }
+    case PHYSOBJ_YOSHI_EGG:
+    {
+        egg = ((PhysicsYoshiEgg*)other)->mYoshiEgg;
+        if (egg->mActive)
+        {
+            CollisionKoopaShellEndData* endData = 0;
+            g_CollisionKoopaShellEndDataPool.Allocate(endData);
+            endData->shell = mKoopaShell;
+            endData->cracked = true;
+            QueueCollisionKoopaShellEnd(endData);
+
+            CollisionEggData* crackData = 0;
+            g_CollisionEggDataPool.Allocate(crackData);
+            crackData->pPlayer = 0;
+            crackData->pFielder = egg->mFielder;
+            crackData->pEgg = egg;
+            crackData->m_pad0C = 0;
+            crackData->m_pad10 = 0;
+            QueueCollisionCrackEgg(crackData);
+        }
+        break;
+    }
+    case PHYSOBJ_THWOMP:
+    {
+        CollisionKoopaShellEndData* eventData = 0;
+        g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+        eventData->shell = mKoopaShell;
+        eventData->cracked = true;
+        QueueCollisionKoopaShellEnd(eventData);
+        break;
+    }
+    case PHYSOBJ_NPC:
+    {
+        bool isChainChomp
+            = ((SkinAnimatedNPC*)((PhysicsNPC*)other)->mpAINPC)
+                  ->GetSkinAnimatedNPC_Type()
+            == SkinAnimatedNPC_CHAIN_CHOMP;
+        if (isChainChomp)
+        {
+            CollisionKoopaShellEndData* eventData = 0;
+            g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+            eventData->shell = mKoopaShell;
+            eventData->cracked = true;
+            QueueCollisionKoopaShellEnd(eventData);
+        }
+
+        bool isWindDebris
+            = ((SkinAnimatedNPC*)((PhysicsNPC*)other)->mpAINPC)
+                  ->GetSkinAnimatedNPC_Type()
+            == SkinAnimatedNPC_WIND_DEBRIS;
+        if (isWindDebris)
+        {
+            CollisionKoopaShellEndData* eventData = 0;
+            g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+            eventData->shell = mKoopaShell;
+            eventData->cracked = true;
+            QueueCollisionKoopaShellEnd(eventData);
+        }
+        break;
+    }
+    case PHYSOBJ_BULLET_BILL:
+    {
+        CollisionKoopaShellEndData* eventData = 0;
+        g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+        eventData->shell = mKoopaShell;
+        eventData->cracked = false;
+        QueueCollisionKoopaShellEnd(eventData);
+        break;
+    }
+    case PHYSOBJ_SHOCKWAVE:
+    {
+        CollisionKoopaShellEndData* eventData = 0;
+        g_CollisionKoopaShellEndDataPool.Allocate(eventData);
+        eventData->shell = mKoopaShell;
+        eventData->cracked = false;
+        QueueCollisionKoopaShellEnd(eventData);
+        break;
+    }
+    case PHYSOBJ_PATCH:
+    {
+        PhysicsPatch* patch = (PhysicsPatch*)other;
+        if (patch->m_bKillMe)
+        {
+            break;
+        }
+
+        switch (patch->m_Type)
+        {
+        case PATCH_YOSHI_TONGUE:
+        {
+            cFielder* fielder = (cFielder*)patch->m_pOwner;
+            if (!fielder->IsInvincible())
+            {
+                QueueKoopaShellKnockYoshiTongue(fielder);
+            }
+            break;
+        }
+        }
+        break;
+    }
+    }
+
+    return NO_CONTACT;
+}
+
+bool PhysicsKoopaShell::SetContactInfo(
+    dContact* contact, PhysicsObject*, bool first)
+{
+    if (first)
+    {
+        SetDefaultContactInfo(contact);
+    }
+    contact->surface.bounce = 0.01f;
+    contact->surface.bounce_vel = 0.0f;
+    contact->surface.mu = 5.0f;
+    return true;
+}
+
+void PhysicsKoopaShell::PreCollide()
+{
+}
+
+int PhysicsKoopaShell::GetObjectType() const
+{
+    return PHYSOBJ_KOOPA_SHELL;
+}
+
+PhysicsKoopaShell::~PhysicsKoopaShell()
+{
+}

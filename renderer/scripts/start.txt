@@ -1,0 +1,5 @@
+# skip notices+movie, stay on the start screen
+300 303 100 0 0
+400 403 100 0 0
+500 503 100 0 0
+600 603 100 0 0

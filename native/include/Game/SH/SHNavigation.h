@@ -1,0 +1,99 @@
+#ifndef GAME_SH_SHNAVIGATION_H
+#define GAME_SH_SHNAVIGATION_H
+
+#include "Game/BaseSceneHandler.h"
+#include "Game/FE/fePageControls.h"
+#include "NL/nlBasicString.h"
+
+extern NLString gNextFETransition;
+
+class TLComponentInstance;
+class TLInstance;
+
+enum NavigationButton
+{
+    NAVIGATION_BUTTON_NONE = 0x00,
+    NAVIGATION_BUTTON_PLUS = 0x01,
+    NAVIGATION_BUTTON_MINUS = 0x02,
+    NAVIGATION_BUTTON_BACK = 0x04,
+    NAVIGATION_BUTTON_BREADCRUMBS = 0x08,
+    NAVIGATION_BUTTON_PLAY = 0x10,
+    NAVIGATION_BUTTON_DONE = 0x20,
+    NAVIGATION_BUTTON_LOWER_DONE = 0x40,
+    NAVIGATION_BUTTON_PROGRESS = 0x80
+};
+
+enum eNavigationPlayText
+{
+    NAV_PLAY_NOW = 0,
+    NAV_RESTART_CUP = 1,
+    NAV_CONTINUE = 2,
+    NAV_PLAY_READY = 3,
+};
+
+enum eNavigationDoneText
+{
+    NAV_DONE = 0,
+    NAV_ACCEPT = 1,
+};
+
+enum eNavigationBackText
+{
+    NAV_BACK = 0,
+    NAV_LOG_OUT = 1,
+};
+
+class SHNavigation : public BaseSceneHandler
+{
+public:
+    SHNavigation();
+    virtual ~SHNavigation();
+    virtual void Update(float fDeltaT);
+    virtual void SceneCreated();
+
+    void SetButtonVisibility(int mask, bool visible);
+    void RestoreButtonVisibility();
+    void HideButtons();
+    void SetTimerVisible(bool visible);
+    void SetButtons(int value, bool enabled);
+    TLComponentInstance* GetButton(int value);
+    FEPageControls* GetPageControls()
+    {
+        return &mPageControls;
+    }
+    TLInstance* GetTimer() { return mTimer; }
+    void ShowHomeButtonWarning();
+    void SetPointerTeamColours();
+    void ResetButtons(bool enabled);
+    void SetPlayButtonText(int value);
+    void SetDoneButtonText(int value);
+    void SetBackButtonText(int value);
+    void StartTransition();
+
+    /* 0x01C */ TLComponentInstance* mPointerInstances[4];
+    /* 0x02C */ TLComponentInstance* mPlusButton;
+    /* 0x030 */ TLComponentInstance* mMinusButton;
+    /* 0x034 */ TLComponentInstance* mBackButton;
+    /* 0x038 */ TLComponentInstance* mBreadcrumbs;
+    /* 0x03C */ TLComponentInstance* mPlayButton;
+    /* 0x040 */ TLComponentInstance* mDoneButton;
+    /* 0x044 */ TLComponentInstance* mLowerDoneButton;
+    /* 0x048 */ TLComponentInstance* mProgressButton;
+    /* 0x04C */ TLComponentInstance* mTransition;
+    /* 0x050 */ TLComponentInstance* mHomeWarning;
+    /* 0x054 */ TLInstance* mTimer;
+    /* 0x058 */ FEPageControls mPageControls;
+    /* 0x1E0 */ int mPadding1E0;
+    /* 0x1E4 */ unsigned char mVisibleButtons;
+    /* 0x1E5 */ bool mTransitionPlaying;
+    /* 0x1E6 */ bool mTransitionPending;
+    /* 0x1E7 */ bool mHomeWarningPlaying;
+    /* 0x1E8 */ bool mIsWidescreen;
+    /* 0x1E9 */ unsigned char mPadding1E9[3];
+}; // size 0x1EC
+
+void SetPointerEnabled(bool value);
+
+SHNavigation* GetNavigationScene();
+
+#endif // GAME_SH_SHNAVIGATION_H

@@ -1,0 +1,11 @@
+# Vita3K (container, software GL, real time): ONE WHOLE MATCH, boot to the rematch. v3k_fulltime.txt = nav_fulltime.txt with the holds cut to 22 moves
+# (the emulator presents ~8 frames per second; the game's clock runs in real time) and the post-game idle times scaled down.
+# Run with KEEPDATA=1 (vitaGL's compiled-shader cache and the save data of the earlier runs stay: no shader compiles, no first-run pop-up delay).
+MSC_INPUT_SCRIPT=v3k_fulltime.txt
+MSC_MAX_FRAMES=40000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=900
+MSC_VITA_MEMSTATS=1
+MSC_VITA_RENDER=320x224
+NP_DATA_DIR=ux0:data/mscharged/np-data

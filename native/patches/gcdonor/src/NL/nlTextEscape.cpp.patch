@@ -1,0 +1,18 @@
+diff --git a/src/NL/nlTextEscape.cpp b/src/NL/nlTextEscape.cpp
+index a60ee90..f715488 100644
+--- a/src/NL/nlTextEscape.cpp
++++ b/src/NL/nlTextEscape.cpp
+@@ -111,7 +111,12 @@ nlEscapeSequence::nlEscapeSequence(const unsigned short* str)
+     m_Extended[Char] = 0;
+     m_pEnd = (ExtendedStart ? ExtendedStart : str + 1) + Char + 1;
+ 
+-    key = *(unsigned long*)Seq;
++    // NP: ESCAPE_DEFN packs the characters first-byte-high ('nbs\0' = 0x6E627300), which is what a
++    // big-endian load of Seq gave; on a little-endian host the load reverses it and nothing matches.
++    key = ((unsigned long)(unsigned char)Seq[0] << 24)
++        | ((unsigned long)(unsigned char)Seq[1] << 16)
++        | ((unsigned long)(unsigned char)Seq[2] << 8)
++        | ((unsigned long)(unsigned char)Seq[3]);
+     pEscape = nlBSearch(key, s_EscapeLookup, ESC_COUNT);
+     if (pEscape != 0)
+     {

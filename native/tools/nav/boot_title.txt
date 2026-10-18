@@ -1,0 +1,5 @@
+# Boot, skip the ESRB / wrist-strap screen and the intro movie with A, stop at the title screen.
+mash 100 20 scene == 0
+log STATE title screen
+idle 120
+exit

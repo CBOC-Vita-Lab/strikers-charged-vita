@@ -1,0 +1,44 @@
+#ifndef GAME_RENDER_IMPOSTOR_H
+#define GAME_RENDER_IMPOSTOR_H
+
+#include "NL/nlColour.h"
+#include "NL/nlMath.h"
+#include "types.h"
+
+class ImpostorCharacter;
+class ImpostorSprite;
+
+class Impostor
+{
+public:
+    Impostor();
+    virtual ~Impostor();
+
+    void Reset();
+    void Set(ImpostorCharacter* character, const nlVector3& position,
+        float width, float height, u16 angle);
+    void Release();
+
+    float GetWidth() const
+    {
+        return mWidth;
+    }
+
+    float GetHeight() const
+    {
+        return mHeight;
+    }
+
+    /* 0x04 */ ImpostorCharacter* mpCharacter;
+    /* 0x08 */ ImpostorSprite* mpSprite;
+    /* 0x0C */ nlVector3 mPosition;
+    /* 0x18 */ float mWidth;
+    /* 0x1C */ float mHeight;
+    /* 0x20 */ u16 mAngle;
+    /* 0x22 */ nlColour mColour;
+    /* 0x26 */ u8 m_pad26[2];
+    /* 0x28 */ int mSlot;
+    /* 0x2C */ bool mSkipCrowdVisibilityPass;
+}; // size: 0x30
+
+#endif // GAME_RENDER_IMPOSTOR_H

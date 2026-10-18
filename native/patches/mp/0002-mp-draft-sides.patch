@@ -1,0 +1,22 @@
+Multiplayer 2/4: the LAN launch never chose the draft sides; BeginTeamDraft assigns them from the machine index (NpLanBeginTeamDraft).
+
+diff --git a/src/Game/NetworkDraft.cpp b/src/Game/NetworkDraft.cpp
+index 9d50401..a812d86 100644
+--- a/src/Game/NetworkDraft.cpp
++++ b/src/Game/NetworkDraft.cpp
+@@ -1,6 +1,7 @@
+ #include "Game/NetworkMessageRegistry.h"
+ #include "Game/NetworkDraft.h"
+ #include "Game/Sys/debug.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ #include "Game/GameInfo.h"
+ #include "Game/GameSceneManager.h"
+@@ -145,6 +146,7 @@ static inline void CopyDraftMachineInfo(NetworkDraftPlayer& player, const Networ
+ 
+ void NetworkDraft::BeginTeamDraft(NetMessageDraft* message)
+ {
++    NpLanBeginTeamDraft(message);  // multiplayer: the LAN launch never chose the sides (np/patches/mp)
+     gNetworkMessageRegistry->RegisterReceiver(23, this);
+     gNetworkMessageRegistry->RegisterReceiver(24, this);
+     mDraftMessage = *message;

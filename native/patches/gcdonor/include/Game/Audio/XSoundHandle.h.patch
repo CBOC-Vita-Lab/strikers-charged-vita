@@ -1,0 +1,38 @@
+diff --git a/include/Game/Audio/XSoundHandle.h b/include/Game/Audio/XSoundHandle.h
+index 74dd5b6..da39dbd 100644
+--- a/include/Game/Audio/XSoundHandle.h
++++ b/include/Game/Audio/XSoundHandle.h
+@@ -1,6 +1,7 @@
+ #ifndef GAME_AUDIO_XSOUND_HANDLE_H
+ #define GAME_AUDIO_XSOUND_HANDLE_H
+ 
++#include "port/bitfield.h"
+ #include "NL/nlMath.h"
+ #include "types.h"
+ 
+@@ -37,14 +38,25 @@ struct XSoundOwner
+     /* 0x1C */ union
+     {
+         u32 m_ReferencesAndFlags;
++        // NP: m_ReferencesAndFlags is masked as a whole word elsewhere (|= 0x8000, >> 12); the declaration
++        // order is reversed on little-endian targets so the named fields are the same bits (port/bitfield.h).
+         struct
+         {
++#if NP_BITFIELDS_LSB_FIRST
++            u32 field_0FFF : 12;
++            u32 field_1000 : 1;
++            u32 zeroVelocity : 1;
++            u32 updatePending : 1;
++            u32 positionIsPointer : 1;
++            s32 references : 16;
++#else
+             s32 references : 16;
+             u32 positionIsPointer : 1;
+             u32 updatePending : 1;
+             u32 zeroVelocity : 1;
+             u32 field_1000 : 1;
+             u32 field_0FFF : 12;
++#endif
+         } count;
+     };
+ };

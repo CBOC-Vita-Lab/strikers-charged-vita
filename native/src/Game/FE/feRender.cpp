@@ -1,0 +1,335 @@
+#include "Game/FE/feRender.h"
+
+#include "Game/SharedStaticStorage.h"
+#include "Game/FE/fePackage.h"
+#include "Game/FE/fePresentation.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/feTextureResource.h"
+#include "Game/FE/tlComponent.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlImageInstance.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/FE/tlSlide.h"
+#include "Game/FE/tlInstance.inl"
+#include "NL/gl/glDraw3.h"
+#include "NL/gl/glMatrix.h"
+#include "NL/gl/glState.h"
+#include "NL/nlString.h"
+#include "NL/platvmath.h"
+
+static nlFloatColour s_currentAssetColour;
+static const nlVector3 s_quadPositions[4] = {
+    { -50.0f, 50.0f, 0.0f },
+    { -50.0f, -50.0f, 0.0f },
+    { 50.0f, -50.0f, 0.0f },
+    { 50.0f, 50.0f, 0.0f },
+};
+FEScene* FERender::m_pRenderScene;
+
+RenderImageCallback g_pfnRenderImage;
+static const unsigned long grabTex = nlStringLowerHash("target/grab_texture");
+static const unsigned long movieTex = nlStringLowerHash("movie");
+
+void FERender::CalculateCurrentAssetColour(const TLInstance* instance)
+{
+    for (unsigned long i = 0; i < 4; i++)
+    {
+        s_currentAssetColour.c[i] = (instance->GetColour().c[i] * s_currentAssetColour.c[i]) / 255.0f;
+    }
+}
+
+void FERender::Initialize()
+{
+}
+
+void FERender::PushTransformMatrix(const TLInstance* instance, const nlMatrix4& parentMatrix, nlMatrix4& combinedMatrix)
+{
+    const feVector3& tlPosition = instance->GetPosition();
+    const feVector3& tlPivot = instance->GetPivot();
+    const feVector3& tlRotation = instance->GetRotation();
+    const feVector3& tlScale = instance->GetScale();
+    unsigned long flags = 0;
+
+    if (tlPosition.f.x == 0.0f && tlPosition.f.y == 0.0f && tlPosition.f.z == 0.0f)
+    {
+        flags |= 2;
+    }
+    if (tlPivot.f.x == 0.0f && tlPivot.f.y == 0.0f && tlPivot.f.z == 0.0f)
+    {
+        flags |= 1;
+    }
+    if (tlRotation.f.x == 0.0f && tlRotation.f.y == 0.0f && tlRotation.f.z == 0.0f)
+    {
+        flags |= 4;
+    }
+    if (tlScale.f.x == 1.0f && tlScale.f.y == 1.0f && tlScale.f.z == 1.0f)
+    {
+        flags |= 8;
+    }
+
+    if ((flags & 0xF) == 0xF)
+    {
+        combinedMatrix = parentMatrix;
+        return;
+    }
+
+    nlMatrix4 scalePivotMatrix;
+    nlMatrix4 localMatrix;
+    if ((flags & 1) == 0 || (flags & 8) == 0)
+    {
+        nlMatrix4 scaleMatrix;
+        nlMatrix4 pivotMatrix;
+        nlMakeScaleMatrix(scaleMatrix, tlScale.f.x, tlScale.f.y, tlScale.f.z);
+        nlMakeTranslationMatrix(pivotMatrix, -tlPivot.f.x, -tlPivot.f.y, -tlPivot.f.z);
+        nlMultMatrices(scalePivotMatrix, pivotMatrix, scaleMatrix);
+    }
+    else
+    {
+        scalePivotMatrix.SetIdentity();
+    }
+
+    if ((flags & 4) == 0)
+    {
+        nlMatrix4 rotationMatrix;
+        nlMakeRotationMatrixEulerAngles(rotationMatrix, tlRotation.f.x, tlRotation.f.y, tlRotation.f.z);
+        nlMultMatrices(localMatrix, scalePivotMatrix, rotationMatrix);
+    }
+    else
+    {
+        localMatrix = scalePivotMatrix;
+    }
+
+    if ((flags & 2) == 0)
+    {
+        localMatrix.m41 += tlPosition.f.x;
+        localMatrix.m42 += tlPosition.f.y;
+        localMatrix.m43 += tlPosition.f.z;
+    }
+    localMatrix.m43 *= -1.0f;
+    nlMultMatrices(combinedMatrix, localMatrix, parentMatrix);
+}
+
+void FERender::RenderSlide(const TLSlide* slide, const nlMatrix4& matrix)
+{
+    if (slide == 0)
+        return;
+    if (slide->pChildren == 0)
+        return;
+    TLInstance* next;
+    TLInstance* curr = slide->pChildren->m_next;
+    for (;;)
+    {
+        next = curr->m_next;
+        nlFloatColour colour = s_currentAssetColour;
+        RenderTimeLineAsset(curr, slide->GetCurrentTime(), matrix);
+        s_currentAssetColour = colour;
+        if (curr == slide->pChildren)
+            break;
+        curr = next;
+    }
+}
+
+void FERender::RenderComponentInstance(TLComponentInstance* instance, const nlMatrix4& matrix)
+{
+    TLComponent* component = static_cast<TLComponent*>(instance->GetLibRefObject());
+    if (component == 0)
+        return;
+    if (component->GetActiveSlide() == 0)
+        return;
+    RenderSlide(component->GetActiveSlide(), matrix);
+}
+
+void FERender::RenderTimeLineAsset(TLInstance* pTLInstance, float fCurrentTime, const nlMatrix4& parentMatrix)
+{
+    if (!pTLInstance->IsValidAtTime(fCurrentTime))
+    {
+        return;
+    }
+    if (!pTLInstance->IsVisible() || !pTLInstance->m_component->m_attributes.bVisible)
+    {
+        return;
+    }
+
+    nlMatrix4 combinedMatrix;
+    PushTransformMatrix(pTLInstance, parentMatrix, combinedMatrix);
+
+    CalculateCurrentAssetColour(pTLInstance);
+
+    switch (pTLInstance->GetType())
+    {
+    case TLAT_IMAGE:
+        RenderImageInstance((const TLImageInstance*)pTLInstance, combinedMatrix);
+        break;
+    case TLAT_TEXT:
+    {
+        nlMatrix4 textMatrix;
+        nlMultMatrices(textMatrix, combinedMatrix, m_pRenderScene->m_matView);
+        TLTextInstance* textInstance = (TLTextInstance*)pTLInstance;
+        textInstance->SetMatrix(&textMatrix);
+        nlColour colour;
+        ConvertColour(colour, s_currentAssetColour);
+        textInstance->Render((GLView*)m_pRenderScene->m_uRenderView, colour);
+        break;
+    }
+    case TLAT_COMPONENT:
+        RenderComponentInstance(static_cast<TLComponentInstance*>(pTLInstance), combinedMatrix);
+        break;
+    default:
+        break;
+    }
+
+    if (pTLInstance->pChildren != 0)
+    {
+        TLInstance* curr = pTLInstance->pChildren->m_next;
+        for (;;)
+        {
+            TLInstance* next = curr->m_next;
+            nlFloatColour colour = s_currentAssetColour;
+            RenderTimeLineAsset(curr, fCurrentTime, combinedMatrix);
+            s_currentAssetColour = colour;
+            if (curr == pTLInstance->pChildren)
+            {
+                break;
+            }
+            curr = next;
+        }
+    }
+}
+
+void FERender::BeginFrame()
+{
+}
+
+void FERender::RenderScene(FEScene* scene)
+{
+    if (scene == 0)
+    {
+        return;
+    }
+
+    m_pRenderScene = scene;
+    s_currentAssetColour.c[0] = 1.0f;
+    s_currentAssetColour.c[1] = 1.0f;
+    s_currentAssetColour.c[2] = 1.0f;
+    s_currentAssetColour.c[3] = 1.0f;
+
+    nlMatrix4 identity;
+    identity.SetIdentity();
+
+    FEPresentation* presentation = scene->m_pFEPackage->GetPresentation();
+    TLInstance* curr;
+    TLInstance* next;
+    TLSlide* slide;
+    if (presentation != 0 && presentation->m_slides != 0)
+    {
+        slide = presentation->m_currentSlide;
+        if (slide != 0 && slide->pChildren != 0)
+        {
+            curr = slide->pChildren->m_next;
+            for (;;)
+            {
+                float fCurrentTime = slide->m_time;
+                next = curr->m_next;
+                nlFloatColour colour = s_currentAssetColour;
+                RenderTimeLineAsset(curr, fCurrentTime, identity);
+                s_currentAssetColour = colour;
+                if (curr == slide->pChildren)
+                {
+                    break;
+                }
+                curr = next;
+            }
+        }
+    }
+    m_pRenderScene = 0;
+}
+
+unsigned char FERender::RenderImageInstance(const TLImageInstance* pTLImageInstance, const nlMatrix4& matrix)
+{
+    nlColour colour;
+    ConvertColour(colour, s_currentAssetColour);
+
+    FETextureResource* pTexRes = pTLImageInstance->m_pTextureResource;
+    if (!pTexRes->IsValid())
+    {
+        return 1;
+    }
+
+    unsigned long textureHandle = pTexRes->GetTextureHandle();
+    float halfPixelU = 0.5f / (float)(s32)pTexRes->m_uWidth;
+    float halfPixelV = 0.5f / (float)(s32)pTexRes->m_uHeight;
+    float left = pTLImageInstance->GetUVX();
+    float uvY = pTLImageInstance->GetUVY();
+    float uvH = pTLImageInstance->GetUVHeight();
+    float bottom = 1.0f - (uvH + uvY);
+    float right = left + pTLImageInstance->GetUVWidth();
+    float top = 1.0f - pTLImageInstance->GetUVY();
+
+    glSetDefaultState(false);
+    glSetRasterState(GLS_Culling, 0);
+    if (textureHandle != grabTex && textureHandle != movieTex)
+    {
+        glSetRasterState(GLS_AlphaBlend, pTLImageInstance->field_0x94);
+        glSetRasterState(GLS_AlphaTest, 1);
+        glSetRasterState(GLS_AlphaTestRef, 0);
+    }
+    glSetCurrentRasterState(glHandleizeRasterState());
+
+    nlMatrix4 matTM = matrix;
+    const nlMatrix4& view = m_pRenderScene->m_matView;
+    matTM.m41 += view.m41;
+    matTM.m42 += view.m42;
+    matTM.m43 += view.m43;
+    unsigned long matrixHandle = glAllocMatrix();
+    if (matrixHandle != 0xFFFFFFFF)
+    {
+        glSetMatrix(matrixHandle, matTM);
+    }
+    glSetCurrentMatrix(matrixHandle);
+
+    if (textureHandle == movieTex && g_pfnRenderImage != 0)
+    {
+        nlVector2 uv[4];
+        nlVector2 pos[4];
+        uv[0].x = left + halfPixelU;
+        uv[0].y = bottom + halfPixelV;
+        uv[1].x = left + halfPixelU;
+        uv[1].y = top - halfPixelV;
+        uv[2].x = right - halfPixelU;
+        uv[2].y = top - halfPixelV;
+        uv[3].x = right - halfPixelU;
+        uv[3].y = bottom + halfPixelV;
+
+        const nlVector3* pSrc = s_quadPositions;
+        nlVector2* pDst = pos;
+        unsigned int count = 4;
+        while (count--)
+        {
+            nlVec2Set(*pDst, pSrc->x, pSrc->y);
+            pDst++;
+            pSrc++;
+        }
+        g_pfnRenderImage((GLView*)m_pRenderScene->m_uRenderView, textureHandle, s_currentAssetColour, pos, uv);
+    }
+    else
+    {
+        glSetCurrentTexture(textureHandle, GLTT_Diffuse);
+        glQuad3 quad;
+        quad.m_pos[0] = s_quadPositions[0];
+        quad.m_pos[1] = s_quadPositions[1];
+        quad.m_pos[2] = s_quadPositions[2];
+        quad.m_pos[3] = s_quadPositions[3];
+        quad.m_uv[0].x = left + halfPixelU;
+        quad.m_uv[0].y = bottom + halfPixelV;
+        quad.m_uv[1].x = left + halfPixelU;
+        quad.m_uv[1].y = top - halfPixelV;
+        quad.m_uv[2].x = right - halfPixelU;
+        quad.m_uv[2].y = top - halfPixelV;
+        quad.m_uv[3].x = right - halfPixelU;
+        quad.m_uv[3].y = bottom + halfPixelV;
+        quad.SetColour(colour);
+        glAttachQuad3((eGLView)(u32)m_pRenderScene->m_uRenderView, 0, 1, &quad);
+    }
+
+    return 1;
+}

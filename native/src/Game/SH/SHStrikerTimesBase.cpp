@@ -1,0 +1,531 @@
+#include "Game/SH/SHNavigation.h"
+#include "NL/nlFunction.inl"
+#include "Game/FE/feHelpFuncs_decl.h"
+#include "Game/SH/SHStrikerTimesBase.h"
+#include "Game/FE/tlImageInstance.h"
+#include "Game/FE/FEAudio.h"
+
+#include "Game/DB/CharacterInfo.h"
+#include "Game/DB/GameProgress.h"
+#include "Game/DB/SaveLoad.h"
+#include "Game/FE/feFinder.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feFinder_impl.h"
+#include "Game/FE/feInput.h"
+#include "Game/FE/fePackage.h"
+#include "Game/FE/fePresentation.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlImageInstance.h"
+#include "Game/FE/tlSlide.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/GameInfo.h"
+#include "NL/globalpad.h"
+#include "NL/nlMath.h"
+#include "NL/nlBind.h"
+#include "NL/nlPrint.h"
+#include "NL/nlLocalization.h"
+#include "NL/nlString.h"
+#include "Game/FE/feDPD.h"
+#include "Game/FE/FEAudio.h"
+#include "Game/SH/SHNavigation.h"
+
+static inline void ShowDoneButtons(TLSlide* first)
+{
+    TLSlide* slide = first;
+    FEAudio::PlayAnimAudioEvent(0x2AB04562, 0, 0, 1);
+    do
+    {
+        TLComponentInstance* done = FEFinder<TLComponentInstance, TLAT_COMPONENT>::FindOrDefault<>(slide, "Layer", "done");
+        done->m_bVisible = true;
+        done->SetActiveSlide("in", true, false);
+        slide = slide->m_next;
+    } while (slide != first);
+}
+
+SHStrikerTimesBase::SHStrikerTimesBase()
+    : BaseOverlayHandler(1, POSITION_ALL)
+    , mDisplayMode(NEWS_DISPLAY_NONE)
+    , mPage(-1)
+    , mDonePressed(false)
+    , mUseCustomText(false)
+    , mState(NEWS_PHASE_ENTERING)
+    , mControlsInitialized(false)
+    , mDoneVisible(false)
+    , mCanShowDone(true)
+    , mContentInitialized(false)
+    , mIntroAudioPlayed(false)
+    , mLogoReady(false)
+    , mHeadlineScroller(0)
+    , mStoryHeadlineScroller(0)
+    , mStoryImage("art/fe/StrikerTimesUI.res", 0)
+    , mHeadlineImage("art/fe/StrikerTimesUI.res", 0)
+    , mLogoImage("art/fe/StrikerTimesUI.res", 0)
+{
+    mDoneButton.mIgnoreInputLock = true;
+    mDoneButton.mDisabled = true;
+    FEPointerEvent event;
+    mDoneButton.mPreviousEvents[0] = event;
+    mDoneButton.mPreviousEvents[1] = event;
+    mDoneButton.mPreviousEvents[2] = event;
+    mDoneButton.mPreviousEvents[3] = event;
+}
+
+SHStrikerTimesBase::~SHStrikerTimesBase()
+{
+}
+
+void SHStrikerTimesBase::SceneCreated()
+{
+    mScrollBar.SetComponent(FEFinder<TLComponentInstance, TLAT_COMPONENT>::FindOrDefault(mPresentation->m_currentSlide, "Layer", "scrollbar"));
+    if ((unsigned int)(mDisplayMode - NEWS_MATCH_SUMMARY) <= 2)
+    {
+        mScrollBar.SetRange(0);
+        mLogoReady = true;
+    }
+    else if (mDisplayMode == NEWS_FRIENDLY_RESULTS)
+    {
+        mScrollBar.SetRange(2);
+    }
+    else
+    {
+        mScrollBar.SetRange(1);
+    }
+    mScrollBar.SetValue(0);
+
+    FEPresentation* presentation = mPresentation;
+    TLSlide* first = presentation->m_currentSlide;
+    presentation = mPresentation;
+    TLSlide* slide = presentation->m_currentSlide;
+    do
+    {
+        FEFinder<TLInstance, 2>::Find<>(slide, "Layer", "TimerText")->m_bVisible = false;
+        FEFinder<TLInstance, 2>::Find<>(slide, "Layer", "NetworkWait")->m_bVisible = false;
+        FEFinder<TLComponentInstance, TLAT_COMPONENT>::FindOrDefault<>(slide, "Layer", "done")->m_bVisible = false;
+        slide = slide->m_next;
+    } while (slide != first);
+
+    if (mDisplayMode != NEWS_FRIENDLY_RESULTS)
+    {
+        TLInstance* more = FEFinder<TLComponentInstance, 4>::FindOrDefault(mPresentation, "story", "Layer", "more");
+        more->m_bVisible = false;
+    }
+
+    if (mDisplayMode != NEWS_CHALLENGE_BRIEFING && mDisplayMode != NEWS_CUP_GAME_RESULTS)
+    {
+        SHNavigation* scene = GetNavigationScene();
+        if (scene != 0)
+            scene->SetButtons(NAVIGATION_BUTTON_NONE, true);
+    }
+
+    char buffer[0x40];
+    switch (g_pLocalization->m_CurrentLanguage)
+    {
+    case nlLocalization::LangFrench:
+    case nlLocalization::LangNAFrench:
+        nlSNPrintf(buffer, 0x40, "fe/striker_times_textures/st_logo_french");
+        break;
+    case nlLocalization::LangGerman:
+        nlSNPrintf(buffer, 0x40, "fe/striker_times_textures/st_logo_german");
+        break;
+    case nlLocalization::LangSpanish:
+    case nlLocalization::LangNASpanish:
+        nlSNPrintf(buffer, 0x40, "fe/striker_times_textures/st_logo_spanish");
+        break;
+    case nlLocalization::LangItalian:
+        nlSNPrintf(buffer, 0x40, "fe/striker_times_textures/st_logo_italian");
+        break;
+    default:
+        mLogoReady = true;
+        break;
+    }
+
+    if (!mLogoReady)
+    {
+        TLInstance* logo = FEFinder<TLImageInstance, 2>::Find<>(mPresentation, "logo", "Layer", "logo", "st_logo");
+        mLogoImage.mImageInstance = (TLImageInstance*)logo;
+        mLogoImage.QueueLoad(buffer, false);
+    }
+
+    mPresentation->SetActiveSlide("in", true);
+    mPresentation->Update(0.0f);
+}
+
+void SHStrikerTimesBase::Update(float dt)
+{
+    TLSlide* first;
+    if (SaveEnabled && InOperation)
+        return;
+    if (!mLogoReady)
+    {
+        mLogoReady = mLogoImage.Update(true);
+        return;
+    }
+    BaseSceneHandler::Update(dt);
+    if (mDisplayMode != NEWS_CUP_GAME_RESULTS && mDisplayMode != NEWS_PAUSE_STATISTICS && mDisplayMode != NEWS_MATCH_SUMMARY)
+    {
+        if (!mContentInitialized)
+            InitializeContent();
+        mStoryImage.Update(true);
+        mHeadlineImage.Update(true);
+    }
+    if (!mIntroAudioPlayed)
+    {
+        mIntroAudioPlayed = true;
+        FEAudio::PlayAnimAudioEvent(0xAFE4352B, 0, 0, 1);
+    }
+    int state = mState;
+    if (state == NEWS_PHASE_ENTERING || (unsigned int)(state - NEWS_PHASE_EXITING_DONE) <= 1)
+    {
+        FEPresentation* presentation = mPresentation;
+        TLSlide* slide = presentation->m_currentSlide;
+        if (slide->GetCurrentTime() < slide->GetStartTime() + slide->GetDuration())
+        {
+            for (int pad = 0; pad < 4; ++pad)
+            {
+                GetPointerInstance(pad)->SetActiveSlide("waiting", true, false);
+            }
+            return;
+        }
+        if (state == NEWS_PHASE_ENTERING)
+        {
+            if (!mControlsInitialized)
+            {
+                InitializeControls();
+                mControlsInitialized = true;
+            }
+            mState = NEWS_PHASE_ACTIVE;
+            if ((unsigned int)(mDisplayMode - NEWS_MATCH_SUMMARY) <= 2)
+            {
+                mPresentation->SetActiveSlide("game summary", true);
+                mPresentation->Update(0.0f);
+            }
+            else if (mDisplayMode == NEWS_FRIENDLY_RESULTS)
+            {
+                mPresentation->SetActiveSlide("logo", true);
+                mPresentation->Update(0.0f);
+            }
+            else
+            {
+                mPresentation->SetActiveSlide("logo", true);
+                mPresentation->Update(0.0f);
+            }
+            return;
+        }
+        if (state == NEWS_PHASE_EXITING_DONE)
+        {
+            OnDoneTransitionComplete();
+            return;
+        }
+        if (state == NEWS_PHASE_EXITING_BACK)
+        {
+            OnBackTransitionComplete();
+            return;
+        }
+    }
+    if (mPage == 0)
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() >= slide->GetStartTime() + slide->GetDuration())
+        {
+            mPage = 1;
+            mPresentation->SetActiveSlide("headline pic", true);
+            mPresentation->Update(0.0f);
+        }
+        else
+        {
+            return;
+        }
+    }
+    if ((unsigned int)(mPage - 1) <= 1)
+    {
+        mHeadlineScroller.Update(dt);
+        mStoryHeadlineScroller.m_scrollOffset = mHeadlineScroller.m_scrollOffset;
+        mStoryHeadlineScroller.Update(0.0f);
+    }
+    if (mCanShowDone && !mDoneVisible)
+    {
+        FEPresentation* presentation = mPresentation;
+        first = presentation->m_currentSlide;
+        ShowDoneButtons(first);
+        mDoneButton.mDisabled = false;
+        mDoneVisible = true;
+    }
+    for (int pad = 0; pad < 4; ++pad)
+    {
+        TLComponentInstance* instance = GetPointerInstance(pad);
+        if (mDisplayMode != NEWS_PAUSE_STATISTICS && pad != gFEControllerIndex)
+        {
+            instance->SetActiveSlide("waiting", true, false);
+        }
+        else
+        {
+            instance->SetActiveSlide("cursor", true, false);
+            u8 valid = 1;
+            FEPointerEvent event;
+            event.mIndex = pad;
+            event.mPosition = GetPointerPosition(pad, &valid);
+            g_pPadManager->GetPad(pad)->GetButtonIndex(0x1E, true);
+            event.mPressed = g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0);
+            event.mReleased = g_pFEInput->JustReleased((eFEINPUT_PAD)pad, 0x1E, true, 0);
+            mDoneButton.HandlePointerEvent(&event);
+            if (mDonePressed)
+                return;
+            mScrollBar.Update(event, dt);
+            if (mScrollBar.IsScrolling(1, 1))
+            {
+                ShowNextPage();
+            }
+            else if (mScrollBar.IsScrolling(0, 1))
+            {
+                ShowPreviousPage();
+            }
+        }
+    }
+}
+
+void SHStrikerTimesBase::InitializeContent()
+{
+    FEPresentation* presentation = mFEScene->m_pFEPackage->GetPresentation();
+
+    TLTextInstance* headlineText = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation, "headline pic", "Layer", "HEADLINE");
+
+    TLTextInstance* descriptionText = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation, "story", "Layer", "Description_clip");
+
+    mHeadlineScroller.ApplyNewTextInstancePointer(headlineText, -1, -1, -300);
+    if (mUseCustomText)
+        mHeadlineScroller.SetDisplayMessage(mHeadlineText);
+    else
+        mHeadlineScroller.SetDisplayMessage(mHeadlineStringID);
+    mHeadlineScroller.SetClippingTextInstance(descriptionText);
+    descriptionText->m_bVisible = false;
+
+    TLTextInstance* storyHeadline = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation, "story", "Layer", "HEADLINE");
+    mStoryHeadlineScroller.ApplyNewTextInstancePointer(storyHeadline, -1, -1, -300);
+    if (mUseCustomText)
+        mStoryHeadlineScroller.SetDisplayMessage(mHeadlineText);
+    else
+        mStoryHeadlineScroller.SetDisplayMessage(mHeadlineStringID);
+    mStoryHeadlineScroller.SetClippingTextInstance(descriptionText);
+
+    TLTextInstance* bodyText = FEFinder<TLTextInstance, 3>::FindOrDefault(presentation, "story", "Layer", "BODY");
+    if (mUseCustomText)
+        bodyText->SetString(mStoryText.c_str());
+    else
+        bodyText->SetStringId(mStoryStringID);
+
+    mHeadlineScroller.m_scrollSpeed = 150.0f;
+    mStoryHeadlineScroller.m_scrollSpeed = 150.0f;
+    mHeadlineScroller.m_nextDeltaT = 2.0f;
+    mStoryHeadlineScroller.m_nextDeltaT = 2.0f;
+
+    TLInstance* storyTexture = FEFinder<TLInstance, 2>::FindOrDefault(mPresentation, "story", "Layer", "00_dummy_texture");
+    mStoryImage.mImageInstance = (TLImageInstance*)storyTexture;
+
+    TLInstance* headlineTexture = FEFinder<TLInstance, 2>::FindOrDefault(mPresentation, "headline pic", "Layer", "00_dummy_texture");
+    mHeadlineImage.mImageInstance = (TLImageInstance*)headlineTexture;
+
+    mHeadlineImage.QueueLoad(mArticleImageName, false);
+    mStoryImage.QueueLoad(mArticleImageName, false);
+    mContentInitialized = true;
+}
+
+void SHStrikerTimesBase::SetArticleImageName(int captain, int mood, int special)
+{
+    int variant = nlRandom(3, &nlDefaultSeed);
+    if (mDisplayMode == NEWS_CHALLENGE_BRIEFING)
+    {
+        s8 stored = g_pStrikerChallenge->mHeadlineVariant;
+        if (stored != -1)
+            variant = stored;
+        else
+            g_pStrikerChallenge->mHeadlineVariant = variant;
+    }
+    const CharacterInfo& info = GetCharacterInfo(GetCharacterIndexFromCaptain(captain));
+    char name[0x10];
+    if (special == 4)
+    {
+        nlSNPrintf(name, 0x10, "boo");
+        variant = 0;
+    }
+    else if (special == 2)
+    {
+        nlSNPrintf(name, 0x10, "hammerbro");
+        variant = 0;
+    }
+    else if (special == 8)
+    {
+        nlSNPrintf(name, 0x10, "kritter");
+        variant = 0;
+    }
+    else if (captain == 3)
+    {
+        nlSNPrintf(name, 0x10, "dk");
+    }
+    else if (captain == 0xA)
+    {
+        nlSNPrintf(name, 0x10, "diddy");
+    }
+    else
+    {
+        nlSNPrintf(name, 0x10, "%s", info.mName);
+    }
+    switch (mood)
+    {
+    case NEWS_MOOD_POSITIVE:
+        nlSNPrintf(mArticleImageName, 0x40, "fe/striker_times_textures/%s_positive_0%d", name, variant);
+        break;
+    case NEWS_MOOD_NEUTRAL:
+        nlSNPrintf(mArticleImageName, 0x40, "fe/striker_times_textures/%s_neutral_0%d", name, variant);
+        break;
+    case NEWS_MOOD_NEGATIVE:
+        nlSNPrintf(mArticleImageName, 0x40, "fe/striker_times_textures/%s_negative_0%d", name, variant);
+        break;
+    case NEWS_MOOD_CUP_WIN:
+        nlSNPrintf(mArticleImageName, 0x40, "fe/striker_times_textures/%s_positive_0%d", name, variant);
+        break;
+    }
+}
+
+void SHStrikerTimesBase::SetDisplayMode(unsigned int transition)
+{
+    mDisplayMode = transition;
+    if (transition - 0xB <= 2)
+    {
+        mCanShowDone = true;
+        mPage = 3;
+    }
+    else
+    {
+        mCanShowDone = false;
+        mPage = 0;
+    }
+}
+
+void SHStrikerTimesBase::ShowPreviousPage()
+{
+    FEPresentation* presentation = mPresentation;
+    if (mDisplayMode == NEWS_CUP_GAME_RESULTS)
+        return;
+    if (mDisplayMode == NEWS_PAUSE_STATISTICS)
+        return;
+    if (mDisplayMode == NEWS_MATCH_SUMMARY)
+        return;
+    if (mDisplayMode == NEWS_FRIENDLY_RESULTS)
+    {
+        if (mPage == 2)
+        {
+            mPage = 1;
+            presentation->SetActiveSlide("headline pic", true);
+            presentation->Update(presentation->m_currentSlide->GetStartTime() + presentation->m_currentSlide->GetDuration());
+        }
+        else if (mPage == 3)
+        {
+            mPage = 2;
+            presentation->SetActiveSlide("story", true);
+            presentation->Update(0.0f);
+        }
+    }
+    else if (mPage == 2)
+    {
+        mPage = 1;
+        presentation->SetActiveSlide("headline pic", true);
+        presentation->Update(presentation->m_currentSlide->GetStartTime() + presentation->m_currentSlide->GetDuration());
+    }
+}
+
+void SHStrikerTimesBase::ShowNextPage()
+{
+    FEPresentation* presentation = mPresentation;
+    if ((unsigned int)(mDisplayMode - NEWS_MATCH_SUMMARY) <= 2)
+    {
+        mCanShowDone = true;
+    }
+    else if (mDisplayMode == NEWS_FRIENDLY_RESULTS)
+    {
+        if (mPage == 2)
+        {
+            mCanShowDone = GameInfoManager::Instance()->mIsOnlineMode == 0;
+            mPage = 3;
+            presentation->SetActiveSlide("game summary", true);
+        }
+        else if (mPage == 1)
+        {
+            mPage = 2;
+            presentation->SetActiveSlide("story", true);
+            presentation->Update(0.0f);
+        }
+    }
+    else if (mPage == 1)
+    {
+        mCanShowDone = true;
+        mPage = 2;
+        presentation->SetActiveSlide("story", true);
+        presentation->Update(0.0f);
+    }
+}
+
+void SHStrikerTimesBase::OnDoneTransitionComplete()
+{
+}
+
+void SHStrikerTimesBase::InitializeControls()
+{
+    typedef Detail::MemFunImpl<void, void (SHStrikerTimesBase::*)(int, void*)> PointerMethod;
+    typedef BindExp3<void, PointerMethod, SHStrikerTimesBase*, Placeholder<0>, Placeholder<1> > PointerBinding;
+
+    if (!mScrollBar.mInitialized)
+    {
+        mScrollBar.SetComponent(FEFinder<TLComponentInstance, TLAT_COMPONENT>::FindOrDefault(mPresentation->m_currentSlide, "Layer", "scrollbar"));
+        mScrollBar.Initialize();
+    }
+    FEPointerListener::Callback callback(
+        PointerBinding(MemFun(&SHStrikerTimesBase::OnDonePointerEnter), this, Placeholder<0>(), Placeholder<1>()));
+    mDoneButton.SetPointerEnterCallback(callback);
+    callback = FEPointerListener::Callback(
+        PointerBinding(MemFun(&SHStrikerTimesBase::OnDonePointerLeave), this, Placeholder<0>(), Placeholder<1>()));
+    mDoneButton.SetPointerLeaveCallback(callback);
+    FEPointerListener::Callback callback2(
+        PointerBinding(MemFun(&SHStrikerTimesBase::OnDonePointerPress), this, Placeholder<0>(), Placeholder<1>()));
+    mDoneButton.SetPointerPressCallback(callback2);
+    SetDoneButtonBounds(&mDoneButton, 0, 0);
+}
+
+void SHStrikerTimesBase::OnDonePointerEnter(int index, void* context)
+{
+    mDoneButton.SetPointerState(POINTER_BUTTON_HOVER, index);
+    TLComponentInstance* done = FEFinder<TLComponentInstance, TLAT_COMPONENT>::FindOrDefault(mPresentation->m_currentSlide, "Layer", "done");
+    if (!mDoneButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        done->SetActiveSlide("over", true, false);
+        FEAudio::PlayAnimAudioEvent(0xAA73EF33, 0, 0, 1);
+    }
+}
+
+void SHStrikerTimesBase::OnDonePointerLeave(int index, void* context)
+{
+    mDoneButton.SetPointerState(POINTER_BUTTON_NORMAL, index);
+    TLComponentInstance* done = FEFinder<TLComponentInstance, TLAT_COMPONENT>::FindOrDefault(mPresentation->m_currentSlide, "Layer", "done");
+    if (!mDoneButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        done->SetActiveSlide("off", true, false);
+    }
+}
+
+void SHStrikerTimesBase::OnDonePointerPress(int index, void* context)
+{
+    FEAudio::PlayAnimAudioEvent(0xF0AFD586, 0, 0, 1);
+    mDonePressed = true;
+    mState = NEWS_PHASE_EXITING_DONE;
+    mPresentation->SetActiveSlide("out", true);
+    mPresentation->Update(0.0f);
+    if (mDisplayMode != NEWS_CUP_GAME_RESULTS)
+    {
+        GetNavigationScene()->HideButtons();
+    }
+    if (mDisplayMode == NEWS_CHALLENGE_BRIEFING)
+    {
+        FEAudio::PlayAnimAudioEvent(0x4861E03D, 0, 0, 1);
+    }
+    FEFinder<TLComponentInstance, TLAT_COMPONENT>::FindOrDefault(mPresentation->m_currentSlide, "Layer", "done")->SetActiveSlide("down", true, false);
+}

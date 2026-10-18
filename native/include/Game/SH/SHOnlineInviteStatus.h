@@ -1,0 +1,41 @@
+#ifndef GAME_SH_ONLINE_INVITE_STATUS_H
+#define GAME_SH_ONLINE_INVITE_STATUS_H
+
+#include "Game/BaseSceneHandler.h"
+#include "Game/FE/feBackButton.h"
+
+class TLComponentInstance;
+
+enum eOnlineInviteStatus
+{
+    INVITE_STATUS_CONNECTING = 0,
+    INVITE_STATUS_ENTERING_LOBBY = 1,
+    INVITE_STATUS_CANCELED = 2,
+    INVITE_STATUS_DECLINED = 3,
+};
+
+class SHOnlineInviteStatus : public BaseSceneHandler
+{
+public:
+    SHOnlineInviteStatus();
+    virtual ~SHOnlineInviteStatus();
+    virtual void Update(float fDeltaT);
+    virtual void SceneCreated();
+
+    inline bool CanCancel();
+    void ShowConnectionError();
+    void OnConnectionErrorDismissed();
+
+    /* 0x01C */ eOnlineInviteStatus mStatus;
+    /* 0x020 */ float mReturnDelay;
+    /* 0x024 */ FEBackButton mBackButton;
+    /* 0x0FC */ bool mCanCancel;
+    /* 0x0FD */ bool mPopupActive;
+    /* 0x0FE */ u8 mPaddingFE[2];
+    /* 0x100 */ float mElapsedTime;
+    /* 0x104 */ bool mPointersInitialized;
+    /* 0x105 */ u8 mPadding105[3];
+    /* 0x108 */ TLComponentInstance* mStatusInstance;
+}; // size 0x10C
+
+#endif // GAME_SH_ONLINE_INVITE_STATUS_H

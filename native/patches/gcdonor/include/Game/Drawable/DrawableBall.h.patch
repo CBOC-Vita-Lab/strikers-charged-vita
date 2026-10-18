@@ -1,0 +1,40 @@
+diff --git a/include/Game/Drawable/DrawableBall.h b/include/Game/Drawable/DrawableBall.h
+index f65cf2a..f936759 100644
+--- a/include/Game/Drawable/DrawableBall.h
++++ b/include/Game/Drawable/DrawableBall.h
+@@ -28,6 +28,8 @@ struct BallTrailState
+     char _1D[3];
+ };
+ 
++#include "port/bitfield.h"
++
+ union DrawableBallFlags
+ {
+     DrawableBallFlags(u32 initial)
+@@ -36,8 +38,18 @@ union DrawableBallFlags
+     }
+ 
+     unsigned int value;
++    // NP: `value |= 0x80000000` sets `visible` in the original; reversed on little-endian targets (port/bitfield.h).
+     struct
+     {
++#if NP_BITFIELDS_LSB_FIRST
++        u32 unused : 7;
++        u32 passTargetIndex : 5;
++        u32 previousOwnerIndex : 5;
++        u32 ownerIndex : 5;
++        u32 lastTouchIndex : 5;
++        u32 transient : 4;
++        u32 visible : 1;
++#else
+         u32 visible : 1;
+         u32 transient : 4;
+         u32 lastTouchIndex : 5;
+@@ -45,6 +57,7 @@ union DrawableBallFlags
+         u32 previousOwnerIndex : 5;
+         u32 passTargetIndex : 5;
+         u32 unused : 7;
++#endif
+     } bits;
+ };
+ 

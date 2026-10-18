@@ -1,0 +1,740 @@
+#include "Game/AI/FielderDesireTypes.h"
+#include "NL/nlDLListContainer.inl"
+#include "Game/AI/AvoidableObject.h"
+#include "Game/CharacterTweaks.h"
+#include "Game/AI/AvoidController.h"
+#include "Game/AI/Scripts/ScriptQuestions.h"
+
+#include "Game/AI/AiUtil.h"
+#include "Game/AI/Desire.h"
+#include "Game/AI/Fielder.h"
+#include "Game/AI/Powerups.h"
+#include "Game/Game.h"
+#include "Game/GameTweaks.h"
+#include "Game/Physics/PhysicsCharacter.h"
+#include "Game/Physics/PhysicsPatch.h"
+#include "Game/Physics/PhysicsYoshiEgg.h"
+#include "Game/Player.h"
+#include "Game/Render/NPCManager.h"
+#include "Game/Render/ChainChomp.h"
+#include "Game/Team.h"
+#include "Game/SharedStaticStorage.h"
+#include "NL/nlList.h"
+#include "NL/nlMath.h"
+#include "Game/Render/YoshiEggObject.h"
+
+
+static const nlVector2 v2Zero = { 0.0f, 0.0f };
+static const nlVector2 sAvoidanceStrengthRange = { 0.5f, 1.0f };
+
+float gAvoidableTweaks[7][7] = {
+    { 1.0f, 1.0f, 3.0f, 0.0f, 5.0f, 6.5f, 5.5f },
+    { 2.0f, 4.0f, 8.0f, 0.0f, 6.0f, 10.0f, 15.0f },
+    { 3.0f, 3.0f, 5.0f, 0.0f, 4.0f, 6.5f, 5.0f },
+    { 3.0f, 2.0f, 4.0f, 0.0f, 3.0f, 10.0f, 10.0f },
+    { 3.0f, 2.0f, 4.0f, 0.0f, 3.0f, 6.0f, 5.0f },
+    { 4.0f, 1.5f, 5.0f, 0.0f, 3.0f, 8.0f, 8.0f },
+    { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+};
+
+static float sBananaAvoidanceStrengthScale = 0.5f;
+
+nlList<AvoidableObject> gAvoidableObjects(0, 0);
+int gNextAvoidableObjectId;
+
+static inline int AvoidableEnumToIndex(eAvoidableThings avoidable)
+{
+    if (avoidable == AVOID_EVERYTHING)
+    {
+        return 7;
+    }
+    for (int i = 0; i < NUM_AVOIDABLES; i++)
+    {
+        if ((1 << i) & (int)avoidable)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+AvoidableObject::AvoidableObject(int type)
+{
+    int nIndex = AvoidableEnumToIndex((eAvoidableThings)type);
+    mTweaks = gAvoidableTweaks[nIndex];
+    mType = type;
+    nlListAddEnd(&gAvoidableObjects.m_pStart, &gAvoidableObjects.m_pEnd, this);
+    mId = gNextAvoidableObjectId;
+    gNextAvoidableObjectId++;
+}
+
+AvoidableObject::~AvoidableObject()
+{
+    RemoveFromAvoidControllers(this);
+    nlListRemoveElement(&gAvoidableObjects.m_pStart, this, &gAvoidableObjects.m_pEnd);
+}
+
+int GetAvoidableIndex(eAvoidableThings avoidable)
+{
+    return AvoidableEnumToIndex(avoidable);
+}
+
+int GetAvoidableMask(int index)
+{
+    int avoidable = 1 << index;
+    if (index == 7)
+    {
+        avoidable = AVOID_EVERYTHING;
+    }
+    return avoidable;
+}
+
+bool AvoidableObject::IsWithinRange(
+    AvoidableObject* other, float range)
+{
+    const nlVector3& v3OtherPos = other->GetPosition();
+    const nlVector3& v3Pos = GetPosition();
+    nlVector2 v2Diff;
+    v2Diff.x = v3Pos.x - v3OtherPos.x;
+    v2Diff.y = v3Pos.y - v3OtherPos.y;
+    float fDist = nlVec2Length(v2Diff);
+    float fOtherRadius = other->GetRadius();
+    float fRadius = GetRadius();
+    float fGap = fDist - (fRadius + fOtherRadius);
+    if (range <= 0.0f)
+    {
+        range = other->mTweaks[2];
+    }
+    return fGap <= range;
+}
+
+bool AvoidableObject::GetClosestBoundaryPoint(
+    const nlVector3& target, nlVector3& point, nlVector3& dir)
+{
+    bool bInside = false;
+    const nlVector3& v3Pos = GetPosition();
+    nlVec3Sub(dir, target, v3Pos);
+    dir.z = 0.0f;
+    float fRadius = GetRadius();
+    float fLengthSq = dir.GetLengthSq3D();
+    if (fLengthSq < fRadius * fRadius)
+    {
+        bInside = true;
+    }
+    if (nlNear(fLengthSq, 0.0f))
+    {
+        nlPolar polar = { 0, 1.0f };
+        polar.a = nlRandom(0xFFFF);
+        nlPolarToCartesian(dir, polar);
+    }
+    else
+    {
+        float fScale = nlRecipSqrt(dir.GetLengthSq3D(), true);
+        nlVec3Scale(dir, fScale);
+    }
+    const nlVector3& v3Origin = GetPosition();
+    float fScale = GetRadius();
+    nlVec2Set(*(nlVector2*)&point, fScale * dir.x + v3Origin.x,
+        fScale * dir.y + v3Origin.y);
+    point.z = 0.0f;
+    return bInside;
+}
+
+const nlVector3& AvoidableFielder::GetPosition()
+{
+    return m_pFielder->m_DetChar.m_v3Position;
+}
+
+const nlVector3& AvoidableFielder::GetVelocity()
+{
+    return m_pFielder->m_DetChar.m_v3Velocity;
+}
+
+float AvoidableFielder::GetRadius()
+{
+    float fRadius = 0.0f;
+    if (m_pFielder->IsYoshiSuperPowerActive())
+    {
+        fRadius = gNPCManager->mpYoshiEgg->mPhysics->GetRadius();
+    }
+    else
+    {
+        m_pFielder->m_pPhysicsCharacter->GetRadius(&fRadius);
+    }
+    return fRadius;
+}
+
+float AvoidableFielder::GetAttackReach()
+{
+    float fRadius;
+    if (IsBowserSuperPowerActive(m_pFielder))
+    {
+        fRadius = 11.0f;
+    }
+    else if (m_pFielder->IsPeteySuperPowerActive())
+    {
+        fRadius = 11.0f;
+    }
+    else
+    {
+        float fTime = m_pFielder->m_DetChar.m_fPlayerScale;
+        float fValue = fn_8002BFA8(m_pFielder->GetTweaks(), fTime);
+        fRadius = GetFielderHitReach(m_pFielder) - fValue;
+    }
+    if (m_pFielder->IsYoshiSuperPowerActive())
+    {
+        fRadius += 2.0f;
+    }
+    return fRadius;
+}
+
+bool AvoidableFielder::IsWithinRange(
+    AvoidableObject* other, float range)
+{
+    int nIndex = m_pFielder->m_nCharacterIndex;
+    int otherType = other->mType;
+    cPlayer* pOther = 0;
+    int nOtherIndex = -1;
+    if (otherType == AVOID_FIELDERS)
+    {
+        pOther = ((AvoidableFielder*)other)->m_pFielder;
+        nOtherIndex = pOther->m_nCharacterIndex;
+    }
+    else if (otherType == AVOID_GOALIES)
+    {
+        pOther = ((AvoidableGoalie*)other)->m_pPlayer;
+        nOtherIndex = pOther->m_nCharacterIndex;
+    }
+    if (range <= 0.0f)
+    {
+        range = other->mTweaks[2];
+    }
+    if (nOtherIndex >= 0)
+    {
+        float fDist = g_pGame->fn_8005B748(nIndex, nOtherIndex);
+        float fOtherRadius = other->GetRadius();
+        float fRadius = GetRadius();
+        float fGap = fDist - (fRadius + fOtherRadius);
+        if (!m_pFielder->IsOnSameTeam(pOther))
+        {
+            fGap -= other->GetAttackReach();
+        }
+        return fGap <= range;
+    }
+    else if (otherType == AVOID_POLYGONS)
+    {
+        return other->IsWithinRange(this, range);
+    }
+    else
+    {
+        return AvoidableObject::IsWithinRange(other, range);
+    }
+}
+
+float AvoidableFielder::GetAvoidanceStrength(
+    AvoidableObject* other)
+{
+    float fSkill = fn_800A636C(g_pCurrentlyUpdatingTeam)->Off_Avoidance->GetValue();
+    float fMin = sAvoidanceStrengthRange.x;
+    float fMax = sAvoidanceStrengthRange.y;
+    float fStrength = InterpolateClamped(fMin, fMax, fSkill);
+    if (m_pFielder->m_pBall != 0)
+    {
+        fStrength *= 1.5f;
+    }
+
+    switch (other->mType)
+    {
+    case AVOID_GOALIES:
+        if (m_pFielder->IsOnSameTeam(
+                ((AvoidableGoalie*)other)->m_pPlayer))
+        {
+            fStrength *= 0.5f;
+        }
+        m_pFielder->IsYoshiSuperPowerActive();
+        break;
+    case AVOID_POLYGONS:
+    {
+        AvoidablePolygon* pPolygon
+            = (AvoidablePolygon*)other;
+        if (pPolygon->mPolygonType == AVOID_POLYGON_WALUIGI_WALL)
+        {
+            if (IsWaluigiSuperPowerActive(m_pFielder) && m_pFielder->m_pBall == 0
+                && fn_800DED80(m_pFielder) > 0.7f)
+            {
+                fStrength = 0.0f;
+            }
+            else
+            {
+                fStrength *= 1.3f;
+            }
+        }
+        else if (pPolygon->mPolygonType == AVOID_POLYGON_FIELD_BOUNDARY && m_pFielder->IsYoshiSuperPowerActive())
+        {
+            fStrength *= 0.3f;
+        }
+        else if (pPolygon->mPolygonType != AVOID_POLYGON_THWOMP)
+        {
+            if (fn_800DED80(m_pFielder))
+            {
+                fStrength *= 0.0f;
+            }
+        }
+        break;
+    }
+    case AVOID_FIELDERS:
+    {
+        cFielder* pOther
+            = ((AvoidableFielder*)other)->m_pFielder;
+        if (fn_800DED80(m_pFielder) && !Incapacitated(pOther))
+        {
+            fStrength *= 0.2f;
+        }
+        else
+        {
+            if (m_pFielder->IsMarking(pOther))
+            {
+                fStrength *= 0.4f;
+            }
+            float fValue = StrategicBallOwner(pOther);
+            if (pOther->IsOnSameTeam(m_pFielder) && fValue >= 0.7f)
+            {
+                fStrength *= 2.0f;
+            }
+        }
+        if (IsBowserSuperPowerActive(m_pFielder) || m_pFielder->IsPeteySuperPowerActive()
+            || m_pFielder->IsWarioSuperPowerActive())
+        {
+            cFielder* pTarget = 0;
+            DesireRunInDirection* pDesire
+                = (DesireRunInDirection*)GetFielderDesire(m_pFielder, FIELDER_DESIRE_RUN_IN_DIRECTION);
+            if (pDesire != 0 && pDesire->IsActive())
+            {
+                pTarget = pDesire->GetTarget();
+            }
+            if (pTarget == pOther)
+            {
+                fStrength *= 0.0f;
+            }
+            else
+            {
+                fStrength *= 0.2f;
+            }
+        }
+        break;
+    }
+    case AVOID_PATCHES:
+    {
+        switch (((AvoidablePatch*)other)->m_pPatch->m_Type)
+        {
+        case PATCH_FIRE_BALL:
+        case PATCH_LAVA_BALL:
+        case PATCH_LAVA_HOLE:
+        case PATCH_CHAIN_LIGHTNING:
+            fStrength *= 1.5f;
+            break;
+        }
+        break;
+    }
+    case AVOID_POWERUPS:
+    {
+        PowerupBase* pPowerup
+            = ((AvoidablePowerup*)other)->m_pPowerup;
+        if (pPowerup != 0 && pPowerup->m_eType == POWER_UP_BANANA)
+        {
+            fStrength *= sBananaAvoidanceStrengthScale;
+        }
+        break;
+    }
+    }
+    return fStrength;
+}
+
+float AvoidableFielder::GetAvoidanceWeight(
+    AvoidableObject* other)
+{
+    switch (other->mType)
+    {
+    case AVOID_FIELDERS:
+    {
+        bool bIgnore = false;
+        cFielder* pFielder = m_pFielder;
+        cFielder* pOther
+            = ((AvoidableFielder*)other)->m_pFielder;
+        if (!pFielder->IsStuck() && (pFielder->muInvincibleStatus & 1))
+        {
+            bIgnore = true;
+        }
+        if (bIgnore || pOther->IsInFallAction() || pOther->IsShattered()
+            || (!m_pFielder->IsOnSameTeam(pOther)
+                && (m_pFielder->IsMarioSuperPowerActive() || m_pFielder->IsLuigiSuperPowerActive())))
+        {
+            return 0.0f;
+        }
+        break;
+    }
+    case AVOID_POWERUPS:
+    {
+        PowerupBase* pPowerup
+            = ((AvoidablePowerup*)other)->m_pPowerup;
+        cFielder* pFielder = m_pFielder;
+        bool bIgnore = false;
+        if (!pFielder->IsStuck() && (pFielder->muInvincibleStatus & 8))
+        {
+            bIgnore = true;
+        }
+        if (bIgnore)
+        {
+            return 0.0f;
+        }
+        if (pPowerup != 0 && pPowerup->mtNoHitTimer.GetSeconds() > 0.0f
+            && fn_800DEAB4(m_pFielder) && pPowerup->m_pThrower == m_pFielder)
+        {
+            return 0.0f;
+        }
+        break;
+    }
+    }
+
+    float fWeight = other->mTweaks[0];
+    switch (other->mType)
+    {
+    case AVOID_FIELDERS:
+    {
+        cFielder* pOther
+            = ((AvoidableFielder*)other)->m_pFielder;
+        if (IsBowserSuperPowerActive(pOther) || pOther->IsPeteySuperPowerActive())
+        {
+            fWeight *= 2.5f;
+        }
+        if (m_pFielder->IsOnSameTeam(pOther))
+        {
+            fWeight *= 0.8f;
+        }
+        if (pOther->IsYoshiSuperPowerActive())
+        {
+            fWeight *= 3.0f;
+        }
+        break;
+    }
+    case AVOID_GOALIES:
+        if (m_pFielder->IsOnSameTeam(
+                ((AvoidableGoalie*)other)->m_pPlayer))
+        {
+            fWeight *= 0.8f;
+        }
+        else
+        {
+            fWeight *= 1.5f;
+        }
+        m_pFielder->IsYoshiSuperPowerActive();
+        break;
+    case AVOID_PATCHES:
+        switch (((AvoidablePatch*)other)->m_pPatch->m_Type)
+        {
+        case PATCH_MUCK_HOLE:
+            if (m_pFielder->m_DetChar.m_eCharacterClass == PETEY)
+            {
+                fWeight = 0.0f;
+            }
+            break;
+        case PATCH_GAS_BALL:
+            if (m_pFielder->m_DetChar.m_eCharacterClass == WARIO)
+            {
+                fWeight = 0.0f;
+            }
+            break;
+        case PATCH_HEAVENLY_LIGHT:
+            if (m_pFielder->m_DetChar.m_eCharacterClass == DIDDYKONG)
+            {
+                fWeight = 0.0f;
+            }
+            break;
+        }
+        break;
+    }
+    return fWeight;
+}
+
+const nlVector3& AvoidableGoalie::GetPosition()
+{
+    return m_pPlayer->m_DetChar.m_v3Position;
+}
+
+const nlVector3& AvoidableGoalie::GetVelocity()
+{
+    return m_pPlayer->m_DetChar.m_v3Velocity;
+}
+
+float AvoidableGoalie::GetRadius()
+{
+    float fRadius;
+    m_pPlayer->m_pPhysicsCharacter->GetRadius(&fRadius);
+    return fRadius;
+}
+
+const nlVector3& AvoidablePowerup::GetPosition()
+{
+    if (m_pPowerup != 0)
+    {
+        return m_pPowerup->m_v3Position;
+    }
+    if (m_pChainChomp != 0)
+    {
+        return m_pChainChomp->mv3Position;
+    }
+    return v3Zero;
+}
+
+const nlVector3& AvoidablePowerup::GetVelocity()
+{
+    if (m_pPowerup != 0)
+    {
+        return m_pPowerup->m_v3Velocity;
+    }
+    if (m_pChainChomp != 0)
+    {
+        return m_pChainChomp->mv3Velocity;
+    }
+    return v3Zero;
+}
+
+float AvoidablePowerup::GetRadius()
+{
+    float fRadius = 0.0f;
+    if (m_pPowerup != 0)
+    {
+        return m_pPowerup->GetRadius();
+    }
+    if (m_pChainChomp != 0)
+    {
+        return m_pChainChomp->mpPhysObj->GetRadius();
+    }
+    return fRadius;
+}
+
+bool AvoidablePowerup::IsMobile()
+{
+    if (m_pPowerup != 0 && m_pPowerup->m_eType == POWER_UP_BANANA)
+    {
+        return false;
+    }
+    return true;
+}
+
+const nlVector3& AvoidablePoint::GetPosition()
+{
+    return mPosition;
+}
+
+const nlVector3& AvoidablePoint::GetVelocity()
+{
+    return v3Zero;
+}
+
+float AvoidablePoint::GetRadius()
+{
+    return mRadius;
+}
+
+const nlVector3& AvoidablePatch::GetPosition()
+{
+    return m_pPatch->GetPosition();
+}
+
+const nlVector3& AvoidablePatch::GetVelocity()
+{
+    if (m_pPatch->m_Type == PATCH_CHAIN_LIGHTNING)
+    {
+        float fSpeed = m_pPatch->m_PathSpeed;
+        nlVec3Scale(mPathVelocity, m_pPatch->fn_80173CCC(), fSpeed);
+        return mPathVelocity;
+    }
+    return m_pPatch->m_Velocity;
+}
+
+float AvoidablePatch::GetRadius()
+{
+    float fRadius = m_pPatch->GetRadius();
+    if (m_pPatch->m_Type == PATCH_CHAIN_LIGHTNING)
+    {
+        fRadius *= 3.0f;
+    }
+    return fRadius;
+}
+
+bool AvoidablePatch::IsMobile()
+{
+    if (m_pPatch->m_Type == PATCH_LAVA_BALL || m_pPatch->m_Type == PATCH_CHAIN_LIGHTNING)
+    {
+        return true;
+    }
+    return false;
+}
+
+static inline void InitPolygon(AvoidablePolygon* pPolygon)
+{
+    for (int i = 0; i < 4; i++)
+    {
+        pPolygon->mPoints[i] = v2Zero;
+        pPolygon->mNormals[i] = v2Zero;
+    }
+    pPolygon->mOwner = 0;
+}
+
+AvoidablePolygon::AvoidablePolygon(
+    int polygonType, const nlVector3& a, const nlVector3& b, float width)
+    : AvoidableObject(AVOID_POLYGONS)
+{
+    InitPolygon(this);
+    mPolygonType = polygonType;
+    Update(*(const nlVector2*)&a, *(const nlVector2*)&b, width);
+}
+
+AvoidablePolygon::AvoidablePolygon(
+    int polygonType, const nlVector3& center, float length, float width)
+    : AvoidableObject(AVOID_POLYGONS)
+{
+    nlVector2 b;
+    nlVector2 a;
+    InitPolygon(this);
+    mPolygonType = polygonType;
+    nlVec2Set(a, center.x, center.y - 0.5f * width);
+    nlVec2Set(b, center.x, center.y + 0.5f * width);
+    Update(a, b, length);
+}
+
+AvoidablePolygon::~AvoidablePolygon()
+{
+}
+
+const nlVector3& AvoidablePolygon::GetPosition()
+{
+    *(nlVector2*)&mCenter = v2Zero;
+    for (int i = 0; i < 4; i++)
+    {
+        nlVec2Set(*(nlVector2*)&mCenter, mCenter.x + mPoints[i].x,
+            mCenter.y + mPoints[i].y);
+    }
+    nlVec2Set(*(nlVector2*)&mCenter, 0.25f * mCenter.x, 0.25f * mCenter.y);
+    mCenter.z = 0.0f;
+    return mCenter;
+}
+
+bool AvoidablePolygon::GetClosestBoundaryPoint(
+    const nlVector3& target, nlVector3& point, nlVector3& dir)
+{
+    int aFront[2] = { -1, -1 };
+    float fThreshold;
+    float fMinDist;
+    int nClosest;
+    nlVector2 aEdge[2];
+    nlVector4 line;
+    bool bInside;
+    int i;
+    int nFront;
+
+    fMinDist = 10000000000.0f;
+    fThreshold = 0.0f;
+    nFront = 0;
+    nClosest = -1;
+    const nlVector2& v2Target = *(const nlVector2*)&target;
+
+    for (i = 0; i < 4; i++)
+    {
+        nlMakePlaneFromPointNormal(line, mPoints[i], mNormals[i]);
+        float fDist = nlPlaneDot(v2Target, line);
+        bool bFront = fDist - fThreshold > 0.0001f || nlNear(fDist, fThreshold);
+        int nSide = 2;
+        if (bFront)
+        {
+            nSide = 1;
+        }
+        if (nSide == 1)
+        {
+            aFront[nFront] = i;
+            nFront++;
+        }
+        float fAbs = nlAbs(fDist);
+        if (fAbs < fMinDist)
+        {
+            fMinDist = fAbs;
+            nClosest = i;
+        }
+    }
+
+    if (nFront == 0)
+    {
+        bInside = true;
+        if (nClosest < 3)
+        {
+            aEdge[0] = mPoints[nClosest];
+            aEdge[1] = mPoints[nClosest + 1];
+        }
+        else
+        {
+            aEdge[0] = mPoints[nClosest];
+            aEdge[1] = mPoints[0];
+        }
+        *(nlVector2*)&point = GetClosestPointOnLineABFromPointC(
+            aEdge[0], aEdge[1], *(const nlVector2*)&target);
+        *(nlVector2*)&dir = mNormals[nClosest];
+    }
+    else
+    {
+        dir = v3Zero;
+        i = 0;
+        if (nFront > 0)
+        {
+            for (; i < nFront; i++)
+            {
+                nlVec2ScaleAdd(*(nlVector2*)&dir, 1.0f / (float)nFront,
+                    mNormals[aFront[i]], *(nlVector2*)&dir);
+            }
+        }
+        if (nFront == 2)
+        {
+            dir.z = 0.0f;
+            float fScale = nlRecipSqrt(dir.GetLengthSq3D(), true);
+            nlVec3Scale(dir, fScale);
+        }
+        if (aFront[0] < 3)
+        {
+            aEdge[0] = mPoints[aFront[0]];
+            aEdge[1] = mPoints[aFront[0] + 1];
+        }
+        else
+        {
+            aEdge[0] = mPoints[aFront[0]];
+            aEdge[1] = mPoints[0];
+        }
+        *(nlVector2*)&point = GetClosestPointOnLineABFromPointC(
+            aEdge[0], aEdge[1], *(const nlVector2*)&target);
+        bInside = false;
+    }
+    dir.z = 0.0f;
+    point.z = 0.0f;
+    return bInside;
+}
+
+bool AvoidablePolygon::IsWithinRange(
+    AvoidableObject* other, float range)
+{
+    nlVector3 v3Point;
+    nlVector3 v3Dir;
+    nlVector4 line;
+    bool bInside = GetClosestBoundaryPoint(other->GetPosition(), v3Point, v3Dir);
+    if (range <= 0.0f)
+    {
+        range = other->mTweaks[2];
+    }
+    if (!bInside)
+    {
+        nlMakePlaneFromPointNormal(line, v3Point, v3Dir);
+        float fDist
+            = nlPlaneDot(*(const nlVector2*)&other->GetPosition(), line);
+        float fRadius = other->GetRadius();
+        return fDist - fRadius <= range;
+    }
+    return bInside;
+}

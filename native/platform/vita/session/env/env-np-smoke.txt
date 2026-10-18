@@ -1,0 +1,5 @@
+# platform smoke application (platform layer + benchmarks, no game): the numbers the performance plan rests on.
+# Expect in log.txt: "[smoke] memory", "[smoke] cores" (does each of three cores deliver the single-core rate when all run at once?),
+# "[smoke] jobs" (speed-up of the fork-join helper lanes, with render-like and audio-like load on cores 1 and 2, workers' priority above / equal / below),
+# "[smoke] audio" (a second of 440 Hz), "[smoke] frames" and "===== done". About 60-120 s. np/docs/vita.md section 1.8 explains each line.
+NP_DATA_DIR=ux0:data/mscharged/np-data

@@ -1,0 +1,112 @@
+#include "Game/SH/SHNavigation.h"
+#include "Game/SH/SHGameResults.h"
+
+#include "Game/GameSceneManager.h"
+#include "Game/DB/BasicGameInfo.h"
+#include "Game/FE/feFinder.h"
+#include "Game/FE/feInput.h"
+#include "Game/FE/fePackage.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/tlTextInstance.h"
+#include "NL/nlPrint.h"
+#include "NL/nlString.h"
+
+
+
+static inline TLTextInstance* AsTextInstance(void* instance)
+{
+    if (instance == 0)
+        return 0;
+    return (TLTextInstance*)instance;
+}
+
+GameResultsScene::GameResultsScene()
+    : mTitleText(0)
+    , mSuppressMatchSummary(false)
+    , mGameData(0)
+    , mListener(0)
+    , mTournamentGame(0)
+{
+    mTitleBuffer[0] = 0;
+    g_pFEInput->PushExclusiveInputLock(this, -1);
+}
+
+GameResultsScene::~GameResultsScene()
+{
+    g_pFEInput->PopExclusiveInputLock(this);
+    SHNavigation* scene = GetNavigationScene();
+    if (scene != 0)
+        scene->RestoreButtonVisibility();
+}
+
+void GameResultsScene::SetResultsData(BasicGameInfo* data, BaseSceneHandler* listener, NetworkTournamentGame* game)
+{
+    mGameData = data;
+    mListener = listener;
+    mTournamentGame = game;
+}
+
+void GameResultsScene::OnDoneTransitionComplete()
+{
+    SHStrikerTimesBase::OnDoneTransitionComplete();
+    mListener->SetVisible(true);
+    GameSceneManager::Instance()->Pop();
+}
+
+void GameResultsScene::SceneCreated()
+{
+    SHStrikerTimesBase::SceneCreated();
+    unsigned long titleHash;
+    unsigned long summaryHash;
+    unsigned long layerHash;
+    FEPresentation* presentation;
+    presentation = mFEScene->m_pFEPackage->GetPresentation();
+    titleHash = nlStringLowerHash("title");
+    summaryHash = nlStringLowerHash("game summary");
+    layerHash = nlStringLowerHash("Layer");
+    TLTextInstance* text = AsTextInstance(FEFindInstance(presentation, nlStringLowerHash("game summary"), layerHash, summaryHash, titleHash, 0, 0));
+    if (text == 0)
+        text = &TLTextDefault::sInstance;
+    mTitleText = text;
+    mTitleText->SetStringId("CUP_GAME_RESULTS");
+    SHNavigation* scene = GetNavigationScene();
+    if (scene != 0)
+        scene->HideButtons();
+}
+
+void GameResultsScene::Update(float dt)
+{
+    SHStrikerTimesBase::Update(dt);
+    if (!mSuppressMatchSummary && mGameData != 0)
+    {
+        FEPresentation* presentation = mFEScene->m_pFEPackage->GetPresentation();
+        mSummary.DisplayMatchSummary(mGameData->mSides[0], mGameData->mSides[1], presentation);
+    }
+    NetworkTournamentGame* tournamentGame = mTournamentGame;
+    if (tournamentGame != 0)
+    {
+        switch (tournamentGame->mGameStatus)
+        {
+        case TOURN_GAME_STATUS_PLAYING:
+        {
+            char buffer[0x20];
+            int seconds = tournamentGame->mGameTimeDelta;
+            int minutes = seconds / 60;
+            int remainder = seconds % 60;
+            if (remainder < 10)
+                nlSNPrintf(buffer, 0x20, "%d:0%d", minutes, remainder);
+            else
+                nlSNPrintf(buffer, 0x20, "%d:%d", minutes, remainder);
+            nlStrToWcs(buffer, mTitleBuffer, 0x20);
+            mTitleText->SetString(mTitleBuffer);
+            break;
+        }
+        case TOURN_GAME_STATUS_SUDDEN_DEATH:
+            mTitleText->SetStringId("SUDDEN_DEATH");
+            break;
+        default:
+            mTitleText->SetStringId("CUP_GAME_RESULTS");
+            break;
+        }
+    }
+}

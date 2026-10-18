@@ -1,0 +1,361 @@
+#include "revolution/types.h"
+#include "NL/nlDLListContainer.inl"
+#include <revolution/sc.h>
+#include "Game/FE/fePresentation.inl"
+#include "Game/Audio/RegistryPools.h"
+
+#include "Game/SH/SHBootLoading.h"
+#include "Game/BaseSceneHandler.inl"
+#include "Game/Render/RLViewLayers.h"
+#include "Game/FE/FEAudio.h"
+
+#include "Game/Audio/AudioBankTable.h"
+#include "Game/Audio/AudioBundleManager.h"
+#include "Game/Audio/AudioSystem.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feFinder_impl.h"
+#include "Game/FE/feInput.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlImageInstance.h"
+#include "Game/FE/tlInstance.inl"
+#include "Game/main.h"
+#include "NL/nlColour.h"
+#include "NL/nlLocalization.h"
+#include "NL/nlString.h"
+#include "Game/FE/tlDefault.h"
+#include "np/boot.h"
+
+BootLoadingScene::BootLoadingScene()
+    : mElapsedTime(0.0f)
+    , mStrapAlpha(255.0f)
+    , mStrapDismissed(false)
+    , mHomeButtonWarning(0)
+    , mHomeButtonWarningActive(false)
+    , mWidescreen(false)
+{
+    mPhase = PhaseStrap;
+}
+
+BootLoadingScene::~BootLoadingScene()
+{
+}
+
+void BootLoadingScene::SceneCreated()
+{
+    FEPresentation* presentation = mPresentation;
+    if (g_pLocalization->m_CurrentLanguage == nlLocalization::LangJapanese)
+    {
+        if (IsWidescreen())
+        {
+            mStrapImage = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("strap"),
+                InlineHasher("Layer"), InlineHasher("strap_16_9_jp"));
+            TLImageInstance* image = FEFinder<TLImageInstance, 2>::FindOrDefault(presentation, InlineHasher("strap"),
+                InlineHasher("Layer"), InlineHasher("strap_jp"));
+            image->SetVisible(false);
+            mWidescreen = true;
+        }
+        else
+        {
+            mStrapImage = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("strap"),
+                InlineHasher("Layer"), InlineHasher("strap_jp"));
+            TLImageInstance* image = FEFinder<TLImageInstance, 2>::FindOrDefault(presentation, InlineHasher("strap"),
+                InlineHasher("Layer"), InlineHasher("strap_16_9_jp"));
+            image->SetVisible(false);
+        }
+    }
+    else if (IsWidescreen())
+    {
+        mStrapImage = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("strap"),
+            InlineHasher("Layer"), InlineHasher("strap_16_9_us"));
+        TLImageInstance* image = FEFinder<TLImageInstance, 2>::FindOrDefault(presentation, InlineHasher("strap"),
+            InlineHasher("Layer"), InlineHasher("strap_us"));
+        image->SetVisible(false);
+        mWidescreen = true;
+    }
+    else
+    {
+        mStrapImage = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("strap"),
+            InlineHasher("Layer"), InlineHasher("strap_us"));
+        TLImageInstance* image = FEFinder<TLImageInstance, 2>::FindOrDefault(presentation, InlineHasher("strap"),
+            InlineHasher("Layer"), InlineHasher("strap_16_9_us"));
+        image->SetVisible(false);
+    }
+    TLImageInstance* image = 0;
+    switch (g_Language)
+    {
+    case nlLocalization::LangFrench:
+    case nlLocalization::LangNAFrench:
+        if (IsWidescreen())
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_16_9_French"));
+        else
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_French"));
+        break;
+    case nlLocalization::LangGerman:
+        if (IsWidescreen())
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_16_9_German"));
+        else
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_German"));
+        break;
+    case nlLocalization::LangSpanish:
+    case nlLocalization::LangNASpanish:
+        if (IsWidescreen())
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_16_9_Spanish"));
+        else
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_Spanish"));
+        break;
+    case nlLocalization::LangItalian:
+        if (IsWidescreen())
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_16_9_Italian"));
+        else
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_Italian"));
+        break;
+    }
+    if (SCGetLanguage() == 6)
+    {
+        if (IsWidescreen())
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_16_9_Dutch"));
+        else
+            image = FEFinder<TLImageInstance, 2>::Find(presentation, InlineHasher("art"),
+                InlineHasher("Layer"), InlineHasher("strap_Dutch"));
+    }
+    if (image != 0)
+        mStrapImage->SetTextureResource(image->GetTextureResource());
+    // NP (W5 BOOT): no Wii Remote on the Vita: the strap and Nunchuk screens are skipped; the boot goes on as the Nunchuk phase
+    // would have left it (ratings in the US, else the developer logo). The scene and its loading are otherwise unchanged.
+    if (NpSkipStrapScreen())
+    {
+        mStrapDismissed = true;
+        mStrapAlpha = 0.0f;
+        mElapsedTime = 0.0f;
+        if (GetRegion() == GAME_REGION_US)
+            mPhase = PhaseRatings;
+        else
+            mPhase = PhaseDeveloperLogo;
+    }
+    NpBootMark("boot screens (the game's first picture)");
+    SetPhaseSlide();
+    mHomeButtonWarning = FEFinder<TLComponentInstance, 4>::FindOrDefault(presentation->m_currentSlide,
+        nlStringLowerHash("Layer"), nlStringLowerHash("no home"), 0, 0, 0, 0);
+    mHomeButtonWarning->SetVisible(false);
+    TLComponentInstance* component;
+    component = FEFinder<TLComponentInstance, 4>::FindOrDefault(presentation, InlineHasher("Slide1"),
+        InlineHasher("Layer"), InlineHasher("no home"));
+    component->SetVisible(false);
+    component = FEFinder<TLComponentInstance, 4>::FindOrDefault(presentation, InlineHasher("ESRB"),
+        InlineHasher("Layer"), InlineHasher("no home"));
+    component->SetVisible(false);
+    component = FEFinder<TLComponentInstance, 4>::FindOrDefault(presentation, InlineHasher("strap"),
+        InlineHasher("Layer"), InlineHasher("no home"));
+    component->SetVisible(false);
+    component = FEFinder<TLComponentInstance, 4>::FindOrDefault(presentation, InlineHasher("nunchuk"),
+        InlineHasher("Layer"), InlineHasher("no home"));
+    component->SetVisible(false);
+    component = FEFinder<TLComponentInstance, 4>::FindOrDefault(presentation, InlineHasher("NLG"),
+        InlineHasher("Layer"), InlineHasher("no home"));
+    component->SetVisible(false);
+    if (mWidescreen)
+        mHomeButtonWarning->SetActiveSlide("widescreen", true, false);
+    else
+        mHomeButtonWarning->SetActiveSlide("Slide1", true, false);
+}
+
+void BootLoadingScene::Update(float fDeltaT)
+{
+    BaseSceneHandler::Update(fDeltaT);
+    if (mPhase == PhaseRatings)
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() >= slide->GetStartTime() + slide->GetDuration())
+        {
+            mPhase = PhaseDeveloperLogo;
+            mElapsedTime = 0.0f;
+            SetPhaseSlide();
+        }
+    }
+    else if (mPhase == PhaseStrap)
+    {
+        if (mStrapDismissed)
+        {
+            int fadeRate = 2 * 255;
+            mStrapAlpha -= fadeRate * fDeltaT;
+            if (mStrapAlpha <= 0.0f)
+                mStrapAlpha = 0.0f;
+            nlColour colour = { 255, 255, 255, 0 };
+            colour.c[3] = (unsigned char)mStrapAlpha;
+            mStrapImage->SetAssetColour(colour);
+            if (mStrapAlpha <= 0.0f)
+            {
+                mElapsedTime = 0.0f;
+                mPhase = PhaseNunchuk;
+                SetPhaseSlide();
+            }
+        }
+        else
+        {
+            mElapsedTime += fDeltaT;
+            if (mElapsedTime >= 1.5f)
+            {
+                if (g_pFEInput->JustPressed(FE_ALL_PADS, 0x20, true, 0)
+                    || g_pFEInput->JustPressed(FE_ALL_PADS, 0x08, true, 0)
+                    || g_pFEInput->JustPressed(FE_ALL_PADS, 0x1E, true, 0)
+                    || g_pFEInput->JustPressed(FE_ALL_PADS, 0x1F, true, 0)
+                    || g_pFEInput->JustPressed(FE_ALL_PADS, 0x2A, true, 0)
+                    || g_pFEInput->JustPressed(FE_ALL_PADS, 0x2B, true, 0)
+                    || g_pFEInput->JustPressed(FE_ALL_PADS, 0x28, true, 0)
+                    || g_pFEInput->JustPressed(FE_ALL_PADS, 0x29, true, 0))
+                    mStrapDismissed = true;
+                if (mElapsedTime >= 15.5f)
+                    mStrapDismissed = true;
+            }
+        }
+    }
+    else if (mPhase == PhaseNunchuk)
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() >= slide->GetStartTime() + slide->GetDuration())
+        {
+            mElapsedTime = 0.0f;
+            if (GetRegion() == GAME_REGION_US)
+                mPhase = PhaseRatings;
+            else
+                mPhase = PhaseDeveloperLogo;
+            SetPhaseSlide();
+        }
+    }
+    else if (mPhase == PhaseDeveloperLogo)
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() >= slide->GetStartTime() + slide->GetDuration())
+        {
+            mPhase = PhaseFinished;
+            mElapsedTime = 0.0f;
+            g_pAudioSystem->GetBundleManager()->GetSoundMap()->UnloadBank(0x17);
+        }
+    }
+    else if (mPhase == PhaseFinished)
+    {
+        if (mElapsedTime >= 0.0f)
+        {
+            mElapsedTime += fDeltaT;
+            if (mElapsedTime >= 0.5f)
+            {
+                SetPhaseSlide();
+                mElapsedTime = -1.0f;
+            }
+        }
+    }
+    if (mHomeButtonWarningActive)
+    {
+        TLSlide* slide = mHomeButtonWarning->GetActiveSlide();
+        if (slide->GetCurrentTime() >= slide->GetStartTime() + slide->GetDuration())
+        {
+            mHomeButtonWarning->m_bVisible = false;
+            mHomeButtonWarningActive = false;
+        }
+    }
+}
+
+void BootLoadingScene::SetPhaseSlide()
+{
+    switch (mPhase)
+    {
+    case PhaseRatings:
+        mPresentation->SetActiveSlide("ESRB", true);
+        break;
+    case PhaseStrap:
+        mPresentation->SetActiveSlide("strap", true);
+        break;
+    case PhaseNunchuk:
+        mPresentation->SetActiveSlide("nunchuk", true);
+        break;
+    case PhaseFinished:
+        mPresentation->SetActiveSlide("Slide1", true);
+        break;
+    case PhaseDeveloperLogo:
+        mPresentation->SetActiveSlide("NLG", true);
+        FEAudio::PlaySound(0x17, 0xDE83984E, 0, 0);
+        break;
+    }
+    if (mHomeButtonWarning != 0)
+    {
+        float time = mHomeButtonWarning->GetActiveSlide()->m_time;
+        mHomeButtonWarning = FEFinder<TLComponentInstance, 4>::FindOrDefault(
+            mPresentation->GetActiveSlide(), "Layer", "no home");
+        if (mWidescreen)
+            mHomeButtonWarning->SetActiveSlide("widescreen", true, false);
+        else
+            mHomeButtonWarning->SetActiveSlide("Slide1", true, false);
+        if (mHomeButtonWarningActive)
+        {
+            TLSlide* slide = mHomeButtonWarning->GetActiveSlide();
+            if (time < slide->GetStartTime() + slide->GetDuration())
+                mHomeButtonWarning->m_bVisible = true;
+        }
+        mHomeButtonWarning->Update(time);
+    }
+}
+
+void BootLoadingScene::ShowHomeButtonWarning()
+{
+    if (mFEScene == 0 || mFEScene->mState != FE_SCENE_READY || mHomeButtonWarningActive)
+    {
+        return;
+    }
+
+    if (mPhase != PhaseStrap || !(mElapsedTime <= 2.0f))
+    {
+        mHomeButtonWarning->m_bVisible = true;
+        if (mWidescreen)
+            mHomeButtonWarning->SetActiveSlide("widescreen", true, false);
+        else
+            mHomeButtonWarning->SetActiveSlide("Slide1", true, false);
+        mHomeButtonWarningActive = true;
+    }
+}
+
+bool BootLoadingScene::IsBootScreenPending()
+{
+    FEPresentation* presentation = GetPresentation();
+    int alpha;
+    switch (mPhase)
+    {
+    case PhaseRatings:
+    {
+        nlColour colour = FEFinder<TLInstance, 2>::Find(presentation, "ESRB",
+            "Layer", "Text2")->GetAssetColour();
+        alpha = colour.c[3];
+        break;
+    }
+    case PhaseStrap:
+        alpha = 0;
+        break;
+    case PhaseNunchuk:
+    {
+        nlColour colour = FEFinder<TLInstance, 2>::Find(presentation, "nunchuk",
+            "Layer", "nunchuk")->GetAssetColour();
+        alpha = colour.c[3];
+        break;
+    }
+    case PhaseDeveloperLogo:
+    {
+        nlColour colour = FEFinder<TLInstance, 2>::Find(presentation, "NLG",
+            "Layer", "nlgameslogo")->GetAssetColour();
+        alpha = colour.c[3];
+        break;
+    }
+    default:
+        alpha = 255;
+        break;
+    }
+    return 255 > alpha;
+}

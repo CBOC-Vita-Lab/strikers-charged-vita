@@ -1,0 +1,16 @@
+// NP (gcdonor): bit-field order. Metrowerks on the PowerPC allocates the first-declared bit-field at the
+// MOST significant end of its storage unit; GCC and clang on a little-endian target (host32, armhf, vita)
+// allocate it at the LEAST significant end. Code that reaches the same word through both a named
+// bit-field and a mask or shift of the whole word (`flags.raw |= 0x80000000` next to `flags.bits.visible`)
+// is only consistent when the fields are declared in reverse on a little-endian target. Such structs
+// list their fields once under `#if NP_BITFIELDS_LSB_FIRST` (reversed) and once under `#else` (as decompiled).
+#ifndef PORT_BITFIELD_H
+#define PORT_BITFIELD_H
+
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define NP_BITFIELDS_LSB_FIRST 1
+#else
+#define NP_BITFIELDS_LSB_FIRST 0
+#endif
+
+#endif // PORT_BITFIELD_H

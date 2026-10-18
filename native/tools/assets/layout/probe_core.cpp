@@ -1,0 +1,6 @@
+#include "NL/gl/glModel.h"
+#include "NL/glx/glxTexture.h"
+#include "NL/glx/glxDisplayList.h"
+#include "Game/GL/GLTextureAnim.h"
+#include "Game/SAnim.h"
+#include "Game/InterpreterCore.h"

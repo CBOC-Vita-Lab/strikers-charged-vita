@@ -1,0 +1,63 @@
+#ifndef GAME_PAD_MONKEY_H
+#define GAME_PAD_MONKEY_H
+
+#include "NL/platpad.h"
+#include "types.h"
+
+class PadMonkey : public PadBackend
+{
+public:
+    PadMonkey(int padIndex);
+    virtual int GetClassID() { return sClassID; }
+    virtual ~PadMonkey() { }
+
+    virtual bool IsConnected();
+    virtual bool IsPressed(int button, bool remap);
+    virtual float GetPressure(int button, bool remap);
+    virtual float GetPressureDerivative(int button, bool remap);
+    virtual bool PlatJustPressed(int button, bool remap);
+    virtual bool PlatJustReleased(int button, bool remap);
+    virtual int GetButtonIndex(int button, bool remap) = 0;
+    virtual int GetButtonMask(int buttonIndex);
+    virtual float GetButtonStateTime(int button, bool remap);
+    virtual float AnalogLeftX();
+    virtual float AnalogLeftY();
+    virtual float AnalogRightX();
+    virtual float AnalogRightY();
+    virtual bool RumbleActive();
+    virtual void StartRumble(float duration, float intensity, float frequency);
+    virtual void StopRumble();
+    virtual void Update(float dt);
+    virtual int GetButtonCount() = 0;
+
+    void SetButtonChance(int button, float pct);
+
+    static int sClassID;
+
+    /* 0x19 */ bool m_isConnected;
+    /* 0x1C */ float* m_prevPressurePtr;
+    /* 0x20 */ float* m_currPressurePtr;
+    /* 0x24 */ float m_analogLeftX;
+    /* 0x28 */ float m_analogLeftY;
+    /* 0x2C */ float m_analogRightX;
+    /* 0x30 */ float m_analogRightY;
+    /* 0x34 */ float m_connectionChance;
+    /* 0x38 */ float* m_buttonChance;
+}; // size 0x3C
+
+class WiiPadMonkey : public PadMonkey
+{
+public:
+    WiiPadMonkey(int padIndex);
+    virtual ~WiiPadMonkey();
+
+    virtual int GetButtonIndex(int button, bool remap);
+    virtual int GetButtonMask(int buttonIndex);
+    virtual int GetButtonCount();
+
+    /* 0x3C */ float m_prevPressure[16];
+    /* 0x7C */ float m_currPressure[16];
+    /* 0xBC */ float m_buttonChances[16];
+}; // size 0xFC
+
+#endif // GAME_PAD_MONKEY_H

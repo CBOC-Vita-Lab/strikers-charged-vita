@@ -1,0 +1,24 @@
+Multiplayer 5/5: the game's own lockstep checksum and random seed, logged by NpLanSyncSeen (platform/sdk/net/np_lan.cpp) for every input message that carries sync data
+(every 4th tick; "[mp-lan] sync tick=.. m=.. crc=.. seed=.." every MSC_LAN_SYNC_LOG ticks, default 100) so that a pair's two logs can be compared tick by tick, and the
+test-only MSC_LAN_TEST_SCORE=tick:team goal hook (never set on a console). See np/docs/multiplayer.md.
+
+diff --git a/src/Game/InputRouter.cpp b/src/Game/InputRouter.cpp
+index fe252f4..cdf8f18 100644
+--- a/src/Game/InputRouter.cpp
++++ b/src/Game/InputRouter.cpp
+@@ -7,6 +7,7 @@
+ #include "Game/NetworkInput.h"
+ #include "Game/NetworkMessageRegistry.h"
+ #include "Game/NetworkSync.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ #include <string.h>
+ 
+@@ -559,6 +560,7 @@ void NetworkInputRouter::OnInputReady()
+                 mNetworkCRCs[machine] = message->mChecksum;
+                 mRemoteTicks[machine] = message->mFrame;
+                 mRandomSeeds[machine] = message->mRandomSeed;
++                NpLanSyncSeen(machine, message->mFrame, message->mChecksum, message->mRandomSeed);  // multiplayer (np/patches/mp)
+             }
+             if ((message->mFlags & 8) != 0)
+             {

@@ -1,0 +1,15 @@
+diff --git a/src/Game/Render/Warble.cpp b/src/Game/Render/Warble.cpp
+index 125274f..302d87b 100644
+--- a/src/Game/Render/Warble.cpp
++++ b/src/Game/Render/Warble.cpp
+@@ -165,7 +165,9 @@ static inline int IA8RowBits(int y)
+ {
+     IA8PackedRow row;
+     row.word = (y & ~3) << 6;
+-    row.fields.pixelY = y;
++    // NP: was `row.fields.pixelY = y`, a store into bits 2..3 of the word on the console (the first
++    // declared field is the most significant); on a little-endian target pixelY is bits 28..29.
++    row.word |= (y & 3) << 2;
+     return row.word;
+ }
+ 

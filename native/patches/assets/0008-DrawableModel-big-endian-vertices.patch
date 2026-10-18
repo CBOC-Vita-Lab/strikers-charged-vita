@@ -1,0 +1,30 @@
+diff --git a/src/Game/Drawable/DrawableModel.cpp b/src/Game/Drawable/DrawableModel.cpp
+index 0714f4b..845e5b1 100644
+--- a/src/Game/Drawable/DrawableModel.cpp
++++ b/src/Game/Drawable/DrawableModel.cpp
+@@ -1,4 +1,7 @@
+ #include "Game/Drawable/DrawableModel.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_endian.h" /* GX vertex arrays stay big-endian (NPA) */
++#endif
+ 
+ #include "Game/Debug/ShapeRender.h"
+ #include "NL/gl/glModel.h"
+@@ -46,9 +49,17 @@ void GetAABBDimensions(const glModel* model,
+ 
+             if (stream->stride == 12)
+             {
++#ifdef NP_NATIVE
++                /* the vertex array is a GX array: big-endian floats (NPA) */
++                const u8* src = (const u8*)stream->address + vert * stream->stride;
++                point.x = npa_rdf32(src);
++                point.y = npa_rdf32(src + 4);
++                point.z = npa_rdf32(src + 8);
++#else
+                 memcpy(&point,
+                     (u8*)stream->address + vert * stream->stride,
+                     12);
++#endif
+             }
+             else if (stream->stride == 6)
+             {

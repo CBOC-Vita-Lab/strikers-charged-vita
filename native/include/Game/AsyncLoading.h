@@ -1,0 +1,122 @@
+#ifndef GAME_ASYNC_LOADING_H
+#define GAME_ASYNC_LOADING_H
+
+#include "Game/InterpreterCore.h"
+
+class GLResourcePool;
+struct AudioResourceLoadOwner;
+struct EventConnection;
+
+struct GlobalEventConnectionOwner
+{
+    GlobalEventConnectionOwner()
+        : mOwner(0)
+    {
+    }
+
+    ~GlobalEventConnectionOwner();
+
+    /* 0x00 */ EventConnection* mOwner;
+};
+
+enum AsyncLoadingSequenceState
+{
+    ASYNC_LOADING_IDLE = 0,
+    ASYNC_LOADING_BOOT_TO_FE_BEGIN = 1,
+    ASYNC_LOADING_BOOT_TO_FE_RUN = 2,
+    ASYNC_LOADING_CLEAN_BOOT_BEGIN = 3,
+    ASYNC_LOADING_CLEAN_BOOT_RUN = 4,
+    ASYNC_LOADING_FE_TO_GAME_BEGIN = 5,
+    ASYNC_LOADING_FE_TO_GAME_RUN = 6,
+    ASYNC_LOADING_GAME_TO_FE_BEGIN = 7,
+    ASYNC_LOADING_GAME_TO_FE_RUN = 8,
+    ASYNC_LOADING_BOOT_TO_GAME_BEGIN = 9,
+    ASYNC_LOADING_BOOT_TO_GAME_RUN = 10,
+    ASYNC_LOADING_STADIUM_VIEWER_BEGIN = 11,
+    ASYNC_LOADING_STADIUM_VIEWER_RUN = 12,
+};
+
+enum AsyncLoadingResourceState
+{
+    ASYNC_RESOURCES_UNLOADED = 0,
+    ASYNC_RESOURCES_LOADED = 1,
+    ASYNC_RESOURCES_LOADING = 2,
+    ASYNC_RESOURCES_UNLOADING = 3,
+};
+
+enum AsyncLoadingResult
+{
+    ASYNC_LOADING_WAITING_FOR_BYTE_CODE = 0,
+    ASYNC_LOADING_NO_TRANSITION = 1,
+    ASYNC_LOADING_RUNNING = 2,
+    ASYNC_LOADING_FE_READY = 3,
+    ASYNC_LOADING_CLEAN_BOOT_COMPLETE = 4,
+    ASYNC_LOADING_GAME_READY = 5,
+    ASYNC_LOADING_RETURN_TO_FE = 6,
+    ASYNC_LOADING_STADIUM_OR_GAME_READY = 7,
+};
+
+class AsyncLoadingManager : public InterpreterCore
+{
+public:
+    AsyncLoadingManager();
+
+    virtual ~AsyncLoadingManager();
+    virtual void DoFunctionCall(unsigned int functionIndex);
+
+    static AsyncLoadingManager* Instance();
+    GLResourcePool* GetPersistentResourcePool();
+    void LoadTrophyTemplates();
+    void SetLoadingComment(const char* comment) { mLoadingComment = comment; }
+
+    /* 0x28 */ void* mByteCode;
+    /* 0x2C */ u32 mSequenceState;
+    /* 0x30 */ u32 mLoadingState;
+    /* 0x34 */ const char* mLoadingComment;
+    /* 0x38 */ u32 mPreviousStageTick;
+    /* 0x3C */ u32 m_pad3C;
+    /* 0x40 */ unsigned long long mSequenceStartTime;
+    /* 0x48 */ u32 mStageStartTick;
+    /* 0x4C */ void* mPoolResourceMark;
+    /* 0x50 */ void* mGameResourceMark;
+    /* 0x54 */ EventConnection* mGameOverConnection;
+}; // size 0x58
+
+extern bool g_VerboseAudio;
+extern bool g_bDumpMemoryStatsOnLoad;
+extern float g_fScriptBlockingWarningMS;
+extern float g_fYieldScriptBlockingTimeMS;
+
+extern "C" {
+void fn_80116988(AudioResourceLoadOwner*, void* bankName);
+void fn_80118B38(void* data, unsigned long size, void* userData);
+void fn_80118B50(AsyncLoadingManager* manager);
+u32 fn_80118B7C(AsyncLoadingManager* manager);
+void fn_80119054(AsyncLoadingManager* manager);
+void fn_801190A0(AsyncLoadingManager* manager);
+void fn_801190EC(AsyncLoadingManager* manager);
+void fn_80119138(AsyncLoadingManager* manager);
+void fn_80119184(AsyncLoadingManager* manager);
+void fn_801191D4(AsyncLoadingManager* manager);
+void fn_80119220(AsyncLoadingManager* manager);
+void fn_8011926C(AsyncLoadingManager* manager);
+void fn_80119454(AsyncLoadingManager* manager);
+void fn_80119528(AsyncLoadingManager* manager);
+void fn_80119B0C(AsyncLoadingManager* manager);
+void fn_80119EC0(AsyncLoadingManager* manager);
+void fn_8011A0A8(AsyncLoadingManager* manager);
+void fn_8011A2DC(void* value0, unsigned long value1, void*);
+void fn_8011A2E8(AsyncLoadingManager* manager);
+void fn_8011A570(AsyncLoadingManager* manager);
+void fn_8011A800(AsyncLoadingManager* manager);
+void fn_8011A9DC(AsyncLoadingManager* manager);
+void fn_8011B02C(AsyncLoadingManager* manager);
+void fn_8011B178(AsyncLoadingManager* manager);
+void fn_8011B2E4(AsyncLoadingManager* manager);
+void fn_8011B40C(AudioResourceLoadOwner*, void*);
+void fn_8011B418();
+void fn_8011B424(void*, unsigned long, unsigned long);
+void fn_8011B6E8(AsyncLoadingManager* manager);
+}
+
+#endif // GAME_ASYNC_LOADING_H

@@ -1,0 +1,132 @@
+# vgx profile script: nav_match60.txt cut short. Walk-out skipped; profile window = 300 frames of open play starting ~120 frames after it begins.
+# --- boot screens, intro movie, title -------------------------------------------------------
+# A dismisses the wrist-strap screen and skips the intro movie (scene 22); stops at the title.
+mash 100 6 scene == 0
+log STATE title screen
+# The title accepts A once its intro animation has finished; it is then popped (scene != 0).
+mash 100 10 scene != 0
+wait scene == 1
+# Without a save file the game asks to create one (pop-up scene 10, default button = yes);
+# the main menu keeps its buttons dead until the save is loaded or created.
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 4
+mash 100 10 scene == 1
+wait nbuttons >= 8
+endif
+# The port's menu navigation puts the pointer on the first button: Domination Mode (ctx 0).
+wait onctx == 0
+log STATE main menu, pointer on Domination Mode
+# --- Domination Mode: options -> captains -> sidekicks -> sides -> stadium ---------------------
+idle 10
+press 100
+wait scene == 27
+wait nbuttons >= 10
+# Gameplay options (skill, series, 3-minute limit) are left at their defaults: go down to DONE.
+mash 4 10 onoff == 0x1470
+idle 7
+press 100
+wait scene == 2
+wait nbuttons >= 10
+# Captains: the pointer starts on the home team's panel. A opens the captain grid for it.
+wait onoff == 0x920
+idle 10
+press 100
+idle 20
+# Grid button 2 (third in the top row) = captain 3, Donkey Kong.
+mash 4 10 onoff == 0x218
+idle 7
+press 100
+idle 14
+# Right twice, up: the away team's panel. A, then grid button 3 = captain 6, Waluigi.
+mash 2 10 onoff == 0x380
+idle 7
+mash 8 10 onoff == 0x9D4
+idle 7
+press 100
+idle 20
+mash 4 10 onoff == 0x2CC
+idle 7
+press 100
+idle 20
+mash 4 10 onoff == 0xBF0
+idle 7
+press 100
+log captains confirmed
+wait scene == 3
+wait nbuttons >= 10
+# Sidekicks: the default line-ups are kept; down to DONE.
+idle 7
+mash 4 10 onoff == 0x11C8
+idle 7
+press 100
+wait scene == 4
+wait nbuttons >= 3
+# Sides: the pointer starts on HOME. A joins the home team (the away team is the CPU's).
+wait onoff == 0x20
+idle 10
+press 100
+idle 10
+mash 4 10 onoff == 0x188
+idle 7
+press 100
+wait scene == 5
+# Stadium: the default one; the pointer starts on PLAY.
+wait onoff == 0x110
+idle 10
+press 100
+log stadium confirmed, loading the match
+wait ingame == 1
+# A skips the walk-out cutscene (match state 0); state 1 is the kick-off, 5 open play.
+mash 100 10 gs == 1
+log STATE kick-off
+wait gs == 5
+log STATE open play
+# --- play: stop once the match clock (seconds of open play) passes 62 -----------------------
+hold 4 0 71 12
+hold 4 0 66 -29
+hold 1 200 64 -34
+hold 6 0 64 -34
+hold 4 0 63 -36
+hold 6 0 56 -45
+hold 1 100 70 -15
+hold 2 0 70 -15
+log profile window: open play, 300 frames
+prof begin
+hold 5 0 -72 0
+hold 4 0 -30 66
+hold 4 0 -72 7
+hold 5 200 -37 -62
+hold 5 0 7 -72
+hold 8 0 -37 -62
+hold 1 800 6 -72
+hold 4 0 6 -72
+hold 4 0 -9 -71
+hold 8 0 -64 -34
+hold 6 0 -66 29
+hold 1 100 -66 29
+hold 8 0 -66 29
+hold 9 0 -29 66
+hold 7 0 -68 23
+hold 5 0 -72 0
+hold 4 0 -30 66
+hold 4 0 -72 7
+hold 5 200 -37 -62
+hold 5 0 7 -72
+hold 8 0 -37 -62
+hold 1 800 6 -72
+hold 4 0 6 -72
+hold 4 0 -9 -71
+hold 8 0 -64 -34
+hold 6 0 -66 29
+hold 1 100 -66 29
+hold 8 0 -66 29
+hold 9 0 -29 66
+hold 7 0 -68 23
+prof end
+log profile window end
+idle 2
+exit
+

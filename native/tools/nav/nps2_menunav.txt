@@ -1,0 +1,48 @@
+# NPS2 menu navigation in the real game (the controller layer, not the script, moves the pointer): boot to the main menu, check that the
+# navigation put the pointer on the first button, move with the D-pad, click with A, go back with B.
+# Run: tools/nps2_menunav.sh   (MSC_WATCH_BUTTONS=1 lists the live buttons and the pointer)
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0 1800
+log STATE main menu: the pointer is on the first button (ctx 0)
+idle 20
+press 0004 3 30
+idle 20
+log STATE after D-pad down
+press 0004 3 30
+idle 20
+log STATE after D-pad down (2)
+press 0008 3 30
+idle 20
+log STATE after D-pad up
+press 0002 3 30
+idle 20
+log STATE after D-pad right
+press 0001 3 30
+idle 20
+log STATE after D-pad left
+press 0008 3 30
+wait onctx == 0 600
+log STATE D-pad up from the left side: back on the first button
+press 0100 3 10
+wait scene == 27 900
+log STATE A clicked the first button: the options screen is up
+wait nbuttons >= 8 900
+idle 30
+log STATE options screen ready
+press 0200 3 10
+wait scene == 1 900
+log STATE B went back to the main menu
+wait nbuttons >= 8 900
+idle 30
+exit

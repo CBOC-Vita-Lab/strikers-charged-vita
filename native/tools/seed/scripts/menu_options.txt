@@ -1,0 +1,27 @@
+# W5-SEED generated script: main menu item 6 (options): A until the next state
+# A dismisses the wrist-strap screen and skips the intro movie; the title follows.
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+mash 100 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu, pointer on item 0
+idle 30
+
+mash 4 30 onctx == 6 900
+idle 20
+log STATE main menu item 6 under the pointer
+press 100
+idle 300
+mash 100 60 scene == 1 || scene == 99 600
+log STATE script end
+exit

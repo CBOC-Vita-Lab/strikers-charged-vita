@@ -1,0 +1,163 @@
+#include "revolution/types.h"
+#include "NL/nlDLListContainer.inl"
+#include "Game/Audio/AudioSource.h"
+#include "Game/Audio/XSoundCueHandle.h"
+#include "Game/Audio/AudioConfig.h"
+#include "Game/Audio/LowPassFilter.h"
+#include "Game/SharedStaticStorage.h"
+#include "NL/nlString.h"
+
+static u32 sLowPassFilterFrequency = 1000;
+static u32 sLowPassFilterEnabled = 1;
+
+SlotPool<LowPassFilterParameter>
+    LowPassFilterParameter::s_Pool(16, 16);
+SlotPool<LowPassFilter> LowPassFilter::s_Pool(16, 16);
+
+bool gLowPassFilterOverrideEnabled;
+
+LowPassFilterParameter::LowPassFilterParameter()
+    : m_On(0)
+    , m_Frequency(16000)
+{
+}
+
+void LowPassFilter::CreateParameter(unsigned int definition, const void*, bool disabled,
+    AudioEffectParameter** output)
+{
+    LowPassFilterParameter* parameter
+        = new LowPassFilterParameter;
+    *output = parameter;
+
+    if (gLowPassFilterOverrideEnabled)
+    {
+        m_Final.m_On = sLowPassFilterEnabled;
+        m_Final.m_Frequency = sLowPassFilterFrequency;
+        *parameter = m_Final;
+        return;
+    }
+
+    AudioConfigNode* node = ConfigFindDefinition(definition);
+
+    parameter->m_On = (u16)node->Get(nlStringLowerHash("on")).m_Words.m_Value;
+
+    u32 frequency = node->Get(nlStringLowerHash("freq")).m_Words.m_Value;
+    parameter->m_Frequency = disabled ? 0 : 16000 - frequency;
+}
+
+void LowPassFilter::BeginBlend()
+{
+    if (m_Initial.m_On != 0)
+    {
+        m_Final = m_Initial;
+        m_FilterCount = 1;
+    }
+    else
+    {
+        m_Final.m_Frequency = 0;
+        m_Final.m_On = 0;
+        m_FilterCount = 0;
+    }
+}
+
+void LowPassFilter::BlendParameter(
+    AudioEffectParameter* destination,
+    AudioEffectParameter* source)
+{
+    LowPassFilterParameter* destinationParameter
+        = (LowPassFilterParameter*)destination;
+    LowPassFilterParameter* sourceParameter
+        = (LowPassFilterParameter*)source;
+
+    s32 adjustment;
+    if (sourceParameter->m_Frequency != 0)
+    {
+        float amount;
+        if (sourceParameter->m_State.m_Flags.bytes[0])
+        {
+            amount = *(float*)sourceParameter->m_State.m_Current.pointer;
+            amount = amount >= 0.0f ? amount : 0.0f;
+            amount = amount <= 1.0f ? amount : 1.0f;
+        }
+        else
+        {
+            amount = sourceParameter->m_State.m_Target.scalar;
+            if (amount)
+            {
+                amount = sourceParameter->m_State.m_Current.scalar / amount;
+                amount = amount >= 0.0f ? amount : 0.0f;
+                amount = amount <= 1.0f ? amount : 1.0f;
+            }
+            else
+            {
+                amount = 1.0f;
+            }
+        }
+
+        adjustment = (u32)(sourceParameter->m_Frequency * amount);
+    }
+    else
+    {
+        float amount;
+        if (sourceParameter->m_State.m_Flags.bytes[0])
+        {
+            amount = *(float*)sourceParameter->m_State.m_Current.pointer;
+            amount = amount >= 0.0f ? amount : 0.0f;
+            amount = amount <= 1.0f ? amount : 1.0f;
+        }
+        else
+        {
+            amount = sourceParameter->m_State.m_Target.scalar;
+            if (amount)
+            {
+                amount = sourceParameter->m_State.m_Current.scalar / amount;
+                amount = amount >= 0.0f ? amount : 0.0f;
+                amount = amount <= 1.0f ? amount : 1.0f;
+            }
+            else
+            {
+                amount = 1.0f;
+            }
+        }
+
+        adjustment = -(u32)(16000.0f * amount);
+        if ((u32)-adjustment > destinationParameter->m_Frequency)
+            adjustment = -(s32)destinationParameter->m_Frequency;
+    }
+
+    destinationParameter->m_Frequency += adjustment;
+    destinationParameter->m_On = sourceParameter->m_On >= destinationParameter->m_On
+                                   ? sourceParameter->m_On
+                                   : destinationParameter->m_On;
+    ++m_FilterCount;
+}
+
+void LowPassFilter::EndBlend()
+{
+    m_Final.m_Frequency /= m_FilterCount;
+    if (m_Parameters.m_Head == 0 && m_Initial.m_On == 0)
+        m_Finished = true;
+}
+
+void LowPassFilter::ApplyToSound(void* handle)
+{
+    AudioSource* voices[8];
+    unsigned int count;
+    GetSoundSources(handle, voices, &count);
+
+    for (u16 i = 0; i < count; ++i)
+    {
+        u32 frequency = 16000 - m_Final.m_Frequency;
+        voices[i]->SetLowPassFilter(m_Final.m_On != 0,
+            frequency > 16000 ? 16000 : frequency,
+            false);
+    }
+}
+
+void LowPassFilter::OnParameterFinished(AudioEffectParameter* parameter)
+{
+    LowPassFilterParameter* filterParameter
+        = (LowPassFilterParameter*)parameter;
+    m_Initial.m_Frequency = filterParameter->m_Frequency;
+    m_Initial.m_On = m_Initial.m_Frequency != 0;
+}

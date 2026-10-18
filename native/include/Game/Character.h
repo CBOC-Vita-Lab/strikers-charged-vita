@@ -1,0 +1,373 @@
+#ifndef GAME_CHARACTER_H
+#define GAME_CHARACTER_H
+
+#include "Game/CharacterEffects.h"
+#include "NL/nlMath.h"
+#include "NL/nlAVLTree.h"
+#include "NL/nlTimer.h"
+#include "types.h"
+
+class Blinker;
+class BlurHandler;
+class cAnimInventory;
+class cHeadTrack;
+class EffectsTexturing;
+class EffectsGroup;
+class EmissionController;
+class GLSkinMesh;
+class PhysicsCharacter;
+class cPN_SAnimController;
+class cAnimInventory;
+class cPoseAccumulator;
+class cPoseNode;
+class glModel;
+struct CharacterInfo;
+class RunningChecksum;
+class DebugWriteCache;
+class cSHierarchy;
+class CharacterPhysicsData;
+class AnimRetargetList;
+struct cCharacterSFX;
+
+enum eCharacterClass
+{
+    CHARACTER_CLASS_INVALID = -1,
+    MARIO = 0,
+    BOWSER = 1,
+    DAISY = 2,
+    DONKEYKONG = 3,
+    LUIGI = 4,
+    PEACH = 5,
+    WALUIGI = 6,
+    WARIO = 7,
+    YOSHI = 8,
+    BOWSERJR = 9,
+    DIDDYKONG = 10,
+    PETEY = 11,
+    BIRDO = 12,
+    HAMMERBROS = 13,
+    KOOPA = 14,
+    TOAD = 15,
+    BOO = 16,
+    DRYBONES = 17,
+    MONTYMOLE = 18,
+    SHYGUY = 19,
+};
+
+enum eMovementState
+{
+    MOVEMENT_COAST = 0,
+    MOVEMENT_DECELERATE_EXPONENTIAL = 1,
+    MOVEMENT_FROM_ANIM = 2,
+    MOVEMENT_FROM_ANIM_SEEK = 3,
+    MOVEMENT_NONE = 4,
+    MOVEMENT_RUNNING = 5,
+    MOVEMENT_RUNNING_NO_TURN = 6,
+    MOVEMENT_STRAFING = 7,
+    MOVEMENT_UNUSED = 8,
+};
+
+enum eClassTypes
+{
+    CHARACTER = 0,
+    PLAYER = 1,
+    FIELDER = 2,
+    GOALIE = 3,
+    NUM_CLASSES = 4,
+};
+
+enum eCharacterDamageType
+{
+    DAMAGE_TEXTURE_STADIUM = 0,
+    DAMAGE_TEXTURE_DIRT = 1,
+    DAMAGE_TEXTURE_SCORCH = 2,
+};
+
+enum eCharacterModelType
+{
+    CharModel_Rigid = 0,
+    CharModel_Blend = 1,
+    CharModel_Num = 2,
+};
+
+struct DetChar
+{
+    void SyncLog(void* context, DebugWriteCache* cache);
+    DetChar()
+    {
+        Reset();
+    }
+
+    void Reset()
+    {
+        m_eMovementState = MOVEMENT_NONE;
+        m_aDesiredFacingDirection = 0;
+        m_aActualFacingDirection = 0;
+        m_aPrevFacingDirection = 0;
+        m_aDesiredMovementDirection = 0;
+        m_aActualMovementDirection = 0;
+        m_bFromAnimBlended = false;
+        m_bOnScreen = false;
+        m_fAnimAdjustBeginTime = 0.0f;
+        m_fAnimAdjustEndTime = 0.0f;
+        m_fDirectionSeekSpeed = 0.0f;
+        m_fDirectionSeekFalloff = 0.0f;
+        m_fAccel = 0.0f;
+        m_fDecel = 0.0f;
+        m_fDesiredSpeed = 0.0f;
+        m_fActualSpeed = 0.0f;
+        m_fLeanAmount = 0.0f;
+        m_nAnimTurnAdjust = 0;
+        m_fPlayerScale = 1.0f;
+        m_fMovementScale = 1.0f;
+        m_fDesiredPlayerScale = 1.0f;
+        m_fDesiredMovementScale = 1.0f;
+        nlVec3Set(m_v3Position, 0.0f, 0.0f, 0.0f);
+        nlVec3Set(m_v3PrevPosition, 0.0f, 0.0f, 0.0f);
+        nlVec3Set(m_v3Velocity, 0.0f, 0.0f, 0.0f);
+        nlVec3Set(m_v3PrevVelocity, 0.0f, 0.0f, 0.0f);
+        nlVec3Set(m_v3AnimMoveAdjust, 0.0f, 0.0f, 0.0f);
+        m_tScaleTimer.Clear();
+    }
+
+    /* 0x00 */ eCharacterClass m_eCharacterClass;
+    /* 0x04 */ eMovementState m_eMovementState;
+    /* 0x08 */ bool m_bFromAnimBlended;
+    /* 0x09 */ bool m_bOnScreen;
+    /* 0x0A */ u8 mPadding0A[2];
+    /* 0x0C */ nlVector3 m_v3Position;
+    /* 0x18 */ nlVector3 m_v3PrevPosition;
+    /* 0x24 */ nlVector3 m_v3Velocity;
+    /* 0x30 */ nlVector3 m_v3PrevVelocity;
+    /* 0x3C */ u16 m_aDesiredFacingDirection;
+    /* 0x3E */ u16 m_aActualFacingDirection;
+    /* 0x40 */ u16 m_aPrevFacingDirection;
+    /* 0x42 */ u16 m_aDesiredMovementDirection;
+    /* 0x44 */ u16 m_aActualMovementDirection;
+    /* 0x46 */ u8 mPadding46[2];
+    /* 0x48 */ float m_fAnimAdjustBeginTime;
+    /* 0x4C */ float m_fAnimAdjustEndTime;
+    /* 0x50 */ float m_fDirectionSeekSpeed;
+    /* 0x54 */ float m_fDirectionSeekFalloff;
+    /* 0x58 */ float m_fAccel;
+    /* 0x5C */ float m_fDecel;
+    /* 0x60 */ float m_fDesiredSpeed;
+    /* 0x64 */ float m_fActualSpeed;
+    /* 0x68 */ float m_fLeanAmount;
+    /* 0x6C */ s16 m_nAnimTurnAdjust;
+    /* 0x6E */ u8 mPadding6E[2];
+    /* 0x70 */ nlVector3 m_v3AnimMoveAdjust;
+    /* 0x7C */ float m_fPlayerScale;
+    /* 0x80 */ float m_fMovementScale;
+    /* 0x84 */ float m_fDesiredMovementScale;
+    /* 0x88 */ float m_fDesiredPlayerScale;
+    /* 0x8C */ Timer m_tScaleTimer;
+};
+
+class cCharacter
+{
+public:
+    virtual ~cCharacter();
+    cCharacter(eCharacterClass cc, const int* nModelID,
+        cSHierarchy* pHierarchy, cAnimInventory* pAnimInventory,
+        const CharacterPhysicsData* pPhysicsData,
+        float fPhysicsCapsuleHeight, float fPhysicsCapsuleWidth,
+        AnimRetargetList* pAnimRetargetList, int nIndex,
+        eClassTypes eNewClassType);
+    virtual void PostPhysicsUpdate();
+    virtual void PrePhysicsUpdate();
+    virtual void Unknown7(float dt);
+    virtual void PreUpdate(float dt);
+    virtual void ResetAnimState();
+    virtual void ResetEffects();
+    virtual void SetAnimID(int animID);
+    virtual void SetDesiredFacingDirection(unsigned short aDirection, bool bParam);
+    virtual void SetPosition(const nlVector3& position);
+    virtual void Update(float fDeltaT);
+    virtual void Reset(const nlVector3& v3Position, unsigned short aDirection);
+    virtual void SyncLog(void* context, DebugWriteCache* cache);
+    virtual void ChecksumState(RunningChecksum* pChecksum);
+
+    void SetAnimState(int animID, bool useBlendTime, float nonDefaultBlendTime,
+        bool restartCyclic, bool forceMirrorSwap);
+    void SetHammerTransformFrozen(bool frozen);
+    cPN_SAnimController* NewAnimController(int animID, bool bRestartCyclic,
+        bool bForceMirrorSwap,
+        void (*funcPlaybackSpeedCallback)(
+            unsigned int, cPN_SAnimController*),
+        unsigned int nPlaybackSpeedCallbackParam);
+    bool ShouldStartCrossBlend(int animID);
+    static void MatchAnimSpeedToCharacterSpeed(unsigned int nParam,
+        cPN_SAnimController* pController);
+
+    void UpdateMovementState(float fDeltaT);
+    void SetPlayerScale(float unidentifiedScale);
+    void fn_80022D58(float fDeltaT);
+
+    void SetElectrocutionTextureEnabled(bool isEnabled);
+    void fn_8001F1D8();
+    bool IsPlayingEffect(const EffectsGroup* effectGroup) const;
+    bool IsEffectDying(const EffectsGroup* effectGroup) const;
+    void EndEffect(const EffectsGroup* effectGroup);
+    void KillEffect(const EffectsGroup* effectGroup);
+    void PerformBlinking(GLSkinMesh* skinMesh, glModel* model) const;
+    void UpdateBlinking(float fDeltaT);
+    void StopPlayingAllTrackedSFX();
+    void SetVelocity(const nlVector3& velocity);
+    void CreateWorldMatrix();
+    void SetFacingDirection(
+        unsigned short dir, bool bSetMovementDirection);
+    static float SeekSpeedExponential(float currentValue,
+        float targetValue, float responsiveness, float deltaTime);
+    void InitMovementStrafing(float fDirectionSeekSpeed,
+        float fDirectionSeekFalloff, float fAccel, float fDecel);
+    void InitMovementRunningNoTurn(float fAccel, float fDecel);
+    void InitMovementRunning(float fDirectionSeekSpeed,
+        float fDirectionSeekFalloff, float fAccel, float fDecel);
+    void InitMovementNone(
+        float fDirectionSeekSpeed, float fDirectionSeekFalloff);
+    void InitMovementFromAnimSeek(
+        float fDirectionSeekSpeed, float fDirectionSeekFalloff);
+    void InitMovementFromAnim(short fDirectionSeekSpeed,
+        const nlVector3& v3AnimMoveAdjust, float fAdjustEndTime,
+        bool bBlended);
+    void InitMovementDecelerateExponential(float fDecel);
+    void InitMovementCoast();
+    void EndBlur();
+    nlVector3& GetPrevJointPosition(int jointIndex);
+    void GetJointPositionFuture(nlVector3* v3Out, int nAnimIndex,
+        int nJointIndex, float fTime, bool bAddRootTrans,
+        bool bAddRootRot, bool bUsePrevPosition, bool bParam4);
+    void GetCurrentAnimFuture(int nJointIndex, float fTime,
+        nlVector3& v3Out, nlVector3& v3FutureRoot,
+        unsigned short& outFacing);
+    nlVector3& GetJointPosition(int jointIndex) const;
+    s16 GetFacingDeltaToPosition(const nlVector3& position);
+    s16 CalcAnimTurnAdjust(unsigned short aFacingDirection, unsigned short aDesiredFacingDirection, int nAnimID, float fParam);
+    void AttachEffect(EmissionController* pEmissionController);
+    GLSkinMesh* GetSkinMesh(int modelType) const;
+    void PoseSkinMesh(cPoseAccumulator* pPoseAccumulator, int modelType);
+    void SetModelType(int modelType);
+    bool fn_8001C534(int modelType);
+    void fn_8001C574();
+    void fn_80022DAC(unsigned long uTextureID);
+    void fn_80022DE8(unsigned long uTextureID);
+    void fn_80022E24(unsigned long uTextureID);
+    void fn_80022E60();
+    void fn_80022D3C(float fParam0, float fParam1);
+    void fn_8001EF78(float fParam);
+    void AddRandomDirt();
+    float GetDirt() const { return m_Dirt; }
+    float GetMinDirt() const { return m_MinDirt; }
+    void fn_8001F1C0(int nParam);
+    void fn_8001EE74(float fParam0, float fParam1, float fParam2);
+    void fn_8001E304(float fSpeed, float fDeltaT);
+    void fn_8001EF6C(float movementScale);
+    void fn_8001DCE0(unsigned short aDirection);
+    bool fn_8001E160();
+    bool IsCaptain() const;
+    bool fn_8001E184();
+    const CharacterInfo* GetCharacterInfoData() const { return m_pCharacterInfo; }
+    cPN_SAnimController* GetCurrentAnimController() const { return m_pCurrentAnimController; }
+
+    int GetCurrentAnimID() const { return m_eAnimID; }
+
+    cAnimInventory* GetAnimInventory() const
+    {
+        return m_pAnimInventory;
+    }
+    eCharacterClass GetCharacterClass() const
+    {
+        return m_DetChar.m_eCharacterClass;
+    }
+    const nlVector3& GetPosition() const
+    {
+        return m_DetChar.m_v3Position;
+    }
+    const nlVector3& GetVelocity() const
+    {
+        return m_DetChar.m_v3Velocity;
+    }
+    u16 GetDesiredFacing() const { return m_DetChar.m_aDesiredFacingDirection; }
+    u16 GetActualFacing() const
+    {
+        return m_DetChar.m_aActualFacingDirection;
+    }
+    float GetActualSpeed() const
+    {
+        return m_DetChar.m_fActualSpeed;
+    }
+    float GetPlayerScale() const
+    {
+        return m_DetChar.m_fPlayerScale;
+    }
+    int GetHeadJointIndex() const
+    {
+        return m_nHeadJointIndex;
+    }
+    /* 0x004 */ const CharacterPhysicsData* m_pPhysicsData;
+    /* 0x008 */ GLSkinMesh* m_pSkinMesh[4];
+    /* 0x018 */ bool unknown_0x018[4];
+    /* 0x01C */ int m_ModelType;
+    /* 0x020 */ PhysicsCharacter* m_pPhysicsCharacter;
+    /* 0x024 */ DetChar m_DetChar;
+    /* 0x0B8 */ cAnimInventory* m_pAnimInventory;
+    /* 0x0BC */ cPoseAccumulator* m_pPoseAccumulator;
+    /* 0x0C0 */ cPoseNode* m_pPoseTree;
+    /* 0x0C4 */ cPoseNode** m_pAILayer;
+    /* 0x0C8 */ cPN_SAnimController* m_pCurrentAnimController;
+    /* 0x0CC */ int m_eAnimID;
+    /* 0x0D0 */ AnimRetargetList* m_pAnimRetargetList;
+    /* 0x0D4 */ cHeadTrack* m_pHeadTrack;
+    /* 0x0D8 */ int m_nHeadJointIndex;
+    /* 0x0DC */ int m_nBip01JointIndex_0xA4;
+    /* 0x0E0 */ int m_nSpine1JointIndex;
+    /* 0x0E4 */ int m_nLFootJointIndex;
+    /* 0x0E8 */ int m_nRFootJointIndex;
+    /* 0x0EC */ const char* m_szEffectsName;
+    /* 0x0F0 */ eClassTypes m_eClassType;
+    /* 0x0F4 */ bool m_bIsUsingElectrocutionTexture;
+    /* 0x0F5 */ u8 unknown_0x0F5[3];
+    /* 0x0F8 */ cCharacterSFX* m_pCharacterSFX;
+    /* 0x0FC */ void* m_pad0FC;
+    /* 0x100 */ u32 m_uNormalTextureID;
+    /* 0x104 */ u32 m_uSwapTextureID;
+    /* 0x108 */ u32 m_uShockTextureID;
+    /* 0x10C */ ResolvedTexture m_ResolvedNormalTexture;
+    /* 0x110 */ ResolvedTexture m_ResolvedSwapTexture;
+    /* 0x114 */ ResolvedTexture m_ResolvedShockTexture;
+    /* 0x118 */ bool m_bTexturesResolved;
+    /* 0x119 */ u8 unknown_0x119[3];
+    /* 0x11C */ const CharacterInfo* m_pCharacterInfo;
+    /* 0x120 */ int m_nCharacterIndex;
+    /* 0x124 */ nlMatrix4 m_m4WorldMatrix;
+    /* 0x164 */ float m_Dirt;
+    /* 0x168 */ float m_MinDirt;
+    /* 0x16C */ int m_nDamageType;
+    /* 0x170 */ BlurHandler* m_pBlurHandler;
+    /* 0x174 */ Blinker* m_pBlinker;
+    /* 0x178 */ float m_fOpacity;
+    /* 0x17C */ bool m_bShadowVisible;
+    /* 0x17D */ bool m_bCaughtInPhoto;
+    /* 0x17E */ bool m_bLeftPropAnimated;
+    /* 0x17F */ bool m_bRightPropAnimated;
+    /* 0x180 */ bool m_bHammerTransformFrozen;
+    /* 0x181 */ bool m_bPacketAVisible;
+    /* 0x182 */ bool m_bPacketBVisible;
+    /* 0x183 */ u8 unknown_0x183;
+    /* 0x184 */ nlQuaternion m_qFrozenHammerRotation;
+    /* 0x194 */ nlVector3 m_v3FrozenHammerTranslation;
+    /* 0x1A0 */ float m_fFrozenHammerScale;
+    /* 0x1A4 */ float m_fMegaBlendRate;
+    /* 0x1A8 */ float m_fMegaBlend;
+    /* 0x1AC */ float m_fMegaBlendTarget;
+    /* 0x1B0 */ EffectsTexturing* m_pEffectsTexturing;
+    /* 0x1B4 */ nlVector3 m_v3ScreenPosition;
+    /* 0x1C0 */ nlAVLTreeSlotPool<unsigned long, nlVector3,
+        DefaultKeyCompare<unsigned long> > m_JointPositionCache;
+
+private:
+    void CaptureHammerTransform();
+}; // total size: 0x1E4
+
+#endif // GAME_CHARACTER_H

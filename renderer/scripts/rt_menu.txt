@@ -1,0 +1,3 @@
+# real-time timeline: A at 1500 (skip movie), A at 1590 (start screen -> main menu), then idle
+1500 1503 100 0 0
+1590 1593 100 0 0

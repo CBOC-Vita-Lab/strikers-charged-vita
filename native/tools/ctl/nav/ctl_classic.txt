@@ -1,0 +1,303 @@
+# W5 CTL generated (tools/ctl/gen_scripts.py): classic. Vita-button commands only; the layout maps them.
+# Counters: platform/sdk/input/np_game_input.cpp ctl_observe ([ctl] summary at the end); the run stops when every one of
+# cpass clob cshot cchip cturbo cdeke chit cslide cswitch ccycle cmeterpress is non-zero and a minigame was played with buttons / touch (or at MSC_MAX_FRAMES).
+vmash cross 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=0 home=0 away=7 hsk=0,1,2 ask=3,4,5 human=0 skill=2 time=300
+wait ingame == 1 4000
+log STATE match object
+wait gs == 5 6000
+log STATE open play
+stopwhen csavea > 0 || cshake > 0 && cpass > 0 && clob > 0 && cshot > 0 && cchip > 0 && cturbo > 0 && cdeke > 0 && chit > 0 && cslide > 0 && cswitch > 0 && ccycle > 0 && cmeterpress > 0
+repeat 400
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 0 && cmega < 3
+log ACTION mega strike try (captain holds square)
+vchase 15 none goal
+try vmash square 1 cmode == 2 || chave == 0 200
+if cmode == 2
+log MINIGAME our mega strike meter (square)
+try vmash square 12 cmode != 2 300
+endif
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION pass
+vchase 10 none goal
+vpress cross 3 20
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION big hit
+vchase 10 none ball
+vpress triangle 3 15
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION deke (right stick)
+vchase 8 none goal
+vchase 4 none goal 72 0
+idle 15
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION switch player
+vpress cross 3 15
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION lob pass
+vchase 10 none goal
+vpress l+cross 3 25
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION slide tackle
+vchase 10 none ball
+vpress square 3 20
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION turbo (chip ahead)
+vchase 10 none goal
+vchase 3 l goal
+vchase 30 none ball
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION cycle item
+vpress select 3 15
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION deke (D-pad)
+vchase 8 none goal
+vhold 3 right
+idle 15
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION big hit
+vchase 10 none ball
+vpress triangle 3 15
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION shot
+vchase 20 none goal
+vchase 4 square goal
+idle 30
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION switch player
+vpress cross 3 15
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION pass
+vchase 10 none goal
+vpress cross 3 20
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION slide tackle
+vchase 10 none ball
+vpress square 3 20
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION chip shot
+vchase 15 none goal
+vchase 6 l+square goal
+vchase 4 l goal
+idle 30
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION cycle item
+vpress select 3 15
+endif
+if cmode == 1
+log MINIGAME mega save
+try vmash cross 8 cmode != 1 600
+endif
+if cmode == 2
+log MINIGAME our mega strike meter
+try vmash square 10 cmode != 2 600
+endif
+if cmode == 3
+log MINIGAME shakedown
+try vmash select 6 cmode != 3 600
+endif
+if chave == 1 && cplayer == 4
+log ACTION keeper pass
+vpress cross 3 20
+endif
+if chave == 1 && cplayer != 4
+log ACTION cycle item
+vpress select 3 15
+endif
+if chave == 0
+vchase 12 none ball
+endif
+if cball == 1
+log ACTION big hit
+vchase 10 none ball
+vpress triangle 3 15
+endif
+if chave == 1 && citems > 0
+log ACTION use item
+vpress circle 3 20
+endif
+endrepeat
+log STATE script end
+exit

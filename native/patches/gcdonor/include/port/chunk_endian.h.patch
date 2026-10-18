@@ -1,0 +1,97 @@
+diff --git a/include/port/chunk_endian.h b/include/port/chunk_endian.h
+new file mode 100644
+index 0000000..be27337
+--- /dev/null
++++ b/include/port/chunk_endian.h
+@@ -0,0 +1,91 @@
++// NP (gcdonor): in-place byte swap of the nlChunk headers of a big-endian chunk tree, for the
++// formats that use the container (.sanim, .shier, .rlg models, .cam, .nis, retarget lists...).
++//
++// nlChunk header: u32 ID (bit 31 = container whose payload is a run of chunks, bits 24..27 = payload
++// alignment exponent, low 24 bits = type) and u32 size in payload bytes excluding the 8-byte header;
++// the next sibling starts at the payload end rounded up to 4 (nlChunk::GetNextChunk).
++// Checked against every .sanim (340), .shier (177), .rlg (185), .cam (45) and .nis (457) of the US disc:
++// "recurse iff bit 31" walks all of them with no size past its container and no aligned payload
++// past its own end (tests/chunk_endian_test.cpp). Unlike the GameCube port's per-format container
++// list (bmd_endian.c) this needs no table; leaf payloads are the loaders' business.
++#ifndef PORT_CHUNK_ENDIAN_H
++#define PORT_CHUNK_ENDIAN_H
++
++#include <stdint.h>
++#include <string.h>
++#include "port/endian.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// Swaps the headers of every chunk in [p, p + size) and of the containers inside them, in place,
++// and returns how many chunks were converted. Returns 0 (and leaves the later chunks untouched, the
++// earlier ones converted) when a chunk is sized past its container, a payload alignment lands past
++// the chunk's end, or the tree is deeper than any real file (8): the game's own walk would read past
++// the buffer on any of those, so the caller must refuse the tree.
++static inline unsigned long port_chunk_swap_tree_range(uint8_t* p, uint8_t* end, int depth)
++{
++    unsigned long n = 0;
++    if (depth > 8)
++        return 0;
++    while (p + 8 <= end)
++    {
++        uint32_t id = port_be32(p);
++        uint32_t size = port_be32(p + 4);
++        uintptr_t payload = (uintptr_t)(p + 8);
++        unsigned shift = (id & 0x0F000000u) >> 24;
++        // A chunk may run past its container by the alignment padding of its own payload: files
++        // (the empty .cph physics sets) are stored without the padding of their last chunk, so the
++        // declared extent exceeds the file by up to 7 bytes. More than that is a bad size.
++        if (size > (uint32_t)(end - p - 8) && size - (uint32_t)(end - p - 8) > 7u)
++            return 0;
++        if (shift != 0)
++        {
++            uintptr_t alignment = (uintptr_t)1 << shift;
++            payload = (payload + alignment - 1) & ~(alignment - 1);
++        }
++        if (payload > (uintptr_t)(p + 8) + size)
++            return 0;
++        memcpy(p, &id, 4);
++        memcpy(p + 4, &size, 4);
++        n++;
++        if (id & 0x80000000u)
++        {
++            uint8_t* childEnd = p + 8 + size;
++            if (childEnd > end)
++                childEnd = end;
++            unsigned long m = port_chunk_swap_tree_range(p + 8, childEnd, depth + 1);
++            if (m == 0 && size >= 8)
++                return 0;
++            n += m;
++        }
++        p += 8 + ((size + 3u) & ~3u);
++        if (p > end)
++            p = end;
++    }
++    return n;
++}
++
++static inline unsigned long port_chunk_swap_tree(void* data, unsigned long size)
++{
++    if (data == NULL || size < 8)
++        return 0;
++    return port_chunk_swap_tree_range((uint8_t*)data, (uint8_t*)data + size, 0);
++}
++
++
++// The loaders call this one: it swaps (and validates) unless NP_DISC_HOST_ORDER says the file layer
++// already converted the buffer (see port/endian.h), in which case it only reports success.
++static inline unsigned long port_disc_chunk_swap_tree(void* data, unsigned long size)
++{
++    if (!PORT_DISC_IS_BE)
++        return 1;
++    return port_chunk_swap_tree(data, size);
++}
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif // PORT_CHUNK_ENDIAN_H

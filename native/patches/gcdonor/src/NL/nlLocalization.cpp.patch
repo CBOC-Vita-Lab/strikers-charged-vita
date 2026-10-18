@@ -1,0 +1,53 @@
+diff --git a/src/NL/nlLocalization.cpp b/src/NL/nlLocalization.cpp
+index cab17e4..2dbbc9f 100644
+--- a/src/NL/nlLocalization.cpp
++++ b/src/NL/nlLocalization.cpp
+@@ -1,4 +1,5 @@
+ #include "NL/nlLocalization.h"
++#include "port/endian.h"
+ 
+ #include <string.h>
+ 
+@@ -48,10 +49,41 @@ const char nlLocalization::Thumbprint[5] = "NLOC";
+ 
+ nlLocalization* g_pLocalization;
+ 
+-static void OnTableLoaded(LOCHeader* pFile, unsigned long, nlLocalization* pLocalization)
++static void OnTableLoaded(LOCHeader* pFile, unsigned long fileSize, nlLocalization* pLocalization)
+ {
+     pLocalization->m_pFile = pFile;
+ 
++    // NP: the callback also runs with a null buffer when the file is missing.
++    if (pFile == 0)
++    {
++        pLocalization->m_LookupTable = 0;
++        pLocalization->m_FirstString = 0;
++        return;
++    }
++
++    // NP: big-endian on disc. First the four u32s behind the thumbprint (the Version check below
++    // reads one of them), then the lookup table (hash + offset per string), then every 16-bit
++    // character up to the end of the file. A table whose count does not fit the file is refused
++    // by clearing Version rather than walked out of bounds.
++    if (fileSize >= sizeof(LOCHeader) && memcmp(pFile, nlLocalization::Thumbprint, 4) == 0)
++    {
++        port_disc32_array((char*)pFile + 4, 4);
++        if ((unsigned long long)pFile->StringCount * 8ULL + sizeof(LOCHeader) <= fileSize)
++        {
++            u32* pLookup = (u32*)(pFile + 1);
++            port_disc32_array(pLookup, pFile->StringCount * 2);
++
++            u16* pStrings = (u16*)&pLookup[pFile->StringCount * 2];
++            const char* pEnd = (const char*)pFile + fileSize;
++            for (u16* w = pStrings; (const char*)(w + 1) <= pEnd; w++)
++                *w = port_disc16(w);
++        }
++        else
++        {
++            pFile->Version = 0;
++        }
++    }
++
+     if (memcmp(pFile, nlLocalization::Thumbprint, 4) != 0 || pFile->Version != 1
+         || pFile->Language != nlLocalization::LanguageId[pLocalization->m_CurrentLanguage])
+     {

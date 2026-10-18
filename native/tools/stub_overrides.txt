@@ -1,0 +1,1 @@
+# symbol  data|func|skip [return ctype]   (overrides for tools/gen_stubs.py)

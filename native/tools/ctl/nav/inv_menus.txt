@@ -1,0 +1,44 @@
+# W5 CTL inventory: the title, the main menu, the multiplayer (LAN) screen, Strikers 101. GL frame dumps every N frames.
+vmash cross 20 scene == 0
+log STATE title screen
+idle 60
+vmash cross 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file
+idle 60
+wait nbuttons >= 2
+idle 10
+vmash cross 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0 1800
+log STATE main menu
+idle 90
+# the multiplayer button (ring ctx 1, panel 300,140): the LAN screen
+touch 300 140 3 0
+try wait scene == 24 300
+idle 150
+log STATE multiplayer screen
+vpress circle 3 0
+try wait scene == 1 600
+try wait nbuttons >= 8 900
+idle 60
+# Strikers 101
+scene 76
+idle 200
+log STATE strikers 101 select
+vpress cross 3 0
+idle 200
+log STATE strikers 101 after cross
+vpress cross 3 0
+idle 300
+log STATE strikers 101 after cross 2
+vpress cross 3 0
+idle 400
+log STATE strikers 101 after cross 3
+vpress cross 3 0
+idle 400
+log STATE strikers 101 after cross 4
+exit

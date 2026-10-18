@@ -1,0 +1,127 @@
+diff --git a/src/Game/NetMeshEdge.cpp b/src/Game/NetMeshEdge.cpp
+index e7c6178..9eeaecc 100644
+--- a/src/Game/NetMeshEdge.cpp
++++ b/src/Game/NetMeshEdge.cpp
+@@ -1,4 +1,7 @@
+ #include "Game/Physics/NetMeshEdge.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_endian.h" /* GX vertex arrays stay big-endian (NPA) */
++#endif
+ 
+ static inline bool HasStream(const glModelPacket* packet, int streamID)
+ {
+@@ -26,7 +29,20 @@ const nlVector3* NetMeshModelLoader::NetMeshVertex::GetPosition() const
+     const glModelStream* layout = GetStream(mpPacket, 1);
+     u8 stride = layout->stride;
+     s8* base = (s8*)layout->address;
++#ifdef NP_NATIVE
++    /* the position array is a GX array (big-endian floats): decode into a small ring of scratch vectors,
++       the callers copy the value out immediately */
++    static nlVector3 sScratch[4];
++    static unsigned sNext;
++    nlVector3* out = &sScratch[sNext++ & 3];
++    const u8* src = (const u8*)(base + mIndex * stride);
++    out->x = npa_rdf32(src);
++    out->y = npa_rdf32(src + 4);
++    out->z = npa_rdf32(src + 8);
++    return out;
++#else
+     return (const nlVector3*)(base + mIndex * stride);
++#endif
+ }
+ 
+ void NetMeshModelLoader::NetMeshVertex::GetNormal(nlVector3& normal) const
+@@ -59,6 +75,12 @@ void NetMeshModelLoader::NetMeshVertex::GetNormal(nlVector3& normal) const
+     else if (layout->stride == 12)
+     {
+         float f = 1.0f;
++#ifdef NP_NATIVE
++        const u8* n = (const u8*)layout->address + mIndex * layout->stride;
++        normal.x = npa_rdf32(n) / f;
++        normal.y = npa_rdf32(n + 4) / f;
++        normal.z = npa_rdf32(n + 8) / f;
++#else
+         normal.x = *(const float*)((const u8*)layout->address
+                                    + mIndex * layout->stride)
+                  / f;
+@@ -68,6 +90,7 @@ void NetMeshModelLoader::NetMeshVertex::GetNormal(nlVector3& normal) const
+         normal.z = *(const float*)((const u8*)layout->address
+                                    + mIndex * layout->stride + 8)
+                  / f;
++#endif
+     }
+ }
+ 
+@@ -78,23 +101,36 @@ void NetMeshModelLoader::NetMeshVertex::GetTextureCoord(
+ 
+     if (layout->stride == 4)
+     {
++#ifdef NP_NATIVE
++        s16 texCoordX = (s16)npa_rd16((const u8*)layout->address + mIndex * layout->stride);
++#else
+         s16 texCoordX = *(const s16*)((const u8*)layout->address
+                                       + mIndex * layout->stride);
++#endif
+         texCoord.x = (float)texCoordX;
+         texCoord.x *= 0.0009765625f;
++#ifdef NP_NATIVE
++        s16 texCoordY = (s16)npa_rd16((const u8*)layout->address + mIndex * layout->stride + 2);
++#else
+         s16 texCoordY = *(const s16*)((const u8*)layout->address
+                                       + mIndex * layout->stride + 2);
++#endif
+         texCoord.y = (float)texCoordY;
+         texCoord.y *= 0.0009765625f;
+     }
+     else if (layout->stride == 8)
+     {
+         float f = 1.0f;
++#ifdef NP_NATIVE
++        texCoord.x = npa_rdf32((const u8*)layout->address + mIndex * layout->stride) / f;
++        texCoord.y = npa_rdf32((const u8*)layout->address + mIndex * layout->stride + 4) / f;
++#else
+         texCoord.x = *(const float*)((const u8*)layout->address
+                                      + mIndex * layout->stride)
+                    / f;
+         texCoord.y = *(const float*)((const u8*)layout->address
+                                      + mIndex * layout->stride + 4)
+                    / f;
++#endif
+     }
+ }
+diff --git a/src/Game/NetMeshModelLoader.cpp b/src/Game/NetMeshModelLoader.cpp
+index 4015064..b96cde6 100644
+--- a/src/Game/NetMeshModelLoader.cpp
++++ b/src/Game/NetMeshModelLoader.cpp
+@@ -1,4 +1,7 @@
+ #include "Game/Physics/NetMeshModelLoader.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_endian.h" /* display lists are GX data: big-endian u16 (NPA) */
++#endif
+ 
+ #include "Game/Drawable/DrawableModel.h"
+ #include "Game/MathHelpers.h"
+@@ -116,7 +119,11 @@ void NetMeshModelLoader::ReadVerticesFromGeometryPacket(
+             ptr = (u16*)((u8*)pList->list + 3 + i * stride);
+         }
+ 
++#ifdef NP_NATIVE
++        unsigned short vertexIndex = npa_rd16(ptr);
++#else
+         unsigned short vertexIndex = *ptr;
++#endif
+         m_TriStripIndices[m_CurrentTriStripIndex] = vertexIndex + baseIndex;
+         ++m_CurrentTriStripIndex;
+         ++i;
+@@ -240,7 +247,11 @@ void NetMeshModelLoader::ReadEdgesFromGeometryPacket(
+                 ptr = (u16*)ptr8;
+             }
+ 
++#ifdef NP_NATIVE
++            *pVtx = npa_rd16(ptr);
++#else
+             *pVtx = *ptr;
++#endif
+             if (*pVtx > maxVertex)
+                 maxVertex = *pVtx;
+             ++pVtx;

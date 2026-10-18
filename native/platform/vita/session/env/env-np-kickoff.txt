@@ -1,0 +1,10 @@
+# native check 3: the nav script that walks from boot through the menus into a match (the recompiled build's nav_kickoff.txt, unchanged).
+# NEEDS the pad injection of the native bring-up (NPB2/NPS2): without it the script waits for a scene that never comes and ends by its
+# timeout ("[script] TIMEOUT", exit code 3). Copy nav_kickoff.txt next to this file (vitalab.py cycle ... --input nav_kickoff.txt).
+MSC_INPUT_SCRIPT=nav_kickoff.txt
+MSC_WATCH=1
+MSC_WATCH_EVERY=120
+MSC_FRAME_TIMING=300
+MSC_MAX_FRAMES=12000
+# saves of the native game go to their own directory (all native builds default to it): the native NAND layout is the recompiled build's own, so ux0:data/mscharged would be the owner's save
+NP_DATA_DIR=ux0:data/mscharged/np-data

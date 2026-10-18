@@ -1,0 +1,627 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/SH/SHHallOfFameRoom.h"
+#include "NL/nlFunction.inl"
+#include "Game/FE/FEAudio.h"
+#include "Game/Effects/EmissionManager.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/SH/SHHallOfFame.h"
+#include "Game/FE/feDPD.h"
+#include "NL/nlBind.h"
+#include "Game/SharedStaticStorage.h"
+#include "Game/BasicStadium.h"
+#include "Game/GameSceneManager.h"
+#include "Game/DB/GameProgress.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feFinder_impl.h"
+#include "Game/FE/feInput.h"
+#include "Game/FE/feMusic.h"
+#include "Game/FE/fePackage.h"
+#include "Game/FE/fePageControls.h"
+#include "Game/FE/fePopupMenu.h"
+#include "Game/FE/fePresentation.h"
+#include "Game/FE/feScene.h"
+#include "Game/Render/RLViewLayers.h"
+#include "Game/SH/SHNavigation.h"
+#include "NL/nlPrint.h"
+#include "NL/nlString.h"
+
+static const char* sRolloverSlides[21] = {
+    "FIRE CUP",
+    "FIRE CUP BRICK WALL",
+    "FIRE CUP GOLDEN BOOT",
+    "MARIO",
+    "LUIGI",
+    "DONKEYKONG",
+    "PEACH",
+    "CRYSTAL CUP",
+    "CRYSTAL CUP BRICK WALL",
+    "CRYSTAL CUP GOLDEN BOOT",
+    "DAISY",
+    "WARIO",
+    "WALUIGI",
+    "YOSHI",
+    "STRIKER CUP",
+    "STRIKER CUP BRICK WALL",
+    "STRIKER CUP GOLDEN BOOT",
+    "BOWSER",
+    "PETEY",
+    "BOWSERJR",
+    "DIDDYKONG",
+};
+
+SHHallOfFameRoom::~SHHallOfFameRoom()
+{
+}
+
+void SHHallOfFameRoom::SceneCreated()
+{
+    if (IsWidescreen())
+    {
+        mPresentation->SetActiveSlide("Slide1", true);
+    }
+    else
+    {
+        mPresentation->SetActiveSlide("4:3", true);
+    }
+
+    SHNavigation* navigation = GetNavigationScene();
+    TLComponentInstance* backButton = 0;
+    TLComponentInstance* breadcrumbs = 0;
+    if (navigation != 0)
+    {
+        navigation->SetButtons(NAVIGATION_BUTTON_PLUS | NAVIGATION_BUTTON_MINUS | NAVIGATION_BUTTON_BACK | NAVIGATION_BUTTON_BREADCRUMBS | NAVIGATION_BUTTON_PROGRESS, false);
+        backButton = navigation->GetButton(NAVIGATION_BUTTON_BACK);
+        breadcrumbs = navigation->GetButton(NAVIGATION_BUTTON_BREADCRUMBS);
+        mPageControls = navigation->GetPageControls();
+        mPageControls->SetButtonState(1, true, true);
+        mPageControls->SetButtonState(0, true, true);
+    }
+
+    mBackButton.SetButtonInstance(backButton);
+    SetHallOfFameBreadcrumbs(mMode, breadcrumbs);
+
+    for (int pad = 0; pad < 4; ++pad)
+    {
+        GetPointerInstance(pad)->SetActiveSlide("waiting", true, false);
+    }
+
+    FEMusic::StartStreamIfDifferent(12);
+}
+
+void SHHallOfFameRoom::Update(float fDeltaT)
+{
+    BaseSceneHandler::Update(fDeltaT);
+
+    if (!mButtonsInitialized)
+    {
+        TLSlide* slide = mPresentation->m_currentSlide;
+        if (slide->GetCurrentTime() < slide->GetStartTime() + slide->GetDuration())
+        {
+            return;
+        }
+
+        InitializeButtons();
+        mButtonsInitialized = true;
+    }
+
+    for (int i = 0; i < 7; ++i)
+    {
+        if (mTrophyTimers[i] > 0.0f)
+        {
+            mTrophyTimers[i] -= fDeltaT;
+            if (mTrophyTimers[i] <= 0.0f)
+            {
+                fn_8027890C(BasicStadium::GetCurrentStadium(), "fe_light_cone_trophy", GetHallOfFameTrophyID(mMode, i));
+                mTrophyTimers[i] = 0.0f;
+            }
+        }
+    }
+
+    for (unsigned int pad = 0; pad < 4; ++pad)
+    {
+        TLComponentInstance* controller = GetPointerInstance(pad);
+        bool processInput;
+        if (g_pFEInput->m_InputLockDepth == 0)
+        {
+            if (pad != gFEControllerIndex)
+            {
+                controller->SetActiveSlide("waiting", true, false);
+                processInput = false;
+                goto checkInput;
+            }
+
+            if (mPointerHoverCounts[pad] > 0 || mBackButton.mPointerInside[pad]
+                || mPageControls->mPointerInside[0] || mPageControls->mPointerInside[1])
+            {
+                controller->SetActiveSlide("A", true, false);
+            }
+            else
+            {
+                controller->SetActiveSlide("cursor", true, false);
+            }
+        }
+        processInput = true;
+
+    checkInput:
+        if (processInput)
+        {
+            unsigned char valid = 1;
+            FEPointerEvent event;
+            event.mIndex = pad;
+            event.mPosition = GetPointerPosition(pad, &valid);
+            event.mPressed
+                = g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0);
+            event.mReleased
+                = g_pFEInput->JustReleased((eFEINPUT_PAD)pad, 0x1E, true, 0);
+
+            mPageControls->Update(event, fDeltaT);
+            if (mBackButton.UpdateBackButton(event, fDeltaT))
+            {
+                StopHallOfFameTrophyEffects();
+                LeaveHallOfFamePage(mMode);
+                return;
+            }
+
+            if (mPageControls->IsButtonPressed(1))
+            {
+                if (g_pFEInput->m_InputLockDepth == 0)
+                {
+                    StopHallOfFameTrophyEffects();
+                    CycleHallOfFameCup(mMode, false);
+                    FEAudio::PlayAnimAudioEvent(0x375C885A, 0, 0, 1);
+                    FEAudio::PlayAnimAudioEvent(0xD982FCA9, 0, 0, 1);
+                }
+            }
+            else if (mPageControls->IsButtonPressed(0))
+            {
+                if (g_pFEInput->m_InputLockDepth == 0)
+                {
+                    StopHallOfFameTrophyEffects();
+                    CycleHallOfFameCup(mMode, true);
+                    FEAudio::PlayAnimAudioEvent(0x375C885A, 0, 0, 1);
+                    FEAudio::PlayAnimAudioEvent(0xD982FCA9, 0, 0, 1);
+                }
+            }
+            else
+            {
+                HandlePointerEvent(&event, pad, fDeltaT);
+            }
+
+            if (mPointerHoverCounts[pad] <= 0)
+            {
+                FEAudio::StopAnimAudioEvent(0x1C4C829E, (void*)1);
+            }
+        }
+    }
+}
+
+void StopHallOfFameTrophyEffects()
+{
+    EmissionManager* manager = EmissionManager::Instance();
+    EffectsGroup* group = manager->GetEffectsGroup("fe_light_cone_trophy");
+    if (group != 0)
+    {
+        manager->Kill(group);
+    }
+    FEAudio::StopAnimAudioEvent(0x1C4C829E, (void*)1);
+}
+
+inline SHHallOfFameRoom::SHHallOfFameRoom()
+{
+    mMode = 4;
+    mButtonsInitialized = false;
+    mPointerHoverCounts[0] = 0;
+    mPointerHoverCounts[1] = 0;
+    mPointerHoverCounts[2] = 0;
+    mPointerHoverCounts[3] = 0;
+    StopHallOfFameTrophyEffects();
+}
+
+SHHallOfFameCup::SHHallOfFameCup(int mode)
+{
+    unsigned int nextItem = 0;
+    mMode = mode;
+    mTrophyTimers[nextItem] = 0.0f;
+    mCupButton.mContext = (void*)nextItem++;
+    for (int i = 0; i < 2; ++i)
+    {
+        unsigned int item = nextItem++;
+        mTrophyTimers[item] = 0.0f;
+        mAwardButtons[i].mContext = (void*)item;
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        unsigned int item = nextItem++;
+        mTrophyTimers[item] = 0.0f;
+        mPlayerCardButtons[i].mContext = (void*)item;
+    }
+    mProgressButton.mContext = (void*)nextItem;
+}
+
+void SHHallOfFameCup::SceneCreated()
+{
+    SHHallOfFameRoom::SceneCreated();
+
+    FEPresentation* presentation = mFEScene->m_pFEPackage->GetPresentation();
+    mCupInstance = FEFinder<TLComponentInstance, 4>::FindOrDefault<TLSlide>(
+        presentation->m_currentSlide, "Layer", "cup");
+
+    char name[8];
+    for (int i = 0; i < 2; ++i)
+    {
+        nlSNPrintf(name, 8, "award_%d", i);
+        mAwardInstances[i] = FEFinder<TLComponentInstance, 4>::FindOrDefault<TLSlide>(
+            presentation->m_currentSlide, "Layer", name);
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        nlSNPrintf(name, 8, "card_%d", i);
+        mPlayerCardInstances[i] = FEFinder<TLComponentInstance, 4>::FindOrDefault<TLSlide>(
+            presentation->m_currentSlide, "Layer", name);
+    }
+
+    SHNavigation* navigation = GetNavigationScene();
+    if (navigation != 0)
+    {
+        mProgressButtonInstance = navigation->GetButton(NAVIGATION_BUTTON_PROGRESS);
+    }
+
+    mRollovers = FEFinder<TLComponentInstance, 4>::Find<TLSlide>(
+        presentation->m_currentSlide, "Layer", "rollovers");
+    mRollovers->m_bVisible = false;
+}
+
+void SHHallOfFameCup::HandlePointerEvent(
+    const FEPointerEvent* event, int index, float)
+{
+    mCupButton.HandlePointerEvent(event);
+    mProgressButton.HandlePointerEvent(event);
+
+    for (int i = 0; i < 2; ++i)
+    {
+        mAwardButtons[i].HandlePointerEvent(event);
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        mPlayerCardButtons[i].HandlePointerEvent(event);
+    }
+
+    if (mPointerHoverCounts[index] <= 0)
+    {
+        mRollovers->m_bVisible = false;
+    }
+}
+
+void SHHallOfFameCup::InitializeButtons()
+{
+    typedef Detail::MemFunImpl<void, void (SHHallOfFameCup::*)(unsigned int, void*)> PointerMethod;
+    typedef BindExp3<void, PointerMethod, SHHallOfFameCup*, Placeholder<0>, Placeholder<1> > PointerBinding;
+
+    FEPointerListener::Callback enterFunc(PointerBinding(MemFun(&SHHallOfFameCup::OnItemPointerEnter), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback leaveFunc(PointerBinding(MemFun(&SHHallOfFameCup::OnItemPointerLeave), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback pressFunc(PointerBinding(MemFun(&SHHallOfFameCup::OnItemPointerPress), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback insideFunc(PointerBinding(MemFun(&SHHallOfFameCup::OnItemPointerInside), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback progressEnterFunc(PointerBinding(MemFun(&SHHallOfFameCup::OnProgressPointerEnter), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback progressLeaveFunc(PointerBinding(MemFun(&SHHallOfFameCup::OnProgressPointerLeave), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback progressPressFunc(PointerBinding(MemFun(&SHHallOfFameCup::OnProgressPointerPress), this, Placeholder<0>(), Placeholder<1>()));
+
+    mCupButton.SetInstanceBounds(mCupInstance, true, 0.0f, 0.0f, 1.0f, 1.0f);
+    mCupButton.SetPointerEnterCallback(enterFunc);
+    mCupButton.SetPointerLeaveCallback(leaveFunc);
+    mCupButton.SetPointerPressCallback(pressFunc);
+    mProgressButton.SetInstanceBounds(mProgressButtonInstance, true, 0.0f, 0.0f, 1.0f, 1.0f);
+    mProgressButton.SetPointerEnterCallback(progressEnterFunc);
+    mProgressButton.SetPointerLeaveCallback(progressLeaveFunc);
+    mProgressButton.SetPointerPressCallback(progressPressFunc);
+
+    for (int i = 0; i < 2; ++i)
+    {
+        mAwardButtons[i].SetInstanceBounds(mAwardInstances[i], true, 0.0f, 0.0f, 1.0f, 1.0f);
+        mAwardButtons[i].SetPointerEnterCallback(enterFunc);
+        mAwardButtons[i].SetPointerLeaveCallback(leaveFunc);
+        mAwardButtons[i].SetPointerInsideCallback(insideFunc);
+        mAwardButtons[i].SetPointerPressCallback(pressFunc);
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        mPlayerCardButtons[i].SetInstanceBounds(mPlayerCardInstances[i], true, 0.0f, 0.0f, 1.0f, 1.0f);
+        mPlayerCardButtons[i].SetPointerEnterCallback(enterFunc);
+        mPlayerCardButtons[i].SetPointerLeaveCallback(leaveFunc);
+        mPlayerCardButtons[i].SetPointerInsideCallback(insideFunc);
+        mPlayerCardButtons[i].SetPointerPressCallback(pressFunc);
+    }
+}
+
+void SHHallOfFameCup::OnItemPointerInside(unsigned int, void*)
+{
+}
+
+void SHHallOfFameCup::OnItemPointerEnter(unsigned int index, void* context)
+{
+    unsigned int item = (unsigned int)context;
+
+    ++mPointerHoverCounts[index];
+    if (mTrophyTimers[item] == 0.0f)
+    {
+        BasicStadium::GetCurrentStadium()->TriggerEffects(GetHallOfFameTrophyID(mMode, item));
+        FEAudio::StopAnimAudioEvent(0x1C4C829E, (void*)1);
+        FEAudio::PlayAnimAudioEvent(0x1C4C829E, "FE_HUM", (void*)1, false);
+    }
+    else
+    {
+        mTrophyTimers[item] = 0.0f;
+        FEAudio::StopAnimAudioEvent(0x1C4C829E, (void*)1);
+        FEAudio::PlayAnimAudioEvent(0x1C4C829E, "FE_HUM", (void*)1, false);
+    }
+
+    int first = 0;
+    switch (mMode)
+    {
+    case HOF_FIRE_CUP:
+        first = 0;
+        break;
+    case HOF_STRIKER_CUP:
+        first = 14;
+        break;
+    case HOF_CRYSTAL_CUP:
+        first = 7;
+        break;
+    }
+
+    mRollovers->m_bVisible = true;
+    mRollovers->SetActiveSlide(sRolloverSlides[item + first], true, false);
+
+    if (item == 0)
+    {
+        mCupButton.SetPointerState(POINTER_BUTTON_HOVER, index);
+    }
+    else if (item <= 2)
+    {
+        mAwardButtons[item - 1].SetPointerState(POINTER_BUTTON_HOVER, index);
+    }
+    else if (item <= 6)
+    {
+        mPlayerCardButtons[item - 3].SetPointerState(POINTER_BUTTON_HOVER, index);
+    }
+}
+
+void SHHallOfFameCup::OnItemPointerLeave(unsigned int index, void* context)
+{
+    unsigned int item = (unsigned int)context;
+
+    --mPointerHoverCounts[index];
+    mTrophyTimers[item] = 0.1f;
+
+    if (item == 0)
+    {
+        mCupButton.SetPointerState(POINTER_BUTTON_NORMAL, index);
+    }
+    else if (item <= 2)
+    {
+        mAwardButtons[item - 1].SetPointerState(POINTER_BUTTON_NORMAL, index);
+    }
+    else if (item <= 6)
+    {
+        mPlayerCardButtons[item - 3].SetPointerState(POINTER_BUTTON_NORMAL, index);
+    }
+}
+
+void SHHallOfFameCup::OnItemPointerPress(unsigned int index, void* context)
+{
+    int i;
+    unsigned int item = (unsigned int)context;
+
+    mPlayerCardButtons[item].SetPointerState(POINTER_BUTTON_SELECTED, index);
+    StopHallOfFameTrophyEffects();
+    for (i = 0; i < 4; ++i)
+    {
+        GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+    FEAudio::PlayAnimAudioEvent(0xF0AFD586, 0, 0, 1);
+
+    if (!IsUnlockFlagSet(GetHallOfFameUnlockFlag(mMode, item)) && item <= 2)
+    {
+        ShowLockedItemMessage(item);
+    }
+    else if (item == 0)
+    {
+        switch (mMode)
+        {
+        case HOF_FIRE_CUP:
+            ShowHallOfFameTrophy(HOF_FIRE_CUP_HISTORY);
+            break;
+        case HOF_STRIKER_CUP:
+            ShowHallOfFameTrophy(HOF_STRIKER_CUP_HISTORY);
+            break;
+        case HOF_CRYSTAL_CUP:
+            ShowHallOfFameTrophy(HOF_CRYSTAL_CUP_HISTORY);
+            break;
+        }
+    }
+    else if (item <= 2)
+    {
+        int camera;
+        switch (mMode)
+        {
+        case HOF_FIRE_CUP:
+            camera = 8;
+            if (item - 1 == 0)
+            {
+                camera = 7;
+            }
+            ShowHallOfFameTrophy(camera);
+            break;
+        case HOF_STRIKER_CUP:
+            camera = 12;
+            if (item - 1 == 0)
+            {
+                camera = 11;
+            }
+            ShowHallOfFameTrophy(camera);
+            break;
+        case HOF_CRYSTAL_CUP:
+            camera = 10;
+            if (item - 1 == 0)
+            {
+                camera = 9;
+            }
+            ShowHallOfFameTrophy(camera);
+            break;
+        }
+    }
+    else if (item <= 6)
+    {
+        switch (mMode)
+        {
+        case HOF_FIRE_CUP:
+            ShowHallOfFamePlayerCard(item - 3);
+            break;
+        case HOF_STRIKER_CUP:
+            ShowHallOfFamePlayerCard(item + 5);
+            break;
+        case HOF_CRYSTAL_CUP:
+            ShowHallOfFamePlayerCard(item + 1);
+            break;
+        }
+    }
+}
+
+void SHHallOfFameCup::OnProgressPointerEnter(unsigned int index, void*)
+{
+    ++mPointerHoverCounts[index];
+    if (!mProgressButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        mProgressButtonInstance->SetActiveSlide("over", true, false);
+        FEAudio::PlayAnimAudioEvent(0xAA73EF33, 0, 0, 1);
+        mProgressButton.SetPointerState(POINTER_BUTTON_HOVER, index);
+    }
+}
+
+void SHHallOfFameCup::OnProgressPointerLeave(unsigned int index, void*)
+{
+    --mPointerHoverCounts[index];
+    if (!mProgressButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        mProgressButtonInstance->SetActiveSlide("off", true, false);
+        mProgressButton.SetPointerState(POINTER_BUTTON_NORMAL, index);
+    }
+}
+
+void SHHallOfFameCup::OnProgressPointerPress(unsigned int, void*)
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+    FEAudio::PlayAnimAudioEvent(0xBB142B94, 0, 0, 1);
+    CycleHallOfFameDetailPage(mMode, 0);
+}
+
+void SHHallOfFameCup::ShowLockedItemMessage(unsigned int item)
+{
+    FEPopupMenu* popup = (FEPopupMenu*)GameSceneManager::Instance()->Push(
+        SCENE_POPUP_MENU, SCREEN_NOTHING, false);
+
+    ePopupMenu type = INVALID_TYPE;
+    if (item == 0)
+    {
+        switch (mMode)
+        {
+        case HOF_FIRE_CUP:
+            type = POPUP_LOCKED_FIRE_CUP;
+            break;
+        case HOF_STRIKER_CUP:
+            type = POPUP_LOCKED_STRIKER_CUP;
+            break;
+        case HOF_CRYSTAL_CUP:
+            type = POPUP_LOCKED_CRYSTAL_CUP;
+            break;
+        }
+    }
+    else if (item <= 2)
+    {
+        switch (mMode)
+        {
+        case HOF_FIRE_CUP:
+            type = item == 1 ? POPUP_LOCKED_FIRE_BRICK_WALL : POPUP_LOCKED_FIRE_GOLDEN_BOOT;
+            break;
+        case HOF_STRIKER_CUP:
+            type = item == 1 ? POPUP_LOCKED_STRIKER_BRICK_WALL : POPUP_LOCKED_STRIKER_GOLDEN_BOOT;
+            break;
+        case HOF_CRYSTAL_CUP:
+            type = item == 1 ? POPUP_LOCKED_CRYSTAL_BRICK_WALL : POPUP_LOCKED_CRYSTAL_GOLDEN_BOOT;
+            break;
+        }
+    }
+
+    popup->Create(type, FEPopupMenu::Nothing);
+}
+
+SHHallOfFameProfile::SHHallOfFameProfile()
+{
+    mMode = 0;
+    mSummaryButton.mContext = (void*)0;
+}
+
+void SHHallOfFameProfile::SceneCreated()
+{
+    SHHallOfFameRoom::SceneCreated();
+
+    FEPresentation* presentation = mFEScene->m_pFEPackage->GetPresentation();
+    mSummaryButtonInstance = FEFinder<TLComponentInstance, 4>::FindOrDefault<TLSlide>(
+        presentation->m_currentSlide, "Layer", "summary");
+}
+
+void SHHallOfFameProfile::HandlePointerEvent(
+    const FEPointerEvent* event, int, float)
+{
+    mSummaryButton.HandlePointerEvent(event);
+}
+
+void SHHallOfFameProfile::InitializeButtons()
+{
+    typedef Detail::MemFunImpl<void, void (SHHallOfFameProfile::*)(unsigned int, void*)> PointerMethod;
+    typedef BindExp3<void, PointerMethod, SHHallOfFameProfile*, Placeholder<0>, Placeholder<1> > PointerBinding;
+
+    FEPointerListener::Callback enterFunc(PointerBinding(MemFun(&SHHallOfFameProfile::OnSummaryPointerEnter), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback leaveFunc(PointerBinding(MemFun(&SHHallOfFameProfile::OnSummaryPointerLeave), this, Placeholder<0>(), Placeholder<1>()));
+    FEPointerListener::Callback pressFunc(PointerBinding(MemFun(&SHHallOfFameProfile::OnSummaryPointerPress), this, Placeholder<0>(), Placeholder<1>()));
+
+    mSummaryButton.SetInstanceBounds(mSummaryButtonInstance, true, 0.0f, 0.0f, 1.0f, 1.0f);
+    mSummaryButton.SetPointerEnterCallback(enterFunc);
+    mSummaryButton.SetPointerLeaveCallback(leaveFunc);
+    mSummaryButton.SetPointerPressCallback(pressFunc);
+}
+
+void SHHallOfFameProfile::OnSummaryPointerEnter(unsigned int index, void*)
+{
+    ++mPointerHoverCounts[index];
+    if (!mSummaryButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        mSummaryButtonInstance->SetActiveSlide("over", true, false);
+        mSummaryButton.SetInstanceBounds(
+            mSummaryButtonInstance, true, 0.0f, 0.0f, 1.0f, 1.0f);
+        mSummaryButton.SetPointerState(POINTER_BUTTON_HOVER, index);
+    }
+}
+
+void SHHallOfFameProfile::OnSummaryPointerLeave(unsigned int index, void*)
+{
+    --mPointerHoverCounts[index];
+    if (!mSummaryButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        mSummaryButtonInstance->SetActiveSlide("off", true, false);
+        mSummaryButton.SetInstanceBounds(
+            mSummaryButtonInstance, true, 0.0f, 0.0f, 1.0f, 1.0f);
+        mSummaryButton.SetPointerState(POINTER_BUTTON_NORMAL, index);
+    }
+}
+
+void SHHallOfFameProfile::OnSummaryPointerPress(unsigned int, void*)
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+    CycleHallOfFameDetailPage(HOF_FIRE_CUP_HISTORY, 0);
+}

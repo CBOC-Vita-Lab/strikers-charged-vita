@@ -1,0 +1,6 @@
+# W5-SEED generated script: the intro movie plays to its end by itself
+wait scene == 22 3000
+wait scene == 0 20000
+idle 600
+log STATE script end
+exit

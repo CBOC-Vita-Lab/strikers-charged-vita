@@ -1,0 +1,11 @@
+# Vita3K, real time: ONE WHOLE MATCH as env-v3k-full.txt, but only every 3rd frame is rasterised (MSC_VITA_DRAW_EVERY=3, vgx npv3): the draws are what a frame costs in the emulator.
+# KEEPDATA=1 FRESHSHADERS=0 as for m2.
+MSC_INPUT_SCRIPT=v3k_fulltime.txt
+MSC_MAX_FRAMES=40000
+MSC_WATCH=1
+MSC_WATCH_EVERY=300
+MSC_FRAME_TIMING=900
+MSC_VITA_MEMSTATS=1
+MSC_VITA_RENDER=320x224
+MSC_VITA_DRAW_EVERY=3
+NP_DATA_DIR=ux0:data/mscharged/np-data

@@ -1,0 +1,60 @@
+#ifndef GAME_AI_SCRIPTS_SCRIPT_CACHING_H
+#define GAME_AI_SCRIPTS_SCRIPT_CACHING_H
+
+#include "Game/AI/DesireUpdate.h"
+#include "NL/nlAVLTree.h"
+
+extern unsigned char g_bScriptQuestionCachingOn;
+
+class ScriptQuestionCache
+{
+public:
+    ScriptQuestionCache();
+
+    ~ScriptQuestionCache()
+    {
+        FreeBlocks();
+    }
+
+    void FreeBlocks()
+    {
+        Clear();
+        mQuestionCacheMap.GetAllocator()->FreeBlocks();
+    }
+
+    void Clear()
+    {
+        mQuestionCacheMap.Clear();
+        mCacheHits = 0;
+        mTotalLookups = 0;
+    }
+
+    unsigned char Lookup(
+        unsigned long hash, DesireUpdate& returnVal,
+        const char* name)
+    {
+        DesireUpdate* pValue;
+
+        if (!g_bScriptQuestionCachingOn)
+        {
+            return 0;
+        }
+
+        mTotalLookups++;
+        if (mQuestionCacheMap.FindGet(hash, &pValue))
+        {
+            mCacheHits++;
+            returnVal = *pValue;
+            return 1;
+        }
+        return 0;
+    }
+
+    nlAVLTreeSlotPool<unsigned long, DesireUpdate,
+        DefaultKeyCompare<unsigned long> > mQuestionCacheMap;
+    int mTotalLookups;
+    int mCacheHits;
+};
+
+
+#endif // GAME_AI_SCRIPTS_SCRIPT_CACHING_H

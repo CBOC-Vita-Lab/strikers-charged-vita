@@ -1,0 +1,428 @@
+#ifndef GAME_EVENT_DATA_TYPES_H
+#define GAME_EVENT_DATA_TYPES_H
+
+#include "Game/AI/Powerups.h"
+#include "Game/Render/ThwompObject.h"
+#include "NL/nlMath.h"
+#include "NL/nlSlotPool.h"
+#include "types.h"
+
+class BulletBillObject;
+class ChainChomp;
+class CrowdRiot;
+class NetMesh;
+class PhysicsObject;
+class PhysicsPatch;
+class PhysicsShockwave;
+class cBall;
+class cCharacter;
+class cFielder;
+class cPlayer;
+struct KoopaShellObject;
+
+struct CharacterImpactEvent
+{
+    nlVector3 v3Position;
+    float fRadius;
+    cCharacter* pCharacter;
+
+    float GetRadius() const
+    {
+        return fRadius;
+    }
+};
+
+struct GoalieSaveData
+{
+    /* 0x00 */ nlVector3 v3BallVelocity;
+    /* 0x0C */ cPlayer* pGoalie;
+    /* 0x10 */ cPlayer* pShooter;
+    /* 0x14 */ u32 saveType;
+    /* 0x18 */ float fWowFactor;
+    /* 0x1C */ unsigned int isSTS : 1;
+    /* 0x1C */ unsigned int padding : 31;
+}; // total size: 0x20
+
+enum eGoalType
+{
+    GOAL_REGULAR = 0,
+    GOAL_ONE_TIMER = 1,
+    GOAL_SKILLSHOT = 2,
+    GOAL_DEFLECTION = 3,
+    GOAL_UNCLASSIFIED = 4,
+    GOAL_OWN_GOAL = 5,
+    GOAL_MEGA_STRIKE = 6,
+    GOAL_CARRIED_IN = 7,
+};
+
+struct GoalScoredData
+{
+    /* 0x00 */ unsigned int uTeamIndex : 8;
+    /* 0x00 */ unsigned int uNumGoalsScored : 8;
+    /* 0x00 */ unsigned int uGoalType : 16;
+    /* 0x04 */ nlVector3 v3ShotPosition;
+    /* 0x10 */ cPlayer* pScorer;
+    /* 0x14 */ cPlayer* pAssister;
+    /* 0x18 */ cPlayer* pLastTouch[2];
+}; // total size: 0x20
+
+struct MegaStrikeEndData
+{
+    /* 0x00 */ cPlayer* pPlayer;
+    /* 0x04 */ s8 attempts;
+    /* 0x05 */ s8 goals;
+    /* 0x06 */ s8 defendingSide;
+    /* 0x07 */ s8 goalValue;
+    /* 0x08 */ u32 unknown_08;
+}; // total size: 0x0C
+
+struct MegaStrikeMeterData
+{
+    /* 0x00 */ cFielder* pFielder;
+    /* 0x04 */ float fMeterValue;
+    /* 0x08 */ nlVector3 v3Position;
+}; // total size: 0x14
+
+enum eReceiveBallResult
+{
+    RECEIVEBALL_LOOSE_PICKUP = 0,
+    RECEIVEBALL_PASS_COMPLETE = 1,
+    RECEIVEBALL_PASS_INTERCEPT = 2,
+};
+
+struct ReceiveBallData
+{
+    /* 0x00 */ cPlayer* pReceiver;
+    /* 0x04 */ eReceiveBallResult eResult;
+}; // total size: 0x08
+
+struct CollisionPlayerPlayerData
+{
+    /* 0x00 */ cPlayer* player1;
+    /* 0x04 */ cPlayer* player2;
+    /* 0x08 */ nlVector3 velocity1;
+    /* 0x14 */ nlVector3 velocity2;
+}; // total size: 0x20
+
+struct CollisionChainPlayerData
+{
+    /* 0x00 */ cFielder* pFielder;
+    /* 0x04 */ ChainChomp* pChain;
+}; // total size: 0x8
+
+class WindDebris;
+
+struct CollisionWindDebrisPlayerData
+{
+    /* 0x00 */ cFielder* pFielder;
+    /* 0x04 */ WindDebris* pDebris;
+}; // total size: 0x8
+
+struct CollisionThwompPlayerData
+{
+    /* 0x00 */ ThwompObject* thwomp;
+    /* 0x04 */ eThwompState state;
+    /* 0x08 */ cCharacter* target;
+}; // total size: 0xC
+
+struct CollisionBulletBillData
+{
+    /* 0x00 */ cCharacter* player;
+    /* 0x04 */ BulletBillObject* bulletBill;
+}; // total size: 0x8
+
+struct CollisionChainPowerupData
+{
+    /* 0x00 */ ChainChomp* pChain;
+    /* 0x04 */ PowerupBase* pPowerup;
+}; // total size: 0x8
+
+struct CollisionPlayerWallData
+{
+    /* 0x00 */ cPlayer* pPlayer;
+    /* 0x04 */ nlVector3 contactPoint;
+    /* 0x10 */ nlVector3 wallNormal;
+}; // total size: 0x1C
+
+struct LightningStrikeData
+{
+    /* 0x00 */ nlVector3 position;
+    /* 0x0C */ float radius;
+}; // total size: 0x10
+
+struct CollisionBallWallData
+{
+    /* 0x00 */ cBall* pBall;
+    /* 0x04 */ bool bIsPerfect;
+    /* 0x05 */ bool bIsShot;
+    /* 0x08 */ nlVector3 position;
+    /* 0x14 */ nlVector3 normal;
+    /* 0x20 */ float fCollisionVecLen;
+}; // total size: 0x24
+
+struct CollisionCrowdData
+{
+    /* 0x00 */ nlVector3 v3Position;
+    /* 0x0C */ PhysicsObject* pObject;
+    /* 0x10 */ CrowdRiot* pCrowdRiot;
+}; // total size: 0x14
+
+struct CollisionPowerupGroundData
+{
+    /* 0x00 */ nlVector3 position;
+    /* 0x0C */ float fVecZComponent;
+    /* 0x10 */ ePowerUpType eType;
+}; // total size: 0x14
+
+struct CollisionBallGroundData
+{
+    /* 0x00 */ cBall* pBall;
+    /* 0x04 */ bool bIsShot;
+    /* 0x08 */ nlVector3 position;
+    /* 0x14 */ nlVector3 normal;
+    /* 0x20 */ float fVecZComponent;
+}; // total size: 0x24
+
+struct CollisionPowerupWallData
+{
+    /* 0x00 */ PowerupBase* pPowerup;
+    /* 0x04 */ ePowerupSize eSize;
+    /* 0x08 */ ePowerUpType eType;
+    /* 0x0C */ nlVector3 position;
+    /* 0x18 */ nlVector3 normal;
+}; // total size: 0x24
+
+struct CollisionPlayerBallData
+{
+    /* 0x00 */ cPlayer* pPlayer;
+    /* 0x04 */ cBall* pBall;
+    /* 0x08 */ nlVector3 velocity;
+    /* 0x14 */ int boneID;
+}; // total size: 0x18
+
+struct CollisionKoopaShellGoalieData
+{
+    /* 0x00 */ KoopaShellObject* shell;
+    /* 0x04 */ cCharacter* goalie;
+}; // total size: 0x8
+
+struct CollisionKoopaShotBallPlayerData
+{
+    /* 0x00 */ KoopaShellObject* shell;
+    /* 0x04 */ cFielder* player;
+}; // total size: 0x8
+
+struct BirdoEggObject;
+
+struct CollisionBirdoShotBallPlayerData
+{
+    /* 0x00 */ BirdoEggObject* egg;
+    /* 0x04 */ cFielder* player;
+}; // total size: 0x8
+
+struct CollisionBirdoEggGoalieData
+{
+    /* 0x00 */ BirdoEggObject* egg;
+    /* 0x04 */ cCharacter* goalie;
+}; // total size: 0x8
+
+struct CollisionKoopaShellEndData
+{
+    /* 0x00 */ void* shell;
+    /* 0x04 */ bool cracked;
+}; // total size: 0x8
+
+struct CollisionBirdoEggEndData
+{
+    /* 0x00 */ BirdoEggObject* egg;
+    /* 0x04 */ bool cracked;
+}; // total size: 0x8
+
+struct CollisionBallShellData
+{
+    /* 0x00 */ cBall* pBall;
+    /* 0x04 */ PowerupBase* pPowerup;
+    /* 0x08 */ nlVector3 v3CollisionVelocity;
+}; // total size: 0x14
+
+struct CollisionBallChainData
+{
+    /* 0x00 */ ChainChomp* pChain;
+    /* 0x04 */ cBall* pBall;
+}; // total size: 0x8
+
+struct CollisionPlayerShellData
+{
+    /* 0x00 */ cFielder* pPlayer;
+    /* 0x04 */ cFielder* pThrower;
+    /* 0x08 */ u8 nThrowerPadID;
+    /* 0x09 */ u8 bIsExploder;
+    /* 0x0C */ int eSize;
+    /* 0x10 */ nlVector3 v3CollisionLocation;
+    /* 0x1C */ nlVector3 v3CollisionVelocity;
+}; // total size: 0x28
+
+struct CollisionPlayerFreezeData
+{
+    /* 0x00 */ cFielder* pPlayer;
+    /* 0x04 */ cFielder* pThrower;
+    /* 0x08 */ int nThrowerPadID;
+    /* 0x0C */ int eSize;
+}; // total size: 0x10
+
+struct CollisionPlayerBananaData
+{
+    /* 0x00 */ cFielder* pPlayer;
+    /* 0x04 */ cFielder* pThrower;
+    /* 0x08 */ int nThrowerPadID;
+    /* 0x0C */ nlVector3 v3CollisionLocation;
+}; // total size: 0x18
+
+struct CollisionPowerupStatsData
+{
+    /* 0x00 */ cPlayer* pPlayer;
+    /* 0x04 */ int nPlayerPadID;
+    /* 0x08 */ cPlayer* pThrower;
+    /* 0x0C */ int nThrowerPadID;
+}; // total size: 0x10
+
+struct CollisionBallGoalpostData
+{
+    /* 0x00 */ nlVector3 v3CollisionVelocity;
+    /* 0x0C */ nlVector3 v3CollisionPosition;
+    /* 0x18 */ unsigned int uTeamIndex;
+}; // total size: 0x1C
+
+struct BallNetmeshEventData
+{
+    /* 0x00 */ NetMesh* netMesh;
+    /* 0x04 */ nlVector3 collisionVelocity;
+}; // total size: 0x10
+
+struct ShotAtGoalData
+{
+    /* 0x00 */ cPlayer* pShooter;
+}; // total size: 0x4
+
+struct PenaltyData
+{
+    /* 0x00 */ cFielder* pFouler;
+    /* 0x04 */ cFielder* pFoulee;
+    /* 0x08 */ float fPenaltyWorth;
+}; // total size: 0xC
+
+struct NISData
+{
+    /* 0x00 */ const char* Type;
+    /* 0x04 */ const char* Param;
+}; // total size: 0x8
+
+struct PowerupUsedEventData
+{
+    /* 0x00 */ ePowerUpType Type;
+    /* 0x04 */ cPlayer* Thrower;
+    /* 0x08 */ cPlayer* Target;
+}; // total size: 0xC
+
+struct PowerupHitPlayerEventData
+{
+    /* 0x00 */ ePowerUpType Type;
+    /* 0x04 */ cPlayer* Thrower;
+    /* 0x08 */ cPlayer* Target;
+}; // total size: 0xC
+
+extern SlotPool<CollisionPlayerPlayerData> g_CollisionPlayerPlayerDataPool;
+extern SlotPool<CollisionChainPlayerData> g_CollisionChainPlayerDataPool;
+extern SlotPool<CollisionWindDebrisPlayerData> g_CollisionWindDebrisPlayerDataPool;
+extern SlotPool<CollisionThwompPlayerData> g_CollisionThwompPlayerDataPool;
+extern SlotPool<CollisionBulletBillData> g_CollisionBulletBillDataPool;
+extern SlotPool<CollisionChainPowerupData> g_CollisionChainPowerupDataPool;
+extern SlotPool<CollisionPlayerWallData> g_CollisionPlayerWallDataPool;
+extern SlotPool<LightningStrikeData> g_LightningStrikeDataPool;
+extern SlotPool<CollisionBallWallData> g_CollisionBallWallDataPool;
+extern SlotPool<CollisionCrowdData> g_CollisionCrowdDataPool;
+extern SlotPool<CollisionPowerupGroundData> g_CollisionPowerupGroundDataPool;
+extern SlotPool<CollisionBallGroundData> g_CollisionBallGroundDataPool;
+extern SlotPool<CollisionPowerupWallData> g_CollisionPowerupWallDataPool;
+extern SlotPool<CollisionPlayerBallData> g_CollisionPlayerBallDataPool;
+extern SlotPool<CollisionKoopaShellGoalieData> g_CollisionKoopaShellGoalieDataPool;
+extern SlotPool<CollisionKoopaShotBallPlayerData> g_CollisionKoopaShotBallPlayerDataPool;
+extern SlotPool<CollisionBirdoShotBallPlayerData> g_CollisionBirdoShotBallPlayerDataPool;
+extern SlotPool<CollisionBirdoEggGoalieData> g_CollisionBirdoEggGoalieDataPool;
+extern SlotPool<CollisionKoopaShellEndData> g_CollisionKoopaShellEndDataPool;
+extern SlotPool<CollisionBirdoEggEndData> g_CollisionBirdoEggEndDataPool;
+extern SlotPool<CollisionBallShellData> g_CollisionBallShellDataPool;
+extern SlotPool<CollisionBallChainData> g_CollisionBallChainDataPool;
+extern SlotPool<CollisionPlayerShellData> g_CollisionPlayerShellDataPool;
+extern SlotPool<CollisionPlayerFreezeData> g_CollisionPlayerFreezeDataPool;
+extern SlotPool<CollisionPlayerBananaData> g_CollisionPlayerBananaDataPool;
+extern SlotPool<CollisionPowerupStatsData> g_CollisionPowerupStatsDataPool;
+extern SlotPool<CollisionBallGoalpostData> g_CollisionBallGoalpostDataPool;
+extern SlotPool<BallNetmeshEventData> g_BallNetmeshEventDataPool;
+extern SlotPool<ShotAtGoalData> g_ShotAtGoalDataPool;
+extern SlotPool<PenaltyData> g_PenaltyDataPool;
+extern SlotPool<NISData> g_NISDataPool;
+extern SlotPool<PowerupUsedEventData> g_PowerupUsedEventDataPool;
+extern SlotPool<PowerupHitPlayerEventData> g_PowerupHitPlayerEventDataPool;
+
+inline void FreeCollisionPowerupStatsData(CollisionPowerupStatsData* data)
+{
+    g_CollisionPowerupStatsDataPool.Free(data);
+}
+
+void FreePenaltyData(PenaltyData* data);
+void FreeEventDataPools();
+
+struct PeachPhotoData
+{
+    /* 0x00 */ cPlayer* pPlayer;
+    /* 0x04 */ nlVector3 v3Position;
+    /* 0x10 */ float fHalfWidth;
+    /* 0x14 */ float fHalfHeight;
+}; // total size: 0x18
+
+struct ResetEffectsData;
+struct CollisionHammerbroShotBallPlayerData
+{
+    /* 0x00 */ cFielder* pFielder;
+    /* 0x04 */ cBall* pBall;
+};
+struct CollisionPatchData
+{
+    /* 0x00 */ unsigned char m_pad00[0x0C];
+    /* 0x0C */ cPlayer* pPlayer;
+    /* 0x10 */ PhysicsPatch* pPatch;
+}; // total size: 0x14
+
+struct CollisionProjectileData
+{
+    /* 0x00 */ nlVector3 v3Position;
+    /* 0x0C */ nlVector3 v3Velocity;
+    /* 0x18 */ void* pTarget;
+    /* 0x1C */ cFielder* pFielder;
+}; // total size: 0x20
+struct CollisionPatchPowerupData
+{
+    /* 0x00 */ PowerupBase* pPowerup;
+    /* 0x04 */ PhysicsPatch* pPatch;
+}; // total size: 0x8
+class YoshiEggObject;
+
+struct CollisionEggData
+{
+    /* 0x00 */ cPlayer* pPlayer;
+    /* 0x04 */ cFielder* pFielder;
+    /* 0x08 */ YoshiEggObject* pEgg;
+    /* 0x0C */ u32 m_pad0C;
+    /* 0x10 */ u32 m_pad10;
+}; // total size: 0x14
+struct HammerObject;
+
+struct CollisionShockwaveData
+{
+    /* 0x00 */ PhysicsShockwave* pShockwave;
+    /* 0x04 */ PhysicsObject* pObject;
+    /* 0x08 */ unsigned int m_pad08;
+}; // total size: 0xC
+
+#endif // GAME_EVENT_DATA_TYPES_H

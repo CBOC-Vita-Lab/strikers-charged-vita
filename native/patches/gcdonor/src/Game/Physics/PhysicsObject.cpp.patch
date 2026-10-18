@@ -1,0 +1,642 @@
+diff --git a/src/Game/Physics/PhysicsObject.cpp b/src/Game/Physics/PhysicsObject.cpp
+index a014e2e..e0ba11e 100644
+--- a/src/Game/Physics/PhysicsObject.cpp
++++ b/src/Game/Physics/PhysicsObject.cpp
+@@ -6,6 +6,43 @@
+ 
+ float PhysicsObject::DefaultGravity = -9.8f;
+ 
++// NP: a PhysicsObject can have neither a geom nor a body (the transform-only parents of a composite
++// object). The accessors below pick the body when there is no geom and otherwise ask the geom, so such an
++// object reached dGeom*(NULL): the console read low memory and carried on, a native build faults.
++// These wrappers give such an object the identity transform and ignore writes to it.
++static const float np_no_geom_pos[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
++static const float np_no_geom_rot[12] = {
++    1.0f, 0.0f, 0.0f, 0.0f,
++    0.0f, 1.0f, 0.0f, 0.0f,
++    0.0f, 0.0f, 1.0f, 0.0f,
++};
++
++static inline const float* NpGeomGetPosition(dGeomID geom)
++{
++    return geom != 0 ? dGeomGetPosition(geom) : np_no_geom_pos;
++}
++
++static inline const float* NpGeomGetRotation(dGeomID geom)
++{
++    return geom != 0 ? dGeomGetRotation(geom) : np_no_geom_rot;
++}
++
++static inline void NpGeomSetPosition(dGeomID geom, dReal x, dReal y, dReal z)
++{
++    if (geom != 0)
++    {
++        dGeomSetPosition(geom, x, y, z);
++    }
++}
++
++static inline void NpGeomSetRotation(dGeomID geom, const dMatrix3 rot)
++{
++    if (geom != 0)
++    {
++        dGeomSetRotation(geom, rot);
++    }
++}
++
+ void ConvertDMat3ToNLMat4(const float* src, nlMatrix4* dest);
+ void ConvertNLMat4ToDMat3(const nlMatrix4& src, float* dest);
+ 
+@@ -101,7 +138,7 @@ void PhysicsObject::PreUpdate()
+         }
+         else
+         {
+-            values = dGeomGetPosition(geomID);
++            values = NpGeomGetPosition(geomID);
+         }
+ 
+         PhysicsObject* parent = m_parentObject;
+@@ -123,7 +160,7 @@ void PhysicsObject::PreUpdate()
+             }
+             else
+             {
+-                values = dGeomGetPosition(parent->m_geomID);
++                values = NpGeomGetPosition(parent->m_geomID);
+             }
+             float parentZ;
+             float parentY;
+@@ -152,7 +189,7 @@ void PhysicsObject::PreUpdate()
+             }
+             else
+             {
+-                values = dGeomGetRotation(parent->m_geomID);
++                values = NpGeomGetRotation(parent->m_geomID);
+             }
+ 
+             parentRotation.e2[0][0] = values[0];
+@@ -182,7 +219,7 @@ void PhysicsObject::PreUpdate()
+                 }
+                 else
+                 {
+-                    values = dGeomGetRotation(grandParent->m_geomID);
++                    values = NpGeomGetRotation(grandParent->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(values, &rotation1);
+ 
+@@ -199,7 +236,7 @@ void PhysicsObject::PreUpdate()
+                     else
+                     {
+                         values =
+-                            dGeomGetRotation(greatGrandParent->m_geomID);
++                            NpGeomGetRotation(greatGrandParent->m_geomID);
+                     }
+                     ConvertDMat3ToNLMat4(values, &rotation2);
+ 
+@@ -318,7 +355,7 @@ void PhysicsObject::PostUpdate()
+         }
+         else
+         {
+-            values = dGeomGetPosition(geomID);
++            values = NpGeomGetPosition(geomID);
+         }
+ 
+         PhysicsObject* parent = m_parentObject;
+@@ -340,7 +377,7 @@ void PhysicsObject::PostUpdate()
+             }
+             else
+             {
+-                values = dGeomGetPosition(parent->m_geomID);
++                values = NpGeomGetPosition(parent->m_geomID);
+             }
+             float parentZ;
+             float parentY;
+@@ -369,7 +406,7 @@ void PhysicsObject::PostUpdate()
+             }
+             else
+             {
+-                values = dGeomGetRotation(parent->m_geomID);
++                values = NpGeomGetRotation(parent->m_geomID);
+             }
+ 
+             parentRotation.e2[0][0] = values[0];
+@@ -399,7 +436,7 @@ void PhysicsObject::PostUpdate()
+                 }
+                 else
+                 {
+-                    values = dGeomGetRotation(grandParent->m_geomID);
++                    values = NpGeomGetRotation(grandParent->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(values, &rotation1);
+ 
+@@ -416,7 +453,7 @@ void PhysicsObject::PostUpdate()
+                     else
+                     {
+                         values =
+-                            dGeomGetRotation(greatGrandParent->m_geomID);
++                            NpGeomGetRotation(greatGrandParent->m_geomID);
+                     }
+                     ConvertDMat3ToNLMat4(values, &rotation2);
+ 
+@@ -533,7 +570,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+             }
+             else
+             {
+-                dRot = dGeomGetRotation(parent_parentObj->m_geomID);
++                dRot = NpGeomGetRotation(parent_parentObj->m_geomID);
+             }
+ 
+             rot.e2[0][0] = dRot[0];
+@@ -562,7 +599,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+                 }
+                 else
+                 {
+-                    dRot = dGeomGetRotation(parent_parentObj->m_geomID);
++                    dRot = NpGeomGetRotation(parent_parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(dRot, &parentRot);
+ 
+@@ -575,7 +612,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+                     }
+                     else
+                     {
+-                        dRot = dGeomGetRotation(parent_parentObj->m_geomID);
++                        dRot = NpGeomGetRotation(parent_parentObj->m_geomID);
+                     }
+                     ConvertDMat3ToNLMat4(dRot, &rot_1);
+ 
+@@ -618,7 +655,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+             }
+             else
+             {
+-                _retFloats = dGeomGetPosition(geomID);
++                _retFloats = NpGeomGetPosition(geomID);
+             }
+ 
+             nlVec3Set(parentObj->m_position,
+@@ -638,7 +675,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+                 else
+                 {
+                     _retFloats =
+-                        dGeomGetPosition(parent_parentObj->m_geomID);
++                        NpGeomGetPosition(parent_parentObj->m_geomID);
+                 }
+                 nlVec3Set(parentPos,
+                     _retFloats[0],
+@@ -666,7 +703,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+                 else
+                 {
+                     _retFloats =
+-                        dGeomGetRotation(parent_parentObj->m_geomID);
++                        NpGeomGetRotation(parent_parentObj->m_geomID);
+                 }
+ 
+                 parentRot.e2[0][0] = _retFloats[0];
+@@ -699,7 +736,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+                     else
+                     {
+                         _retFloats =
+-                            dGeomGetRotation(temp_r28_2->m_geomID);
++                            NpGeomGetRotation(temp_r28_2->m_geomID);
+                     }
+                     ConvertDMat3ToNLMat4(_retFloats, &rot_1);
+ 
+@@ -716,7 +753,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+                         else
+                         {
+                             _retFloats =
+-                                dGeomGetRotation(greatGrandParent->m_geomID);
++                                NpGeomGetRotation(greatGrandParent->m_geomID);
+                         }
+                         ConvertDMat3ToNLMat4(_retFloats, &rot_2);
+ 
+@@ -757,7 +794,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+             dBodySetPosition(m_bodyID, _pos.x, _pos.y, _pos.z);
+             return;
+         }
+-        dGeomSetPosition(m_geomID, _pos.x, _pos.y, _pos.z);
++        NpGeomSetPosition(m_geomID, _pos.x, _pos.y, _pos.z);
+         return;
+     }
+ 
+@@ -766,7 +803,7 @@ void PhysicsObject::SetPosition(const nlVector3& pos, PhysicsObject::CoordinateT
+         dBodySetPosition(m_bodyID, pos.x, pos.y, pos.z);
+         return;
+     }
+-    dGeomSetPosition(m_geomID, pos.x, pos.y, pos.z);
++    NpGeomSetPosition(m_geomID, pos.x, pos.y, pos.z);
+ }
+ 
+ void PhysicsObject::GetPosition(nlVector3* position) const
+@@ -778,7 +815,7 @@ void PhysicsObject::GetPosition(nlVector3* position) const
+     }
+     else
+     {
+-        values = dGeomGetPosition(m_geomID);
++        values = NpGeomGetPosition(m_geomID);
+     }
+ 
+     nlMatrix4 parentRotation;
+@@ -805,7 +842,7 @@ void PhysicsObject::GetPosition(nlVector3* position) const
+         }
+         else
+         {
+-            values = dGeomGetPosition(parent->m_geomID);
++            values = NpGeomGetPosition(parent->m_geomID);
+         }
+         nlVec3Set(parentPosition, values[0], values[1], values[2]);
+ 
+@@ -825,7 +862,7 @@ void PhysicsObject::GetPosition(nlVector3* position) const
+         }
+         else
+         {
+-            values = dGeomGetRotation(parent->m_geomID);
++            values = NpGeomGetRotation(parent->m_geomID);
+         }
+ 
+         parentRotation.e2[0][0] = values[0];
+@@ -854,7 +891,7 @@ void PhysicsObject::GetPosition(nlVector3* position) const
+             }
+             else
+             {
+-                values = dGeomGetRotation(grandParent->m_geomID);
++                values = NpGeomGetRotation(grandParent->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(values, &rotation1);
+ 
+@@ -868,7 +905,7 @@ void PhysicsObject::GetPosition(nlVector3* position) const
+                 }
+                 else
+                 {
+-                    values = dGeomGetRotation(greatGrandParent->m_geomID);
++                    values = NpGeomGetRotation(greatGrandParent->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(values, &rotation2);
+ 
+@@ -919,7 +956,7 @@ nlVector3& PhysicsObject::GetPosition()
+     }
+     else
+     {
+-        _retFloats = dGeomGetPosition(geomID);
++        _retFloats = NpGeomGetPosition(geomID);
+     }
+ 
+     PhysicsObject* parentObj = m_parentObject;
+@@ -941,7 +978,7 @@ nlVector3& PhysicsObject::GetPosition()
+         }
+         else
+         {
+-            _retFloats = dGeomGetPosition(parentObj->m_geomID);
++            _retFloats = NpGeomGetPosition(parentObj->m_geomID);
+         }
+         float parentZ;
+         float parentY;
+@@ -969,7 +1006,7 @@ nlVector3& PhysicsObject::GetPosition()
+         }
+         else
+         {
+-            _retFloats = dGeomGetRotation(parentObj->m_geomID);
++            _retFloats = NpGeomGetRotation(parentObj->m_geomID);
+         }
+ 
+         parentRot.e2[0][0] = _retFloats[0];
+@@ -999,7 +1036,7 @@ nlVector3& PhysicsObject::GetPosition()
+             }
+             else
+             {
+-                _retFloats = dGeomGetRotation(parent_parentObj->m_geomID);
++                _retFloats = NpGeomGetRotation(parent_parentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(_retFloats, &rot_1);
+ 
+@@ -1016,7 +1053,7 @@ nlVector3& PhysicsObject::GetPosition()
+                 else
+                 {
+                     _retFloats =
+-                        dGeomGetRotation(parent_parent_parentObj->m_geomID);
++                        NpGeomGetRotation(parent_parent_parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(_retFloats, &rot_2);
+ 
+@@ -1079,7 +1116,7 @@ void PhysicsObject::SetRotation(const nlMatrix3& m3_in, PhysicsObject::Coordinat
+         }
+         else
+         {
+-            dRot = dGeomGetRotation(parentObj->m_geomID);
++            dRot = NpGeomGetRotation(parentObj->m_geomID);
+         }
+ 
+         parentRotation.e2[0][0] = dRot[0];
+@@ -1108,7 +1145,7 @@ void PhysicsObject::SetRotation(const nlMatrix3& m3_in, PhysicsObject::Coordinat
+             }
+             else
+             {
+-                dRot = dGeomGetRotation(parentObj->m_geomID);
++                dRot = NpGeomGetRotation(parentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(dRot, &inheritedParentRotation);
+ 
+@@ -1121,7 +1158,7 @@ void PhysicsObject::SetRotation(const nlMatrix3& m3_in, PhysicsObject::Coordinat
+                 }
+                 else
+                 {
+-                    dRot = dGeomGetRotation(parentObj->m_geomID);
++                    dRot = NpGeomGetRotation(parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(dRot, &inheritedRotation1);
+ 
+@@ -1156,7 +1193,7 @@ void PhysicsObject::SetRotation(const nlMatrix3& m3_in, PhysicsObject::Coordinat
+             dBodySetRotation(m_bodyID, parentOdeRotation);
+             return;
+         }
+-        dGeomSetRotation(m_geomID, parentOdeRotation);
++        NpGeomSetRotation(m_geomID, parentOdeRotation);
+         return;
+     }
+ 
+@@ -1191,7 +1228,7 @@ void PhysicsObject::SetRotation(const nlMatrix3& m3_in, PhysicsObject::Coordinat
+         dBodySetRotation(m_bodyID, directOdeRotation);
+         return;
+     }
+-    dGeomSetRotation(m_geomID, directOdeRotation);
++    NpGeomSetRotation(m_geomID, directOdeRotation);
+ }
+ 
+ void PhysicsObject::SetRotation(const nlMatrix4& m4_in, PhysicsObject::CoordinateType arg1)
+@@ -1218,7 +1255,7 @@ void PhysicsObject::SetRotation(const nlMatrix4& m4_in, PhysicsObject::Coordinat
+         }
+         else
+         {
+-            dRot = dGeomGetRotation(parentObj->m_geomID);
++            dRot = NpGeomGetRotation(parentObj->m_geomID);
+         }
+ 
+         parentRot.e2[0][0] = dRot[0];
+@@ -1247,7 +1284,7 @@ void PhysicsObject::SetRotation(const nlMatrix4& m4_in, PhysicsObject::Coordinat
+             }
+             else
+             {
+-                dRot = dGeomGetRotation(parentObj->m_geomID);
++                dRot = NpGeomGetRotation(parentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(dRot, &rot_1);
+ 
+@@ -1260,7 +1297,7 @@ void PhysicsObject::SetRotation(const nlMatrix4& m4_in, PhysicsObject::Coordinat
+                 }
+                 else
+                 {
+-                    dRot = dGeomGetRotation(parentObj->m_geomID);
++                    dRot = NpGeomGetRotation(parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(dRot, &rot_2);
+ 
+@@ -1288,7 +1325,7 @@ void PhysicsObject::SetRotation(const nlMatrix4& m4_in, PhysicsObject::Coordinat
+             dBodySetRotation(m_bodyID, parentOdeRotation);
+             return;
+         }
+-        dGeomSetRotation(m_geomID, parentOdeRotation);
++        NpGeomSetRotation(m_geomID, parentOdeRotation);
+         return;
+     }
+ 
+@@ -1335,7 +1372,7 @@ void PhysicsObject::SetRotation(const nlMatrix4& m4_in, PhysicsObject::Coordinat
+         dBodySetRotation(m_bodyID, directOdeRotation);
+         return;
+     }
+-    dGeomSetRotation(m_geomID, directOdeRotation);
++    NpGeomSetRotation(m_geomID, directOdeRotation);
+ }
+ 
+ void PhysicsObject::GetRotation(nlMatrix4* m_out) const
+@@ -1348,7 +1385,7 @@ void PhysicsObject::GetRotation(nlMatrix4* m_out) const
+     }
+     else
+     {
+-        dRot = dGeomGetRotation(m_geomID);
++        dRot = NpGeomGetRotation(m_geomID);
+     }
+ 
+     nlMatrix4 parentRot;
+@@ -1388,7 +1425,7 @@ void PhysicsObject::GetRotation(nlMatrix4* m_out) const
+     }
+     else
+     {
+-        dRot = dGeomGetRotation(parentObj->m_geomID);
++        dRot = NpGeomGetRotation(parentObj->m_geomID);
+     }
+     ConvertDMat3ToNLMat4(dRot, &parentRot);
+ 
+@@ -1401,7 +1438,7 @@ void PhysicsObject::GetRotation(nlMatrix4* m_out) const
+         }
+         else
+         {
+-            dRot = dGeomGetRotation(parentObj->m_geomID);
++            dRot = NpGeomGetRotation(parentObj->m_geomID);
+         }
+         ConvertDMat3ToNLMat4(dRot, &rot_1);
+ 
+@@ -1646,7 +1683,7 @@ void PhysicsObject::SetWorldMatrix(const nlMatrix4& in)
+         }
+         else
+         {
+-            dRot = dGeomGetRotation(parentObj->m_geomID);
++            dRot = NpGeomGetRotation(parentObj->m_geomID);
+         }
+ 
+         parentRotation.e2[0][0] = dRot[0];
+@@ -1675,7 +1712,7 @@ void PhysicsObject::SetWorldMatrix(const nlMatrix4& in)
+             }
+             else
+             {
+-                dRot = dGeomGetRotation(parentObj->m_geomID);
++                dRot = NpGeomGetRotation(parentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(dRot, &inheritedParentRotation);
+ 
+@@ -1688,7 +1725,7 @@ void PhysicsObject::SetWorldMatrix(const nlMatrix4& in)
+                 }
+                 else
+                 {
+-                    dRot = dGeomGetRotation(parentObj->m_geomID);
++                    dRot = NpGeomGetRotation(parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(dRot, &inheritedRotation1);
+ 
+@@ -1724,7 +1761,7 @@ void PhysicsObject::SetWorldMatrix(const nlMatrix4& in)
+         }
+         else
+         {
+-            dGeomSetRotation(m_geomID, parentOdeRotation);
++            NpGeomSetRotation(m_geomID, parentOdeRotation);
+         }
+     }
+     else
+@@ -1761,7 +1798,7 @@ void PhysicsObject::SetWorldMatrix(const nlMatrix4& in)
+         }
+         else
+         {
+-            dGeomSetRotation(m_geomID, mat);
++            NpGeomSetRotation(m_geomID, mat);
+         }
+     }
+ 
+@@ -1891,7 +1928,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+     }
+     else
+     {
+-        values = dGeomGetPosition(obj.m_geomID);
++        values = NpGeomGetPosition(obj.m_geomID);
+     }
+ 
+     PhysicsObject* parentObj = obj.m_parentObject;
+@@ -1913,7 +1950,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+         }
+         else
+         {
+-            values = dGeomGetPosition(parentObj->m_geomID);
++            values = NpGeomGetPosition(parentObj->m_geomID);
+         }
+         float parentZ;
+         float parentY;
+@@ -1943,7 +1980,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+         }
+         else
+         {
+-            values = dGeomGetRotation(parentObj->m_geomID);
++            values = NpGeomGetRotation(parentObj->m_geomID);
+         }
+ 
+         positionParentRotation.e2[0][0] = values[0];
+@@ -1973,7 +2010,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+             }
+             else
+             {
+-                values = dGeomGetRotation(parent_parentObj->m_geomID);
++                values = NpGeomGetRotation(parent_parentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(values, &positionRotation1);
+ 
+@@ -1990,7 +2027,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+                 else
+                 {
+                     values =
+-                        dGeomGetRotation(parent_parent_parentObj->m_geomID);
++                        NpGeomGetRotation(parent_parent_parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(values, &positionRotation2);
+ 
+@@ -2029,7 +2066,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+     }
+     else
+     {
+-        dRot = dGeomGetRotation(obj.m_geomID);
++        dRot = NpGeomGetRotation(obj.m_geomID);
+     }
+ 
+     PhysicsObject* rotationParentObj = obj.m_parentObject;
+@@ -2059,7 +2096,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+         }
+         else
+         {
+-            dRot = dGeomGetRotation(rotationParentObj->m_geomID);
++            dRot = NpGeomGetRotation(rotationParentObj->m_geomID);
+         }
+         ConvertDMat3ToNLMat4(dRot, &objectParentRotation);
+ 
+@@ -2073,7 +2110,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+             }
+             else
+             {
+-                dRot = dGeomGetRotation(rotationParentObj->m_geomID);
++                dRot = NpGeomGetRotation(rotationParentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(dRot, &objectRotation1);
+ 
+@@ -2105,7 +2142,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+         }
+         else
+         {
+-            dRot = dGeomGetRotation(parentObj->m_geomID);
++            dRot = NpGeomGetRotation(parentObj->m_geomID);
+         }
+ 
+         parentRotation.e2[0][0] = dRot[0];
+@@ -2134,7 +2171,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+             }
+             else
+             {
+-                dRot = dGeomGetRotation(parentObj->m_geomID);
++                dRot = NpGeomGetRotation(parentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(dRot, &inheritedParentRotation);
+ 
+@@ -2147,7 +2184,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+                 }
+                 else
+                 {
+-                    dRot = dGeomGetRotation(parentObj->m_geomID);
++                    dRot = NpGeomGetRotation(parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(dRot, &inheritedRotation1);
+ 
+@@ -2183,7 +2220,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+         }
+         else
+         {
+-            dGeomSetRotation(m_geomID, parentOdeRotation);
++            NpGeomSetRotation(m_geomID, parentOdeRotation);
+         }
+     }
+     else
+@@ -2220,7 +2257,7 @@ void PhysicsObject::CloneObject(const PhysicsObject& obj)
+         }
+         else
+         {
+-            dGeomSetRotation(m_geomID, _rot);
++            NpGeomSetRotation(m_geomID, _rot);
+         }
+     }
+ 
+@@ -2461,7 +2498,7 @@ void PhysicsObject::Unknown0()
+         }
+         else
+         {
+-            dRot = dGeomGetRotation(parentObj->m_geomID);
++            dRot = NpGeomGetRotation(parentObj->m_geomID);
+         }
+ 
+         parentRotation.e2[0][0] = dRot[0];
+@@ -2490,7 +2527,7 @@ void PhysicsObject::Unknown0()
+             }
+             else
+             {
+-                dRot = dGeomGetRotation(parentObj->m_geomID);
++                dRot = NpGeomGetRotation(parentObj->m_geomID);
+             }
+             ConvertDMat3ToNLMat4(dRot, &inheritedParentRotation);
+ 
+@@ -2503,7 +2540,7 @@ void PhysicsObject::Unknown0()
+                 }
+                 else
+                 {
+-                    dRot = dGeomGetRotation(parentObj->m_geomID);
++                    dRot = NpGeomGetRotation(parentObj->m_geomID);
+                 }
+                 ConvertDMat3ToNLMat4(dRot, &inheritedRotation1);
+ 
+@@ -2539,7 +2576,7 @@ void PhysicsObject::Unknown0()
+         }
+         else
+         {
+-            dGeomSetRotation(m_geomID, parentOdeRotation);
++            NpGeomSetRotation(m_geomID, parentOdeRotation);
+         }
+     }
+     else
+@@ -2576,7 +2613,7 @@ void PhysicsObject::Unknown0()
+         }
+         else
+         {
+-            dGeomSetRotation(m_geomID, directOdeRotation);
++            NpGeomSetRotation(m_geomID, directOdeRotation);
+         }
+     }
+ 

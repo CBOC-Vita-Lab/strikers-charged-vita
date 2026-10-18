@@ -1,0 +1,176 @@
+# Builds the Vita executable and package of the native port from the platform layer
+# (platform/vita, platform/harness) and the game's objects.
+#
+#   export VITASDK=/opt/vitasdk PATH=/opt/vitasdk/bin:$PATH
+#   make -f platform/vita/Makefile.vpk objs                        # compile the platform layer only (a syntax/flag check)
+#   make -f platform/vita/Makefile.vpk smoke                       # np-smoke.vpk: the platform layer + benchmarks, no game
+#   make -f platform/vita/Makefile.vpk vpk NP_GAME_OBJS="a.o b.o" NP_GAME_LIBS="-lfoo"   # mscharged-np.vpk
+#
+# Options (see vita.mk): NP_COMPILER=gcc|clang, NP_RELEASE=1 (title MSCH00002), LAB=0|1, NP_TITLE_ID.
+# NP_SEED_DIR=<dir>: files packed as seed/... (copied to ux0:data/mscharged on first start when missing).
+# NP_SHADER_SEED=<dir>: compiled shaders packed as shadercache/... (see below).
+# NP_EXTRA_WRAPS: the game's own --wrap options (the harness hook: -Wl,--wrap=_Z10glxSwapPreb, with
+#                 platform/harness/src/np_wrap_swap.cpp among the objects).
+# Heavy: a game link is one heavy job (tools/heavy.sh). The platform layer is 14 small files.
+include $(dir $(lastword $(MAKEFILE_LIST)))vita.mk
+comma := ,
+
+NAME   ?= np
+OUT    ?= $(NP_VBUILD)
+D      := $(OUT)/$(NAME)
+HARN   := $(NPV_DIR)/../harness
+INC    := -I$(NPV_DIR)/include -I$(NPV_DIR)/src -I$(HARN)/include -I$(NPV_DIR)/neon $(NP_VINC)
+# NP_PGO=gen: instrumented build (-fprofile-generate); NP_PGO=use NP_PGO_DIR=<dir with the .gcda files>:
+# the build that uses the profile. NP_LTO=1 adds link-time optimisation. (np/docs/vita.md "LTO and PGO".)
+NP_OPT := $(if $(filter 1,$(NP_LTO)),$(NP_VOPT_LTO),$(NP_VOPT_BASE))
+ifeq ($(NP_PGO),gen)
+NP_OPT += -fprofile-generate -fprofile-update=single
+NP_PGOLINK := -fprofile-generate
+NP_PGOLIBS := -lgcov   # VitaSDK's specs do not add libgcov by themselves
+else ifeq ($(NP_PGO),use)
+NP_OPT += -fprofile-use=$(NP_PGO_DIR) -fprofile-correction -Wno-missing-profile
+endif
+NP_LTOLINK := $(if $(filter 1,$(NP_LTO)),-flto=2 -fuse-linker-plugin,)
+# NP_CLANG_LTO=thin|full (np/Makefile LTO=thin|full, VCOMP=clang): the game objects are LLVM bitcode (clang -flto=thin) and VitaSDK's GNU ld
+# generates their code through LLVM's gold plugin, ThinLTO with two jobs. Everything else in the link stays as it is, so the image layout
+# (two LOAD segments at 0x81000000) is the same as without LTO. The plugin takes the code-generation options that clang would have put on
+# the command line: -emulated-tls (VitaSDK's libraries expect __emutls_get_address; without it TLS access becomes __aeabi_read_tp, which does
+# not exist: a link error), -O2. A cache directory makes a link that the heavy queue cut at its time limit resume with the modules it finished.
+LLVMGOLD ?= /usr/lib/llvm-18/lib/LLVMgold.so
+ifneq ($(NP_CLANG_LTO),)
+NP_LTOLINK := -Wl$(comma)-plugin$(comma)$(LLVMGOLD) $(if $(filter thin,$(NP_CLANG_LTO)),-Wl$(comma)-plugin-opt=thinlto) -Wl$(comma)-plugin-opt=jobs=2 \
+              -Wl$(comma)-plugin-opt=-emulated-tls -Wl$(comma)-plugin-opt=O2 -Wl$(comma)-plugin-opt=cache-dir=$(NP_VBUILD)/../ltocache
+endif
+CXXFLAGS := -std=gnu++17 $(NP_OPT) $(NP_VARCH) $(NP_VDEFS) $(NP_VCXXSYS) $(INC) -w -Wno-psabi -MMD
+PLATSRC := np_vita_main np_vita_process np_vita_platform np_vita_input np_vita_audio np_vita_crash np_jobs np_framesend \
+           vita_log vita_console vita_lab vita_memreport vita_threads vita_probe vita_plan np_vita_selftest np_vita_wire np_vita_settings np_settings np_fps_probe vita_bootscreen
+HARNSRC := np_harness np_vclock np_harness_game np_wrap_swap
+POBJS := $(patsubst %,$(D)/obj/%.o,$(PLATSRC)) $(patsubst %,$(D)/obj/h_%.o,$(HARNSRC)) $(D)/obj/vita_pad.o
+objs: $(POBJS)
+
+$(D)/obj/h_%.o: $(HARN)/src/%.cpp
+	@mkdir -p $(dir $@)
+	$(NP_VCXX) $(CXXFLAGS) -c $< -o $@
+$(D)/obj/%.o: $(NPV_DIR)/src/%.cpp
+	@mkdir -p $(dir $@)
+	$(NP_VCXX) $(CXXFLAGS) -c $< -o $@
+# np_fps_probe.cpp reads the policy's probe interface (the repository's include/np/fps.h); no other platform file needs the game's include directory
+$(D)/obj/np_fps_probe.o: CXXFLAGS += -I$(NPV_DIR)/../../include
+$(D)/obj/vita_pad.o: $(NPV_DIR)/src/vita_pad.c
+	@mkdir -p $(dir $@)
+	$(NP_VCC) $(NP_VARCH) $(NP_OPT) -c $< -o $@
+$(D)/obj/smoke_game.o: $(NPV_DIR)/tests/smoke_game.cpp
+	@mkdir -p $(dir $@)
+	$(NP_VCXX) $(CXXFLAGS) -c $< -o $@
+
+# ---- link, convert, package ------------------------------------------------------------------
+# (W5 SKIN: vita_pad.o is always among POBJS and --gc-sections drops its unreferenced section; the relink keeps it with -u msc_segment_pad.
+# It used to name vita_pad.o a second time: "multiple definition of msc_segment_pad", so a link that needed the pad could not be made.)
+# -q keeps the relocations vita-elf-create needs; ld inserts long-branch veneers where a BL crosses +-16 MiB.
+NP_GC ?= 1   # --gc-sections: the game objects are compiled with -ffunction-sections -fdata-sections (np/Makefile OPT)
+LINKCMD = $(NP_VLINK) $(NP_VARCH_ISA) $(NP_OPT) $(NP_LTOLINK) $(NP_PGOLINK) $(if $(filter 1,$(NP_GC)),-Wl$(comma)--gc-sections) -Wl,-u,sceUserMainThreadStackSize -Wl,-u,sceUserMainThreadName -Wl,-q -Wl,-Map,$(basename $@).map $(NP_VWRAPS) $(NP_EXTRA_WRAPS) -o $@
+GAPOK = $(NPV_DIR)/tools/seg_gap.sh $@
+define LINKRULE
+	@echo "linking $@"; $(LINKCMD) $(1) $(NP_VLIBS) $(NP_PGOLIBS) 2> $@.err || { grep -o "undefined reference to .*" $@.err | sort | uniq -c | sort -rn | head -40; tail -5 $@.err; false; }
+	@$(GAPOK) || { echo "relinking $@ with the segment pad"; $(LINKCMD) $(1) -Wl,-u,msc_segment_pad $(NP_VLIBS) $(NP_PGOLIBS) 2> $@.err && $(GAPOK); }
+	@grep -v "missing .note.GNU-stack\|NOTE: This behaviour is deprecated\|wchar_t yet the output\|32-bit enums yet the output" $@.err || true
+	@echo "$@: $$(grep -c 'wchar_t yet the output' $@.err) ABI-attribute warnings (2-byte wchar_t / 4-byte enums against the SDK's libc: expected, see np/docs/vita.md 1.1) filtered out of this log; full list in $@.err"
+endef
+
+$(D)/np-smoke.elf: $(POBJS) $(D)/obj/smoke_game.o $(NP_VBUILD)/stubs/libkubridge_stub_weak.a
+	$(call LINKRULE,$(POBJS) $(D)/obj/smoke_game.o)
+# (the archives are prerequisites too: a rebuilt libnpsdk.a / libvgx must relink; found when a fixed SDK object did not reach the image)
+$(D)/mscharged-np.elf: $(POBJS) $(NP_GAME_OBJS) $(filter %.a,$(NP_GAME_LIBS)) $(NP_VBUILD)/stubs/libkubridge_stub_weak.a
+	$(call LINKRULE,$(POBJS) $(NP_GAME_OBJS) $(NP_GAME_LIBS))
+$(NP_VBUILD)/stubs/libkubridge_stub_weak.a:
+	VBIN=$(VBIN) $(NPV_DIR)/tools/gen_kubridge_stubs.sh $(NP_VBUILD)/stubs
+
+%.velf: %.elf
+	$(VBIN)/vita-elf-create $< $@ > $*.elf-create.log 2>&1 || (cat $*.elf-create.log; false)
+	@tail -3 $*.elf-create.log
+# Not "safe" (-s): the power/clock calls and kubridge need the extended permission set. -na: no
+# ASLR, so the image stays at 0x81000000 and the map file's addresses are the run-time addresses
+# (psp2core dumps symbolise with it). No -c: compressed code decompresses at every launch.
+%.eboot.bin: %.velf
+	$(VBIN)/vita-make-fself -na $< $@
+# ATTRIBUTE2=12 selects the extended (about 365 MiB) memory budget (the sfo rules are below).
+LIVEAREA := $(NPV_DIR)/vpk/livearea
+# The final art for the final id; the test ids (MSCN0000x) get the same with the label NATIVE, so that they are told apart on the home screen.
+# vpk/art/make_art.py makes the pictures (from the multiplayer build's art). The player builds (NP_PLAYER=1, which the final id implies) have the
+# LiveArea Settings button (livearea/settings.png, target psla:-settings: main() opens the settings screen when it was started with it).
+NP_ICON ?= $(strip $(if $(filter MSCN0000%,$(NP_TITLE_ID)),icon0-test.png,icon0.png))
+# NP_ART_DIR=<dir>: the owner's own home-screen art (17 Oct: community fan art from LaunchBox Games Database, for his console only; it is
+# NOT in this repository): icon0.png (player builds), icon0-lab.png (the lab build), bg.png 840x500, startup.png 280x158, pic0.png 960x544
+# (sce_sys/pic0.png: the system's and RetroFlow's background for the title), all 8-bit palette PNGs. Unset: the plain art above.
+ifneq ($(NP_ART_DIR),)
+ART_ICON := $(NP_ART_DIR)/$(if $(filter 1,$(NP_PLAYER)),icon0.png,icon0-lab.png)
+ART_BG := $(NP_ART_DIR)/bg.png
+ART_START := $(NP_ART_DIR)/startup.png
+else
+ART_ICON := $(NPV_DIR)/vpk/$(NP_ICON)
+ART_BG := $(LIVEAREA)/bg.png
+ART_START := $(LIVEAREA)/startup.png
+endif
+VPK_FILES := -a $(ART_ICON)=sce_sys/icon0.png \
+	-a $(LIVEAREA)/$(if $(filter 1,$(NP_PLAYER)),template.xml,template-lab.xml)=sce_sys/livearea/contents/template.xml \
+	-a $(ART_BG)=sce_sys/livearea/contents/bg.png \
+	-a $(ART_START)=sce_sys/livearea/contents/startup.png
+ifneq ($(NP_ART_DIR),)
+VPK_FILES += -a $(NP_ART_DIR)/pic0.png=sce_sys/pic0.png
+# W5 BOOT: the loading screen's picture (960x544 RGB565 with a 12-byte header, make_vita_art.py); without it the loading screen is plain
+ifneq ($(wildcard $(NP_ART_DIR)/loading.bin),)
+VPK_FILES += -a $(NP_ART_DIR)/loading.bin=boot/loading.bin
+ART_LOADING := $(NP_ART_DIR)/loading.bin
+endif
+endif
+ifeq ($(NP_PLAYER),1)
+VPK_FILES += -a $(LIVEAREA)/settings.png=sce_sys/livearea/contents/settings.png
+endif
+ifneq ($(NP_SEED_DIR),)
+SEED_LIST := $(shell cd $(NP_SEED_DIR) && find . -type f | sed 's|^\./||' | sort)
+VPK_FILES += $(foreach f,$(SEED_LIST),-a $(NP_SEED_DIR)/$(f)=seed/$(f))
+endif
+# NP_SHADER_SEED=<dir>: a copy of a finished session's ux0:data/mscharged/shadercache (v3k / console: <key>/v2/{v,f}/<HH>/<hash>.gxp and vgx_shaderlist.bin), packed as
+# app0:shadercache/... where the renderer's Vita host looks for compiled shaders that come with the package (vgx vita/vgx_host_vita.cpp "a cache that came with the package"):
+# the game then does not compile its shaders on the console while the owner plays. A seed made by another vitaGL / shader generator has another <key> and is simply not found.
+# W5 BOOT: by default the compiled shaders go into the package as ONE file per key, shadercache/<key>.pack (tools/make_shader_pack.py), which
+# vgx reads once at start-up (MSC_VITA_SEED=pack): no copy at an install or an update, no file opened per shader (about 7 ms each on a
+# console's memory card), and the installer writes one file instead of 761 files and 380 folders. NP_SEED_LOOSE=1 packs the folder as it is
+# (the copy / link modes).
+ifneq ($(NP_SHADER_SEED),)
+ifeq ($(NP_SEED_LOOSE),1)
+SSEED_LIST := $(shell cd $(NP_SHADER_SEED) && find . -type f | sed 's|^\./||' | sort)
+VPK_FILES += $(foreach f,$(SSEED_LIST),-a $(NP_SHADER_SEED)/$(f)=shadercache/$(f))
+else
+SPACK_DIR := $(D)/shaderpack
+SPACK_LIST := $(shell python3 -I $(NPV_DIR)/tools/make_shader_pack.py $(NP_SHADER_SEED) $(SPACK_DIR) >&2 && cd $(SPACK_DIR) && ls)
+VPK_FILES += $(foreach f,$(SPACK_LIST),-a $(SPACK_DIR)/$(f)=shadercache/$(f))
+endif
+endif
+
+TID_smoke := MSCN00002
+TITLE_smoke := NP smoke test
+TID_game := $(NP_TITLE_ID)
+TITLE_game := $(NP_TITLE)
+smoke: $(D)/np-smoke.vpk
+vpk: $(D)/mscharged-np.vpk
+$(D)/np-smoke.vpk: $(D)/np-smoke.eboot.bin $(D)/smoke.param.sfo
+	$(VBIN)/vita-pack-vpk -s $(D)/smoke.param.sfo -b $(D)/np-smoke.eboot.bin $(VPK_FILES) $@
+	@ls -l $@; $(VBIN)/arm-vita-eabi-size $(D)/np-smoke.elf
+# The sfo has no source file: a stamp with the id, version and title makes it again when any of them changes (17 Oct: the
+# player title changed and a stale sfo kept the old one); the package is packed again when the art changes.
+GAME_SFO_ID := $(TID_game)|$(NP_APP_VER)|$(TITLE_game)
+$(shell mkdir -p $(D) && { [ "$$(cat $(D)/game.sfo.id 2>/dev/null)" = '$(GAME_SFO_ID)' ] || printf '%s' '$(GAME_SFO_ID)' > $(D)/game.sfo.id; })
+$(D)/game.param.sfo: $(D)/game.sfo.id
+$(D)/mscharged-np.vpk: $(D)/mscharged-np.eboot.bin $(D)/game.param.sfo $(ART_ICON) $(ART_BG) $(ART_START) $(ART_LOADING)
+	$(VBIN)/vita-pack-vpk -s $(D)/game.param.sfo -b $(D)/mscharged-np.eboot.bin $(VPK_FILES) $@
+	@ls -l $@; $(VBIN)/arm-vita-eabi-size $(D)/mscharged-np.elf
+$(D)/smoke.param.sfo:
+	$(VBIN)/vita-mksfoex -s TITLE_ID=$(TID_smoke) -s APP_VER=$(NP_APP_VER) -d ATTRIBUTE2=12 "$(TITLE_smoke)" $@
+$(D)/game.param.sfo:
+	$(VBIN)/vita-mksfoex -s TITLE_ID=$(TID_game) -s APP_VER=$(NP_APP_VER) -d ATTRIBUTE2=12 "$(TITLE_game)" $@
+clean:
+	rm -rf $(D)
+-include $(POBJS:.o=.d)
+.PHONY: objs smoke vpk clean
+.SECONDARY:

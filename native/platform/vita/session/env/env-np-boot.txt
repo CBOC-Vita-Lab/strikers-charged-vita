@@ -1,0 +1,14 @@
+# native check 2: as far as the host build gets: boot, intro movie scene ("movieplayer"), ESRB screen. ~1200 presented frames on the host
+# (60 s there); on the console the game thread may be slower than that, the frame budget below is generous.
+# Expect "[nav] ... scenes: [... 22:movieplayer ...]" and "[watch]" lines every 120 frames with rt= (real seconds) and ret= (retraces).
+MSC_MAX_FRAMES=2400
+MSC_WATCH=1
+MSC_WATCH_EVERY=120
+MSC_FRAME_TIMING=300
+MSC_VITA_MEMSTATS=1
+# pictures of these presents (the renderer's count): fetch with `vitalab.py get shots/shot_000600.png x.png`.
+# In Vita3K these files were BLACK although the emulator window showed the picture (read-back of the EFB in the emulator?): unexplained, so a black
+# file does not mean a black screen; on the console this is the only way to see a picture remotely.
+MSC_VITA_SHOT=100,300,600,900,1200,1500,1800,2100
+# saves of the native game go to their own directory (all native builds default to it): the native NAND layout is the recompiled build's own, so ux0:data/mscharged would be the owner's save
+NP_DATA_DIR=ux0:data/mscharged/np-data

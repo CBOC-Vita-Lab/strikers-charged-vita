@@ -1,0 +1,12 @@
+# W5-SEED test: demo match (AI against AI) in stadium 0, from the title screen
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=demo stadium=0 home=0 away=1
+wait ingame == 1 3000
+log STATE match object
+wait gs == 5 3000
+log STATE open play
+idle 1800
+log done
+exit

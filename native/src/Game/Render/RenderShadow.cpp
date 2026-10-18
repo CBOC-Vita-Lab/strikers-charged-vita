@@ -1,0 +1,1030 @@
+#include "revolution/types.h"
+#include "NL/nlDLListContainer.inl"
+#include <revolution/gx/GXTypes.h>
+
+#include "Game/Render/RenderShadow.h"
+
+#include "Game/BasicStadium.h"
+#include "Game/Debug/ShapeRender.h"
+#include "Game/Drawable/DrawableModel.h"
+#include "Game/Drawable/DrawableObj.h"
+#include "Game/Render/PlanarShadowDrawable.h"
+#include "Game/Render/RLView.h"
+#include "Game/Render/RLViewLayers.h"
+#include "Game/Render/Frustum.h"
+#include "Game/SharedStaticStorage.h"
+#include "NL/gl/gl.h"
+#include "NL/gl/glDraw3.h"
+#include "NL/gl/glMaterialParameters.h"
+#include "NL/gl/glMaterialProgram.h"
+#include "NL/gl/glMatrix.h"
+#include "NL/gl/glState.h"
+
+struct BallShadowParams
+{
+    /* 0x00 */ float fReferenceHeight;
+    /* 0x04 */ float fRadius0;
+    /* 0x08 */ float fRadius1;
+    /* 0x0C */ int nAlpha0;
+    /* 0x10 */ int nAlpha1;
+    /* 0x14 */ nlColour colour;
+};
+
+void BuildPlanarShadowMatrix(nlMatrix4& out, const nlMatrix4& in);
+void GetPlanarShadowBounds(const glModel* model, const nlMatrix4& transform,
+    float* minX, float* maxX, float* minY, float* maxY,
+    unsigned long boundingBoxCacheKey);
+void DrawPlanarShadowBounds(eCLV layer, const glModel* model,
+    const nlMatrix4& transform, unsigned long boundingBoxCacheKey);
+
+
+
+
+static bool g_bPlanarShadows = true;
+bool g_bProjectedShadows = true;
+float g_fShadowLightOverrideX = 1.0f;
+float g_fShadowLightOverrideY = 1.0f;
+float g_fShadowLightOverrideZ = 1.0f;
+static float g_fBallShadowH = 4.0f;
+static float g_fBallShadowR0 = 0.35f;
+static float g_fBallShadowR1 = 0.65f;
+static int g_nBallShadowA0 = 10;
+static int g_nBallShadowA1 = 50;
+static bool g_bBallGlow = true;
+static float g_fBallGlowH = 4.0f;
+static float g_fBallGlowR0 = 2.0f;
+static float g_fBallGlowR1 = 2.0f;
+static int g_nBallGlowA0 = 165;
+static int g_nBallGlowA1 = 10;
+static float sfPlanarShadowOpacity = 0.3f;
+static float sfCoPlanarZ = 0.1f;
+static const unsigned long LightRampTexture = glGetTexture("global/lightramp");
+static const unsigned long BlackTexture = glGetTexture("global/black");
+const unsigned long WhiteTexture = glGetTexture("global/white");
+static bool g_bShadowBoundingBox;
+u8 g_bDrawProjectedShadowDebug;
+u8 g_bDrawPlanarShadowBounds;
+static bool g_bSkipUntransformed;
+int MaxProjectedShadows;
+static u8 g_bShadowBlobs;
+static u8 g_bShadowPositionOverride;
+static RLView* g_CharacterShadowView;
+static inline float GetDefaultAntiFlimmer()
+{
+    BasicStadium* stadium = BasicStadium::GetCurrentStadium();
+    float height = 0.0f;
+    if (stadium != 0)
+    {
+        height = stadium->m_shadowHeight;
+    }
+    return height + 0.015625f;
+}
+
+static float g_AntiFlimmer = GetDefaultAntiFlimmer();
+static int sShadowProjectionQuadAlpha;
+static u8 g_bShadowBounds;
+static int g_Alpha[3] = { 180, 80, 32 };
+
+static inline void CastDirectional(nlVector3& p, const nlVector3& lightPos)
+{
+    nlVector3 V;
+    nlVector3 Q;
+
+    V.x = 0.0f;
+    V.y = 0.0f;
+    V.z = 1.0f;
+    nlVec3Set(Q, p.x, p.y, p.z);
+    nlVector3 L = lightPos;
+
+    nlVec3Normalize(L, L, false);
+
+    float t = -(nlVec3DotProduct(V, Q) / nlVec3DotProduct(V, L));
+
+    nlVec3Set(p, Q.x + t * L.x, Q.y + t * L.y, Q.z + t * L.z);
+}
+
+/**
+ * Builds the corners of a square of half-size radius around vCenter, facing
+ * along the light direction vDir.
+ */
+static inline void GetShadowQuad(nlVector3* p, const nlVector3& vDir,
+    const nlVector3& vCenter, float radius)
+{
+    nlVector3 vRight;
+    nlVector3 vUp = { 0.0f, 0.0f, 1.0f };
+
+    nlVec3CrossProduct(vRight, vDir, vUp);
+    nlVec3Normalize(vRight, vRight);
+    nlVec3CrossProduct(vUp, vRight, vDir);
+    nlVec3Normalize(vUp, vUp);
+
+    nlVec3ScaleAdd(p[0], radius, vRight, vCenter);
+    nlVec3ScaleAdd(p[1], -radius, vRight, vCenter);
+    nlVec3ScaleAdd(p[0], -radius, vUp, p[0]);
+    nlVec3ScaleAdd(p[1], -radius, vUp, p[1]);
+    nlVec3ScaleAdd(p[2], -radius, vRight, vCenter);
+    nlVec3ScaleAdd(p[3], radius, vRight, vCenter);
+    nlVec3ScaleAdd(p[2], radius, vUp, p[2]);
+    nlVec3ScaleAdd(p[3], radius, vUp, p[3]);
+}
+
+float GetCoPlanarZ()
+{
+    return sfCoPlanarZ;
+}
+
+void SetCoPlanarZ(float z)
+{
+    sfCoPlanarZ = z;
+}
+
+void InitMaxProjectedShadows()
+{
+    MaxProjectedShadows = 10;
+}
+
+RLView* SetCharacterShadowView(RLView* view)
+{
+    RLView* previous = g_CharacterShadowView;
+    g_CharacterShadowView = view;
+    return previous;
+}
+
+extern "C" float fn_80184AF8(float antiFlimmer)
+{
+    float previous = g_AntiFlimmer;
+    g_AntiFlimmer = antiFlimmer;
+    return previous;
+}
+
+extern "C" float fn_80184B08()
+{
+    float previous = g_AntiFlimmer;
+    g_AntiFlimmer = GetDefaultAntiFlimmer();
+    return previous;
+}
+
+bool ShouldShadowBeUpdated(const ProjectedShadowParams& params)
+{
+    nlVector3 position = params.vPosition;
+    position.z += 0.625f * params.fHeight;
+
+    float radius = 2.0f * params.fRadius;
+    RLView* view = GetShadowedView();
+    bool visible
+        = ClassifySphereInFrustum(view->m_Interface->GetShadowMatrix(), &position, radius);
+    unsigned long interval;
+    if (visible)
+    {
+        interval = params.nVisibleInterval;
+    }
+    else
+    {
+        interval = params.nInvisibleInterval;
+    }
+
+    unsigned long frame
+        = params.nPartitionIndex + (unsigned long)glGetCurrentFrame();
+    if (frame % interval != 0)
+    {
+        return 0;
+    }
+    return 1;
+}
+
+void RenderShadowProjectionQuad(
+    GLView* pView, const ProjectedShadowParams& params)
+{
+    nlVector3 p[4];
+    nlVector3 vDir;
+    nlVector3 vTemp;
+    nlVector3 vLight;
+    float radius;
+
+    if (g_bShadowPositionOverride)
+    {
+        float z;
+        float y;
+        float x;
+        z = g_fShadowLightOverrideZ;
+        y = g_fShadowLightOverrideY;
+        x = g_fShadowLightOverrideX;
+        nlVec3Set(vLight, x, y, z);
+    }
+    else
+    {
+        float z;
+        float y;
+        float x;
+        z = params.vLight.z;
+        y = params.vLight.y;
+        x = params.vLight.x;
+        nlVec3Set(vLight, x, y, z);
+    }
+
+    nlVec3Set(vDir, -vLight.x, -vLight.y, -vLight.z);
+    nlVec3Scale(vDir, nlRecipSqrt(vDir.GetLengthSq3D(), false));
+
+    vTemp = params.vPosition;
+    vTemp.z += 0.5f * params.fHeight;
+    radius = params.fRadius;
+
+    GetShadowQuad(p, vDir, vTemp, radius);
+
+    {
+        nlVector3* pPoint = p;
+        for (int i = 0; i < 4; i++, pPoint++)
+        {
+            CastDirectional(*pPoint, vDir);
+            pPoint->z = g_AntiFlimmer;
+        }
+    }
+
+    glSetDefaultState(true);
+    glSetRasterState(GLS_DepthWrite, 1);
+    glSetRasterState(GLS_AlphaBlend, 1);
+    glSetRasterState(GLS_Culling, 0);
+    glSetCurrentRasterState(glHandleizeRasterState());
+    glSetCurrentTexture(WhiteTexture, GLTT_Diffuse);
+    glSetTextureState(GLTS_DiffuseWrap, 0);
+    glSetCurrentTextureState(glHandleizeTextureState());
+
+    nlColour colour = { 0xFF, 0xFF, 0x00, 0x00 };
+    colour.c[3] = (u8)sShadowProjectionQuadAlpha;
+    glQuad3 quad;
+    nlVec2Set(quad.m_uv[0], 0.0f, 0.0f);
+    nlVec2Set(quad.m_uv[1], 0.0f, 1.0f);
+    nlVec2Set(quad.m_uv[2], 1.0f, 1.0f);
+    nlVec2Set(quad.m_uv[3], 1.0f, 0.0f);
+    quad.m_pos[0] = p[0];
+    quad.m_pos[1] = p[1];
+    quad.m_pos[2] = p[2];
+    quad.m_pos[3] = p[3];
+    quad.SetColour(colour);
+    glAttachQuad3((eGLView)(u32)pView, 1, &quad);
+}
+
+void RenderCharacterIntoTexture(const ProjectedShadowParams& params)
+{
+    nlVector3 up = { 0.0f, 0.0f, 1.0f };
+    nlVector3 targetPos;
+    nlVector3 viewDir;
+    nlVector3 eyePos;
+    nlVector3 vTemp;
+    nlVector3 vDir;
+    nlVector3 shadowPos;
+    nlVector3 vLight;
+
+    targetPos = params.vPosition;
+    targetPos.z += 0.5f * params.fHeight;
+
+    if (g_bShadowPositionOverride)
+    {
+        float z;
+        float y;
+        float x;
+        z = g_fShadowLightOverrideZ;
+        y = g_fShadowLightOverrideY;
+        x = g_fShadowLightOverrideX;
+        nlVec3Set(shadowPos, x, y, z);
+    }
+    else
+    {
+        float z;
+        float y;
+        float x;
+        z = params.vLight.z;
+        y = params.vLight.y;
+        x = params.vLight.x;
+        nlVec3Set(shadowPos, x, y, z);
+    }
+
+    nlVec3Set(viewDir, -shadowPos.x, -shadowPos.y, -shadowPos.z);
+    nlVec3Scale(viewDir, nlRecipSqrt(viewDir.GetLengthSq3D(), false));
+    nlVec3Neg(viewDir, viewDir);
+
+    nlVec3ScaleAdd(eyePos, 8.0f, viewDir, targetPos);
+
+    nlMatrix4 view;
+    glMatrixLookAt(view, eyePos, targetPos, up);
+
+    nlMatrix4 projection;
+    float radius = 2.0f * params.fRadius;
+    glMatrixOrthographicCentered(projection, radius, radius, 4.0f, 12.0f);
+
+    SetShadowPartitionCamera(params.nPartitionIndex, view, projection);
+    SetShadowPartitionEnabled(params.nPartitionIndex, true);
+    RenderShadowProjectionQuad(GetShadowPartitionView(params.nPartitionIndex), params);
+    GetShadowPartitionView(params.nPartitionIndex)->AttachModel(params.pModel, 0);
+
+    if (g_bShadowBounds)
+    {
+        GLView* unknownView = g_ShapeRenderer.m_eView;
+        g_ShapeRenderer.m_eView = GetShadowPartitionView(params.nPartitionIndex);
+
+        vTemp = params.vPosition;
+        vTemp.z += 0.5f * params.fHeight;
+
+        if (g_bShadowPositionOverride)
+        {
+            float z;
+            float y;
+            float x;
+            z = g_fShadowLightOverrideZ;
+            y = g_fShadowLightOverrideY;
+            x = g_fShadowLightOverrideX;
+            nlVec3Set(vLight, x, y, z);
+        }
+        else
+        {
+            float z;
+            float y;
+            float x;
+            z = params.vLight.z;
+            y = params.vLight.y;
+            x = params.vLight.x;
+            nlVec3Set(vLight, x, y, z);
+        }
+
+        nlVec3Set(vDir, -vLight.x, -vLight.y, -vLight.z);
+        nlVec3Scale(vDir, nlRecipSqrt(vDir.GetLengthSq3D(), false));
+
+        float radius = params.fRadius;
+        nlVector3 p[4];
+        GetShadowQuad(p, vDir, vTemp, radius);
+
+        nlColour c = { 0xFF, 0xFF, 0xFF, 0xFF };
+        g_ShapeRenderer.DrawLine3D(p[0], p[1], c, false);
+        g_ShapeRenderer.DrawLine3D(p[1], p[2], c, false);
+        g_ShapeRenderer.DrawLine3D(p[2], p[3], c, false);
+        g_ShapeRenderer.DrawLine3D(p[3], p[0], c, false);
+        g_ShapeRenderer.DrawLine3D(p[0], p[2], c, false);
+        g_ShapeRenderer.DrawLine3D(p[1], p[3], c, false);
+
+        g_ShapeRenderer.m_eView = unknownView;
+    }
+}
+
+static void RenderBlobShadow(const nlVector3& vPosition,
+    const nlVector3* pPoints, int index, const int* uvOrder,
+    const nlColour* pColour)
+{
+    static int alpha = 0x80;
+    static float half_w = 0.625f;
+    static float half_h = 0.625f;
+
+    glQuad3 quad;
+    nlColour c;
+    nlColour cfade;
+    unsigned long texture;
+
+    nlVector3 sp10;
+    nlVec3Set(sp10, vPosition.x, vPosition.y, g_AntiFlimmer);
+
+    if (pColour == 0)
+    {
+        nlColourSet(c, 0xFF, 0xFF, 0xFF, (u8)alpha);
+        cfade = c;
+    }
+    else
+    {
+        c = *pColour;
+        cfade = c;
+        cfade.c[3] = (u8)g_Alpha[2];
+    }
+
+    if (pPoints == 0)
+    {
+        texture = glGetTexture("global/shadeblob");
+
+        nlVec3Set(quad.m_pos[0],
+            sp10.x - half_w, sp10.y - half_h, sp10.z);
+        nlVec3Set(quad.m_pos[1],
+            sp10.x - half_w, sp10.y + half_h, sp10.z);
+        nlVec3Set(quad.m_pos[2],
+            sp10.x + half_w, sp10.y + half_h, sp10.z);
+        nlVec3Set(quad.m_pos[3],
+            sp10.x + half_w, sp10.y - half_h, sp10.z);
+
+        quad.m_uv[0].x = 1.0f;
+        quad.m_uv[0].y = 1.0f;
+        quad.m_uv[1].x = 0.0f;
+        quad.m_uv[1].y = 1.0f;
+        quad.m_uv[2].x = 0.0f;
+        quad.m_uv[2].y = 0.0f;
+        quad.m_uv[3].x = 1.0f;
+        quad.m_uv[3].y = 0.0f;
+    }
+    else
+    {
+        texture = GetShadowPartitionTexture(index);
+
+        quad.m_pos[0] = pPoints[0];
+        quad.m_pos[1] = pPoints[1];
+        quad.m_pos[2] = pPoints[2];
+        quad.m_pos[3] = pPoints[3];
+
+        int idx;
+        nlVector2* pUV;
+
+        if (uvOrder == 0)
+        {
+            idx = 0;
+        }
+        else
+        {
+            idx = uvOrder[0];
+        }
+        pUV = &quad.m_uv[idx];
+        pUV->x = 1.0f;
+        pUV->y = 1.0f;
+
+        if (uvOrder == 0)
+        {
+            idx = 1;
+        }
+        else
+        {
+            idx = uvOrder[1];
+        }
+        pUV = &quad.m_uv[idx];
+        pUV->x = 0.0f;
+        pUV->y = 1.0f;
+
+        if (uvOrder == 0)
+        {
+            idx = 2;
+        }
+        else
+        {
+            idx = uvOrder[2];
+        }
+        pUV = &quad.m_uv[idx];
+        pUV->x = 0.0f;
+        pUV->y = 0.0f;
+
+        if (uvOrder == 0)
+        {
+            idx = 3;
+        }
+        else
+        {
+            idx = uvOrder[3];
+        }
+        pUV = &quad.m_uv[idx];
+        pUV->x = 1.0f;
+        pUV->y = 0.0f;
+    }
+
+    quad.m_colour[1] = c;
+    quad.m_colour[0] = c;
+    quad.m_colour[3] = cfade;
+    quad.m_colour[2] = cfade;
+
+    glSetDefaultState(true);
+    glSetRasterState(GLS_AlphaBlend, 1);
+    glSetRasterState(GLS_Culling, 0);
+    glSetRasterState(GLS_DepthWrite, 0);
+    glSetCurrentRasterState(glHandleizeRasterState());
+    glSetCurrentTexture(texture, GLTT_Diffuse);
+    glSetTextureState(GLTS_DiffuseWrap, 3);
+    glSetCurrentTextureState(glHandleizeTextureState());
+
+    quad.Attach((eGLView)(u32)g_CharacterShadowView, 0);
+}
+
+void RenderProjectedShadow(const ProjectedShadowParams& params)
+{
+    nlVector3 vDir;
+    nlVector3 vTemp;
+    nlVector3 p[4];
+    nlVector3 dir;
+    nlVector3 light;
+    nlVector3 vLight;
+    float radius;
+    nlColour c;
+    nlColour colour;
+    nlMatrix4 mLight;
+
+    if (g_bShadowBlobs)
+    {
+        RenderBlobShadow(params.vPosition, 0, -1, 0, 0);
+        return;
+    }
+
+    radius = params.fRadius;
+
+    if (g_bShadowPositionOverride)
+    {
+        float z;
+        float y;
+        float x;
+        z = g_fShadowLightOverrideZ;
+        y = g_fShadowLightOverrideY;
+        x = g_fShadowLightOverrideX;
+        nlVec3Set(vLight, x, y, z);
+    }
+    else
+    {
+        float z;
+        float y;
+        float x;
+        z = params.vLight.z;
+        y = params.vLight.y;
+        x = params.vLight.x;
+        nlVec3Set(vLight, x, y, z);
+    }
+
+    nlVec3Set(vDir, -vLight.x, -vLight.y, -vLight.z);
+    nlVec3Scale(vDir, nlRecipSqrt(vDir.GetLengthSq3D(), false));
+
+    vTemp = params.vPosition;
+    vTemp.z += 0.5f * params.fHeight;
+
+    GetShadowQuad(p, vDir, vTemp, radius);
+
+    nlColourSet(c, 0x40, 0x40, 0xFF, 0xFF);
+
+    if (g_bDrawProjectedShadowDebug)
+    {
+        nlColour colour = c;
+        g_ShapeRenderer.DrawLine3D(p[0], p[1], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[1], p[2], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[2], p[3], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[3], p[0], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[0], p[2], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[1], p[3], colour, false);
+    }
+
+    {
+        nlVector3* pPoint = p;
+        for (int i = 0; i < 4; i++, pPoint++)
+        {
+            CastDirectional(*pPoint, vDir);
+            pPoint->z = g_AntiFlimmer;
+        }
+    }
+
+    if (g_bDrawProjectedShadowDebug)
+    {
+        nlColourSet(c, 0x40, 0xFF, 0x40, 0xFF);
+        nlColour colour = c;
+        g_ShapeRenderer.DrawLine3D(p[0], p[1], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[1], p[2], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[2], p[3], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[3], p[0], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[0], p[2], colour, false);
+        g_ShapeRenderer.DrawLine3D(p[1], p[3], colour, false);
+
+        dir = vTemp;
+        CastDirectional(dir, vDir);
+        g_ShapeRenderer.DrawLine3D(vTemp, dir, c, false);
+    }
+
+    {
+        float newAntiFlimmer = GetCoPlanarZ();
+        float oldAntiFlimmer = g_AntiFlimmer;
+        g_AntiFlimmer = newAntiFlimmer;
+
+        *(u32*)&colour = 0;
+        colour.c[3] = (u8)(g_Alpha[0] * params.fScalar);
+
+        RenderBlobShadow(
+            params.vPosition, p, params.nPartitionIndex, 0, &colour);
+        g_AntiFlimmer = oldAntiFlimmer;
+    }
+
+    if (g_bDrawProjectedShadowDebug)
+    {
+        nlVec3Set(light,
+            params.vLight.x, params.vLight.y, params.vLight.z);
+
+        mLight.SetIdentity();
+        mLight.m41 = light.x;
+        mLight.m42 = light.y;
+        mLight.m43 = light.z;
+        mLight.m44 = 1.0f;
+
+        c.c[0] = 0xFF;
+        c.c[1] = 0xFF;
+        c.c[2] = 0x40;
+        c.c[3] = 0xFF;
+        g_ShapeRenderer.DrawSpherePrimitive(mLight, 0.5f, c);
+    }
+}
+
+void ClearCharacterShadowsUpdated()
+{
+    int shadowIndex;
+    for (shadowIndex = 0; shadowIndex < GetShadowPartitionCount(); shadowIndex++)
+    {
+        SetShadowPartitionEnabled(shadowIndex, false);
+    }
+}
+
+static void DrawBallShadow(
+    const nlVector3& vPosition, const BallShadowParams& p, bool bGlow)
+{
+    f32 frac = vPosition.z / p.fReferenceHeight;
+    if (frac < 0.0f)
+    {
+        frac = 0.0f;
+    }
+    if (frac > 1.0f)
+    {
+        frac = 1.0f;
+    }
+
+    f32 fX0, fY0, fY1, fX1;
+    f32 half_dim = (1.0f - frac) * p.fRadius0 + frac * p.fRadius1;
+    f32 fAlpha
+        = (1.0f - frac) * (f32)p.nAlpha0 + frac * (f32)p.nAlpha1;
+    s32 alpha = (s32)fAlpha;
+    if (alpha < 0)
+    {
+        alpha = 0;
+    }
+    if (alpha > 0xFF)
+    {
+        alpha = 0xFF;
+    }
+
+    BasicStadium* stadium = BasicStadium::GetCurrentStadium();
+    float height = 0.0f;
+    if (stadium != 0)
+    {
+        height = stadium->m_shadowHeight;
+    }
+
+    nlVector3 position;
+    nlVec3Set(position, vPosition.x, vPosition.y, 0.015625f + height);
+
+    nlColour c = p.colour;
+    fY0 = position.y - half_dim;
+    fX0 = position.x - half_dim;
+
+    glQuad3 quad;
+    c.c[3] = (u8)alpha;
+
+    fY1 = position.y + half_dim;
+    fX1 = position.x + half_dim;
+
+    quad.m_pos[0].x = fX0;
+    quad.m_pos[0].y = fY0;
+    quad.m_pos[0].z = position.z;
+    quad.m_pos[1].x = fX0;
+    quad.m_pos[1].y = fY1;
+    quad.m_pos[1].z = position.z;
+    quad.m_pos[2].x = fX1;
+    quad.m_pos[2].y = fY1;
+    quad.m_pos[2].z = position.z;
+    quad.m_pos[3].x = fX1;
+    quad.m_pos[3].y = fY0;
+    quad.m_pos[3].z = position.z;
+
+    quad.m_uv[0].x = 1.0f;
+    quad.m_uv[0].y = 1.0f;
+    quad.m_uv[1].x = 0.0f;
+    quad.m_uv[1].y = 1.0f;
+    quad.m_uv[2].x = 0.0f;
+    quad.m_uv[2].y = 0.0f;
+    quad.m_uv[3].x = 1.0f;
+    quad.m_uv[3].y = 0.0f;
+
+    quad.m_colour[3] = c;
+    quad.m_colour[2] = c;
+    quad.m_colour[1] = c;
+    quad.m_colour[0] = c;
+
+    glSetDefaultState(true);
+    glSetRasterState(GLS_AlphaBlend, bGlow ? 3 : 1);
+    glSetRasterState(GLS_AlphaTest, 1);
+    glSetRasterState(GLS_Culling, 0);
+    glSetRasterState(GLS_DepthWrite, 0);
+    glSetCurrentRasterState(glHandleizeRasterState());
+
+    glSetCurrentTexture(glGetTexture(bGlow ? "global/light_blob"
+                                        : "global/ball_shadow"),
+        GLTT_Diffuse);
+    glSetTextureState(GLTS_DiffuseWrap, 3);
+    glSetCurrentTextureState(glHandleizeTextureState());
+
+    const glModel* pModel = quad.GetModel();
+    AttachModelToLayerView(eCLV_Particles, pModel, 0);
+}
+
+void DrawBallShadowAndGlow(ChargeShadowDrawable* object)
+{
+    if (object->GetWorldMatrix()->m43 >= 0.0f)
+    {
+        BallShadowParams p;
+        p.fReferenceHeight = g_fBallShadowH;
+        p.fRadius0 = g_fBallShadowR0;
+        p.fRadius1 = g_fBallShadowR1;
+        p.nAlpha0 = g_nBallShadowA0;
+        p.nAlpha1 = g_nBallShadowA1;
+        p.colour.c[0] = 0xFF;
+        p.colour.c[1] = 0xFF;
+        p.colour.c[2] = 0xFF;
+        p.colour.c[3] = 0xFF;
+        DrawBallShadow(
+            *(const nlVector3*)&object->GetWorldMatrix()->e2[3][0], p, false);
+
+        if (g_bBallGlow)
+        {
+            p.fReferenceHeight = g_fBallGlowH;
+            p.fRadius0 = g_fBallGlowR0;
+            p.fRadius1 = g_fBallGlowR1;
+            p.nAlpha0 = g_nBallGlowA0;
+            p.nAlpha1 = g_nBallGlowA1;
+
+            int red;
+            int blue;
+            int green;
+            float charge = object->m_fCharge;
+            if (charge < 1.0f)
+            {
+                red = 180;
+                blue = 200;
+                green = 15;
+            }
+            else if (charge >= 1.0f && charge < 2.0f)
+            {
+                red = 200;
+                blue = 25;
+                green = 25;
+            }
+            else if (charge >= 2.0f && charge < 3.0f)
+            {
+                red = 200;
+                blue = 15;
+                green = 100;
+            }
+            else if (charge >= 3.0f && charge < 4.0f)
+            {
+                red = 200;
+                blue = 10;
+                green = 200;
+            }
+            else
+            {
+                red = 200;
+                blue = 200;
+                green = 200;
+            }
+            p.colour.c[0] = red;
+            p.colour.c[1] = green;
+            p.colour.c[2] = blue;
+            p.colour.c[3] = 0xFF;
+            DrawBallShadow(
+                *(const nlVector3*)&object->GetWorldMatrix()->e2[3][0], p, true);
+        }
+    }
+}
+
+float GetPlanarShadowOpacity()
+{
+    return sfPlanarShadowOpacity;
+}
+
+void SetPlanarShadowOpacity(float opacity)
+{
+    sfPlanarShadowOpacity = opacity;
+}
+
+/**
+ * Address/Size: 0x80186524 | size: 0x12C
+ *
+ * Flattens a transform onto the ground plane along the stadium's shadow light
+ * direction.
+ */
+void BuildPlanarShadowMatrix(nlMatrix4& shadowMatrix, const nlMatrix4& objectToWorldMatrix)
+{
+    nlVector3 vPosition = { 0.0f, 0.0f, 0.0f };
+    const nlVector3& lightVector
+        = BasicStadium::GetCurrentStadium()->m_shadowLightPosition;
+    float m11 = objectToWorldMatrix.m11;
+    float m21 = objectToWorldMatrix.m21;
+    float m31 = objectToWorldMatrix.m31;
+    float m41 = objectToWorldMatrix.m41;
+    float m12 = objectToWorldMatrix.m12;
+    float m22 = objectToWorldMatrix.m22;
+    float m32 = objectToWorldMatrix.m32;
+    float m42 = objectToWorldMatrix.m42;
+    float xOverZ = -lightVector.x / lightVector.z;
+    float yOverZ = -lightVector.y / lightVector.z;
+
+    shadowMatrix.m11 = m11 + xOverZ * objectToWorldMatrix.m13;
+    shadowMatrix.m21 = m21 + xOverZ * objectToWorldMatrix.m23;
+    shadowMatrix.m31 = m31 + xOverZ * objectToWorldMatrix.m33;
+    shadowMatrix.m41 = m41 + xOverZ * objectToWorldMatrix.m43;
+    shadowMatrix.m12 = m12 + yOverZ * objectToWorldMatrix.m13;
+    shadowMatrix.m22 = m22 + yOverZ * objectToWorldMatrix.m23;
+    shadowMatrix.m32 = m32 + yOverZ * objectToWorldMatrix.m33;
+    shadowMatrix.m42 = m42 + yOverZ * objectToWorldMatrix.m43;
+    shadowMatrix.m13 = 0.0f;
+    shadowMatrix.m23 = 0.0f;
+    shadowMatrix.m33 = 0.0f;
+    shadowMatrix.m43 = 0.0f;
+    shadowMatrix.m14 = 0.0f;
+    shadowMatrix.m24 = 0.0f;
+    shadowMatrix.m34 = 0.0f;
+    shadowMatrix.m44 = 1.0f;
+}
+
+/**
+ * Address/Size: 0x80186650 | size: 0x1BC
+ *
+ * Projects the model's bounding box onto the ground plane and returns the
+ * screen-space extent the flattened corners span.
+ */
+void GetPlanarShadowBounds(const glModel* model, const nlMatrix4& transform,
+    float* minX, float* maxX, float* minY, float* maxY,
+    unsigned long boundingBoxCacheKey)
+{
+    AABBDimensions dimensions;
+    GetAABBDimensions(model, dimensions, boundingBoxCacheKey);
+
+    nlVector4 corners[8];
+    nlVec4Set(corners[0], dimensions.mMin.x, dimensions.mMin.y, dimensions.mMin.z, 1.0f);
+    nlVec4Set(corners[1], dimensions.mMin.x, dimensions.mMin.y, dimensions.mMax.z, 1.0f);
+    nlVec4Set(corners[2], dimensions.mMin.x, dimensions.mMax.y, dimensions.mMin.z, 1.0f);
+    nlVec4Set(corners[3], dimensions.mMin.x, dimensions.mMax.y, dimensions.mMax.z, 1.0f);
+    nlVec4Set(corners[4], dimensions.mMax.x, dimensions.mMin.y, dimensions.mMin.z, 1.0f);
+    nlVec4Set(corners[5], dimensions.mMax.x, dimensions.mMin.y, dimensions.mMax.z, 1.0f);
+    nlVec4Set(corners[6], dimensions.mMax.x, dimensions.mMax.y, dimensions.mMin.z, 1.0f);
+    nlVec4Set(corners[7], dimensions.mMax.x, dimensions.mMax.y, dimensions.mMax.z, 1.0f);
+
+    nlMatrix4 projection;
+    BuildPlanarShadowMatrix(projection, transform);
+
+    for (int i = 0; i < 8; i++)
+    {
+        nlVector4 projected;
+        nlMultVectorMatrix(projected, corners[i], projection);
+        corners[i] = projected;
+
+        if (i == 0 || corners[i].x < *minX)
+            *minX = corners[i].x;
+        if (i == 0 || corners[i].x > *maxX)
+            *maxX = corners[i].x;
+        if (i == 0 || corners[i].y < *minY)
+            *minY = corners[i].y;
+        if (i == 0 || corners[i].y > *maxY)
+            *maxY = corners[i].y;
+    }
+}
+
+/**
+ * Address/Size: 0x8018680C | size: 0x1A0
+ *
+ * Draws the flattened bounding box of a model as one white co-planar quad.
+ */
+void DrawPlanarShadowBounds(eCLV layer, const glModel* model,
+    const nlMatrix4& transform, unsigned long boundingBoxCacheKey)
+{
+    float minX;
+    float maxX;
+    float minY;
+    float maxY;
+    float z = sfCoPlanarZ;
+    GetPlanarShadowBounds(model, transform, &minX, &maxX, &minY, &maxY,
+        boundingBoxCacheKey);
+
+    nlVector3 coords[4];
+    coords[0].x = minX;
+    coords[0].y = minY;
+    coords[0].z = z;
+    coords[1].x = maxX;
+    coords[1].y = minY;
+    coords[1].z = z;
+    coords[2].x = maxX;
+    coords[2].y = maxY;
+    coords[2].z = z;
+    coords[3].x = minX;
+    coords[3].y = maxY;
+    coords[3].z = z;
+    if (minX + maxX < 0.0f)
+    {
+        coords[0].x = maxX;
+        coords[1].x = minX;
+        coords[2].x = minX;
+        coords[3].x = maxX;
+    }
+
+    glSetDefaultState(false);
+    glSetRasterState(GLS_Culling,
+        g_bDrawPlanarShadowBounds ? GX_CULL_NONE : GX_CULL_ALL);
+    glSetRasterState(GLS_DepthTest, 0);
+    glSetRasterState(GLS_DepthWrite, 0);
+    glSetCurrentRasterState(glHandleizeRasterState());
+    glSetCurrentTexture(WhiteTexture, GLTT_Diffuse);
+
+    glQuad3 quad;
+    quad.m_pos[0] = coords[0];
+    quad.m_uv[0].x = 0.0f;
+    quad.m_uv[0].y = 0.0f;
+    quad.m_pos[1] = coords[1];
+    quad.m_uv[1].x = 0.0f;
+    quad.m_uv[1].y = 0.0f;
+    quad.m_pos[2] = coords[2];
+    quad.m_uv[2].x = 0.0f;
+    quad.m_uv[2].y = 0.0f;
+    quad.m_pos[3] = coords[3];
+    quad.m_uv[3].x = 0.0f;
+    quad.m_uv[3].y = 0.0f;
+    quad.SetColour(0xAA, 0xAA, 0xAA, 0xFF);
+    quad.Attach((eGLView)(u32)GetLayerView(layer), 0);
+}
+
+/**
+ * Address/Size: 0x801869AC | size: 0x2D8
+ *
+ * Draws one model's ground shadow: the flattened bounding box for the
+ * projected pass and the co-planar geometry for the planar pass.
+ */
+void DrawPlanarShadow(const glModel* model, const nlMatrix4& transform,
+    int ignorePacketMatrices, unsigned long isModelPosed, const void* boundingBoxCacheKey,
+    float opacity)
+{
+    nlMatrix4 packetMatrix;
+    nlMatrix4 packetShadowMatrix;
+    nlMatrix4 transformedPacketMatrix;
+    nlMatrix4 packetMat;
+    nlMatrix4 mat;
+
+    if (g_bShadowBoundingBox)
+        RenderBoundingBox(model, transform);
+
+    if (!g_bPlanarShadows)
+        return;
+
+    if (g_bProjectedShadows)
+    {
+        if (g_bSkipUntransformed && transform.m41 == 0.0f
+            && transform.m42 == 0.0f && transform.m43 == 0.0f)
+        {
+            return;
+        }
+
+        if (ignorePacketMatrices != 0)
+        {
+            mat = transform;
+        }
+        else
+        {
+            glModelGetMatrix(model, packetMat);
+            nlMultMatrices(mat, transform, packetMat);
+        }
+        DrawPlanarShadowBounds(eCLV_CoPlanar, model, mat,
+            (unsigned long)boundingBoxCacheKey);
+    }
+
+    glModelGetMatrix(model, packetMatrix);
+
+    if (ignorePacketMatrices == 0)
+    {
+        if (isModelPosed != 0)
+        {
+            transformedPacketMatrix = packetMatrix;
+        }
+        else
+        {
+            nlMultMatrices(transformedPacketMatrix, transform, packetMatrix);
+        }
+        BuildPlanarShadowMatrix(packetShadowMatrix, transformedPacketMatrix);
+    }
+    else
+    {
+        BuildPlanarShadowMatrix(packetShadowMatrix, transform);
+    }
+
+    glModelSetMatrix((glModel*)model, packetShadowMatrix);
+    glSetRasterState(GLS_DepthTest, 1);
+    glSetCurrentRasterState(glHandleizeRasterState());
+
+    static const unsigned long CoPlanarTexture
+        = glGetTexture("global/black_coplanar");
+    glModelPacket* packet = model->packets;
+    while (packet < model->packets + model->numPackets)
+    {
+        int numParameters
+            = ((GLMaterialProgram*)packet->materialProgram)->parameterCount;
+        for (int i = 0; i < numParameters; i++)
+        {
+            const GXMaterialParameter* parameter
+                = glGetMaterialParameterInfo(packet, i);
+            if ((parameter->metadata & 0xF) == 3)
+            {
+                glTextureBinding* binding = (glTextureBinding*)((u8*)packet->materialParameters
+                    + parameter->offset);
+                binding->texture = CoPlanarTexture;
+                binding->textureIndex = 0xFFFF;
+            }
+        }
+        glSetRasterState(packet->rasterState, GLS_AlphaBlend, 1);
+        glSetRasterState(packet->rasterState, GLS_DepthFunc, 3);
+        ++packet;
+    }
+    GetLayerView(eCLV_CoPlanar)->AttachModel(model, 0);
+}

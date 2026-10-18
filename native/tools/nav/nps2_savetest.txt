@@ -1,0 +1,17 @@
+# NPS2 save test: boot, skip to the title, the title to the main menu, accept 'create save data' on a first run,
+# wait for the main menu's buttons (the save was created, or loaded from the NAND directory of the previous run), exit.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+log STATE main menu with a save
+idle 90
+exit

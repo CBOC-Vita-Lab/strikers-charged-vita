@@ -1,0 +1,28 @@
+#ifndef GAME_BALL_TRAIL_H
+#define GAME_BALL_TRAIL_H
+
+#include "NL/nlMath.h"
+#include "types.h"
+
+class cFielder;
+class BlurHandler;
+class DrawableModel;
+
+struct LiveBallTrail
+{
+    LiveBallTrail();
+    ~LiveBallTrail();
+
+    /* 0x00 */ nlQuaternion orientation;
+    /* 0x10 */ nlVector3 position;
+    /* 0x1C */ nlVector3 velocity;
+    /* 0x28 */ nlVector3 angularVelocity;
+    /* 0x34 */ DrawableModel* drawable;
+    /* 0x38 */ BlurHandler* blurHandler;
+    /* 0x3C */ bool visible;
+};
+
+void InitializeMegaStrikeBallTrail(LiveBallTrail* pBallTrail, cFielder* pFielder);
+void UpdateBallTrails(float deltaTime);
+
+#endif // GAME_BALL_TRAIL_H

@@ -1,0 +1,32 @@
+diff --git a/src/NL/nlConfig.cpp b/src/NL/nlConfig.cpp
+index 047c769..f861253 100644
+--- a/src/NL/nlConfig.cpp
++++ b/src/NL/nlConfig.cpp
+@@ -182,13 +182,16 @@ Config::Config(AllocateWhere where, unsigned int stringCapacity, unsigned int sl
+ 
+     if (where == ALLOCATE_LOW)
+     {
+-        mTvpHash = new (nlMalloc(sizeof(TagValuePair) * mTvpCapacity + 0x10, 8, false))
++        // NP: Metrowerks placed a 16-byte array cookie in front of a placement-new[] array, and the
++        // destructor below freed `mTvpHash - 0x10`. GCC and clang never put a cookie in front of a
++        // placement new[], so the block is the array itself.
++        mTvpHash = new (nlMalloc(sizeof(TagValuePair) * mTvpCapacity, 8, false))
+             TagValuePair[mTvpCapacity];
+         mStringMemory = (char*)nlMalloc(stringCapacity, 8, false);
+     }
+     else
+     {
+-        mTvpHash = new (nlMalloc(sizeof(TagValuePair) * mTvpCapacity + 0x10, 8, true))
++        mTvpHash = new (nlMalloc(sizeof(TagValuePair) * mTvpCapacity, 8, true))
+             TagValuePair[mTvpCapacity];
+         mStringMemory = (char*)nlMalloc(stringCapacity, 8, true);
+     }
+@@ -201,7 +204,7 @@ Config::~Config()
+ {
+     if (mTvpHash != 0)
+     {
+-        ::operator delete[]((char*)mTvpHash - 0x10);
++        ::operator delete[](mTvpHash);
+     }
+     ::operator delete[](mStringMemory);
+ }

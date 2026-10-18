@@ -1,0 +1,49 @@
+#include "Game/Task/GameTaskState.h"
+#include "Game/Task/ParticleUpdateCallbacks.h"
+
+#include "Game/Task/GameRenderTask.h"
+#include "Game/Task/ParticleUpdateTask.h"
+#include "Game/SharedStaticStorage.h"
+
+bool g_bRenderParticles = true;
+u8 lbl_806E1458;
+
+
+void ParticleUpdateNoOp(u8*)
+{
+}
+
+bool CanUpdateParticles()
+{
+    return nlTaskManager::m_pInstance->mCurrentState != TASK_PAUSED;
+}
+
+bool CanRenderParticles()
+{
+    bool result = true;
+    if (!g_bRenderParticles)
+    {
+        result = false;
+    }
+    if (!g_bRenderWorld)
+    {
+        result = false;
+    }
+    return result;
+}
+
+void BeforeParticleUpdate()
+{
+}
+
+void InitializeParticleUpdateCallbacks()
+{
+    GetParticleUpdateTask()->mCanRender = Function0<bool>(CanRenderParticles);
+    GetParticleUpdateTask()->mCanUpdate = Function0<bool>(CanUpdateParticles);
+    GetParticleUpdateTask()->mBeforeUpdate = Function0<void>(BeforeParticleUpdate);
+}
+
+ParticleUpdateTask* GetParticleUpdateTask()
+{
+    return ParticleUpdateTask::sInstance;
+}

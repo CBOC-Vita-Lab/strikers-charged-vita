@@ -1,0 +1,99 @@
+#include <revolution/gx.h>
+
+#include "NL/glx/GXConstantColourMaterialProgram.h"
+#include "NL/glx/GXMaterialProgramInternal.h"
+#include "NL/glx/glxTexture.h"
+#include "NL/gl/glLoadModel.h"
+#include "Game/SharedStaticStorage.h"
+
+GXConstantColourMaterialProgram* GXConstantColourMaterialProgram::Instance;
+bool GXConstantColourMaterialProgram::Initialized;
+
+GXMaterialParameter GXConstantColourMaterialProgram::Parameters[2] = {
+    { 0x69F44DC5, 0x01010103, 0 }, // diffuseTexture
+    { 0xEE9D919D, 0x01040101, 8 }, // constantColour
+};
+
+GXConstantColourMaterialProgram::GXConstantColourMaterialProgram()
+{
+    Instance = this;
+    programHash = 0xEE9D919D;
+    parameterDataSize = 24;
+    parameterCount = 2;
+    glRegisterMaterialProgram(this, programHash);
+}
+
+GXConstantColourMaterialProgram::~GXConstantColourMaterialProgram()
+{
+}
+
+void GXConstantColourMaterialProgram::Initialize()
+{
+    if (Initialized)
+        return;
+    Initialized = true;
+}
+
+void GXConstantColourMaterialProgram::Configure(glModelPacket*)
+{
+}
+
+void GXConstantColourMaterialProgram::ConfigureVertexFormat(bool indexed)
+{
+    GXClearVtxDesc();
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_S16, 12);
+
+    if (indexed)
+    {
+        GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
+        GXSetVtxDesc(GX_VA_TEX0, GX_INDEX16);
+    }
+    else
+    {
+        GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+        GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    }
+}
+
+void GXConstantColourMaterialProgram::BindVertexArrays(const glModelPacket* packet)
+{
+    glModelStream* streams = packet->streams;
+    NP_GX_SETARRAY_STREAM(GX_VA_POS, streams[0], 12);
+    NP_GX_SETARRAY_STREAM(GX_VA_TEX0, streams[1], 4);
+}
+
+void GXConstantColourMaterialProgram::DrawIndexed(const glModelPacket* packet)
+{
+    unsigned short* idxPtr = packet->indexBuffer;
+    unsigned short* end = idxPtr + packet->numVertices;
+    GXBegin(glxGetPrimitiveType((unsigned char)packet->primType), GX_VTXFMT0, (unsigned short)packet->numVertices);
+
+    while (idxPtr < end)
+    {
+        WGPIPE.us = *idxPtr;
+        WGPIPE.us = *idxPtr;
+        ++idxPtr;
+    }
+}
+
+void GXConstantColourMaterialProgram::DrawDirect(const glModelPacket* packet)
+{
+    GXBegin(glxGetPrimitiveType((unsigned char)packet->primType), GX_VTXFMT0, packet->numUniqueVertices);
+
+    for (unsigned short i = 0; i < packet->numUniqueVertices; ++i)
+    {
+        WGPIPE.us = i;
+        WGPIPE.us = i;
+    }
+}
+
+void GXConstantColourMaterialProgram::BindParameters(const glModelPacket* packet)
+{
+    glx_BindTexture(0, &static_cast<GXConstantColourParameters*>(packet->materialParameters)->diffuseTexture);
+}
+
+const GXMaterialParameter* GXConstantColourMaterialProgram::GetParameters()
+{
+    return Parameters;
+}

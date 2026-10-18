@@ -1,0 +1,65 @@
+CB_urgency|/^void DesireCutAndBreak::Update/,/^}/s/mvDesiredPosition, 2.0f/mvDesiredPosition, 1.5f/
+CB_weight|/^void DesireCutAndBreak::Update/,/^}/s/2.0f, 1.0f/2.0f, 0.9f/
+CB_thresh|/^void DesireCutAndBreak::Update/,/^}/s/< 0.5f/< 0.8f/
+CB_result|/^void DesireCutAndBreak::Update/,/^}/s/\*update = 4;/*update = 1;/
+CB_mindur|/^void DesireCutAndBreak::Update/,/^}/s/update->mData.i != 0/update->mData.i != 1/
+CB_interceptor|/^void DesireCutAndBreak::Update/,/^}/s/mpBestBallInterceptor != m_pFielder/mpBestBallInterceptor == m_pFielder/
+GO_dir|/^bool DesireGetOpen::Initialize/,/^}/s/DIR_NONE, 0/DIR_TOWARD_TARGET, 0/
+GO_dir2|/^bool DesireGetOpen::Initialize/,/^}/s/DIR_TOWARD_TARGET, &v3Target/DIR_NONE, \&v3Target/
+GO_radius|/^bool DesireGetOpen::Initialize/,/^}/s/lbl_806DC090/lbl_806DC098/g
+GO_cone|/^bool DesireGetOpen::Initialize/,/^}/s/0x8000/0x4000/g
+GO_owner|/^bool DesireGetOpen::Initialize/,/^}/s/pBallOwner == m_pFielder/pBallOwner != m_pFielder/
+GO_tz|/^bool DesireGetOpen::Initialize/,/^}/s/v3Target.z = 0.0f;/v3Target.z = 1.0f;/
+GO_ref|/^bool DesireGetOpen::Initialize/,/^}/s/v3Reference = g_pBall->m_v3Position;/v3Reference = v3FormationPosition;/
+GO_debug|/^bool DesireGetOpen::Initialize/,/^}/s/m_bDebugOn = lbl_806E0E28/m_bDebugOn = !lbl_806E0E28/g
+GO_formation|/^bool DesireGetOpen::Initialize/,/^}/s/CalculateFormationPosition(v3FormationPosition))/CalculateFormationPosition(v3FormationPosition) == false)/
+RI_urgball|/^bool DesireRunToTarget::Initialize/,/^}/s/m_fUrgency = 4.0f/m_fUrgency = 3.0f/
+RI_defdir|/^bool DesireRunToTarget::Initialize/,/^}/s/m_eDirection = 3;/m_eDirection = 2;/
+RI_defspeed|/^bool DesireRunToTarget::Initialize/,/^}/s/m_fSpeedCoeff = 1.0f;/m_fSpeedCoeff = 1.5f;/
+RI_param13|/^bool DesireRunToTarget::Initialize/,/^}/s/Get(13)->mData.f/Get(18)->mData.f/
+RI_prio|/^bool DesireRunToTarget::Initialize/,/^}/s/parameters->IsSet(14) ? parameters->Get(14) : parameters->Get(0)/parameters->IsSet(0) ? parameters->Get(0) : parameters->Get(14)/
+RI_ballown|/^bool DesireRunToTarget::Initialize/,/^}/s/m_pFielder->m_pBall != 0/m_pFielder->m_pBall == 0/
+RI_desire|/^bool DesireRunToTarget::Initialize/,/^}/s/GetFielderDesire(m_pFielder, 34)/GetFielderDesire(m_pFielder, 33)/
+RI_timer|/^bool DesireRunToTarget::Initialize/,/^}/s/SetTimer(1, 0.0f)/SetTimer(1, 0.1f)/
+RI_defurg|/^bool DesireRunToTarget::Initialize/,/^}/s/m_fUrgency = 2.0f;/m_fUrgency = 2.5f;/
+RU_timer|/^void DesireRunToTarget::Update/,/^}/s/SetTimer(1, 0.2f)/SetTimer(1, 0.25f)/
+RU_pred|/^void DesireRunToTarget::Update/,/^}/s/0.2f \* pTarget->m_DetChar.m_v3Velocity.x/0.25f * pTarget->m_DetChar.m_v3Velocity.x/
+RU_reach|/^void DesireRunToTarget::Update/,/^}/s/0.75f \* GetFielderHitReach/0.7f * GetFielderHitReach/
+RU_dir|/^void DesireRunToTarget::Update/,/^}/s/m_eDirection == 4/m_eDirection == 3/
+RU_urg|/^void DesireRunToTarget::Update/,/^}/s/m_fUrgency \* m_fSpeedCoeff/m_fUrgency/
+RU_avoid|/^void DesireRunToTarget::Update/,/^}/s/SetAvoidanceMultiplier(m_fAvoidanceCoeff)/SetAvoidanceMultiplier(m_fSpeedCoeff)/
+RU_shot|/^void DesireRunToTarget::Update/,/^}/s/m_tShotTimer.m_uPackedTime == 0/m_tShotTimer.m_uPackedTime != 0/
+RU_super|/^void DesireRunToTarget::Update/,/^}/s/!m_pFielder->IsSuperGrowActive()/m_pFielder->IsSuperGrowActive()/
+RU_finish|/^void DesireRunToTarget::Update/,/^}/s/\*update = DESIRE_FINISHED;/*update = DESIRE_CHANGE;/
+RU_mirror|/^void DesireRunToTarget::Update/,/^}/s/mvDesiredPosition.z = -1.0f \* fDz + v3Self.z;/mvDesiredPosition.z = fDz + v3Self.z;/
+T1_thresh|/^extern "C" DesireUpdate fn_800B38AC/,/^}/s/< 0.49f/< 0.35f/
+T1_axis|/^extern "C" DesireUpdate fn_800B38AC/,/^}/s/fDx \* fDx + fDy \* fDy/fDx * fDx/
+T1_val|/^extern "C" DesireUpdate fn_800B38AC/,/^}/s/result = 4;/result = 1;/
+T2_val|/^extern "C" DesireUpdate fn_800B4DC0/,/^}/s/result = 1;/result = 2;/
+T2_cond|/^extern "C" DesireUpdate fn_800B4DC0/,/^}/s/pBallOwner == 0 ||/pBallOwner != 0 ||/
+T2_best|/^extern "C" DesireUpdate fn_800B4DC0/,/^}/s/mpBestBallInterceptor == pFielder/mpBestBallInterceptor != pFielder/
+T2_four|/^extern "C" DesireUpdate fn_800B4DC0/,/^}/s/result = 4;/result = 3;/
+IB_hash|/^bool DesireInterceptBall::Initialize/,/^}/s/"Def\/Block Pass Chance"/"Def\/Block Pass Chancf"/
+IB_lt|/^bool DesireInterceptBall::Initialize/,/^}/s/nlRandomf(1.0f) < fBlockPassChance/nlRandomf(1.0f) > fBlockPassChance/
+IB_pass|/^bool DesireInterceptBall::Initialize/,/^}/s/if (fn_800DFF1C() != 0.0f)/if (fn_800DFF1C() == 0.0f)/
+IB_rand|/^bool DesireInterceptBall::Initialize/,/^}/s/nlRandomf(1.0f)/nlRandomf(2.0f)/
+W_count|/^extern "C" void fn_800B0358/,/^}/s/lbl_8056DA18\[3\] = 7;/lbl_8056DA18[3] = 6;/
+W_swap|/^extern "C" void fn_800B0358/,/^}/s/lbl_8056DA00\[1\] = sStormChainPathRight1;/lbl_8056DA00[1] = sStormChainPathRight2;/
+W_side|/^extern "C" nlVector4 fn_800B04BC/,/^}/s/patch.y = patch.y \* -1.0f;//
+RU_zero|/^void DesireRunToTarget::Update/,/^}/s/mvDesiredPosition.z = 0.0f;/mvDesiredPosition.z = mvDesiredPosition.z;/
+IU_change|/^void DesireInterceptBall::Update/,/^}/s/update->mData.i == DESIRE_CHANGE/update->mData.i == DESIRE_FINISHED/
+IU_shot|/^void DesireInterceptBall::Update/,/^}/s/case 15:/case 16:/
+IU_chip|/^void DesireInterceptBall::Update/,/^}/s/Get(16)->mData.b/Get(8)->mData.b/
+IU_open|/^void DesireInterceptBall::Update/,/^}/s/OpenTo(m_pFielder, target) < 0.5f/OpenTo(m_pFielder, target) < 0.4f/
+IU_airh|/^void DesireInterceptBall::Update/,/^}/s/GetAirInterceptHeight(0)/GetAirInterceptHeight(1)/
+IU_passtime|/^void DesireInterceptBall::Update/,/^}/s/m_v3Position, 0.1f)/m_v3Position, 0.2f)/
+IU_owntime|/^void DesireInterceptBall::Update/,/^}/s/m_v3Position, 0.25f)/m_v3Position, 0.3f)/
+IU_rep|/^void DesireInterceptBall::Update/,/^}/s/m_fRepulsionMult = 0.5f/m_fRepulsionMult = 0.6f/
+IU_urg|/^void DesireInterceptBall::Update/,/^}/s/AddDesiredPosition(position, 2.0f, 1.0f)/AddDesiredPosition(position, 2.5f, 1.0f)/
+IU_goalie|/^void DesireInterceptBall::Update/,/^}/s/m_eClassType == GOALIE/m_eClassType == FIELDER/
+IU_d7b00|/^void DesireInterceptBall::Update/,/^}/s/fn_800D7B00(m_pFielder) >= 0.5f/fn_800D7B00(m_pFielder) >= 0.6f/
+IU_mbpass|/^void DesireInterceptBall::Update/,/^}/s/mbInterceptPass \&\&/!mbInterceptPass \&\&/
+IU_zero|/^void DesireInterceptBall::Update/,/^}/s/position.z = 0.0f;/position.z = position.z;/
+IU_first|/^void DesireInterceptBall::Update/,/^}/s/if (Offensive(fn_800D6670(m_pFielder))/if (!Offensive(fn_800D6670(m_pFielder))/
+IU_pred|/^void DesireInterceptBall::Update/,/^}/s/lbl_806DC0A8 <= interceptTime ? lbl_806DC0A8 : interceptTime/interceptTime/
+IU_param|/^void DesireInterceptBall::Update/,/^}/s/SetParameter(8, FuzzyVariant/SetParameter(9, FuzzyVariant/

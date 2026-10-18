@@ -1,0 +1,718 @@
+#include <string.h>
+
+#include "Game/Debug/ShapeRender.h"
+#include "Game/GL/GLColourMeshWriter.h"
+#include "Game/GL/MeshWriter.h"
+
+#include "NL/nlDebugViews.h"
+
+#include "Game/SharedStaticStorage.h"
+
+#include "NL/gl/gl.h"
+#include "NL/gl/glDraw2.h"
+#include "NL/gl/glMatrix.h"
+#include "NL/gl/glMemory.h"
+#include "NL/gl/glState.h"
+#include "NL/gl/glView.h"
+
+ShapeRender g_ShapeRenderer;
+static unsigned char g_bWire;
+const u32 WhiteTexture = glGetTexture("global/white");
+
+void ShapeRender::CreateBoxGeometry(PrimitiveShape& prim)
+{
+    static int ind_vert[24] = {
+        0,
+        2,
+        3,
+        1,
+        4,
+        5,
+        7,
+        6,
+        0,
+        1,
+        5,
+        4,
+        1,
+        3,
+        7,
+        5,
+        3,
+        2,
+        6,
+        7,
+        2,
+        0,
+        4,
+        6,
+    };
+    static int ind_uv[24] = {
+        1,
+        3,
+        2,
+        0,
+        0,
+        1,
+        3,
+        2,
+        0,
+        1,
+        3,
+        2,
+        0,
+        1,
+        3,
+        2,
+        0,
+        1,
+        3,
+        2,
+        0,
+        1,
+        3,
+        2,
+    };
+    static nlVector3 data_vert[8] = {
+        { -0.5f, -0.5f, -0.5f },
+        { 0.5f, -0.5f, -0.5f },
+        { -0.5f, 0.5f, -0.5f },
+        { 0.5f, 0.5f, -0.5f },
+        { -0.5f, -0.5f, 0.5f },
+        { 0.5f, -0.5f, 0.5f },
+        { -0.5f, 0.5f, 0.5f },
+        { 0.5f, 0.5f, 0.5f },
+    };
+    static nlVector2 data_uv[4] = {
+        { 0.0f, 0.0f },
+        { 1.0f, 0.0f },
+        { 0.0f, 1.0f },
+        { 1.0f, 1.0f },
+    };
+    static nlVector3 data_norm[24] = {
+        { 0.0f, 0.0f, -1.0f },
+        { 0.0f, 0.0f, -1.0f },
+        { 0.0f, 0.0f, -1.0f },
+        { 0.0f, 0.0f, -1.0f },
+
+        { 0.0f, 0.0f, 1.0f },
+        { 0.0f, 0.0f, 1.0f },
+        { 0.0f, 0.0f, 1.0f },
+        { 0.0f, 0.0f, 1.0f },
+
+        { 0.0f, -1.0f, 0.0f },
+        { 0.0f, -1.0f, 0.0f },
+        { 0.0f, -1.0f, 0.0f },
+        { 0.0f, -1.0f, 0.0f },
+
+        { 1.0f, 0.0f, 0.0f },
+        { 1.0f, 0.0f, 0.0f },
+        { 1.0f, 0.0f, 0.0f },
+        { 1.0f, 0.0f, 0.0f },
+
+        { 0.0f, 1.0f, 0.0f },
+        { 0.0f, 1.0f, 0.0f },
+        { 0.0f, 1.0f, 0.0f },
+        { 0.0f, 1.0f, 0.0f },
+
+        { -1.0f, 0.0f, 0.0f },
+        { -1.0f, 0.0f, 0.0f },
+        { -1.0f, 0.0f, 0.0f },
+        { -1.0f, 0.0f, 0.0f },
+    };
+    static int tri_map[6] = { 0, 1, 2, 3, 0, 2 };
+
+    prim.position = (nlVector3*)glResourceAlloc(
+        36 * sizeof(nlVector3), GLM_VertexData, m_pResource);
+    prim.normal = (nlVector3*)glResourceAlloc(
+        36 * sizeof(nlVector3), GLM_VertexData, m_pResource);
+    prim.texcoord = (nlVector2*)glResourceAlloc(
+        36 * sizeof(nlVector2), GLM_VertexData, m_pResource);
+    prim.vertCount = 36;
+
+    int i;
+    int iQuad;
+    nlVector3* pdst = prim.position;
+    nlVector3* ndst = prim.normal;
+    nlVector2* tdst = prim.texcoord;
+    nlVector3* psrc[4];
+    nlVector3* nsrc[4];
+    nlVector2* tsrc[4];
+
+    for (iQuad = 0; iQuad < 6; iQuad++)
+    {
+        for (i = 0; i < 4; i++)
+        {
+            psrc[i] = &data_vert[ind_vert[iQuad * 4 + i]];
+            nsrc[i] = &data_norm[iQuad * 4 + i];
+            tsrc[i] = &data_uv[ind_uv[iQuad * 4 + i]];
+        }
+
+        for (i = 0; i < 6; i++)
+        {
+            *pdst = *psrc[tri_map[i]];
+            *ndst = *nsrc[tri_map[i]];
+            *tdst = *tsrc[tri_map[i]];
+
+            pdst++;
+            ndst++;
+            tdst++;
+        }
+    }
+}
+
+void ShapeRender::CreateHemisphereGeometry(PrimitiveShape& prim)
+{
+    nlVector3 vNormal;
+    nlVector3* pdst;
+    nlVector3* ndst;
+    nlVector2* tdst;
+    int nRing;
+    int angle0;
+    int angle1;
+    float ring0;
+    float ring1;
+    float ringFactor;
+    float segmentFactor;
+    float z0;
+    float z1;
+    int nSegment;
+    float x0;
+    float y0;
+    float x1;
+    float y1;
+
+    prim.vertCount = 150;
+    prim.position = (nlVector3*)glResourceAlloc(
+        150 * sizeof(nlVector3), GLM_VertexData, m_pResource);
+    prim.normal = (nlVector3*)glResourceAlloc(
+        150 * sizeof(nlVector3), GLM_VertexData, m_pResource);
+    prim.texcoord = (nlVector2*)glResourceAlloc(
+        150 * sizeof(nlVector2), GLM_VertexData, m_pResource);
+
+    pdst = prim.position;
+    ndst = prim.normal;
+    tdst = prim.texcoord;
+    ringFactor = 0.31415927f;
+    segmentFactor = 0.44879895f;
+
+    for (nRing = 0; nRing < 5; nRing++)
+    {
+        float fAngle;
+
+        fAngle = (float)nRing;
+        fAngle *= ringFactor;
+        angle0 = (int)(fAngle * 10430.378f);
+        z0 = 0.5f * nlSin((u16)angle0);
+
+        fAngle = (float)(nRing + 1);
+        fAngle *= ringFactor;
+        angle1 = (int)(fAngle * 10430.378f);
+        z1 = 0.5f * nlSin((u16)angle1);
+
+        ring0 = nlSin((u16)((u16)(int)(((float)nRing * ringFactor) * 10430.378f) + 0x4000));
+        ring1 = nlSin((u16)((u16)(int)(((float)(nRing + 1) * ringFactor) * 10430.378f) + 0x4000));
+
+        for (nSegment = 0; nSegment < 15; nSegment++)
+        {
+            x0 = 0.5f * (ring0 * nlSin((u16)(int)(((float)nSegment * segmentFactor) * 10430.378f)));
+            y0 = 0.5f * (ring0 * nlSin((u16)((u16)(int)(((float)nSegment * segmentFactor) * 10430.378f)
+                + 0x4000)));
+            x1 = 0.5f * (ring1 * nlSin((u16)(int)(((float)nSegment * segmentFactor) * 10430.378f)));
+            y1 = 0.5f * (ring1 * nlSin((u16)((u16)(int)(((float)nSegment * segmentFactor) * 10430.378f)
+                + 0x4000)));
+
+            vNormal.x = x0;
+            vNormal.y = y0;
+            vNormal.z = z0;
+
+            nlVec3Normalize(vNormal, vNormal);
+            pdst->x = x0;
+            pdst->y = y0;
+            pdst->z = z0;
+            *ndst = vNormal;
+
+            tdst->x = (float)nSegment / 14.0f;
+            tdst->y = (float)nRing / 5.0f;
+
+            vNormal.x = x1;
+            vNormal.y = y1;
+            vNormal.z = z1;
+
+            nlVec3Normalize(vNormal, vNormal);
+            pdst[1].x = x1;
+            pdst[1].y = y1;
+            pdst[1].z = z1;
+            ndst[1] = vNormal;
+
+            tdst[1].x = (float)nSegment / 14.0f;
+            tdst[1].y = (float)(nRing + 1) / 5.0f;
+
+            pdst += 2;
+            ndst += 2;
+            tdst += 2;
+        }
+    }
+}
+
+void ShapeRender::CreateFlatCylinderEndGeometry(PrimitiveShape& prim)
+{
+    nlVector3 vNormal;
+    int angle;
+    int angle90;
+    nlVector3* pdst;
+    nlVector3* ndst;
+    nlVector2* tdst;
+    int nSegment;
+    float segmentFactor;
+    float z0;
+    float one;
+    float x0;
+    float y0;
+    float x1;
+    float y1;
+    float sinAngle;
+
+    prim.vertCount = 0x20;
+    prim.position = (nlVector3*)glResourceAlloc(
+        0x180, GLM_VertexData, m_pResource);
+    prim.normal = (nlVector3*)glResourceAlloc(
+        0x180, GLM_VertexData, m_pResource);
+    prim.texcoord = (nlVector2*)glResourceAlloc(
+        0x100, GLM_VertexData, m_pResource);
+
+    pdst = prim.position;
+    ndst = prim.normal;
+    tdst = prim.texcoord;
+
+    segmentFactor = 0.41887903f;
+    z0 = 0.0f;
+    one = 1.0f;
+
+    for (nSegment = 0; nSegment < 0x10; nSegment++)
+    {
+        angle = (int)(10430.378f * ((float)nSegment * segmentFactor));
+
+        sinAngle = nlSin((u16)angle);
+        x0 = 0.5f * (one * sinAngle);
+
+        angle90 = (u16)(int)(10430.378f * ((float)nSegment * segmentFactor)) + 0x4000;
+        y0 = 0.5f * (one * nlSin((u16)angle90));
+
+        x1 = 0.5f * (z0 * nlSin((u16)(int)(10430.378f * ((float)nSegment * segmentFactor))));
+        y1 = 0.5f * (z0 * nlSin((u16)((u16)(int)(10430.378f * ((float)nSegment * segmentFactor)) + 0x4000)));
+
+        vNormal.x = x0;
+        vNormal.y = y0;
+        vNormal.z = z0;
+
+        nlVec3Normalize(vNormal, vNormal);
+
+        pdst->x = x0;
+        pdst->y = y0;
+        pdst->z = z0;
+        *ndst = vNormal;
+
+        tdst->x = (float)nSegment / 15.0f;
+        tdst->y = z0;
+
+        vNormal.x = x1;
+        vNormal.y = y1;
+        vNormal.z = one;
+
+        nlVec3Normalize(vNormal, vNormal);
+
+        pdst[1].x = x1;
+        pdst[1].y = y1;
+        pdst[1].z = one;
+        ndst[1] = vNormal;
+
+        tdst[1].x = (float)nSegment / 15.0f;
+        tdst[1].y = one;
+
+        pdst += 2;
+        ndst += 2;
+        tdst += 2;
+    }
+}
+
+void ShapeRender::CreateCylinderGeometry(PrimitiveShape& prim)
+{
+    nlVector3 vNormal;
+    nlVector3* pdst;
+    nlVector3* ndst;
+    nlVector2* tdst;
+    int nRing;
+    int angle;
+    int angle90;
+    float ringScale;
+    float segmentFactor;
+    float z0;
+    float z1;
+    float x0;
+    float y0;
+    float x1;
+    float y1;
+
+    prim.vertCount = 0x40;
+    prim.position = (nlVector3*)glResourceAlloc(
+        0x300, GLM_VertexData, m_pResource);
+    prim.normal = (nlVector3*)glResourceAlloc(
+        0x300, GLM_VertexData, m_pResource);
+    prim.texcoord = (nlVector2*)glResourceAlloc(
+        0x200, GLM_VertexData, m_pResource);
+
+    pdst = prim.position;
+    ndst = prim.normal;
+    tdst = prim.texcoord;
+
+    ringScale = 0.5f;
+    segmentFactor = 0.41887903f;
+
+    for (nRing = 0; nRing < 2; nRing++)
+    {
+        z0 = -0.5f + (float)nRing * ringScale;
+        z1 = -0.5f + (float)(nRing + 1) * ringScale;
+
+        nlSin((u16)((u16)(int)(10430.378f *
+                               ((float)nRing * ringScale))
+            + 0x4000));
+        nlSin((u16)((u16)(int)(10430.378f *
+                               ((float)(nRing + 1) * ringScale))
+            + 0x4000));
+
+        for (int nSegment = 0; nSegment < 0x10; nSegment++)
+        {
+            float fSegmentAngle;
+
+            fSegmentAngle = (float)nSegment;
+            angle = (int)((fSegmentAngle *= segmentFactor) * 10430.378f);
+
+            x0 = 0.5f * nlSin((u16)angle);
+
+            angle90 = (u16)(int)(((float)nSegment * segmentFactor) * 10430.378f) + 0x4000;
+            y0 = 0.5f * nlSin((u16)angle90);
+
+            x1 = 0.5f * nlSin((u16)(int)(((float)nSegment * segmentFactor) * 10430.378f));
+            y1 = 0.5f * nlSin((u16)((u16)(int)(((float)nSegment * segmentFactor) * 10430.378f) + 0x4000));
+
+            vNormal.x = x0;
+            vNormal.y = y0;
+            vNormal.z = z0;
+
+            nlVec3Normalize(vNormal, vNormal);
+
+            pdst->x = x0;
+            pdst->y = y0;
+            pdst->z = z0;
+            *ndst = vNormal;
+
+            tdst->x = (float)nSegment / 15.0f;
+            tdst->y = (float)nRing / 2.0f;
+
+            vNormal.x = x1;
+            vNormal.y = y1;
+            vNormal.z = z1;
+
+            nlVec3Normalize(vNormal, vNormal);
+
+            pdst[1].x = x1;
+            pdst[1].y = y1;
+            pdst[1].z = z1;
+            ndst[1] = vNormal;
+
+            tdst[1].x = (float)nSegment / 15.0f;
+            tdst[1].y = (float)(nRing + 1) / 2.0f;
+
+            pdst += 2;
+            ndst += 2;
+            tdst += 2;
+        }
+    }
+}
+
+void ShapeRender::DrawWireBox(
+    const nlVector3& boundsMin, const nlVector3& boundsMax, const nlColour& colour) const
+{
+    nlVector3 points[8];
+    nlVec3Set(points[0], boundsMin.x, boundsMin.y, boundsMin.z);
+    nlVec3Set(points[1], boundsMin.x, boundsMax.y, boundsMin.z);
+    nlVec3Set(points[2], boundsMax.x, boundsMax.y, boundsMin.z);
+    nlVec3Set(points[3], boundsMax.x, boundsMin.y, boundsMin.z);
+    nlVec3Set(points[4], boundsMin.x, boundsMin.y, boundsMax.z);
+    nlVec3Set(points[5], boundsMin.x, boundsMax.y, boundsMax.z);
+    nlVec3Set(points[6], boundsMax.x, boundsMax.y, boundsMax.z);
+    nlVec3Set(points[7], boundsMax.x, boundsMin.y, boundsMax.z);
+
+    DrawLine3D(points[0], points[1], colour, true);
+    DrawLine3D(points[1], points[2], colour, true);
+    DrawLine3D(points[2], points[3], colour, true);
+    DrawLine3D(points[3], points[0], colour, true);
+    DrawLine3D(points[4], points[5], colour, true);
+    DrawLine3D(points[5], points[6], colour, true);
+    DrawLine3D(points[6], points[7], colour, true);
+    DrawLine3D(points[7], points[4], colour, true);
+    DrawLine3D(points[0], points[4], colour, true);
+    DrawLine3D(points[1], points[5], colour, true);
+    DrawLine3D(points[2], points[6], colour, true);
+    DrawLine3D(points[3], points[7], colour, true);
+}
+
+void ShapeRender::DrawPrimitive(const PrimitiveShape& prim,
+    const nlMatrix4& mat_world, bool, const nlColour& colour) const
+{
+    unsigned long matrix = glAllocMatrix();
+    if (matrix != (unsigned long)-1)
+    {
+        glSetMatrix(matrix, mat_world);
+    }
+
+    unsigned long offset;
+    glModel* pModel = glModelDupNoStreams(prim.model, false, 0);
+    nlFloatColour floatColour;
+    floatColour.c[0] = (float)colour.c[0] * (1.0f / 255.0f);
+    floatColour.c[1] = (float)colour.c[1] * (1.0f / 255.0f);
+    floatColour.c[2] = (float)colour.c[2] * (1.0f / 255.0f);
+    floatColour.c[3] = (float)colour.c[3] * (1.0f / 255.0f);
+
+    unsigned long index;
+    index = 0;
+    offset = 0;
+    while (index < pModel->numPackets)
+    {
+        glModelPacket* packet = (glModelPacket*)((u8*)pModel->packets + offset);
+        packet->matrix = matrix;
+        memcpy((u8*)packet->materialParameters + sizeof(glTextureBinding),
+            &floatColour,
+            sizeof(floatColour));
+
+        if (colour.c[3] != 255)
+        {
+            glSetRasterState(packet->rasterState, GLS_AlphaBlend, 1);
+            glSetRasterState(packet->rasterState, GLS_DepthWrite, 0);
+        }
+
+        if (g_bWire)
+        {
+            glSetRasterState(packet->rasterState, GLS_FillMode, 1);
+            glSetRasterState(packet->rasterState, GLS_Culling, 0);
+        }
+
+        offset += sizeof(glModelPacket);
+        ++index;
+    }
+
+    if (m_eView != 0)
+    {
+        m_eView->AttachModel(pModel, 1);
+    }
+}
+
+void ShapeRender::DrawSphere(const nlVector3& position, const nlColour& colour,
+    float radius) const
+{
+    nlMatrix4 mat_world;
+    mat_world.SetIdentity();
+    mat_world.SetRow_(3, position);
+    DrawSpherePrimitive(mat_world, radius, colour);
+}
+
+void ShapeRender::DrawSpherePrimitive(const nlMatrix4& mat_world,
+    float radius, const nlColour& colour) const
+{
+    nlMatrix4 mat_hemiTop;
+    nlMatrix4 mat_hemiBottom;
+    nlMatrix4 mat_rot;
+
+    radius = radius / 0.5f;
+
+    nlMakeScaleMatrix(mat_hemiTop, radius, radius, radius);
+    nlMakeRotationMatrixX(mat_rot, 3.1415927f);
+    nlMultMatrices(mat_hemiBottom, mat_hemiTop, mat_rot);
+    nlMultMatrices(mat_hemiTop, mat_world);
+    nlMultMatrices(mat_hemiBottom, mat_world);
+
+    DrawPrimitive(m_Hemisphere, mat_hemiTop, true, colour);
+    DrawPrimitive(m_Hemisphere, mat_hemiBottom, true, colour);
+}
+
+void ShapeRender::DrawLine3D(const nlVector3& p0, const nlVector3& p1,
+    const nlColour& colour, bool bWithDepth) const
+{
+    GLColourMeshWriter writer;
+
+    glSetDefaultState(bWithDepth);
+    glSetCurrentMatrix(glGetIdentityMatrix());
+
+    nlFloatColour floatColour;
+    floatColour.c[0] = (float)colour.c[0] * (1.0f / 255.0f);
+    floatColour.c[1] = (float)colour.c[1] * (1.0f / 255.0f);
+    floatColour.c[2] = (float)colour.c[2] * (1.0f / 255.0f);
+    floatColour.c[3] = (float)colour.c[3] * (1.0f / 255.0f);
+
+    if (writer.Begin(2, GLP_LineList, 0))
+    {
+        writer.Colour(colour);
+        writer.Vertex(p0);
+        writer.Colour(colour);
+        writer.Vertex(p1);
+
+        if (!writer.End())
+        {
+            return;
+        }
+
+        if (m_eView != 0)
+        {
+            m_eView->AttachModel(writer.GetModel(), 2);
+        }
+    }
+}
+
+void ShapeRender::DrawEllipse2D(const nlVector3& p0, float fRadius,
+    float fScaleX, float fScaleY, const nlColour& colour, bool bWithDepth) const
+{
+    GLColourMeshWriter mesh;
+    glSetDefaultState(bWithDepth);
+    glSetCurrentMatrix(glGetIdentityMatrix());
+
+    if (g_bWire)
+    {
+        glSetRasterState(GLS_FillMode, 1);
+        glSetCurrentRasterState(glHandleizeRasterState());
+    }
+
+    int numVerts = 12;
+    if (mesh.Begin(numVerts, GLP_LineStrip, 0))
+    {
+        nlVector3 v3point;
+        v3point.z = p0.z;
+        float fRadians = 0.0f;
+
+        for (int i = 0; i < numVerts; i++)
+        {
+            nlSinCos(&v3point.x, &v3point.y, (unsigned short)(int)(10430.378f * fRadians));
+            v3point.x = p0.x + fScaleX * (v3point.x * fRadius);
+            v3point.y = p0.y + fScaleY * (v3point.y * fRadius);
+            mesh.Colour(colour);
+            mesh.Vertex(v3point);
+            fRadians += 6.2831855f / (numVerts - 1);
+        }
+
+        if (!mesh.End())
+        {
+            return;
+        }
+
+        if (m_eView != 0)
+        {
+            m_eView->AttachModel(mesh.GetModel(), 2);
+        }
+    }
+}
+
+void ShapeRender::DrawRectangle2D(float x, float y, float w, float h,
+    float z, const nlColour& colour, int view) const
+{
+    float bottom;
+    float right;
+    glPoly2 poly;
+    GLView* v;
+
+    glSetDefaultState(false);
+    glSetRasterState(GLS_AlphaBlend, 1);
+    glSetRasterState(GLS_AlphaTest, 1);
+    glSetRasterState(GLS_AlphaTestRef, 0);
+    glSetCurrentRasterState(glHandleizeRasterState());
+    glSetCurrentTexture(glGetTexture("global/white"), GLTT_Diffuse);
+
+    right = y + h;
+    bottom = x + w;
+
+    poly.m_pos[0].x = x;
+    poly.m_pos[0].y = y;
+    poly.m_pos[1].x = x;
+    poly.m_pos[1].y = right;
+    poly.m_pos[2].x = bottom;
+    poly.m_pos[2].y = right;
+    poly.m_pos[3].x = bottom;
+    poly.m_pos[3].y = y;
+
+    poly.m_colour[3] = colour;
+    poly.m_colour[2] = poly.m_colour[3];
+    poly.m_colour[1] = poly.m_colour[3];
+    poly.m_colour[0] = poly.m_colour[3];
+
+    poly.depth = z;
+
+    if (view == -1)
+    {
+        v = GetDebugFontView();
+    }
+    else
+    {
+        v = m_eView;
+    }
+    poly.Attach(v, 0, 0);
+}
+
+void ShapeRender::Initialize(void* resource)
+{
+    if (!m_Initialized)
+    {
+        m_pResource = resource;
+        m_Initialized = true;
+        glBeginResource("ShapeRender");
+        CreateBoxGeometry(m_Box);
+        CreateCylinderGeometry(m_Cylinder);
+        CreateHemisphereGeometry(m_Hemisphere);
+        CreateFlatCylinderEndGeometry(m_FlatCylinderEnd);
+        m_Box.MakeModel(GLP_TriStrip, m_pResource);
+        m_Cylinder.MakeModel(GLP_TriStrip, m_pResource);
+        m_Hemisphere.MakeModel(GLP_TriStrip, m_pResource);
+        m_FlatCylinderEnd.MakeModel(GLP_TriStrip, m_pResource);
+        m_pLightUserData = 0;
+        glEndResource();
+        m_eView = 0;
+    }
+}
+
+void PrimitiveShape::MakeModel(int primType, void* resource)
+{
+    MeshWriter mesh;
+    model = 0;
+    nlFloatColour colour = { { 1.0f, 1.0f, 1.0f, 1.0f } };
+    nlVector3* pPosition = position;
+    nlVector2* pTexcoord = texcoord;
+
+    glSetDefaultState(true);
+
+    if (mesh.Begin(vertCount, primType, resource))
+    {
+        int index = 0;
+        while (index < vertCount)
+        {
+            mesh.Texcoord(*pTexcoord);
+            mesh.Vertex(*pPosition);
+            pTexcoord++;
+            pPosition++;
+            index++;
+        }
+
+        glTextureBinding* textureState = (glTextureBinding*)mesh.GetModel()->packets->materialParameters;
+        textureState->texture = WhiteTexture;
+        textureState->textureIndex = 0xFFFF;
+        textureState->SetWrapS(true);
+        textureState->SetWrapT(true);
+        textureState->unknown07 = 0;
+        memcpy((u8*)mesh.GetModel()->packets->materialParameters
+                   + sizeof(glTextureBinding),
+            &colour,
+            sizeof(colour));
+
+        if (mesh.End())
+        {
+            model = mesh.GetModel();
+        }
+    }
+}

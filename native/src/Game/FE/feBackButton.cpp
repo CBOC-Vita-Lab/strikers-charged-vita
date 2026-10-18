@@ -1,0 +1,184 @@
+#include "Game/FE/feBackButton.h"
+#include "NL/nlFunction.inl"
+#include "Game/Render/RLViewLayers.h"
+#include "Game/FE/tlImageInstance.h"
+#include "Game/FE/FEAudio.h"
+
+#include "Game/GameSceneManager.h"
+#include "Game/FE/feFinder.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feFinder_impl.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "NL/nlBind.h"
+#include "NL/nlString.h"
+#include "Game/BaseGameSceneManager.h"
+#include "platform/sdk/input/np_game_input.h"  // controls (np/platform/sdk/input)
+
+
+
+/**
+ * Offset/Address/Size: 0x0 | 0x8022EF84 | size: 0x84
+ */
+FEBackButton::FEBackButton()
+    : FEPointerButton((void*)0)
+    , mBackScene(SCENE_INVALID)
+    , m_padB8(0.0f)
+    , mButtonInstance(0)
+    , mPressed(false)
+    , m_padCD(false)
+    , m_padCE(false)
+    , mPushBackScene(true)
+    , mPopScene(true)
+    , mBoundsInitialized(false)
+{
+    mPointerInside[0] = false;
+    mPointerInside[1] = false;
+    mPointerInside[2] = false;
+    mPointerInside[3] = false;
+    NpNoteBackButtonVptr(this);   // NP controls: the menu navigation recognises the BACK button by its vtable
+}
+
+/**
+ * Offset/Address/Size: 0x84 | 0x8022F008 | size: 0x5C
+ */
+FEBackButton::~FEBackButton()
+{
+}
+
+/**
+ * Offset/Address/Size: 0x210 | 0x8022F194 | size: 0x14C
+ */
+void FEBackButton::SetButtonInstance(TLComponentInstance* instance)
+{
+    if (IsWidescreen())
+    {
+        instance->SetActiveSlide("16:9", true, false);
+    }
+    else
+    {
+        instance->SetActiveSlide("4:3", true, false);
+    }
+
+    mButtonPosition = instance->GetAssetPosition();
+    mButtonInstance = FEFinder<TLComponentInstance, 2>::Find<TLSlide>(instance->GetActiveSlide(), "back");
+}
+
+static void InitializePointerButton(FEBackButton* button)
+{
+    typedef Detail::MemFunImpl<void, void (FEBackButton::*)(int, void*)> PointerMethod;
+    typedef BindExp3<void, PointerMethod, FEBackButton*, Placeholder<0>, Placeholder<1> > PointerBinding;
+
+    button->mBoundsInitialized = true;
+
+    FEPointerListener::Callback callback(PointerBinding(
+        MemFun(&FEBackButton::OnPointerInside), button, Placeholder<0>(), Placeholder<1>()));
+    button->SetPointerInsideCallback(callback);
+
+    TLImageInstance* over = FEFinder<TLImageInstance, TLAT_IMAGE>::FindOrDefault(
+        button->mButtonInstance, "over", "list_high_250x60");
+    feVector3 position = button->mButtonInstance->GetAssetPosition();
+    button->SetInstanceBounds(over, true, position.f.x, position.f.y, 1.0f, 1.0f);
+}
+
+/**
+ * Offset/Address/Size: 0x35C | 0x8022F2E0 | size: 0x2B0
+ */
+bool FEBackButton::UpdateBackButton(FEPointerEvent event, float)
+{
+    if (mDisabled)
+    {
+        return false;
+    }
+
+    if (!mBoundsInitialized)
+    {
+        InitializePointerButton(this);
+    }
+
+    mPointerInside[event.mIndex] = false;
+    HandlePointerEvent(&event);
+
+    BaseGameSceneManager* manager = GameSceneManager::Instance();
+    if (manager == 0)
+    {
+        manager = g_pOverlayManager;
+    }
+
+    if (mPressed && mPushBackScene)
+    {
+        if (mBackScene != SCENE_INVALID)
+        {
+            manager->Push((SceneList)mBackScene, SCREEN_BACK, true);
+        }
+        mPressed = false;
+        return true;
+    }
+
+    if (mPressed && !mPushBackScene)
+    {
+        if (mPopScene)
+        {
+            manager->Pop();
+        }
+        mPressed = false;
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Offset/Address/Size: 0xE0 | 0x8022F064 | size: 0xA0
+ */
+void FEBackButton::OnPointerEnter(int index, void* context)
+{
+    if (!HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        mButtonInstance->SetActiveSlide("over", true, false);
+        FEAudio::PlayAnimAudioEvent(0xACCDCA48, 0, 0, 1);
+    }
+    SetPointerState(POINTER_BUTTON_HOVER, index);
+    FEPointerButton::OnPointerEnter(index, context);
+}
+
+/**
+ * Offset/Address/Size: 0x180 | 0x8022F104 | size: 0x10
+ */
+void FEBackButton::OnPointerInside(int index, void*)
+{
+    mPointerInside[index] = true;
+}
+
+/**
+ * Offset/Address/Size: 0x190 | 0x8022F114 | size: 0x4C
+ */
+void FEBackButton::OnPointerPress(int index, void* context)
+{
+    FEPointerButton::OnPointerPress(index, context);
+    FEAudio::PlayAnimAudioEvent(0x6F6A3A07, 0, 0, 1);
+    mPressed = true;
+}
+
+/**
+ * Offset/Address/Size: 0x1DC | 0x8022F160 | size: 0x34
+ */
+void FEBackButton::OnPointerRelease(int index, void* context)
+{
+    FEPointerButton::OnPointerRelease(index, context);
+    mPressed = false;
+}
+
+/**
+ * Offset/Address/Size: 0x60C | 0x8022F590 | size: 0x98
+ */
+void FEBackButton::OnPointerLeave(int index, void* context)
+{
+    if (!HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        m_padB8 = 0.0f;
+        mButtonInstance->SetActiveSlide("off", true, false);
+        m_padCE = false;
+    }
+    SetPointerState(POINTER_BUTTON_NORMAL, index);
+    FEPointerButton::OnPointerLeave(index, context);
+}

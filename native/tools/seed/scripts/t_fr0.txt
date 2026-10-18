@@ -1,0 +1,13 @@
+# W5-SEED test: friendly match, pad 0 plays the home side, stadium 3
+mash 100 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=3 home=3 away=6 hsk=1,2,3 ask=4,5,6 human=0
+wait ingame == 1 3000
+log STATE match object
+mash 100 30 gs == 1
+wait gs == 5 3000
+log STATE open play
+idle 1800
+log done
+exit

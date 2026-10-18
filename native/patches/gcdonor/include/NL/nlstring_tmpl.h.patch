@@ -1,0 +1,19 @@
+diff --git a/include/NL/nlstring_tmpl.h b/include/NL/nlstring_tmpl.h
+index 5745e05..6207904 100644
+--- a/include/NL/nlstring_tmpl.h
++++ b/include/NL/nlstring_tmpl.h
+@@ -24,6 +24,14 @@ inline CharT* nlStrNCpy(CharT* str1, const CharT* str2, unsigned long len)
+     unsigned long n;
+     int p;
+     unsigned long c;
++    // NP: a null source read as an empty string on the console (it dereferenced the zero page);
++    // natively it faults.
++    if (str2 == 0)
++    {
++        if (len)
++            str1[0] = (CharT)0;
++        return str1;
++    }
+     n = len - 1;
+     p = 0;
+     goto test;

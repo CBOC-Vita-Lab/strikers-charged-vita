@@ -1,0 +1,124 @@
+diff --git a/src/Game/SAnim.cpp b/src/Game/SAnim.cpp
+index 8f6ccf9..0746590 100644
+--- a/src/Game/SAnim.cpp
++++ b/src/Game/SAnim.cpp
+@@ -4,11 +4,56 @@
+ #include "Game/PoseAccumulator.h"
+ #include "Game/SHierarchy.h"
+ #include "NL/nlSlotPool.h"
++#include "port/chunk_endian.h"
+ 
+ SlotPool<cSAnimCallback> lbl_805840D8(16, 16);
+ 
++// NP: the key payloads of the per-node chunks, converted in place from big-endian once the node
++// properties (which say how each rotation track is packed) have been converted themselves.
++// Rotation: u16 angles (props & 1) or four s16 per key (props & 0x10) are 16-bit data; the 12-bit
++// and 8-bit forms are byte streams the decoders assemble themselves, so they stay as they are.
++// Translation: three floats per key. Scale: three u16 per key. Weight keys are bytes.
++static void SwapSAnimNodeKeys(const cSAnim* pAnim, nlChunk* nodeChunk, nlChunk* end)
++{
++    unsigned int nodeIndex = 0;
++    while (nodeChunk != end && nodeChunk->GetID() == 0x80017100)
++    {
++        const unsigned int props = nodeIndex < pAnim->m_nNumNodes ? pAnim->m_pNodeProperties[nodeIndex] : 0;
++        nlChunk* subEnd = nodeChunk->GetLastChunk();
++        for (nlChunk* sub = nodeChunk->GetFirstChunk(); sub != subEnd; sub = sub->GetNextChunk())
++        {
++            const unsigned long bytes = sub->GetDataSize();
++            void* data = sub->GetData();
++            switch (sub->GetID())
++            {
++            case 0x17101:
++                if (props & 0x11)
++                    port_disc16_array(data, bytes / 2);
++                break;
++            case 0x17102:
++                port_disc32_array(data, bytes / 4);
++                break;
++            case 0x17103:
++                port_disc16_array(data, bytes / 2);
++                break;
++            default:
++                break;
++            }
++        }
++        nodeChunk = nodeChunk->GetNextChunk();
++        nodeIndex++;
++    }
++}
++
+ cSAnim* cSAnim::Initialize(nlChunk* pChunk)
+ {
++    // NP: big-endian on disc. Convert this animation's chunk headers before anything walks them; a
++    // tree whose sizes do not fit is refused instead of being walked out of bounds.
++    if (port_disc_chunk_swap_tree(pChunk, port_disc32(&pChunk->m_Size) + sizeof(nlChunk)) == 0)
++    {
++        return 0;
++    }
++
+     cSAnim* pRetval;
+     nlChunk* chunkA;
+     nlChunk* end = pChunk->GetLastChunk();
+@@ -17,15 +62,23 @@ cSAnim* cSAnim::Initialize(nlChunk* pChunk)
+ 
+     pRetval = (cSAnim*)chunkA->GetData();
+     pRetval->m_pCallbackList = 0;
++    // NP: the words of the record that come from the file: hash, key/node/morph-channel counts (four
++    // consecutive words from +4), the root key count and the hierarchy signature. The rest is pointers
++    // this function fills in.
++    port_disc32_array(&pRetval->m_uHashID, 4);
++    port_disc32_array(&pRetval->m_nNumRootKeys, 1);
++    port_disc32_array(&pRetval->m_nHierarchySignature, 1);
+ 
+     chunkB = chunkA->GetNextChunk();
+     pRetval->m_szName = (const char*)chunkB->GetData();
+ 
+     chunkA = chunkB->GetNextChunk();
+     pRetval->m_pNumWeightKeys = (const unsigned int*)chunkA->GetData();
++    port_disc32_array((void*)pRetval->m_pNumWeightKeys, chunkA->GetDataSize() / 4);
+ 
+     chunkB = chunkA->GetNextChunk();
+     pRetval->m_Unknown1C = (const unsigned int*)chunkB->GetData();
++    port_disc32_array((void*)pRetval->m_Unknown1C, chunkB->GetDataSize() / 4);
+ 
+     chunkA = chunkB->GetNextChunk();
+     pRetval->m_pRotKeys = (void**)chunkA->GetData();
+@@ -44,13 +97,16 @@ cSAnim* cSAnim::Initialize(nlChunk* pChunk)
+ 
+     chunkB = chunkA->GetNextChunk();
+     pRetval->m_pRootRot = (unsigned short*)chunkB->GetData();
++    port_disc16_array(pRetval->m_pRootRot, chunkB->GetDataSize() / 2);
+ 
+     chunkA = chunkB->GetNextChunk();
+     pRetval->m_pRootTrans = (nlVector3*)chunkA->GetData();
++    port_disc32_array(pRetval->m_pRootTrans, chunkA->GetDataSize() / 4);
+ 
+     unsigned int nodeIndex = 0;
+     unsigned int type;
+     nlChunk* nodeChunk = chunkA->GetNextChunk();
++    nlChunk* firstNodeChunk = nodeChunk;
+     while (nodeChunk != end
+            && (type = nodeChunk->GetID()) == 0x80017100)
+     {
+@@ -83,9 +139,11 @@ cSAnim* cSAnim::Initialize(nlChunk* pChunk)
+ 
+     pRetval->m_pNumMorphKeys
+         = (const unsigned int*)nodeChunk->GetData();
++    port_disc32_array((void*)pRetval->m_pNumMorphKeys, nodeChunk->GetDataSize() / 4);
+ 
+     nodeChunk = nodeChunk->GetNextChunk();
+     pRetval->m_nMorphIds = (unsigned long*)nodeChunk->GetData();
++    port_disc32_array(pRetval->m_nMorphIds, nodeChunk->GetDataSize() / 4);
+ 
+     nodeChunk = nodeChunk->GetNextChunk();
+     pRetval->m_pMorphKeys = (unsigned char*)nodeChunk->GetData();
+@@ -93,6 +151,9 @@ cSAnim* cSAnim::Initialize(nlChunk* pChunk)
+     nodeChunk = nodeChunk->GetNextChunk();
+     pRetval->m_pNodeProperties
+         = (const unsigned int*)nodeChunk->GetData();
++    port_disc32_array((void*)pRetval->m_pNodeProperties, nodeChunk->GetDataSize() / 4);
++
++    SwapSAnimNodeKeys(pRetval, firstNodeChunk, end);
+ 
+     return pRetval;
+ }

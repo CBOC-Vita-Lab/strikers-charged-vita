@@ -1,0 +1,36 @@
+# W5 CTL part 2: the Vita build in Vita3K through the title and the menus (MODERN): the title's (Cross) prompt, the main menu,
+# the multiplayer screen's Cross / Circle hints, the options; MSC_CTL_TRACE=2 logs every picture redrawn and every text rewritten.
+vmash cross 20 scene == 0
+log STATE title screen
+idle 400
+vmash cross 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+idle 200
+wait nbuttons >= 2
+idle 10
+vmash cross 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0 1800
+log STATE main menu
+idle 300
+touch 300 140 3 0
+try wait scene == 24 600
+log STATE multiplayer screen
+idle 400
+vpress circle 3 0
+try wait scene == 1 900
+try wait nbuttons >= 8 900
+log STATE back in the main menu
+idle 200
+vpress cross 3 10
+try wait scene == 27 900
+log STATE options (Domination)
+idle 300
+vpress circle 3 10
+try wait scene == 1 900
+log STATE script end
+exit

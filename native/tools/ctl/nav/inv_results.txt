@@ -1,0 +1,20 @@
+# W5 CTL inventory: a 20-second friendly to the results screens. GL frame dumps every N frames.
+vmash cross 20 scene == 0
+log STATE title screen
+idle 30
+launch mode=friendly stadium=0 home=0 away=7 hsk=0,1,2 ask=3,4,5 human=0 skill=0 time=20
+wait ingame == 1 4000
+wait gs == 5 6000
+log STATE open play
+try wait ovl == 91 6000
+log STATE results overlay
+idle 250
+vpress cross 3 0
+idle 250
+log STATE after cross
+vpress cross 3 0
+idle 250
+log STATE after cross 2
+vpress cross 3 0
+idle 250
+exit

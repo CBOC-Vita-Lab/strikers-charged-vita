@@ -1,0 +1,55 @@
+#ifndef GAME_MATH_HELPERS_H
+#define GAME_MATH_HELPERS_H
+
+#include "types.h"
+#include "NL/nlMath.h"
+
+static inline u16 nlVector3ToAngle(const nlVector3& dir, u16 offset = 0)
+{
+    float x = dir.x;
+    float y = dir.y;
+    return (u16)((u32)(u16)(s32)(10430.378f * nlATan2f(y, x)) + offset);
+}
+
+static inline u16 RadToAng16(f32 r)
+{
+    return (u16)(s32)(10430.378f * r);
+}
+
+static inline float nlMaxEquals(float a, float b)
+{
+    return (a >= b) ? a : b;
+}
+
+static inline float nlMinEquals(float a, float b)
+{
+    if (a <= b)
+    {
+        return a;
+    }
+    return b;
+}
+
+static inline s32 abs_s16(s16 x)
+{
+    if (x < 0)
+    {
+        return -x;
+    }
+    return x;
+}
+
+inline float CalculateDistanceSquared(
+    const nlVector3& pos1, const nlVector3& pos2)
+{
+    nlVector3 delta;
+    nlVec3Sub(delta, pos1, pos2);
+    return nlGetLengthSquared3D(delta.x, delta.y, delta.z);
+}
+
+static inline u16 abs_ang16(s16 x)
+{
+    return (u16)(x < 0 ? -x : x);
+}
+
+#endif // GAME_MATH_HELPERS_H

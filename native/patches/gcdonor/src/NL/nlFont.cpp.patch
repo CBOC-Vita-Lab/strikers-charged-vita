@@ -1,0 +1,17 @@
+diff --git a/src/NL/nlFont.cpp b/src/NL/nlFont.cpp
+index 066087c..2473fad 100644
+--- a/src/NL/nlFont.cpp
++++ b/src/NL/nlFont.cpp
+@@ -363,8 +363,10 @@ unsigned char nlFont::Load(const char* szFontName, char* pFontDescData, unsigned
+     unsigned long page;
+     for (page = 0; page < m_PageCount; page++)
+     {
+-        nlStrNCpy(sHashFontName, szFontName, 0x109);
+-        nlSNPrintf(sHashFontName, 0x109, TextureNameFormat, sHashFontName, page + 1);
++        // NP: the buffer was staged with the name and then also passed as the %s argument it is
++        // being written to, which is undefined; glibc yields "_1", whose hash matches no file in
++        // the font bundle. Format straight from the font name.
++        nlSNPrintf(sHashFontName, 0x109, TextureNameFormat, szFontName, page + 1);
+         m_TextureHandles[page] = nlStringHash(sHashFontName);
+ 
+         if (m_TextureType == SplitFX)

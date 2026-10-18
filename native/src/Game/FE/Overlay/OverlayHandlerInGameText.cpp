@@ -1,0 +1,254 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/OverlayHandlerInGameText.h"
+#include <cstring>
+#include "Game/FE/feHelpFuncs_decl.h"
+#include "Game/Render/RLViewLayers.h"
+
+#include "Game/BaseGameSceneManager.h"
+#include "Game/OverlayManager.h"
+#include "Game/DB/BasicGameInfo.h"
+#include "Game/DB/StatsTracker.h"
+#include "Game/FE/feFinder.h"
+#include "Game/FE/feFinderFind_impl.h"
+#include "Game/FE/feInlineHasher.h"
+#include "Game/FE/feInput.h"
+#include "Game/FE/fePackage.h"
+#include "Game/FE/fePresentation.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/tlComponentInstance.h"
+#include "Game/FE/tlSlide.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/Game.h"
+#include "Game/GameInfo.h"
+#include "Game/Team.h"
+#include "NL/nlFormat.h"
+#include "NL/nlLocalization.h"
+#include "NL/nlPrint.h"
+#include "NL/nlSingleton.h"
+#include "NL/nlString.h"
+#include "NL/nlTask.h"
+#include "Game/Render/RLViewLayers.h"
+
+
+static inline const unsigned short* LookupLocHash(const char* stringId)
+{
+    nlLocalization* loc = g_pLocalization;
+    unsigned long key = nlStringLowerHash(stringId);
+    if (loc->m_LookupTable == 0)
+    {
+        return LocalizationTableNotFound;
+    }
+
+    nlLocalization::StringLookup* entry
+        = nlBSearch<nlLocalization::StringLookup, unsigned long>(
+            key, loc->m_LookupTable, (int)loc->m_pFile->StringCount);
+    if (entry != 0)
+    {
+        return loc->m_FirstString + entry->StringOffset;
+    }
+    return MissingLocString;
+}
+
+static char* TEAM_SLIDE_NAMES[8] = {
+    "DAISY",
+    "DK",
+    "LUIGI",
+    "MARIO",
+    "PEACH",
+    "WALUIGI",
+    "WARIO",
+    "YOSHI",
+};
+
+static const char* OVERLAY_HANDLER_LAYER_NAME = "Layer";
+
+static const InGameTextEntry IGTTable[8] = {
+    { SLIDE_NAME_TEXT_GOAL, "GOAL!", 0 },
+    { SLIDE_NAME_TEXT_KICKOFF, "KICKOFF!", 0 },
+    { SLIDE_NAME_TEXT_WINNER, "WINNER!", 1 },
+    { SLIDE_NAME_TEXT_PAUSE, "Pause", 1 },
+    { SLIDE_NAME_TEXT_TIE, "TIE!", 1 },
+    { SLIDE_NAME_TEXT_LOADING, "LOADING...", 1 },
+    { SLIDE_NAME_TEXT_SHOOT, "Shoot!", 2 },
+    { SLIDE_NAME_TEXT_REPLAY, "REPLAY", 8 },
+};
+
+InGameTextOverlay::InGameTextOverlay()
+    : BaseOverlayHandler(2, POSITION_ALL)
+{
+    mCurrentSlideName = SLIDE_NAME_INVALID;
+    mPendingSlideName = SLIDE_NAME_INVALID;
+    SetVisible(false);
+}
+
+InGameTextOverlay::~InGameTextOverlay()
+{
+}
+
+void InGameTextOverlay::SetSlide(OverlaySlideName slideName)
+{
+    mPendingSlideName = slideName;
+    if (mCurrentSlideName != mPendingSlideName)
+    {
+        mFEScene->m_pFEPackage->GetPresentation()->SetActiveSlide(
+            IGTTable[mPendingSlideName].mSlideName, true);
+        TLSlide* CurrentSlide
+            = mFEScene->m_pFEPackage->GetPresentation()->m_currentSlide;
+        if (CurrentSlide != 0)
+        {
+            CurrentSlide->m_time = 0.0f;
+            CurrentSlide->m_start = 0.0f;
+            CurrentSlide->Update(0.0f);
+        }
+        if (mCurrentSlideName != SLIDE_NAME_INVALID)
+        {
+            mFEScene->m_pFEPackage->GetPresentation()->SetActiveSlide(
+                IGTTable[mCurrentSlideName].mSlideName, true);
+        }
+    }
+}
+
+void InGameTextOverlay::Update(float fDeltaT)
+{
+    BaseSceneHandler::Update(fDeltaT);
+    if (mCurrentSlideName != mPendingSlideName)
+    {
+        mCurrentSlideName = mPendingSlideName;
+        if (mCurrentSlideName == SLIDE_NAME_TEXT_REPLAY && IsWidescreen() == 0)
+        {
+            mPresentation->SetActiveSlide("REPLAY 4:3", true);
+        }
+        else
+        {
+            mFEScene->m_pFEPackage->GetPresentation()->SetActiveSlide(
+                IGTTable[mCurrentSlideName].mSlideName, true);
+        }
+
+        mVisibilityMask = IGTTable[mCurrentSlideName].mTaskVisibility;
+        if (mVisibilityMask & nlTaskManager::m_pInstance->mCurrentState)
+        {
+            if (mWasLastVisible)
+            {
+                SetVisible(true);
+            }
+        }
+        else
+        {
+            mWasLastVisible = mVisible;
+            SetVisible(false);
+        }
+
+        switch (mCurrentSlideName)
+        {
+        case SLIDE_NAME_TEXT_WINNER:
+            DisplayFinalScore();
+            break;
+        }
+    }
+
+    if (mCurrentSlideName == SLIDE_NAME_TEXT_WINNER
+        && g_pFEInput->JustPressed(FE_ALL_PADS, 0x1E, true, 0) && mVisible)
+    {
+        static_cast<OverlayManager*>(g_pOverlayManager)->SetVisible(OVERLAY_IN_GAME_TEXT, false, false);
+        g_pOverlayManager->Push(OVERLAY_POST_GAME_RESULTS, SCREEN_NOTHING, false);
+    }
+}
+
+void InGameTextOverlay::SceneCreated()
+{
+}
+
+void InGameTextOverlay::DisplayFinalScore()
+{
+    typedef BasicString<unsigned short, Detail::TempStringAllocator> WideString;
+
+    int scoreLeft = g_pTeams[0]->m_nScore;
+    int scoreRight = g_pTeams[1]->m_nScore;
+
+    char scoreLeftString[4];
+    char scoreRightString[4];
+    nlSNPrintf(scoreLeftString, 4, "%d", scoreLeft);
+    nlSNPrintf(scoreRightString, 4, "%d", scoreRight);
+
+    unsigned short scoreLeftWideString[32];
+    unsigned short scoreRightWideString[32];
+    nlStrToWcs(scoreLeftString, scoreLeftWideString, 32);
+    nlStrToWcs(scoreRightString, scoreRightWideString, 32);
+
+    const unsigned short* formatLocString = LookupLocHash("FINAL_SCORE");
+    WideString formatted(Format(WideString(formatLocString),
+        scoreLeftWideString,
+        scoreRightWideString));
+
+    FEPresentation* presentation
+        = mFEScene->m_pFEPackage->GetPresentation();
+    TLTextInstance* pTextInstance;
+    const char* WINNER_SLIDE_NAME
+        = IGTTable[SLIDE_NAME_TEXT_WINNER].mSlideName;
+    long winningSide;
+
+    if (mCurrentSlideName == SLIDE_NAME_TEXT_WINNER)
+    {
+        pTextInstance = FEFinder<TLTextInstance, 3>::Find(presentation,
+            WINNER_SLIDE_NAME, OVERLAY_HANDLER_LAYER_NAME, "Score");
+
+        winningSide = scoreLeft > scoreRight ? 0 : 1;
+        eTeamID winningTeam = (eTeamID)nlSingleton<GameInfoManager>::Instance()->GetTeam(
+            (short)winningSide);
+
+        const unsigned short* winnerNameLookup
+            = LookupLocHash(GetLOCTeamName(winningTeam));
+        WideString winnerNameWideString(winnerNameLookup);
+
+        if (winningTeam == TEAM_MARIO)
+        {
+            const unsigned short* const& spaceCharacters = (const unsigned short*)L" ";
+            WideString space(spaceCharacters);
+            winnerNameWideString = space.Append(winnerNameWideString);
+        }
+
+        const unsigned short* winnerFormatLocString = LookupLocHash("THE_WINNER");
+        WideString unformattedName(winnerFormatLocString);
+        WideString formattedName(Format(unformattedName, winnerNameWideString.c_str()));
+
+        TLInstance* winnerNameInstance
+            = FEFinder<TLInstance, 3>::Find(presentation,
+                WINNER_SLIDE_NAME, OVERLAY_HANDLER_LAYER_NAME, "name");
+        TLTextInstance* winnerNameTextInstance = (TLTextInstance*)winnerNameInstance;
+
+        memcpy(mWinnerBuffer, formattedName.c_str(), sizeof(mWinnerBuffer));
+        winnerNameTextInstance->SetString(mWinnerBuffer);
+
+        eTeamID team = (eTeamID)nlSingleton<GameInfoManager>::Instance()->GetTeam(0);
+        TLComponentInstance* pComponentInstance
+            = FEFinder<TLComponentInstance, 4>::Find(presentation,
+                WINNER_SLIDE_NAME, OVERLAY_HANDLER_LAYER_NAME, "left_face");
+        pComponentInstance->SetActiveSlide(TEAM_SLIDE_NAMES[team], true, false);
+
+        team = (eTeamID)nlSingleton<GameInfoManager>::Instance()->GetTeam(1);
+        pComponentInstance = FEFinder<TLComponentInstance, 4>::Find(presentation,
+            WINNER_SLIDE_NAME, OVERLAY_HANDLER_LAYER_NAME, "right_face");
+        pComponentInstance->SetActiveSlide(TEAM_SLIDE_NAMES[team], true, false);
+
+        if (nlSingleton<GameInfoManager>::Instance()->mCurrentMode != GameInfoManager::GM_FRIENDLY)
+        {
+            if (g_pGame->m_eGameState == GS_OVERTIME)
+            {
+                StatsTracker::Track(STATS_OT_WIN, winningSide, 0,
+                    scoreLeft, scoreRight, 0, 0);
+            }
+            else
+            {
+                StatsTracker::Track(STATS_WIN, winningSide, 0,
+                    scoreLeft, scoreRight, 0, 0);
+            }
+        }
+        else
+        {
+            StatsTracker::Instance()->mNumGamesWon[winningSide]++;
+        }
+    }
+
+    memcpy(mScoresBuffer, formatted.c_str(), sizeof(mScoresBuffer));
+    pTextInstance->SetString(mScoresBuffer);
+}

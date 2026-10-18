@@ -1,0 +1,12 @@
+# native check 5: ONE WHOLE MATCH on the console, from the ESRB screen to the rematch, real time (nav/fullmatch.txt = the script that ran a whole match in Vita3K: boot,
+# menus, Domination Mode, kick-off, 22 scripted moves, then neutral until full time (match state 3, or 6 = sudden death), the post-game article, DONE, rematch).
+# A match takes as long as the game's own clock: about 6 minutes of play plus the menus and the results. Upload with:
+#   vitalab.py cycle env/env-np-fullmatch.txt np-full 1500 --input nav/fullmatch.txt        (status 4 = give the same command again)
+# Read: python3 runlog_summary.py np-full/log.txt   ([watch] every 600 frames, frame-interval windows, memory at the end: pool peaks over a whole match)
+MSC_INPUT_SCRIPT=fullmatch.txt
+MSC_MAX_FRAMES=60000
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_FRAME_TIMING=900
+MSC_VITA_MEMSTATS=1
+NP_DATA_DIR=ux0:data/mscharged/np-data

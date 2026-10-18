@@ -1,0 +1,158 @@
+#ifndef GAME_TEAM_H
+#define GAME_TEAM_H
+
+#include "types.h"
+#include "Game/AI/Powerups.h"
+#include "NL/nlMath.h"
+#include "NL/nlTimer.h"
+
+class cNet;
+class cFielder;
+class cPlayer;
+class cGlobalPad;
+class Goalie;
+class FormationManager;
+class AIContext;
+class FuzzyRuntimeBase;
+class ScriptMachine;
+
+enum eTeamSide
+{
+    NO_SIDE = -1,
+    HOME = 0,
+    AWAY = 1,
+    HOME_AWAY = 2,
+};
+
+enum eSituation
+{
+    SITUATION_OFFENSE = 0,
+    SITUATION_DEFENSE = 1,
+    SITUATION_LOOSE = 2,
+    NUM_SITUATIONS = 3,
+};
+
+enum eTeamStyle
+{
+    TEAM_STYLE_AGGRESSIVE = 0,
+    TEAM_STYLE_MODERATE = 1,
+    TEAM_STYLE_PASSIVE = 2,
+    NUM_TEAM_STYLES = 3,
+};
+
+class DebugWriteCache;
+class RunningChecksum;
+
+class cTeam
+{
+public:
+    cTeam(int nSide);
+    int GetScore() const { return m_nScore; }
+    ~cTeam();
+    void ClearAllPowerUps();
+    void ClearCurrentPowerUp();
+    bool fn_800A6560();
+    bool TogglePowerup(bool bIsSilent);
+    bool IncrementPowerupMeter(
+        float fAdjustAmount, cFielder* pFielder, bool param3);
+    bool fn_800A6764() const;
+    PowerUpTeamType GetCurrentPowerUp() const;
+    void SetIsPowerUpNew(int index, bool isNew);
+    void SetPlayer(cPlayer* pPlayer, int nIndex);
+    void SetGoalie(Goalie* pGoalie);
+    cFielder* GetFielder(int nIndex);
+    cFielder* GetBallInterceptFielder(int i) { return m_pBallInterceptOrderedFielders[i]; }
+    cFielder* GetBestBallInterceptor() { return mpBestBallInterceptor; }
+    const nlVector3& GetBallInterceptPosition(int i) const { return mvBallInterceptPosition[i]; }
+    cFielder* GetAIOrderedFielder(int i) { return m_pAIOrderedFielders[i]; }
+    cPlayer* GetPlayer(int nIndex);
+    cPlayer* GetControlledPlayer(cGlobalPad* pController);
+    cFielder* GetCaptain();
+    cFielder* GetStriker() const;
+    cFielder* GetFrontMostFielder();
+    cFielder* GetRearMostFielder();
+    cTeam* GetOtherTeam();
+    Goalie* GetGoalie();
+    cNet* GetOtherNet();
+    nlVector3 GetAIOffNetLocation(const nlVector3* v3ReferencePos);
+    nlVector3 GetAIDefNetLocation(const nlVector3* v3ReferencePos);
+    int GetNumAssignedControllers();
+    void PreUpdate(float fDeltaT);
+    void Update(float fDeltaT);
+    void UpdateTeamAI(float fDeltaT);
+    bool AssignSituation();
+    void AssignMarks(bool bForceReMark);
+    void UpdateControllers();
+    void ResetCharacters();
+    void StopGameplayEffectsAndSounds();
+    bool CalculateFormationPosition(nlVector3& v3DestPosition,
+        cFielder* pFielder, bool bInPosition);
+    void CalculateNewBallInterceptTimes();
+    PowerUpTeamType GetPowerUpByIndex(int index) const;
+    int SetCurrentPowerUp(
+        ePowerUpType eNewPowerUpType, int nnumOfPowerups);
+    void SetDifficulty(int difficulty, bool blend, bool reload);
+    void Reset();
+    void ResetAI();
+    void StopPlayingAllTrackedSFX();
+    void UpdateShotScore();
+    void SyncLog(void* context, DebugWriteCache* cache);
+    void ChecksumState(RunningChecksum* runningChecksum);
+    float GetAverageMovementRating();
+    float GetAverageShootingRating();
+    float GetAveragePassingRating();
+    float GetAverageDefenseRating();
+
+public:
+    /* 0x00 */ int m_nSide;
+    /* 0x04 */ int m_nScore;
+
+public:
+    /* 0x08 */ float mfPowerupMeter;
+
+    /* 0x0C */ float mfAttackIndicatorProgress;
+
+private:
+    void WriteTeamStateLog(void* context, DebugWriteCache* cache);
+
+    /* 0x10 */ float mfShotScore;
+
+public:
+    /* 0x14 */ float mfPowerupTimer;
+    /* 0x18 */ eSituation mpCurrentSituation;
+    /* 0x1C */ eTeamStyle meCurrentTeamStyle;
+
+public:
+    /* 0x20 */ Timer mtTeamStyleTimer;
+    /* 0x28 */ Timer mtMarkTimer;
+    /* 0x30 */ Timer mtRoleTimer;
+    /* 0x38 */ Timer mtDefensiveZoneTimer;
+    /* 0x40 */ Timer mtToggleTimer;
+    /* 0x48 */ float mfBallInTimes[4];
+
+private:
+    /* 0x58 */ nlVector3 mvBallInterceptPosition[4];
+
+public:
+    /* 0x88 */ cFielder* mpBestBallInterceptor;
+    /* 0x8C */ PowerUpTeamType m_ePowerupList[2];
+    /* 0xA4 */ cPlayer* m_pPlayers[5];
+    /* 0xB8 */ cFielder* m_pAIOrderedFielders[4];
+    /* 0xC8 */ cFielder* m_pBallInterceptOrderedFielders[4];
+    /* 0xD8 */ cFielder* m_pFieldersByTeamRelativeX[4];
+    /* 0xE8 */ cNet* m_pNet;
+    /* 0xEC */ FormationManager* m_pFormationManager;
+    /* 0xF0 */ AIContext* m_pAIContext;
+    /* 0xF4 */ u32 m_nCurrentPowerUp;
+};
+
+extern cTeam* g_pTeams[];
+FuzzyRuntimeBase* GetTeamFuzzyRuntime(cTeam*);
+extern "C" ScriptMachine* fn_800A6968(cTeam*);
+extern cTeam* g_pCurrentlyUpdatingTeam;
+
+class SkillTweaks;
+SkillTweaks* fn_800A636C(cTeam* pTeam);
+float fn_800A6388(cTeam*);
+
+#endif // GAME_TEAM_H

@@ -1,0 +1,120 @@
+#ifndef GAME_EFFECTS_EFFECTS_TEMPLATE_H
+#define GAME_EFFECTS_EFFECTS_TEMPLATE_H
+
+#include "NL/nlColour.h"
+#include "NL/nlMath.h"
+
+class nlChunk;
+
+struct fxRange
+{
+    /* 0x00 */ float base;
+    /* 0x04 */ float range;
+}; // size: 0x08
+
+enum eEffectsEmitter
+{
+    Emitter_Circle = 0,
+    Emitter_Sphere = 1,
+    Emitter_Spindle = 2,
+    Emitter_Hemisphere = 3,
+    Emitter_Disc = 4,
+};
+
+enum eEffectsBlend
+{
+    EfBlend_Normal = 0,
+    EfBlend_Additive = 1,
+};
+
+enum eEffectsBillboard
+{
+    EfBill_Billboard = 0,
+    EfBill_Groundboard = 1,
+    EfBill_SoftwareControlled = 2,
+};
+
+extern unsigned int gEffectsRandomSeed;
+
+struct fxCurveKey
+{
+    /* 0x00 */ float mTime;
+    /* 0x04 */ float mCubic;
+    /* 0x08 */ float mQuadratic;
+    /* 0x0C */ float mLinear;
+    /* 0x10 */ float mConstant;
+}; // size: 0x14
+
+class fxAnimatedRange
+{
+public:
+    static fxAnimatedRange* LoadFromChunk(nlChunk* chunk);
+    float Evaluate(float value) const;
+    float GetMaximum() const;
+
+    /* 0x00 */ unsigned long mUseCurve;
+    /* 0x04 */ float base;
+    /* 0x08 */ float range;
+    /* 0x0C */ unsigned long mNumKeys;
+    /* 0x10 */ fxCurveKey* mKeys;
+}; // size: 0x14
+
+class EffectsTemplate
+{
+public:
+    static EffectsTemplate* LoadFromChunk(nlChunk* chunk);
+    void Cleanup();
+    float GetBoundingRadius();
+
+    /* 0x00 */ unsigned long m_uHashID;
+    /* 0x04 */ float m_fFountainLife;
+    /* 0x08 */ fxRange m_rMass;
+    /* 0x10 */ fxRange m_rParticleLife;
+    /* 0x18 */ fxRange m_rInheritVelocity;
+    /* 0x20 */ fxRange m_rAcceleration;
+    /* 0x28 */ fxRange m_rRotation;
+    /* 0x30 */ float m_fTexcoordFlipPercentage;
+    /* 0x34 */ unsigned char m_eEmitter;
+    /* 0x35 */ unsigned char m_eBlend;
+    /* 0x36 */ unsigned char m_eBillboard;
+    /* 0x37 */ unsigned char m_uFlags;
+    /* 0x38 */ unsigned long m_hTexture;
+    /* 0x3C */ int m_nFrames;
+    /* 0x40 */ unsigned long m_uEmitterDeathCode;
+    /* 0x44 */ unsigned long m_uParticleCreationCode;
+    /* 0x48 */ unsigned long m_uParticleDeathCode;
+    /* 0x4C */ fxRange m_rFPS;
+    /* 0x54 */ unsigned long m_uModelID;
+    /* 0x58 */ fxAnimatedRange* mProperties[8];
+    /* 0x78 */ nlColour m_cColour[26];
+
+    bool IsInFront() const { return (m_uFlags & 1) != 0; }
+    bool IsLocalSpace() const { return (m_uFlags & 2) != 0; }
+    bool DisablesDepthWrite() const { return (m_uFlags & 4) != 0; }
+    float EvaluateProperty(unsigned int index, float time) const
+    {
+        return mProperties[index]->Evaluate(time);
+    }
+}; // size: 0xE0
+
+inline float RandomizedValue(float base, float range)
+{
+    float halfRange = 0.5f * range;
+    float result = base;
+    float randomOffset = nlRandomf(halfRange, &gEffectsRandomSeed);
+    unsigned int randomSign = nlRandom(0x7FFFFFFF, &gEffectsRandomSeed);
+
+    return (randomSign & 1) ? result + randomOffset : result - randomOffset;
+}
+
+inline float RandomizedValue(float value)
+{
+    return nlRandomf(value, &gEffectsRandomSeed);
+}
+
+inline float RandomizedValue(const fxRange& value)
+{
+    return RandomizedValue(value.base, value.range);
+}
+
+#endif // GAME_EFFECTS_EFFECTS_TEMPLATE_H

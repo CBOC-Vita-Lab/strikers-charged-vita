@@ -1,0 +1,18 @@
+# MSP frame-pacing proof, scene "menu": boot -> title -> main menu, idle 900 frames (front-end animations, blinking, texture animations)
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu, pointer on Domination Mode
+idle 900
+log STATE main menu idle done
+exit

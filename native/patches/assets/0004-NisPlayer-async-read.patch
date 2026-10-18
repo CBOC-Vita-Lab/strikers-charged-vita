@@ -1,0 +1,25 @@
+diff --git a/src/Game/NisPlayer.cpp b/src/Game/NisPlayer.cpp
+index ab1e697..749e822 100644
+--- a/src/Game/NisPlayer.cpp
++++ b/src/Game/NisPlayer.cpp
+@@ -1,5 +1,9 @@
+ #include "NL/nlDLListContainer.inl"
+ #include "Game/NisPlayer.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_assets.h"
++#include "platform/assets/np_hook.h"
++#endif
+ #include "Game/Blinker.h"
+ #include "NL/nlBasicString.h"
+ #include "Game/Render/StadiumLoading.h"
+@@ -871,6 +875,10 @@ void NisPlayer::AsyncLoad(nlFile* file, void* buffer, unsigned int size, unsigne
+     {
+         nlClose(file);
+     }
++#ifdef NP_NATIVE
++    /* this read bypasses nlLoadEntireFile (hooked): convert the raw .nis chunks; idempotent */
++    npa_hook_convert_kind(NPA_K_NIS, buffer, size, "nis");
++#endif
+     Instance()->Load((char*)buffer, size, *(NisHeader*)param);
+ }
+ 

@@ -1,0 +1,277 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/Physics/PhysicsYoshiEgg.h"
+
+#include "Game/AI/Fielder.h"
+#include "Game/AI/Powerups.h"
+#include "Game/Ball.h"
+#include "Game/EventDataTypes.h"
+#include "Game/Physics/Physics.h"
+#include "Game/Physics/PhysicsAIBall.h"
+#include "Game/Physics/PhysicsBanana.h"
+#include "Game/Physics/PhysicsCharacter.h"
+#include "Game/Physics/PhysicsEventQueue.h"
+#include "Game/Physics/PhysicsHammer.h"
+#include "Game/Physics/PhysicsPatch.h"
+#include "Game/Physics/PhysicsThwomp.h"
+#include "Game/Render/HammerObject.h"
+#include "Game/Render/ThwompObject.h"
+#include "Game/Render/YoshiEggObject.h"
+#include "Game/SharedStaticStorage.h"
+
+
+PhysicsYoshiEgg::PhysicsYoshiEgg(YoshiEggObject* egg, float radius)
+    : PhysicsSphere(g_CollisionSpace, 0, radius)
+    , mPadding38(0)
+    , mYoshiEgg(egg)
+{
+    SetCategory(0x4000);
+    SetCollide(0x1F060);
+}
+
+ContactType PhysicsYoshiEgg::Contact(PhysicsObject* other, dContact* contact, int)
+{
+    nlVector3 eggPosition;
+    CollisionEggData* eventData;
+    CollisionEggData* crackData;
+    CollisionPatchData* patchData;
+    GetPosition(&eggPosition);
+
+    bool isTimerRunning = mYoshiEgg->mDelay > 0.0f;
+    if (isTimerRunning)
+    {
+        return ONE_WAY_CONTACT_OTHER;
+    }
+
+    switch (other->GetObjectType())
+    {
+    case PHYSOBJ_COLUMN:
+    {
+        cCharacter* character
+            = ((PhysicsCharacter*)other->m_parentObject)->m_pAICharacter;
+        cFielder* player = mYoshiEgg->mFielder;
+        if (character == player)
+        {
+            return NO_CONTACT;
+        }
+
+        if (character->m_eClassType == FIELDER)
+        {
+            cFielder* fielder = (cFielder*)character;
+            if (!fielder->mbTangible)
+            {
+                return NO_CONTACT;
+            }
+            if (fielder->IsCharacterInAir(GetPosition().z + GetRadius()))
+            {
+                return NO_CONTACT;
+            }
+
+            eventData = 0;
+            g_CollisionEggDataPool.Allocate(eventData);
+            eventData->pPlayer = fielder;
+            eventData->pFielder = player;
+            eventData->pEgg = mYoshiEgg;
+            eventData->m_pad0C = 0;
+            eventData->m_pad10 = 0;
+            QueueCollisionEggPlayer(eventData);
+
+            if (fielder->IsSuperGrowActive())
+            {
+                return ONE_WAY_CONTACT_OTHER;
+            }
+        }
+        else if (!player->IsOnSameTeam((cPlayer*)character))
+        {
+            crackData = 0;
+            g_CollisionEggDataPool.Allocate(crackData);
+            crackData->pPlayer = (cPlayer*)character;
+            crackData->pFielder = player;
+            crackData->pEgg = mYoshiEgg;
+            crackData->m_pad0C = 0;
+            crackData->m_pad10 = 0;
+            QueueCollisionCrackEgg(crackData);
+        }
+        else
+        {
+            return TWO_WAY_CONTACT;
+        }
+        break;
+    }
+    case PHYSOBJ_AI_BALL:
+    {
+        cPlayer* owner = ((PhysicsAIBall*)other)->m_pAIBall->m_pOwner;
+        cFielder* player = mYoshiEgg->mFielder;
+        if (owner != 0)
+        {
+            if (player == owner)
+            {
+                return NO_CONTACT;
+            }
+
+            if (owner->m_eClassType == FIELDER)
+            {
+                if (!((cFielder*)owner)->mbTangible)
+                {
+                    return NO_CONTACT;
+                }
+                if (owner->IsCharacterInAir(GetPosition().z + GetRadius()))
+                {
+                    return NO_CONTACT;
+                }
+
+                eventData = 0;
+                g_CollisionEggDataPool.Allocate(eventData);
+                eventData->pPlayer = owner;
+                eventData->pFielder = player;
+                eventData->pEgg = mYoshiEgg;
+                eventData->m_pad0C = 0;
+                eventData->m_pad10 = 0;
+                QueueCollisionEggPlayer(eventData);
+            }
+            else if (!player->IsOnSameTeam(owner))
+            {
+                crackData = 0;
+                g_CollisionEggDataPool.Allocate(crackData);
+                crackData->pPlayer = owner;
+                crackData->pFielder = player;
+                crackData->pEgg = mYoshiEgg;
+                crackData->m_pad0C = 0;
+                crackData->m_pad10 = 0;
+                QueueCollisionCrackEgg(crackData);
+            }
+            else
+            {
+                return TWO_WAY_CONTACT;
+            }
+            break;
+        }
+
+        if (!fn_800167A8(g_pBall))
+        {
+            eventData = 0;
+            g_CollisionEggDataPool.Allocate(eventData);
+            eventData->pPlayer = 0;
+            eventData->pFielder = player;
+            eventData->pEgg = mYoshiEgg;
+            eventData->m_pad0C = 0;
+            eventData->m_pad10 = 0;
+            QueueCollisionEggBall(eventData);
+            return ONE_WAY_CONTACT_OTHER;
+        }
+        return NO_CONTACT;
+    }
+    case PHYSOBJ_BANANA:
+        ((PhysicsBanana*)other)->m_pPowerupObject->m_bShouldDestroy = true;
+        return NO_CONTACT;
+    case PHYSOBJ_SHELL:
+        return ONE_WAY_CONTACT_OTHER;
+    case PHYSOBJ_THWOMP:
+    {
+        if (((PhysicsThwomp*)other)->mThwomp->mState == THWOMP_STATE_FALLING)
+        {
+            crackData = 0;
+            g_CollisionEggDataPool.Allocate(crackData);
+            crackData->pPlayer = 0;
+            crackData->pFielder = mYoshiEgg->mFielder;
+            crackData->pEgg = mYoshiEgg;
+            crackData->m_pad0C = 0;
+            crackData->m_pad10 = 0;
+            QueueCollisionCrackEgg(crackData);
+        }
+
+        nlVector3 normal;
+        normal.x = contact->geom.normal[0];
+        normal.y = contact->geom.normal[1];
+        normal.z = contact->geom.normal[2];
+        mYoshiEgg->SetPendingDisplacement(normal, contact->geom.depth);
+        return ONE_WAY_CONTACT_THIS;
+    }
+    case PHYSOBJ_PATCH:
+    {
+        PhysicsPatch* patch = (PhysicsPatch*)other;
+        int type = patch->GetType();
+        PhysicsPatchInfo* info = GetPhysicsPatchInfo(type);
+        if (patch->GetType() == 1 || patch->GetType() == 8 || patch->GetType() == 9)
+        {
+            crackData = 0;
+            g_CollisionEggDataPool.Allocate(crackData);
+            crackData->pPlayer = 0;
+            crackData->pFielder = mYoshiEgg->mFielder;
+            crackData->pEgg = mYoshiEgg;
+            crackData->m_pad0C = 0;
+            crackData->m_pad10 = 0;
+            QueueCollisionCrackEgg(crackData);
+        }
+        else if (info->mFriction != 0.0f)
+        {
+            patchData = 0;
+            g_CollisionPatchDataPool.Allocate(patchData);
+            patchData->pPlayer = mYoshiEgg->mFielder;
+            patchData->pPatch = patch;
+            QueueCollisionPatchPlayer(patchData);
+        }
+        return NO_CONTACT;
+    }
+    case PHYSOBJ_HAMMER:
+    {
+        HammerObject* hammer = ((PhysicsHammer*)other)->mHammer;
+        bool isLanded = hammer->mLandedTimer > 0.0f;
+        if (isLanded)
+        {
+            hammer->Deactivate(true);
+            break;
+        }
+
+        crackData = 0;
+        g_CollisionEggDataPool.Allocate(crackData);
+        crackData->pPlayer = 0;
+        crackData->pFielder = mYoshiEgg->mFielder;
+        crackData->pEgg = mYoshiEgg;
+        crackData->m_pad0C = 0;
+        crackData->m_pad10 = 0;
+        QueueCollisionCrackEgg(crackData);
+        break;
+    }
+    case PHYSOBJ_NPC:
+    case PHYSOBJ_BULLET_BILL:
+    {
+        crackData = 0;
+        g_CollisionEggDataPool.Allocate(crackData);
+        crackData->pPlayer = 0;
+        crackData->pFielder = mYoshiEgg->mFielder;
+        crackData->pEgg = mYoshiEgg;
+        crackData->m_pad0C = 0;
+        crackData->m_pad10 = 0;
+        QueueCollisionCrackEgg(crackData);
+        break;
+    }
+    }
+
+    return NO_CONTACT;
+}
+
+bool PhysicsYoshiEgg::SetContactInfo(
+    dContact* contact, PhysicsObject*, bool first)
+{
+    if (first)
+    {
+        SetDefaultContactInfo(contact);
+    }
+    contact->surface.bounce = 0.01f;
+    contact->surface.bounce_vel = 0.0f;
+    contact->surface.mu = 5.0f;
+    return true;
+}
+
+void PhysicsYoshiEgg::PreCollide()
+{
+}
+
+int PhysicsYoshiEgg::GetObjectType() const
+{
+    return PHYSOBJ_YOSHI_EGG;
+}
+
+PhysicsYoshiEgg::~PhysicsYoshiEgg()
+{
+}

@@ -1,0 +1,7 @@
+# lab check 3: the game thread spins from frame 200; the watchdog sees no frame for 30 s and reloads
+MSC_MAX_FRAMES=600
+MSC_LAB_CRASH_AT=200
+MSC_LAB_CRASH_KIND=hang
+MSC_LAB_STALL_S=30
+# saves of the native game go to their own directory (all native builds default to it): the native NAND layout is the recompiled build's own, so ux0:data/mscharged would be the owner's save
+NP_DATA_DIR=ux0:data/mscharged/np-data

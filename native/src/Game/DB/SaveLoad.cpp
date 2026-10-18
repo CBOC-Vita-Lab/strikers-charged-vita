@@ -1,0 +1,1019 @@
+#include "NL/nlSingleton.inl"
+#include "Game/DB/SaveLoad.h"
+#include <revolution/tpl_fwd.h>
+#include <revolution/nand/NANDBanner.h>
+#include "Game/TweakRegistry.h"
+
+#include "Game/GameSceneManager.h"
+#include "Game/SH/SHMainMenu.h"
+#include "Game/FE/fePopupMenu.h"
+#include "Game/GameInfo.h"
+#include "Game/GameInfo.inl"
+#include "Game/Task/ResetTask.h"
+#include "Game/main.h"
+
+#include <math.h>
+
+#include "NL/MemAlloc.h"
+#include "NL/nlAlgorithm.h"
+#include "NL/nlFile.h"
+#include "NL/nlLocalizationLookup.h"
+#include "NL/nlMain.h"
+#include "NL/nlMath.h"
+#include "NL/nlMemory.h"
+#include "NL/nlPrint.h"
+#include "NL/nlString.h"
+#include "NL/plat/nlFlash.h"
+
+#include <string.h>
+#include <wchar.h>
+#include "Game/SharedStaticStorage.h"
+#include "Game/BaseGameSceneManager.h"
+#include "np/camzoom.h"  // W5-CAM
+#include "platform/sdk/save/np_save_game.h"  // NP: the save files stay in the Wii's format (np/platform/sdk/save)
+#include "NL/nlFunction.inl"
+
+static const char* SaveFileName = "Strikers2";
+static const char* OnlineSaveFileName = "Online";
+static const char* BannerFileName = "banner.bin";
+bool SaveEnabled = true;
+static bool RetryEnabled = true;
+
+static TPLPalette* IconTPLs[4];
+
+static u32 PendingIconLoads;
+static void* SaveBuffer;
+static NANDBanner* BannerBuffer;
+static TPLPalette* RegionBannerTPL;
+static bool IconDataLoaded;
+static u32 CheckAnswer;
+static u32 BannerFileLength;
+static bool BannerFileExists;
+enum eSaveLoadMode
+{
+    SAVELOAD_LOAD = 0,
+    SAVELOAD_SAVE = 1,
+};
+
+static u32 BannerOpenMode;
+static BaseGameSceneManager* SaveSceneManager;
+bool SaveError;
+static bool OnlineSaveLoaded;
+bool NormalSaveLoaded;
+bool InOperation;
+static bool OnlineMode;
+
+namespace SaveLoad
+{
+void CheckSaveSpace();
+void CancelSave();
+void ContinueWithoutSaving();
+void BeginReset();
+void DeleteSaveFile();
+void OpenSaveForWriteCallback(s32 result);
+void OpenSaveForReadCallback(s32 result);
+void CheckSaveFileCallback(s32 result);
+void CreateSaveFileCallback(s32 result);
+void WriteSaveFileCallback(s32 result);
+void ReadSaveFileCallback(s32 result);
+void DeleteSaveFileCallback(s32 result);
+void CloseCallback(s32 result);
+void ContinueAfterCloseCallback(s32 result);
+void StartSaveDirectoryCallback(s32 result);
+void StartLoadDirectoryCallback(s32 result);
+void CheckSaveAndBannerSpace();
+void ChangeDirectoryCallback(s32 result);
+void WriteSaveData();
+bool ReadSaveData(u32 size);
+void HandleNANDResult(s32 result);
+void OpenBannerCallback(s32 result);
+void BannerLengthCallback(s32 result);
+void BannerFileLengthCallback(s32 result);
+void DeleteInvalidBannerCallback(s32 result);
+void CheckBannerSpaceCallback(s32 result);
+void CreateBannerCallback(s32 result);
+void WriteBannerCallback(s32 result);
+void IconLoadedCallback(void* data, unsigned long size, void* userData);
+void IconLoadsComplete();
+void RegionBannerLoadedCallback(void* data, unsigned long size, void* userData);
+void BannerWriteFinishedCallback(s32 result);
+void FinishOperation(s32 result);
+void BannerCloseCallback(s32 result);
+void CheckSpaceAnswer(u32 answer, bool online);
+void CheckNoCopyDirectoryCallback(s32 result);
+void CreateNoCopyDirectoryCallback(s32 result);
+void OpenBannerDirectoryCallback(s32 result);
+} // namespace SaveLoad
+
+static inline u32 Align32(u32 size)
+{
+    return (size + 0x1F) & ~0x1F;
+}
+
+static inline u32 SaveFileSize()
+{
+    if (OnlineMode)
+    {
+        return GameInfoManager::GetInstance()->GetMemoryCardDataSize()
+            + sizeof(SaveFileHeader);
+    }
+    return GameInfoManager::GetInstance()->GetSettingsDataSize()
+        + sizeof(SaveFileHeader);
+}
+
+static inline FEPopupMenu* PushSavePopup()
+{
+    return (FEPopupMenu*)SaveSceneManager->Push(SCENE_POPUP_MENU, SCREEN_NOTHING, false);
+}
+
+// NP: libc's wcslen counts 4-byte wchar_t units; the game's strings are 16-bit. With it the title and the comment copied whatever
+// followed them in the string table (up to 7 KB over the banner's textures: banner.bin differed from the recompiled build's).
+static inline size_t NpUtf16Len(const unsigned short* s, size_t max)
+{
+    size_t n = 0;
+    while (n < max && s[n] != 0)
+    {
+        ++n;
+    }
+    return n;
+}
+
+static inline void WriteLocalizedBanner(NANDResultCallback callback)
+{
+    const unsigned short* title = LookupLocString("SAVE_BANNER_TITLE");
+    const unsigned short* comment = LookupLocString("SAVE_BANNER_COMMENT");
+
+    memset(BannerBuffer->title, 0, sizeof(BannerBuffer->title));
+    memset(BannerBuffer->subtitle, 0, sizeof(BannerBuffer->subtitle));
+    memcpy(BannerBuffer->title, title, NpUtf16Len(title, NAND_BANNER_TITLE_MAX - 1) * sizeof(unsigned short));
+    memcpy(BannerBuffer->subtitle, comment, NpUtf16Len(comment, NAND_BANNER_TITLE_MAX - 1) * sizeof(unsigned short));
+
+    ResetTask::s_resetPaused = true;
+    // NP: the file is the Wii's big-endian banner; write a converted copy (the game keeps filling its own buffer)
+    SaveLoad::HandleNANDResult(nlFlashWrite(NpSaveBannerShadow(BannerBuffer), NAND_BANNER_SIZE(8), callback));
+}
+
+void SaveLoad::CheckSaveSpace()
+{
+    if (!SaveEnabled)
+    {
+        return;
+    }
+
+    u32 files = 1;
+    u32 bannerBlocks = 0;
+    if (!BannerFileExists)
+    {
+        files = 2;
+        bannerBlocks = NAND_BANNER_SIZE(8);
+        bannerBlocks = (u32)(float)ceil((float)bannerBlocks / 16384.0f);
+    }
+
+    u32 saveBlocks;
+    if (OnlineMode)
+    {
+        saveBlocks = GameInfoManager::GetInstance()->GetMemoryCardDataSize() + sizeof(SaveFileHeader);
+    }
+    else
+    {
+        saveBlocks = GameInfoManager::GetInstance()->GetSettingsDataSize() + sizeof(SaveFileHeader);
+    }
+    saveBlocks = Align32(saveBlocks);
+    saveBlocks = (u32)(float)ceil((float)saveBlocks / 16384.0f);
+    HandleNANDResult(nlFlashCheck(saveBlocks + bannerBlocks, files, &CheckAnswer, CheckSaveFileCallback));
+
+    if (OnlineMode)
+    {
+        OnlineSaveLoaded = true;
+    }
+    else
+    {
+        NormalSaveLoaded = true;
+    }
+}
+
+void SaveLoad::CancelSave()
+{
+    ResetTask::s_resetPaused = false;
+    SaveEnabled = false;
+    InOperation = false;
+}
+
+void SaveLoad::ContinueWithoutSaving()
+{
+    BaseSceneHandler* scene = GameSceneManager::Instance()->GetScene(SCENE_MAIN_MENU);
+    if (scene != 0)
+    {
+        if (SHMainMenu* mainMenu = static_cast<SHMainMenu*>(scene))
+        {
+            mainMenu->mWaitingForLoad = false;
+        }
+    }
+    ResetTask::s_resetPaused = false;
+    OnlineSaveLoaded = false;
+    InOperation = false;
+}
+
+void SaveLoad::BeginReset()
+{
+    ResetTask::s_ResetMode = RM_RETURN_TO_MENU;
+    ResetTask::s_ResetState = ResetTask::s_ResetState == RS_RUNNING
+        ? RS_STARTRESET
+        : ResetTask::s_ResetState;
+}
+
+void SaveLoad::DeleteSaveFile()
+{
+    const char* filename = OnlineMode ? OnlineSaveFileName : SaveFileName;
+    s32 result = nlFlashDelete(filename, DeleteSaveFileCallback);
+    if (result != 0)
+    {
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::OpenSaveForWriteCallback(s32 result)
+{
+    if (result == -12)
+    {
+        if (RetryEnabled && !OnlineMode)
+        {
+            FEPopupMenu* popup = PushSavePopup();
+            popup->Create(
+                POPUP_NO_SAVE_FILE,
+                Function<FnVoidVoid>(CheckSaveSpace),
+                Function<FnVoidVoid>(CancelSave));
+            RetryEnabled = false;
+        }
+        else
+        {
+            CheckSaveSpace();
+        }
+    }
+    else if (result == 0)
+    {
+        WriteSaveData();
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::OpenSaveForReadCallback(s32 result)
+{
+    if (result == 0)
+    {
+        SaveBuffer = 0;
+        u32 size;
+        if (OnlineMode)
+        {
+            size = GameInfoManager::GetInstance()->GetMemoryCardDataSize() + sizeof(SaveFileHeader);
+        }
+        else
+        {
+            size = GameInfoManager::GetInstance()->GetSettingsDataSize() + sizeof(SaveFileHeader);
+        }
+        size = Align32(size);
+        SaveBuffer = nlMalloc(size, 0x20, true);
+        HandleNANDResult(nlFlashRead(&SaveBuffer, &size, ReadSaveFileCallback, true));
+        return;
+    }
+
+    if (result == -12)
+    {
+        if (!OnlineMode)
+        {
+            FEPopupMenu* popup = PushSavePopup();
+            popup->Create(
+                POPUP_SAVE_INFO,
+                Function<FnVoidVoid>(CheckSaveSpace),
+                Function<FnVoidVoid>(CancelSave));
+            RetryEnabled = false;
+        }
+        else if (OnlineMode && RetryEnabled)
+        {
+            FEPopupMenu* popup = PushSavePopup();
+            popup->Create(POPUP_ONLINE_NO_COPY, Function<FnVoidVoid>(CheckSaveSpace));
+            RetryEnabled = false;
+        }
+        else
+        {
+            CheckSaveSpace();
+        }
+        return;
+    }
+    HandleNANDResult(result);
+}
+
+void SaveLoad::CheckSaveFileCallback(s32 result)
+{
+    if (result == 0)
+    {
+        if (CheckAnswer == 0)
+        {
+            ResetTask::s_resetPaused = true;
+            const char* filename = OnlineMode ? OnlineSaveFileName : SaveFileName;
+            HandleNANDResult(nlFlashCreate(filename, 0x30, CreateSaveFileCallback));
+        }
+        else
+        {
+            CheckSpaceAnswer(CheckAnswer, OnlineMode);
+        }
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+    CheckAnswer = 0;
+}
+
+void SaveLoad::CreateSaveFileCallback(s32 result)
+{
+    if (result == -6 || result == 0)
+    {
+        const char* filename = OnlineMode ? OnlineSaveFileName : SaveFileName;
+        HandleNANDResult(nlFlashOpen(filename, 2, OpenSaveForWriteCallback));
+    }
+    else
+    {
+        ResetTask::s_resetPaused = false;
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::WriteSaveFileCallback(s32 result)
+{
+    nlFree(SaveBuffer);
+    SaveBuffer = 0;
+
+    u32 expectedSize = Align32(SaveFileSize());
+    if ((u32)result == expectedSize)
+    {
+        HandleNANDResult(nlFlashClose(ContinueAfterCloseCallback));
+    }
+    else
+    {
+        nlFlashClose(CloseCallback);
+        HandleNANDResult(result);
+    }
+    ResetTask::s_resetPaused = false;
+}
+
+void SaveLoad::ReadSaveFileCallback(s32 result)
+{
+    u32 expectedSize = Align32(SaveFileSize());
+    if ((u32)result == expectedSize)
+    {
+        bool valid = ReadSaveData(result);
+        s32 closeResult;
+        if (valid)
+        {
+            if (!OnlineMode)
+            {
+                GameInfoManager::GetInstance()->GetAudioSettings()->ApplySettings();
+            }
+            closeResult = nlFlashClose(ContinueAfterCloseCallback);
+        }
+        else
+        {
+            closeResult = nlFlashClose(CloseCallback);
+        }
+        if (OnlineMode)
+        {
+            OnlineSaveLoaded = true;
+        }
+        else
+        {
+            NormalSaveLoaded = true;
+        }
+        HandleNANDResult(closeResult);
+    }
+    else if (result >= 0)
+    {
+        nlFree(SaveBuffer);
+        SaveBuffer = 0;
+        nlPrintf("SAVE FILE IS CORRUPT: The size is incorrect.\n");
+        ResetTask::s_resetPaused = false;
+        FEPopupMenu* popup = PushSavePopup();
+        popup->Create(POPUP_SAVE_FILE_ERROR, Function<FnVoidVoid>(DeleteSaveFile));
+        HandleNANDResult(nlFlashClose(CloseCallback));
+    }
+    else
+    {
+        if (OnlineMode)
+        {
+            OnlineSaveLoaded = true;
+        }
+        else
+        {
+            NormalSaveLoaded = true;
+        }
+        nlFlashClose(CloseCallback);
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::DeleteSaveFileCallback(s32 result)
+{
+    if (result == 0)
+    {
+        if (!OnlineMode)
+        {
+            FEPopupMenu* popup = PushSavePopup();
+            popup->Create(POPUP_SAVE_INFO,
+                Function<FnVoidVoid>(CheckSaveSpace),
+                Function<FnVoidVoid>(CancelSave));
+        }
+        else
+        {
+            FEPopupMenu* popup = PushSavePopup();
+            popup->Create(POPUP_ONLINE_NO_COPY, Function<FnVoidVoid>(CheckSaveSpace));
+        }
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::CloseCallback(s32)
+{
+}
+
+void SaveLoad::ContinueAfterCloseCallback(s32)
+{
+    if (OnlineMode)
+    {
+        HandleNANDResult(nlFlashChangeDirectory(0, OpenBannerDirectoryCallback));
+    }
+    else
+    {
+        HandleNANDResult(nlFlashOpen(BannerFileName, 2, OpenBannerCallback));
+    }
+}
+
+void SaveLoad::StartSaveDirectoryCallback(s32 result)
+{
+    if (result == 0)
+    {
+        BannerOpenMode = SAVELOAD_SAVE;
+        InOperation = true;
+        HandleNANDResult(nlFlashOpen(BannerFileName, 1, BannerLengthCallback));
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::StartLoadDirectoryCallback(s32 result)
+{
+    if (result == 0)
+    {
+        BannerOpenMode = SAVELOAD_LOAD;
+        InOperation = true;
+        HandleNANDResult(nlFlashOpen(BannerFileName, 1, BannerLengthCallback));
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}
+
+static inline u32 NANDBlocksForBytes(u32 bytes)
+{
+    return (u32)(float)ceil((float)bytes / 16384.0f);
+}
+
+void SaveLoad::CheckSaveAndBannerSpace()
+{
+    u32 files = 2;
+    u32 bannerBlocks = 0;
+    if (!BannerFileExists)
+    {
+        files = 3;
+        u32 bannerBytes = NAND_BANNER_SIZE(8);
+        bannerBlocks = NANDBlocksForBytes(bannerBytes);
+    }
+    u32 saveBlocks = NANDBlocksForBytes(Align32(
+        GameInfoManager::GetInstance()->GetMemoryCardDataSize() + sizeof(SaveFileHeader)));
+    HandleNANDResult(nlFlashCheck(saveBlocks + bannerBlocks, files, &CheckAnswer, CheckNoCopyDirectoryCallback));
+}
+
+void SaveLoad::ChangeDirectoryCallback(s32 result)
+{
+    if (result == -12)
+    {
+        FEPopupMenu* popup = PushSavePopup();
+        popup->Create(POPUP_ONLINE_NO_COPY, Function<FnVoidVoid>(CheckSaveAndBannerSpace));
+        RetryEnabled = false;
+    }
+    else if (result == 0)
+    {
+        if (BannerOpenMode == SAVELOAD_LOAD)
+        {
+            nlFlashOpen(OnlineSaveFileName, 1, OpenSaveForReadCallback);
+        }
+        else
+        {
+            nlFlashOpen(OnlineSaveFileName, 2, OpenSaveForWriteCallback);
+        }
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::StartSave(bool online)
+{
+    if (GetTweakBool("/user/no_save", false))
+    {
+        SaveEnabled = false;
+        return;
+    }
+
+    OnlineMode = online;
+    SaveSceneManager = GameSceneManager::Instance() != 0 ? GameSceneManager::Instance() : g_pOverlayManager;
+    if (SaveEnabled && !nlFlashCallbackPending())
+    {
+        BannerFileExists = false;
+        HandleNANDResult(nlFlashChangeDirectory(0, StartSaveDirectoryCallback));
+    }
+}
+
+void SaveLoad::StartLoad(bool online)
+{
+    if (GetTweakBool("/user/no_save", false))
+    {
+        SaveEnabled = false;
+        return;
+    }
+
+    OnlineMode = online;
+    bool loaded = online ? OnlineSaveLoaded : NormalSaveLoaded;
+    SaveSceneManager = GameSceneManager::Instance() != 0 ? GameSceneManager::Instance() : g_pOverlayManager;
+    if (SaveEnabled && !loaded && !nlFlashCallbackPending())
+    {
+        BannerFileExists = false;
+        RetryEnabled = true;
+        HandleNANDResult(nlFlashChangeDirectory(0, StartLoadDirectoryCallback));
+    }
+}
+
+u32 SaveLoad::GetSaveBlockSize()
+{
+    u32 size;
+    if (OnlineMode)
+    {
+        size = GameInfoManager::GetInstance()->GetMemoryCardDataSize() + sizeof(SaveFileHeader);
+    }
+    else
+    {
+        size = GameInfoManager::GetInstance()->GetSettingsDataSize() + sizeof(SaveFileHeader);
+    }
+    size = Align32(size);
+    return Align32(size + NAND_BANNER_SIZE(8));
+}
+
+void SaveLoad::WriteSaveData()
+{
+    ResetTask::s_resetPaused = true;
+    u32 dataSize = SaveFileSize();
+    unsigned long alignedSize = Align32(dataSize);
+    SaveBuffer = nlMalloc(alignedSize, 0x20, true);
+    memset(SaveBuffer, 0, alignedSize);   // NP: the alignment tail is part of the checksummed file; the Wii left heap garbage there, a native run writes zeros (reproducible saves)
+
+    GameInfoManager::GetInstance()->GetUserInfo().mSaveID = nlRandom(0xFFFFFFFF, &nlDefaultSeed);
+    if (OnlineMode)
+    {
+        GameInfoManager::GetInstance()->GetMemoryCardData((u8*)SaveBuffer + sizeof(SaveFileHeader));
+    }
+    else
+    {
+#ifdef NP_NATIVE
+        {   // W5-CAM: the first save this build writes makes the camera level the player's own (np/camzoom.h)
+            const VisualSettings& visual = GameInfoManager::GetInstance()->mUserInfo.mVisualOptions;
+            NpCameraZoomSettingsWritten(visual.mIsAutoZoomCamera, visual.mCameraZoomLevel);
+        }
+#endif
+        GameInfoManager::GetInstance()->SerializeSettings((u8*)SaveBuffer + sizeof(SaveFileHeader));
+    }
+
+    // NP: the payload (memory images of the game's structures) and the header words go to the file in the Wii's format
+    NpSavePayloadToWii((u8*)SaveBuffer + sizeof(SaveFileHeader), OnlineMode, dataSize - sizeof(SaveFileHeader));
+    SaveFileHeader* header = (SaveFileHeader*)SaveBuffer;
+    header->Size = NpSaveBe32(dataSize);
+    header->CRC = NpSaveBe32(nlChecksum32((u8*)SaveBuffer + sizeof(SaveFileHeader), alignedSize - sizeof(SaveFileHeader)));
+    HandleNANDResult(nlFlashWrite(SaveBuffer, alignedSize, WriteSaveFileCallback));
+}
+
+bool SaveLoad::ReadSaveData(u32 size)
+{
+    SaveFileHeader* header = (SaveFileHeader*)SaveBuffer;
+    u32 checksum = nlChecksum32((u8*)SaveBuffer + sizeof(SaveFileHeader), size - sizeof(SaveFileHeader));
+    if (NpSaveBe32(header->CRC) != checksum)   // NP: the header is big-endian
+    {
+        nlPrintf("SAVE FILE IS CORRUPT: The checksum is incorrect.\n");
+        nlFree(SaveBuffer);
+        SaveBuffer = 0;
+        ResetTask::s_resetPaused = false;
+        FEPopupMenu* popup = PushSavePopup();
+        popup->Create(POPUP_SAVE_FILE_ERROR, Function<FnVoidVoid>(DeleteSaveFile));
+        return false;
+    }
+
+    void* allocation = SaveBuffer;
+    void* data = (u8*)SaveBuffer + sizeof(SaveFileHeader);
+    SaveBuffer = data;
+    NpSavePayloadFromWii(data, OnlineMode, SaveFileSize() - sizeof(SaveFileHeader));   // NP: file format -> host structures
+    if (OnlineMode)
+    {
+        GameInfoManager::GetInstance()->SetMemoryCardData(data);
+    }
+    else
+    {
+        GameInfoManager::GetInstance()->DeserializeSettings(data);
+#ifdef NP_NATIVE
+        {   // W5-CAM: a save that still holds the TV default camera gets the Vita's default level once (np/camzoom.h)
+            VisualSettings& visual = GameInfoManager::GetInstance()->mUserInfo.mVisualOptions;
+            NpCameraZoomSettingsLoaded(&visual.mIsAutoZoomCamera, &visual.mCameraZoomLevel);
+        }
+#endif
+    }
+    nlFree(allocation);
+    SaveBuffer = 0;
+    return true;
+}
+
+void SaveLoad::HandleNANDResult(s32 result)
+{
+    if (result == 0)
+    {
+        return;
+    }
+
+    if (result == -5 || result == -15)
+    {
+        ResetTask::s_resetPaused = false;
+        FEPopupMenu* popup = PushSavePopup();
+        popup->Create(POPUP_SAVE_FILE_ERROR, DeleteSaveFile);
+        InOperation = true;
+    }
+    else if (result == -4)
+    {
+        FEPopupMenu* popup = PushSavePopup();
+        popup->Create(POPUP_NAND_CORRUPT, Function<FnVoidVoid>(CancelSave));
+        InOperation = true;
+        SaveError = true;
+        ResetTask::s_resetPaused = false;
+    }
+    else
+    {
+        FEPopupMenu* popup = PushSavePopup();
+        popup->Create(POPUP_NAND_ERROR, Function<FnVoidVoid>(CancelSave));
+        InOperation = true;
+        SaveError = true;
+        ResetTask::s_resetPaused = false;
+    }
+}
+
+void SaveLoad::OpenBannerCallback(s32 result)
+{
+    if (BannerFileExists && (result == 0 || result == -6))
+    {
+        WriteLocalizedBanner(BannerWriteFinishedCallback);
+    }
+    else
+    {
+        u32 blocks = NAND_BANNER_SIZE(8);
+        blocks = (u32)(float)ceil((float)blocks / 16384.0f);
+        HandleNANDResult(nlFlashCheck(blocks, 1, &CheckAnswer, CheckBannerSpaceCallback));
+    }
+}
+
+void SaveLoad::BannerLengthCallback(s32 result)
+{
+    if (result == 0 || result == -6)
+    {
+        BannerFileLength = 0;
+        HandleNANDResult(nlFlashGetLength(&BannerFileLength, BannerFileLengthCallback));
+    }
+    else
+    {
+        BannerFileExists = false;
+        if (OnlineMode)
+        {
+            result = nlFlashChangeDirectory(1, ChangeDirectoryCallback);
+        }
+        else if (BannerOpenMode == SAVELOAD_LOAD)
+        {
+            result = nlFlashOpen(SaveFileName, 1, OpenSaveForReadCallback);
+        }
+        else
+        {
+            result = nlFlashOpen(SaveFileName, 2, OpenSaveForWriteCallback);
+        }
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::BannerFileLengthCallback(s32 result)
+{
+    if (result == 0)
+    {
+        s32 closeResult;
+        if (BannerFileLength == NAND_BANNER_SIZE(8))
+        {
+            closeResult = nlFlashClose(BannerCloseCallback);
+            BannerFileExists = true;
+        }
+        else
+        {
+            BannerFileExists = false;
+            closeResult = nlFlashClose(DeleteInvalidBannerCallback);
+        }
+        HandleNANDResult(closeResult);
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::DeleteInvalidBannerCallback(s32 result)
+{
+    if (result == 0)
+    {
+        result = nlFlashDelete(BannerFileName, BannerCloseCallback);
+    }
+    HandleNANDResult(result);
+}
+
+void SaveLoad::CheckBannerSpaceCallback(s32 result)
+{
+    if (result == 0)
+    {
+        if (CheckAnswer == 0)
+        {
+            ResetTask::s_resetPaused = true;
+            HandleNANDResult(nlFlashCreate(BannerFileName, 0x30, CreateBannerCallback));
+        }
+        else
+        {
+            CheckSpaceAnswer(CheckAnswer, OnlineMode);
+        }
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+    CheckAnswer = 0;
+}
+
+void SaveLoad::CreateBannerCallback(s32 result)
+{
+    if (result == -6 || result == 0)
+    {
+        HandleNANDResult(nlFlashOpen(BannerFileName, 2, WriteBannerCallback));
+    }
+    else
+    {
+        ResetTask::s_resetPaused = false;
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::WriteBannerCallback(s32 result)
+{
+    if (result != 0)
+    {
+        HandleNANDResult(result);
+        return;
+    }
+    WriteLocalizedBanner(BannerWriteFinishedCallback);
+}
+
+void LoadMemoryCardIconData()
+{
+    if (IconDataLoaded)
+    {
+        return;
+    }
+
+    BannerBuffer->magic = 0x5749424E;
+    BannerBuffer->flags = 0;
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 0, 2);
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 1, 2);
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 2, 2);
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 3, 1);
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 4, 1);
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 5, 1);
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 6, 1);
+    NAND_BANNER_SET_ICON_SPEED(BannerBuffer, 7, 1);
+
+    memset(BannerBuffer->title, 0, sizeof(BannerBuffer->title) + sizeof(BannerBuffer->subtitle));
+    memset(BannerBuffer->bannerTexture, 0, sizeof(BannerBuffer->bannerTexture));
+    memset(BannerBuffer->iconTexture, 0, sizeof(BannerBuffer->iconTexture));
+
+    const unsigned short* title = LookupLocString("SAVE_BANNER_TITLE");
+    const unsigned short* comment = LookupLocString("SAVE_BANNER_COMMENT");
+    memcpy(BannerBuffer->title, title, NpUtf16Len(title, NAND_BANNER_TITLE_MAX - 1) * sizeof(unsigned short));
+    memcpy(BannerBuffer->subtitle, comment, NpUtf16Len(comment, NAND_BANNER_TITLE_MAX - 1) * sizeof(unsigned short));
+
+    nlLoadEntireFileAsync("/art/fe/icon.tpl", SaveLoad::IconLoadedCallback, &IconTPLs[3], 0x20, AllocateStart, 0, 0, &VirtualAllocator);
+    nlLoadEntireFileAsync("/art/fe/icon_2.tpl", SaveLoad::IconLoadedCallback, &IconTPLs[2], 0x20, AllocateStart, 0, 0, &VirtualAllocator);
+    nlLoadEntireFileAsync("/art/fe/icon_3.tpl", SaveLoad::IconLoadedCallback, &IconTPLs[1], 0x20, AllocateStart, 0, 0, &VirtualAllocator);
+    nlLoadEntireFileAsync("/art/fe/icon_4.tpl", SaveLoad::IconLoadedCallback, &IconTPLs[0], 0x20, AllocateStart, 0, 0, &VirtualAllocator);
+    PendingIconLoads = 4;
+}
+
+void SaveLoad::IconLoadedCallback(void* data, unsigned long, void* userData)
+{
+    *(TPLPalette**)userData = (TPLPalette*)data;
+    --PendingIconLoads;
+    if (PendingIconLoads == 0)
+    {
+        PendingIconLoads = 0;
+        IconLoadsComplete();
+    }
+}
+
+void SaveLoad::IconLoadsComplete()
+{
+    for (s32 i = 0; i < 4; ++i)
+    {
+        TPLBind(IconTPLs[i]);
+    }
+
+    const char* region;
+    switch (GetRegion())
+    {
+    case GAME_REGION_EU:
+        region = "EU";
+        break;
+    case GAME_REGION_JAPAN:
+        region = "JP";
+        break;
+    default:
+        region = "US";
+        break;
+    }
+
+    char path[0x20];
+    nlSNPrintf(path, sizeof(path), "art/fe/%s_banner.tpl", region);
+    nlLoadEntireFileAsync(path, RegionBannerLoadedCallback, &RegionBannerTPL, 0x20, AllocateStart, 0, 0, &VirtualAllocator);
+}
+
+void SaveLoad::RegionBannerLoadedCallback(void* data, unsigned long, void* userData)
+{
+    *(TPLPalette**)userData = (TPLPalette*)data;
+    TPLBind(RegionBannerTPL);
+
+    memcpy(BannerBuffer->iconTexture[0], IconTPLs[0]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->iconTexture[1], IconTPLs[0]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->iconTexture[2], IconTPLs[0]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->iconTexture[3], IconTPLs[1]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->iconTexture[4], IconTPLs[2]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->iconTexture[5], IconTPLs[3]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->iconTexture[6], IconTPLs[2]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->iconTexture[7], IconTPLs[1]->descriptorArray[0].textureHeader->data, NAND_BANNER_ICON_SIZE);
+    memcpy(BannerBuffer->bannerTexture, RegionBannerTPL->descriptorArray[0].textureHeader->data, NAND_BANNER_TEXTURE_SIZE);
+    IconDataLoaded = true;
+
+    for (s32 i = 0; i < 4; ++i)
+    {
+        ::operator delete[](IconTPLs[i]);
+        IconTPLs[i] = 0;
+    }
+    ::operator delete[](RegionBannerTPL);
+    RegionBannerTPL = 0;
+}
+
+void SaveLoad::BannerWriteFinishedCallback(s32)
+{
+    ResetTask::s_resetPaused = false;
+    HandleNANDResult(nlFlashClose(FinishOperation));
+}
+
+void SaveLoad::FinishOperation(s32)
+{
+    InOperation = false;
+}
+
+void SaveLoad::BannerCloseCallback(s32 result)
+{
+    if (result == 0)
+    {
+        if (OnlineMode)
+        {
+            result = nlFlashChangeDirectory(1, ChangeDirectoryCallback);
+        }
+        else if (BannerOpenMode == SAVELOAD_LOAD)
+        {
+            result = nlFlashOpen(SaveFileName, 1, OpenSaveForReadCallback);
+        }
+        else
+        {
+            result = nlFlashOpen(SaveFileName, 2, OpenSaveForWriteCallback);
+        }
+    }
+    HandleNANDResult(result);
+}
+
+void SaveLoad::AllocateBannerBuffer()
+{
+    BannerBuffer = (NANDBanner*)nlMalloc(NAND_BANNER_SIZE(8), 0x20, false);
+}
+
+void SaveLoad::FreeBannerBuffer()
+{
+    ::operator delete(BannerBuffer);
+    BannerBuffer = 0;
+}
+
+void SaveLoad::CheckSpaceAnswer(u32 answer, bool online)
+{
+    ResetTask::s_resetPaused = false;
+    if ((answer & 1) != 0 || (answer & 4) != 0)
+    {
+        FEPopupMenu* popup = PushSavePopup();
+        if (online)
+        {
+            popup->Create(POPUP_NO_SAVE_SPACE_ONLINE,
+                Function<FnVoidVoid>(ContinueWithoutSaving),
+                Function<FnVoidVoid>(BeginReset));
+        }
+        else
+        {
+            popup->Create(POPUP_NO_SAVE_SPACE,
+                Function<FnVoidVoid>(CancelSave),
+                Function<FnVoidVoid>(BeginReset));
+        }
+    }
+    else if ((answer & 2) != 0 || (answer & 8) != 0)
+    {
+        FEPopupMenu* popup = PushSavePopup();
+        if (online)
+        {
+            popup->Create(POPUP_NO_SAVE_INODES_ONLINE,
+                Function<FnVoidVoid>(ContinueWithoutSaving),
+                Function<FnVoidVoid>(BeginReset));
+        }
+        else
+        {
+            popup->Create(POPUP_NO_SAVE_INODES,
+                Function<FnVoidVoid>(CancelSave),
+                Function<FnVoidVoid>(BeginReset));
+        }
+    }
+    else
+    {
+        HandleNANDResult(-64);
+    }
+}
+
+void SaveLoad::CheckNoCopyDirectoryCallback(s32 result)
+{
+    if (result == 0)
+    {
+        if (CheckAnswer == 0)
+        {
+            HandleNANDResult(nlFlashCreateDirectory("nocopy", 0x30, CreateNoCopyDirectoryCallback));
+        }
+        else
+        {
+            CheckSpaceAnswer(CheckAnswer, OnlineMode);
+        }
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+    CheckAnswer = 0;
+}
+
+void SaveLoad::CreateNoCopyDirectoryCallback(s32 result)
+{
+    if (result == 0)
+    {
+        HandleNANDResult(nlFlashChangeDirectory(1, ChangeDirectoryCallback));
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}
+
+void SaveLoad::OpenBannerDirectoryCallback(s32 result)
+{
+    if (result == 0)
+    {
+        HandleNANDResult(nlFlashOpen(BannerFileName, 2, OpenBannerCallback));
+    }
+    else
+    {
+        HandleNANDResult(result);
+    }
+}

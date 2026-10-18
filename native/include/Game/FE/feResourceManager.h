@@ -1,0 +1,115 @@
+#ifndef GAME_FE_RESOURCE_MANAGER_H
+#define GAME_FE_RESOURCE_MANAGER_H
+
+#include "NL/nlBundleFile.h"
+#include "NL/nlSingleton.h"
+#include "NL/nlTask.h"
+#include "types.h"
+
+class FEScene;
+class FEFontResource;
+class FESceneResource;
+class FETextureResource;
+class MemoryAllocator;
+class GLResourcePool;
+
+enum eFEResourceType
+{
+    FERT_UNKNOWN = -1,
+    FERT_TEXTURE = 0,
+    FERT_FONT = 1,
+    FERT_SCENE = 2,
+    FERT_RESOURCE_TYPE_COUNT = 3,
+};
+
+class FEResourceHandle
+{
+public:
+    bool IsValid() const
+    {
+        return m_bValid;
+    }
+
+    eFEResourceType GetResourceType() const
+    {
+        return m_type;
+    }
+
+    unsigned long GetHashID() const
+    {
+        return m_hashID;
+    }
+
+    /* 0x00 */ FEResourceHandle* m_next;
+    /* 0x04 */ FEResourceHandle* m_prev;
+    /* 0x08 */ eFEResourceType m_type;
+    /* 0x0C */ unsigned long m_hashID;
+    /* 0x10 */ bool m_bValid;
+    /* 0x11 */ u8 pad_0x11[3];
+    /* 0x14 */ u32 m_uFileBlock;
+}; // size 0x18
+
+enum ResourceResult
+{
+    FERR_WaitingForResource = 0,
+    FERR_AlreadyLoaded = 1,
+};
+
+struct FEMiniBundle
+{
+    /* 0x00 */ FESceneResource* m_pSceneResource;
+    /* 0x04 */ char m_szBundleFileName[32];
+}; // size 0x24
+
+struct PendingResourceLoad;
+struct PermanentBundleLoadState;
+
+class FEResourceManager : public nlTask, public nlSingleton<FEResourceManager>
+{
+public:
+    FEResourceManager();
+
+    virtual const char* GetName();
+
+    void Run(float dt);
+
+    void Cleanup();
+    void LoadPermanentResourceBundle(const char* szBundleFileName);
+    void LoadPermanentResourceBundle(const char* szBundleFileName, void (*callback)());
+    void LoadPermanentTextures();
+    bool OpenOnDemandResourceBundle(const char* szBundleFileName, FileOpenAsyncCallback callback);
+    void QueueResourceLoad(FEResourceHandle* pHandle, MemoryAllocator* pAllocator);
+    void UnloadResource(FEResourceHandle* pFeResourceHandle);
+    void UnloadPermanentResourceBundle();
+    void Update(float dt);
+    void SetResourcePool(GLResourcePool* resourcePool);
+    GLResourcePool* GetResourcePool();
+    FEMiniBundle* LoadMiniBundle(const char* szBundleFileName);
+    bool UnloadMiniBundle(FEMiniBundle* miniBundle);
+
+    static void TextureResourceLoadComplete(void* buffer, unsigned long uReadSize, unsigned long uParam);
+
+private:
+    ResourceResult IssueResourceLoadRequest(PendingResourceLoad pendingResource);
+    ResourceResult IssueTextureLoadRequest(FETextureResource* pFeTextureResource, MemoryAllocator* pAllocator);
+    ResourceResult IssueSceneContextSwitch(FESceneResource* pFeSceneResource);
+    ResourceResult IssueFontLoadRequest(FEFontResource* pFeFontResource);
+    FEResourceHandle* FindExistingResourceInResourceList(FEResourceHandle* pFEResourceHandle);
+    void RemoveResourceFromResourceList(FEResourceHandle* pFEResourceHandle);
+    void AddResourceToResourceList(FEResourceHandle* pFEResourceHandle);
+    static void PermanentBundleOpenComplete(void* buffer, unsigned long uReadSize, unsigned long uParam);
+    static int LoadNextPermanentTexture(PermanentBundleLoadState* state);
+    static void PermanentTextureLoadComplete(void* buffer, unsigned long uReadSize, unsigned long uParam);
+
+public:
+    /* 0x1D */ char m_szPermanentBundleFileName[32];
+    /* 0x3D */ char m_szOnDemandBundleFileName[32];
+    /* 0x5D */ bool m_bPermanentBundleLoadInProgress;
+}; // size 0x60
+
+inline const char* FEResourceManager::GetName()
+{
+    return "FEResource Manager";
+}
+
+#endif // GAME_FE_RESOURCE_MANAGER_H

@@ -1,0 +1,6 @@
+# lab check 2: a real null-pointer read on the game thread at frame 200: crash handler, report in log.txt, reload by the watchdog thread
+MSC_MAX_FRAMES=600
+MSC_LAB_CRASH_AT=200
+MSC_LAB_CRASH_KIND=null
+# saves of the native game go to their own directory (all native builds default to it): the native NAND layout is the recompiled build's own, so ux0:data/mscharged would be the owner's save
+NP_DATA_DIR=ux0:data/mscharged/np-data

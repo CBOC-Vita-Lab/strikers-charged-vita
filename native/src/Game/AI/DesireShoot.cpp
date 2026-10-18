@@ -1,0 +1,256 @@
+#include "Game/AI/DesireShoot.h"
+
+#include "Game/AI/AIContext.h"
+#include "Game/AI/AiUtil.h"
+#include "Game/AI/AvoidableObject.h"
+#include "Game/AI/DesireUpdate.inl"
+#include "Game/AI/Fielder.h"
+#include "Game/AI/ShotMeter.h"
+#include "Game/AI/SkillTweaks.h"
+#include "Game/Ball.h"
+#include "Game/CharacterTweaks.h"
+#include "Game/DebugWriteCache.h"
+#include "Game/Goalie.h"
+#include "Game/Net.h"
+#include "Game/Player.h"
+#include "Game/Team.h"
+#include "NL/nlString.h"
+#include <math.h>
+#include <stddef.h>
+
+#include "Game/SharedStaticStorage.h"
+
+static float sWindupShotTimeLimitMargin = 0.5f;
+static unsigned short sDesireWindupShotType = 0xFFFF;
+static unsigned short sDesireShootType = 0xFFFF;
+static bool sWindupSkillshotRollPending = true;
+int gWindupShotMegaStrikeState = 32;
+int gWindupShotShootState = 15;
+int gWindupShotDekeState = 3;
+static float sWindupSkillshotTimeLimit = 2.0f;
+
+/**
+ * Offset/Address/Size: 0x0 | 0x800C4198 | size: 0x7C
+ */
+bool DesireWindupShot::Initialize(void*)
+{
+    bool result = true;
+    if (m_pFielder->m_pBall != NULL)
+    {
+        m_pFielder->fn_8004B658();
+        mMaxDuration = sWindupShotTimeLimitMargin
+                         + m_pFielder->m_pShotMeter->GetTotalDuration();
+        mbShotMeterActivated = true;
+        sWindupSkillshotRollPending = true;
+    }
+    else
+    {
+        result = false;
+    }
+    return result;
+}
+
+/**
+ * Offset/Address/Size: 0x7C | 0x800C4214 | size: 0xBAC
+ */
+void DesireWindupShot::Update(DesireUpdate* update, float fDeltaT)
+{
+    if (m_pFielder->m_pBall == NULL)
+    {
+        *update = 1;
+        return;
+    }
+
+    bool bMeterTransition = false;
+    unsigned char bSwitchToShootDesire = 0;
+    ShotMeter* pShotMeter = m_pFielder->m_pShotMeter;
+    if (pShotMeter->m_eShotMeterState == SHOT_METER_RELEASED
+        || pShotMeter->m_eShotMeterState == SHOT_METER_STS_RELEASED)
+    {
+        bSwitchToShootDesire = 1;
+    }
+    else if (pShotMeter->m_eShotMeterState == SHOT_METER_STS_TRANSITION)
+    {
+        bMeterTransition = true;
+        bSwitchToShootDesire = 1;
+    }
+
+    if (bSwitchToShootDesire)
+    {
+        if (bMeterTransition)
+        {
+            *update = 3;
+            update->SetParameter(8, FuzzyVariant(FT_INT, gWindupShotMegaStrikeState));
+        }
+        else
+        {
+            *update = 3;
+            update->SetParameter(8, FuzzyVariant(FT_INT, gWindupShotShootState));
+        }
+        return;
+    }
+
+    if (sWindupSkillshotRollPending)
+    {
+        switch (m_pFielder->m_DetChar.m_eCharacterClass)
+        {
+        case DAISY:
+        case WALUIGI:
+        case DRYBONES:
+        {
+            float fSign = AIsgn(m_pFielder->m_pTeam->GetOtherNet()->m_v3NetLocation.x);
+            Goalie* pGoalie = m_pFielder->m_pTeam->GetOtherTeam()->GetGoalie();
+            float fGoalieX = fSign * pGoalie->m_DetChar.m_v3Position.x;
+            if (fSign * m_pFielder->m_DetChar.m_v3Position.x < fGoalieX
+                || (float)__fabs(m_pFielder->m_DetChar.m_v3Position.y) > 0.6f * cNet::GetNetWidth())
+            {
+                float fRange = m_pFielder->GetDekeDistance();
+                float fDistance = nlSqrt(nlVec3DistanceSquared2D(
+                    m_pFielder->m_DetChar.m_v3Position,
+                    m_pFielder->m_pTeam->GetOtherTeam()->GetGoalie()->m_DetChar.m_v3Position), true);
+                pGoalie = m_pFielder->m_pTeam->GetOtherTeam()->GetGoalie();
+                AvoidableObject* pAvoidable = m_pFielder->m_pAvoidableObject;
+                if (0.25f + (fDistance + (pAvoidable->GetRadius()
+                        + pGoalie->m_pAvoidableObject->GetRadius())) < fRange)
+                {
+                    float fSkillshotChance = fn_800A636C(g_pCurrentlyUpdatingTeam)->GetSkillValue(
+                        nlStringLowerHash("Windup/Skillshot"), m_pFielder);
+                    if (nlRandomf(1.0f) < fSkillshotChance)
+                    {
+                        *update = 3;
+                        update->SetParameter(8, FuzzyVariant(FT_INT, gWindupShotDekeState));
+                    }
+                    else
+                    {
+                        sWindupSkillshotRollPending = false;
+                    }
+                }
+            }
+            break;
+        }
+        }
+    }
+}
+
+/**
+ * Offset/Address/Size: 0xC28 | 0x800C4DC0 | size: 0x4
+ */
+void DesireWindupShot::Cleanup()
+{
+}
+
+/**
+ * Offset/Address/Size: 0xC2C | 0x800C4DC4 | size: 0x244
+ */
+bool DesireShoot::Initialize(void* context)
+{
+    bool result = Desire::Initialize(context);
+    FuzzyVariantCollection* params = (FuzzyVariantCollection*)context;
+    mbLobShot = params->Get(16)->mData.b;
+
+    if (m_pFielder->GetPreviousDesireState() != 20
+        && m_pFielder->GetPreviousDesireState() != 19)
+    {
+        m_pFielder->DoResetShotMeter(0.0f);
+    }
+
+    if (m_pFielder->ShouldIClearBall())
+    {
+        float fRange = GetShootingWindupTime(m_pFielder->GetTweaks()) - 0.2f;
+        m_pFielder->m_pShotMeter->m_fTime = 0.1f + (float)nlRandom((unsigned int)fRange);
+    }
+
+    if (m_pFielder->m_pBall != NULL)
+    {
+        m_pFielder->InitActionShot(mbLobShot, false);
+    }
+    else if (m_pFielder->CanContactLooseBall(false))
+    {
+        m_pFielder->InitActionLooseBallShot(mbLobShot);
+        result = m_pFielder->m_eActionState
+              == ACTION_LOOSE_BALL_SHOT;
+    }
+
+    if (m_pFielder->m_pShotMeter->m_eShotMeterState
+        == SHOT_METER_STS_RELEASED)
+    {
+        FuzzyVariantCollection transitionParams;
+        transitionParams.Set(
+            7, FuzzyVariant(FT_FLOAT, sWindupSkillshotTimeLimit));
+        transitionParams.Set(14, FuzzyVariant(g_pBall));
+        transitionParams.Set(10,
+            FuzzyVariant(FT_U32,
+                nlStringHash("TransDesireWindupSkillshot")));
+        QueueScriptMachineState(GetStateMachineAIContext(this)->mScriptMachine,
+            13,
+            &transitionParams);
+    }
+
+    return result;
+}
+
+/**
+ * Offset/Address/Size: 0xE70 | 0x800C5008 | size: 0x4
+ */
+void DesireShoot::Update(
+    DesireUpdate*, float)
+{
+}
+
+/**
+ * Offset/Address/Size: 0xFFC | 0x800C5194 | size: 0xEC
+ */
+inline void DesireWindupShot::RegisterDebugFields(
+    void* field, DebugWriteCache* cache)
+{
+    *(unsigned short*)field = cache->BeginType("DesireWindupShot");
+    Desire::RegisterDebugFields(field, cache);
+    cache->AddField(16, gDebugFieldTypes[16].size, (u8*)&mbShotMeterActivated - (u8*)&mvDesiredPosition, "mbShotMeterActivated");
+    cache->EndType();
+}
+
+/**
+ * Offset/Address/Size: 0x10E8 | 0x800C5280 | size: 0x9C
+ */
+inline void DesireWindupShot::SyncLog(
+    void* context, DebugWriteCache* cache)
+{
+    if (sDesireWindupShotType == 0xFFFF)
+    {
+        RegisterDebugFields(&sDesireWindupShotType, cache);
+    }
+
+    unsigned int offset = (u8*)&mvDesiredPosition - (u8*)this;
+    void* data = (u8*)this + offset;
+    cache->ChecksumData(sDesireWindupShotType, data, context);
+    cache->WriteData(sDesireWindupShotType, data, sizeof(DesireWindupShot) - offset);
+}
+
+/**
+ * Offset/Address/Size: 0xE74 | 0x800C500C | size: 0xEC
+ */
+inline void DesireShoot::RegisterDebugFields(
+    void* field, DebugWriteCache* cache)
+{
+    *(unsigned short*)field = cache->BeginType("DesireShoot");
+    Desire::RegisterDebugFields(field, cache);
+    cache->AddField(16, gDebugFieldTypes[16].size, (u8*)&mbLobShot - (u8*)&mvDesiredPosition, "mbLobShot");
+    cache->EndType();
+}
+
+/**
+ * Offset/Address/Size: 0xF60 | 0x800C50F8 | size: 0x9C
+ */
+inline void DesireShoot::SyncLog(
+    void* context, DebugWriteCache* cache)
+{
+    if (sDesireShootType == 0xFFFF)
+    {
+        RegisterDebugFields(&sDesireShootType, cache);
+    }
+
+    unsigned int offset = (u8*)&mvDesiredPosition - (u8*)this;
+    void* data = (u8*)this + offset;
+    cache->ChecksumData(sDesireShootType, data, context);
+    cache->WriteData(sDesireShootType, data, sizeof(DesireShoot) - offset);
+}

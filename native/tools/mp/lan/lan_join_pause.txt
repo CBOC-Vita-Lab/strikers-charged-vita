@@ -1,0 +1,47 @@
+# LAN joiner: boot to the main menu, Multiplayer, Join Game, wait for the host to start.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 24 2400
+log STATE lobby
+idle 400
+press 4
+idle 30
+press 100
+log joining
+wait peers >= 2 7200
+log STATE joined
+wait scene != 24 7200
+log STATE launched
+# Draft, captains, sidekicks, stadium: accept whatever is highlighted until the match is loaded.
+mash 100 45 ingame == 1 12000
+log STATE in match
+wait gs == 5 6000
+log STATE open play
+# The host presses Start; nothing may pause here either.
+idle 1500
+if paused == 1
+log FAIL the pause menu opened in a network match
+endif
+log STATE no pause (remote)
+idle 300
+exit

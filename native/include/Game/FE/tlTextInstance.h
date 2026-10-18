@@ -1,0 +1,55 @@
+#ifndef _TLTEXTINSTANCE_H_
+#define _TLTEXTINSTANCE_H_
+
+#include "Game/FE/tlInstance.h"
+#include "NL/gl/gl.h"
+#include "NL/nlFont.h"
+#include "NL/nlTextBox.h"
+
+#include "Game/FE/feTextAttributes.h"
+
+class TLTextInstance : public TLInstance
+{
+public:
+    TLTextInstance(FELibObject* component)
+        : TLInstance(component)
+    {
+        m_LocStrId = 0;
+        m_pFontString = 0;
+        m_DrawOptions = 0;
+        m_wcUserString = 0;
+        m_UseScissorRect = false;
+        m_type = TLAT_TEXT;
+    }
+
+    void SetMatrix(nlMatrix4* pMatrix)
+    {
+        m_DrawInfo.pMatrix = pMatrix;
+    }
+
+    void SetStringId(const char* id);
+    const unsigned short* GetString() const;
+    void Render(GLView* view, const nlColour& colour) const;
+    void SetString(const unsigned short* utf16);
+    void SetScissorBox(u16 left, u16 top, u16 width, u16 height);
+
+    const nlVector2& fn_801CA5E8() const { return m_OverloadedAttributes.BoxSize; }
+    void fn_801CA5F0(const nlVector2& size)
+    {
+        m_OverloadedAttributes.BoxSize = size;
+        m_OverloadFlags |= 4;
+    }
+
+    /* 0x090 */ unsigned long m_LocStrId;
+    /* 0x094 */ FETextLibObjectAttributes m_OverloadedAttributes;
+    /* 0x0A0 */ unsigned long m_OverloadFlags;
+    /* 0x0A4 */ mutable nlTextBox::StringDrawInfo m_DrawInfo;
+    /* 0x0FC */ FontCharString* m_pFontString;
+    /* 0x100 */ unsigned long m_DrawOptions;
+    /* 0x104 */ const unsigned short* m_wcUserString;
+    /* 0x108 */ bool m_UseScissorRect;
+    /* 0x109 */ u8 pad_109;
+    /* 0x10A */ nlFont::ScissorBox m_ScissorRect;
+};
+
+#endif // _TLTEXTINSTANCE_H_

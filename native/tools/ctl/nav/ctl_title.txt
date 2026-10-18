@@ -1,0 +1,6 @@
+# W5 CTL: the title screen (the "PRESS (A) TO START" prompt) for pictures: skip the intro, stay on the title
+vmash cross 20 scene == 0
+log STATE title screen
+idle 90
+log STATE script end
+exit

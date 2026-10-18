@@ -1,0 +1,8 @@
+# W5 CTL part 2: the Vita build in Vita3K through the title and the menus; every redrawn picture and rewritten text in the log
+MSC_INPUT_SCRIPT=ctl_v3k_menus.txt
+MSC_MAX_FRAMES=6000
+MSC_WATCH=1
+MSC_WATCH_BUTTONS=1
+MSC_WATCH_EVERY=300
+MSC_CTL_TRACE=2
+NP_DATA_DIR=ux0:data/mscharged/np-data

@@ -1,0 +1,503 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/World/WorldVisibility.h"
+#include "NL/gl/gl.h"
+#include "Game/World.h"
+#include "Game/World/WorldEffect.h"
+
+#include "Game/Drawable/DrawableObj.h"
+#include "Game/Effects/EmissionManager.h"
+#include "Game/GL/GLInventory.h"
+#include "Game/SAnim.h"
+#include "NL/gl/glMemory.h"
+#include "NL/gl/glTexture.h"
+#include "NL/gl/glView.h"
+#include "NL/nlPrint.h"
+#include "Game/SharedStaticStorage.h"
+#include "Game/Render/CrowdImpostorManager.h"
+#include "Game/Render/WorldNPC.h"
+#include "Game/World/WorldAnimObjects.h"
+#include "NL/nlMemory.h"
+
+class WorldUpdateObject
+{
+public:
+    virtual ~WorldUpdateObject();
+    virtual void ReleaseResources();
+    virtual void GetWorldMatrix();
+    virtual void SetWorldMatrix();
+    virtual void OnWorldLoaded();
+    virtual void Update(float fDeltaT);
+};
+
+u8* WorldObjectLoadContext::GetParentData()
+{
+    if (m_pParent == 0)
+    {
+        return 0;
+    }
+
+    return m_pParent + 0x20;
+}
+
+World::World(GLResourcePool* pResource)
+    : m_pResource(pResource)
+    , m_pOwnedData(0)
+    , m_pOpaqueView(0)
+    , m_pAlphaView(0)
+{
+    m_pVisibilityTree = 0;
+    m_bRenderingEnabled = true;
+}
+
+World::~World()
+{
+    typedef nlAVLTreeIterator<unsigned long, DrawableObject*,
+        DefaultKeyCompare<unsigned long> > DrawableIterator;
+
+    m_renderObjects.Clear();
+    m_physicsObjects.Clear();
+    m_updateObjects.Clear();
+
+    DrawableIterator* pIterator = m_drawableMap.GetIterator();
+    while (pIterator->IsValid())
+    {
+        pIterator->Current()->value->ReleaseResources();
+        if ((pIterator->Current()->value->m_uObjectCreationFlags & 1) == 0)
+        {
+            delete pIterator->Current()->value;
+        }
+        pIterator->Next();
+    }
+    if (pIterator != 0)
+    {
+        delete pIterator;
+    }
+
+    mWorldAnimManager.fn_80342324();
+    OnBeforeUnload();
+    mWorldAnimManager.Clear();
+    if (m_pOwnedData != 0)
+    {
+        delete m_pOwnedData;
+    }
+}
+
+void World::AddDrawableObject(DrawableObject* pDrawableObject)
+{
+    m_drawableMap.Add(pDrawableObject->GetHashID(), pDrawableObject);
+
+    if (pDrawableObject->m_uObjectCreationFlags & 2)
+    {
+        m_renderObjects.AddEnd(
+            (WorldDrawable*)pDrawableObject);
+    }
+
+    if (pDrawableObject->m_uObjectCreationFlags & 4)
+    {
+        m_physicsObjects.AddEnd(
+            (WorldPhysicsDrawable*)pDrawableObject);
+        if (pDrawableObject->m_uObjectCreationFlags & 8)
+        {
+            m_updateObjects.AddEnd(
+                (WorldUpdateObject*)pDrawableObject);
+        }
+    }
+}
+
+void World::RemoveDrawableObject(DrawableObject* pObject)
+{
+    m_drawableMap.Remove(pObject->GetHashID());
+    unsigned long uFlags = pObject->m_uObjectCreationFlags;
+
+    if (uFlags & 2)
+    {
+        nlDLListIterator<WorldDrawable*> iterator;
+        iterator = m_renderObjects.Begin();
+        while (iterator.hasNext())
+        {
+            if (*iterator == (WorldDrawable*)pObject)
+            {
+                m_renderObjects.Remove(&iterator);
+                return;
+            }
+            iterator.next();
+        }
+    }
+
+    if (uFlags & 4)
+    {
+        nlDLListIterator<WorldPhysicsDrawable*> iterator;
+        iterator = m_physicsObjects.Begin();
+        while (iterator.hasNext())
+        {
+            if (*iterator == (WorldPhysicsDrawable*)pObject)
+            {
+                m_physicsObjects.Remove(&iterator);
+                break;
+            }
+            iterator.next();
+        }
+
+        if (pObject->m_uObjectCreationFlags & 4)
+        {
+            nlDLListIterator<WorldUpdateObject*> updateIterator;
+            updateIterator = m_updateObjects.Begin();
+            while (updateIterator.hasNext())
+            {
+                if (*updateIterator
+                    == (WorldUpdateObject*)pObject)
+                {
+                    m_updateObjects.Remove(&updateIterator);
+                    return;
+                }
+                updateIterator.next();
+            }
+        }
+    }
+}
+
+bool World::LoadData(void* pData0, unsigned long uSize0, void* pData1,
+    unsigned long uSize1, bool bKeepData)
+{
+    m_pAnimationSet = 0;
+    if (pData0 != 0)
+    {
+        LoadChunks((nlChunk*)pData0, uSize0);
+    }
+    LoadChunks((nlChunk*)pData1, uSize1);
+    if (bKeepData)
+    {
+        m_pOwnedData = (u8*)pData1;
+    }
+    else
+    {
+        m_pOwnedData = 0;
+    }
+    return true;
+}
+
+bool World::LoadChunks(nlChunk* pChunk, unsigned long uSize)
+{
+    nlChunk* pCurrent = pChunk->GetFirstChunk();
+    nlChunk* pEnd = pChunk->GetLastChunk();
+
+    while (pCurrent != pEnd)
+    {
+        switch (pCurrent->GetID())
+        {
+        case 0x00026000:
+            LoadObjects(pCurrent->GetData(), pCurrent->GetDataSize(), false);
+            break;
+        case 0x80018000:
+            m_pAnimationSet
+                = mWorldAnimManager.LoadHierarchy(pCurrent);
+            break;
+        case 0x80017000:
+            mWorldAnimManager.LoadAnimationSet(
+                m_pAnimationSet, pCurrent);
+            break;
+        case 0x80026100:
+            m_pVisibilityTree = LoadWorldVisibilityTree(pCurrent);
+            break;
+        case 0x00024100:
+            glEndLoadTextureBundle(pCurrent->GetData(),
+                pCurrent->GetDataSize(),
+                m_pResource, false);
+            break;
+        case 0x8001B000:
+        case 0x8001B100:
+            glEndLoadModel(pCurrent, 0, 0, m_pResource);
+            break;
+        default:
+            HandleUnknownChunk(pCurrent);
+            break;
+        }
+        pCurrent = pCurrent->GetNextChunk();
+    }
+    return true;
+}
+
+bool World::LoadObjects(
+    void* pData, unsigned long uSize, bool bKeepData)
+{
+    unsigned long i = 0;
+
+    if (bKeepData)
+    {
+        m_pOwnedData = (u8*)pData;
+    }
+    else
+    {
+        m_pOwnedData = 0;
+    }
+
+    WorldObjectLoadContext context;
+    context.m_pObject = (u8*)pData + 0x10;
+    context.m_pWorld = this;
+    context.m_uNumObjectsLoaded = 0;
+    context.m_pParent = 0;
+
+    for (; i < *(unsigned long*)pData; ++i)
+    {
+        unsigned long uType = *(unsigned long*)(context.m_pObject + 8);
+        if (uType == 0x10)
+        {
+            u8* pParent = context.m_pObject;
+            context.m_pObject += *(unsigned long*)(context.m_pObject + 0xC);
+            context.m_pParent = pParent;
+            continue;
+        }
+
+        DrawableObject* pObject;
+        if (uType < 0x10000)
+        {
+            pObject = CreateObject(uType, &context);
+        }
+        else
+        {
+            pObject = HandleObjectCreation(uType, &context);
+        }
+
+        pObject->m_pWorldContext = this;
+        if (pObject != 0)
+        {
+            AddDrawableObject(pObject);
+        }
+        context.m_pParent = 0;
+    }
+
+    mWorldAnimManager.BindObjects();
+    return true;
+}
+
+void World::HandleUnknownChunk(nlChunk* pChunk)
+{
+    nlPrintf("Unknown Chunk = 0x%08x\n", pChunk->GetID());
+}
+
+DrawableObject* World::CreateObject(
+    unsigned long uType, WorldObjectLoadContext* pContext)
+{
+    DrawableObject* pObject = 0;
+
+    switch (uType)
+    {
+    case 0xFFFFFFFF:
+        break;
+    case WORLD_OBJECT_DRAWABLE:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) WorldDrawable;
+        ((WorldDrawable*)pObject)->Initialize(pContext);
+        pContext->m_pObject += 0x70;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    case WORLD_OBJECT_VISIBILITY:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) WorldVisibilityDrawable;
+        InitializeWorldVisibilityDrawable(
+            (WorldVisibilityDrawable*)pObject, pContext);
+        pContext->m_pObject += 0x30;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    case WORLD_OBJECT_PHYSICS:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) WorldPhysicsDrawable;
+        InitializeWorldPhysicsDrawable((WorldPhysicsDrawable*)pObject, pContext);
+        pContext->m_pObject += 0x90;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    case WORLD_OBJECT_HELPER:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) WorldHelperObject;
+        ((WorldHelperObject*)pObject)->Initialize(pContext);
+        pContext->m_pObject += 0x60;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    case WORLD_OBJECT_ANIMATION:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) WorldAnimObject;
+        ((WorldAnimObject*)pObject)->Initialize(pContext);
+        pContext->m_pObject += 0x90;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    case WORLD_OBJECT_CROWD_LAYOUT:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) CrowdLayoutObject;
+        ((CrowdLayoutObject*)pObject)->RegisterWithCrowdManager(pContext);
+        pContext->m_pObject += 0x80;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    case WORLD_OBJECT_NPC:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) WorldNPC;
+        ((WorldNPC*)pObject)->Initialize(pContext);
+        pContext->m_pObject += 0x70;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    case WORLD_OBJECT_EFFECT:
+        pObject = (DrawableObject*)pContext->m_pObject;
+        new (pObject) WorldEffect;
+        ((WorldEffect*)pObject)->Initialize(pContext);
+        pContext->m_pObject += 0xA0;
+        ++pContext->m_uNumObjectsLoaded;
+        break;
+    default:
+        break;
+    }
+
+    return pObject;
+}
+
+bool World::ResolveModel(glModel*& pModel) const
+{
+    unsigned long uHashID = (unsigned long)pModel;
+    pModel = m_pResource->m_inventory->GetModel(uHashID);
+    if (pModel == 0)
+    {
+        nlPrintf(
+            "Warning: Failed to find GL model to match world object 0x%08x\n",
+            uHashID);
+        return false;
+    }
+    return true;
+}
+
+void World::InitializeObjects()
+{
+    typedef nlAVLTreeIterator<unsigned long, DrawableObject*,
+        DefaultKeyCompare<unsigned long> > DrawableIterator;
+
+    DrawableIterator* pIterator = m_drawableMap.GetIterator();
+    while (pIterator->IsValid())
+    {
+        pIterator->Current()->value->OnWorldLoaded(this);
+        pIterator->Next();
+    }
+    if (pIterator != 0)
+    {
+        delete pIterator;
+    }
+}
+
+void World::Render()
+{
+    if (m_pVisibilityTree != 0)
+    {
+        UpdateWorldVisibility(m_pVisibilityTree,
+            m_pOpaqueView->m_Interface->GetShadowMatrix(), 0);
+    }
+
+    if (m_bRenderingEnabled)
+    {
+        nlDLListIterator<WorldDrawable*> iterator;
+        iterator = m_renderObjects.Begin();
+        while (iterator.hasNext())
+        {
+            if (((DrawableObject*)*iterator)
+                    ->IsVisibleInFrustum(m_pOpaqueView->m_Interface->GetShadowMatrix()))
+            {
+                ((DrawableObject*)*iterator)->Draw();
+            }
+            iterator.next();
+        }
+    }
+}
+
+void World::UpdateAnimations(float fDeltaT)
+{
+    mWorldAnimManager.Update(fDeltaT);
+}
+
+void World::Update(float fDeltaT, bool bUpdateState)
+{
+    if (bUpdateState)
+    {
+        UpdateAnimations(fDeltaT);
+    }
+
+    if (EmissionManager::Instance() != 0)
+    {
+        nlListIterator<WorldEffect*> iterator
+            = m_worldEffects.Begin();
+        while (iterator.IsValid())
+        {
+            iterator.Current()->Update(fDeltaT);
+            iterator.Next();
+        }
+    }
+
+    nlDLListIterator<WorldUpdateObject*> iterator;
+    iterator = m_updateObjects.Begin();
+    while (iterator.hasNext())
+    {
+        (*iterator)->Update(fDeltaT);
+        iterator.next();
+    }
+}
+
+DrawableObject* World::FindDrawableObject(unsigned long uHashID)
+{
+    DrawableObject** foundValue;
+    if (!m_drawableMap.FindGet(uHashID, &foundValue))
+    {
+        return 0;
+    }
+    return *foundValue;
+}
+
+void World::AddEffect(WorldEffect* pEffect)
+{
+    m_worldEffects.AddStart(pEffect);
+}
+
+void World::UpdateEffects(float fDeltaT)
+{
+    if (EmissionManager::Instance() != 0)
+    {
+        nlListIterator<WorldEffect*> iterator
+            = m_worldEffects.Begin();
+        while (iterator.IsValid())
+        {
+            iterator.Current()->Update(fDeltaT);
+            iterator.Next();
+        }
+    }
+}
+
+void World::ResetEffects()
+{
+    nlListIterator<WorldEffect*> iterator
+        = m_worldEffects.Begin();
+    while (iterator.IsValid())
+    {
+        WorldEffect* pEffect = iterator.Current();
+        pEffect->m_fEmissionTime = 0.0f;
+        pEffect->m_nRemainingEmissions = pEffect->m_nEmissionCount;
+        pEffect->m_fPreviousEmissionTime = 0.0f;
+        if (pEffect->m_nTimingMode == WORLD_EFFECT_ELAPSED_TIME)
+        {
+            float fEmissionTime = pEffect->m_fEmissionInterval;
+            fEmissionTime = 1.0f + fEmissionTime;
+            pEffect->m_fEmissionTime = fEmissionTime;
+        }
+        iterator.Next();
+    }
+}
+
+void World::TriggerEffects(unsigned long uType)
+{
+    nlListIterator<WorldEffect*> iterator
+        = m_worldEffects.Begin();
+    while (iterator.IsValid())
+    {
+        WorldEffect* pEffect = iterator.Current();
+        if (uType == pEffect->m_nTimingMode)
+        {
+            pEffect->m_nRemainingEmissions = pEffect->m_nEmissionCount;
+            float fEmissionTime = pEffect->m_fEmissionInterval;
+            fEmissionTime = 1.0f + fEmissionTime;
+            pEffect->m_fEmissionTime = fEmissionTime;
+        }
+        iterator.Next();
+    }
+}

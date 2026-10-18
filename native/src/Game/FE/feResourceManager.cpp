@@ -1,0 +1,562 @@
+#include "NL/nlDLListContainer.inl"
+#include "Game/FE/feResourceManager.h"
+
+#include <stddef.h>
+
+#include "Game/FE/feFontResource.h"
+#include "Game/FE/feScene.h"
+#include "Game/FE/feSceneResource.h"
+#include "Game/FE/feTextureResource.h"
+#include "Game/Font/fontmanager.h"
+#include "NL/gl/gl.h"
+#include "NL/gl/glMemory.h"
+#include "NL/MemAlloc.h"
+#include "NL/nlAVLTree.h"
+#include "NL/nlDLListContainer.h"
+#include "NL/nlDebug.h"
+#include "NL/nlMemory.h"
+#include "NL/nlString.h"
+#include "NL/gl/glTexture.h"
+#include "NL/nlstring_tmpl.h"
+#include "NL/nlPrint.h"
+
+struct PendingResourceLoad
+{
+    PendingResourceLoad(FEResourceHandle* handle, MemoryAllocator* allocator)
+        : pHandle(handle)
+        , pAllocator(allocator)
+    {
+    }
+
+    FEResourceHandle* pHandle;
+    MemoryAllocator* pAllocator;
+};
+
+struct PermanentBundleLoadState
+{
+    /* 0x00 */ bool bComplete;
+    /* 0x04 */ BundleFile* pBundle;
+    /* 0x08 */ unsigned long uFileHashID;
+    /* 0x0C */ unsigned long uFileIndex;
+    /* 0x10 */ void (*callback)();
+    /* 0x14 */ unsigned long field_0x14;
+};
+
+static nlAVLTreeSlotPool<unsigned long, FEResourceHandle*, DefaultKeyCompare<unsigned long> > s_loadedResourceList(0x200, 0);
+static unsigned char* s_pResourceLoadBuffer;
+static nlDLListSlotPool<PendingResourceLoad> pendingResourceQueue(0x100, 0);
+static FEResourceHandle* s_pCurrentResourceBeingLoaded;
+static GLResourcePool* s_pResourcePool;
+FESceneResource* s_pCurrentFESceneResourceContext;
+static BundleFile* s_pPermanentBundle;
+static BundleFile* s_pOnDemandBundle;
+static FESceneResource* s_pPermanentBundleSceneResource;
+static PermanentBundleLoadState s_permanentBundleLoadState;
+
+template <>
+FEResourceManager* nlSingleton<FEResourceManager>::s_pInstance = 0;
+
+static inline void PushAllocator(MemoryAllocator* pAllocator)
+{
+    CurrentAllocator = pAllocator;
+    AllocatorStack[AllocatorStackDepth++] = pAllocator;
+}
+
+static inline void PopAllocator()
+{
+    --AllocatorStackDepth;
+    AllocatorStack[AllocatorStackDepth] = 0;
+    CurrentAllocator = AllocatorStack[AllocatorStackDepth - 1];
+}
+
+void FEResourceManager::AddResourceToResourceList(FEResourceHandle* pFEResourceHandle)
+{
+    s_loadedResourceList.Add(pFEResourceHandle->GetHashID(), pFEResourceHandle);
+}
+
+void FEResourceManager::RemoveResourceFromResourceList(FEResourceHandle* pFEResourceHandle)
+{
+    FEResourceHandle** pLoadedResourceHandle;
+    if (!s_loadedResourceList.FindGet(pFEResourceHandle->GetHashID(), &pLoadedResourceHandle))
+    {
+        return;
+    }
+    if (*pLoadedResourceHandle != pFEResourceHandle)
+    {
+        return;
+    }
+    s_loadedResourceList.Remove(pFEResourceHandle->GetHashID());
+}
+
+FEResourceHandle* FEResourceManager::FindExistingResourceInResourceList(FEResourceHandle* pFEResourceHandle)
+{
+    FEResourceHandle** pPreExistingResourceHandle;
+    if (!s_loadedResourceList.FindGet(pFEResourceHandle->GetHashID(), &pPreExistingResourceHandle))
+    {
+        return 0;
+    }
+    return *pPreExistingResourceHandle;
+}
+
+void FEResourceManager::PermanentBundleOpenComplete(void*, unsigned long, unsigned long uParam)
+{
+    LoadNextPermanentTexture((PermanentBundleLoadState*)uParam);
+}
+
+int FEResourceManager::LoadNextPermanentTexture(PermanentBundleLoadState* state)
+{
+    BundleFileDirectoryEntry fileDirectoryEntry;
+    FEResourceHandle** pPreExistingResourceHandle;
+
+    while (state->uFileIndex < state->pBundle->nNumFiles)
+    {
+        if (!state->pBundle->GetFileInfoByIndex(state->uFileIndex, &fileDirectoryEntry))
+        {
+            nlPrintf("FEResourceManager Error: Failed to get file information in permanent bundle (async)\n");
+            return false;
+        }
+
+        if (s_loadedResourceList.FindGet(fileDirectoryEntry.m_hash, &pPreExistingResourceHandle))
+        {
+            nlPrintf("FEResourceManager: Skipping over existing resource.\n");
+            ++state->uFileIndex;
+            continue;
+        }
+
+        state->uFileHashID = fileDirectoryEntry.m_hash;
+        unsigned char* buffer = (unsigned char*)nlMalloc(fileDirectoryEntry.m_length, 0x20, true);
+        unsigned long fileIndex = state->uFileIndex++;
+        state->pBundle->ReadFileAsyncByIndex(fileIndex, buffer, fileDirectoryEntry.m_length, PermanentTextureLoadComplete, (unsigned long)state);
+        return true;
+    }
+
+    state->pBundle->Close();
+    delete state->pBundle;
+    state->bComplete = true;
+    state->pBundle = 0;
+    FEResourceManager::Instance()->m_bPermanentBundleLoadInProgress = false;
+    if (state->callback != 0)
+    {
+        state->callback();
+    }
+    return false;
+}
+
+void FEResourceManager::PermanentTextureLoadComplete(void* buffer, unsigned long uReadSize, unsigned long uParam)
+{
+    PermanentBundleLoadState* state = (PermanentBundleLoadState*)uParam;
+    FETextureResource* pTextureResource = new (8, false) FETextureResource();
+    pTextureResource->m_hashID = state->uFileHashID;
+    s_pResourceLoadBuffer = (unsigned char*)buffer;
+    TextureResourceLoadComplete(NULL, uReadSize, (unsigned long)pTextureResource);
+    LoadNextPermanentTexture(state);
+}
+
+FEResourceManager::FEResourceManager()
+    : m_bPermanentBundleLoadInProgress(false)
+{
+    s_pResourcePool = glGetCurrentResourcePool();
+}
+
+void FEResourceManager::Cleanup()
+{
+    if (s_pOnDemandBundle != 0)
+    {
+        s_pOnDemandBundle->Close();
+        delete s_pOnDemandBundle;
+        s_pOnDemandBundle = 0;
+    }
+
+    if (s_loadedResourceList.CountNodes((AVLTreeNode*)s_loadedResourceList.m_Root, 0) != 0)
+    {
+        nlPrintf("FEResourceManager: Warning! Manager being destroyed while resources are still loaded!\n");
+        nlPrintf("                   Did all the scenes get popped before destroying the FEResourceManager?\n");
+
+        typedef nlAVLTreeIterator<unsigned long, FEResourceHandle*, DefaultKeyCompare<unsigned long> > ResourceIterator;
+        ResourceIterator* iterator = s_loadedResourceList.GetIterator();
+        while (iterator->IsValid())
+        {
+            FEResourceHandle* pFeResourceHandle = iterator->Current()->value;
+            nlPrintf(
+                "                   Outstanding resource 0x%08x ( type = 0x%08x ) for load\n",
+                pFeResourceHandle->m_hashID,
+                pFeResourceHandle->m_type);
+            iterator->Next();
+        }
+        if (iterator != 0)
+        {
+            delete iterator;
+        }
+    }
+
+    s_loadedResourceList.Clear();
+}
+
+void FEResourceManager::LoadPermanentResourceBundle(const char* szBundleFileName)
+{
+    nlStrNCpy(m_szPermanentBundleFileName, szBundleFileName, 0x20);
+
+    s_pPermanentBundleSceneResource = new (8, false) FESceneResource();
+    s_pPermanentBundleSceneResource->m_pFESceneContext = 0;
+    s_pPermanentBundleSceneResource->m_hashID = nlStringLowerHash("PermanentContext");
+    s_pPermanentBundleSceneResource->m_next = 0;
+    s_pPermanentBundleSceneResource->m_prev = 0;
+    s_pPermanentBundleSceneResource->m_type = FERT_SCENE;
+    IssueSceneContextSwitch(s_pPermanentBundleSceneResource);
+    LoadPermanentTextures();
+}
+
+void FEResourceManager::LoadPermanentResourceBundle(const char* szBundleFileName, void (*callback)())
+{
+    nlStrNCpy(m_szPermanentBundleFileName, szBundleFileName, 0x20);
+
+    s_pPermanentBundleSceneResource = new (8, false) FESceneResource();
+    s_pPermanentBundleSceneResource->m_pFESceneContext = 0;
+    s_pPermanentBundleSceneResource->m_hashID = nlStringLowerHash("PermanentContext");
+    s_pPermanentBundleSceneResource->m_next = 0;
+    s_pPermanentBundleSceneResource->m_prev = 0;
+    s_pPermanentBundleSceneResource->m_type = FERT_SCENE;
+    IssueSceneContextSwitch(s_pPermanentBundleSceneResource);
+
+    s_pPermanentBundle = new (0x20, true) BundleFile();
+    s_permanentBundleLoadState.pBundle = 0;
+    s_permanentBundleLoadState.uFileHashID = -1;
+    s_permanentBundleLoadState.uFileIndex = 0;
+    s_permanentBundleLoadState.bComplete = false;
+    s_permanentBundleLoadState.callback = callback;
+    s_permanentBundleLoadState.pBundle = s_pPermanentBundle;
+    s_pPermanentBundle->OpenAsync(szBundleFileName, PermanentBundleOpenComplete, (unsigned long)&s_permanentBundleLoadState, false);
+}
+
+void FEResourceManager::LoadPermanentTextures()
+{
+    s_pPermanentBundle = new (8, false) BundleFile();
+    s_pPermanentBundle->Open(m_szPermanentBundleFileName, false);
+
+    unsigned long uFileLength;
+    unsigned long uFileHashID;
+    BundleFileDirectoryEntry fileDirectoryEntry;
+    unsigned long i;
+    FEResourceHandle** pPreExistingResourceHandle;
+    unsigned long fileCount = s_pPermanentBundle->GetNumFiles();
+
+    for (i = 0; i < fileCount; ++i)
+    {
+        if (!s_pPermanentBundle->GetFileInfoByIndex(i, &fileDirectoryEntry))
+        {
+            nlPrintf("FEResourceManager Error: Failed to get file information in permanent bundle!\n");
+        }
+        else
+        {
+            uFileLength = fileDirectoryEntry.m_length;
+            uFileHashID = fileDirectoryEntry.m_hash;
+            if (s_loadedResourceList.FindGet(uFileHashID, &pPreExistingResourceHandle))
+            {
+                nlPrintf("FEResourceManager: Skipping over existing resource.\n");
+            }
+            else
+            {
+                FETextureResource* pTextureResource = new (8, false) FETextureResource();
+                pTextureResource->m_hashID = uFileHashID;
+
+                s_pResourceLoadBuffer = (unsigned char*)nlMalloc(uFileLength, 0x20, true);
+                s_pPermanentBundle->ReadFileByIndex(i, s_pResourceLoadBuffer, uFileLength);
+                TextureResourceLoadComplete(NULL, uFileLength, (unsigned long)pTextureResource);
+                delete[] s_pResourceLoadBuffer;
+                s_pResourceLoadBuffer = 0;
+                pTextureResource->m_bValid = true;
+            }
+        }
+    }
+
+    s_pPermanentBundle->Close();
+    delete s_pPermanentBundle;
+    s_pPermanentBundle = 0;
+}
+
+bool FEResourceManager::OpenOnDemandResourceBundle(const char* szBundleFileName, FileOpenAsyncCallback callback)
+{
+    nlStrNCpy(m_szOnDemandBundleFileName, szBundleFileName, 0x20);
+    s_pOnDemandBundle = new (0x20, false) BundleFile();
+    if (!s_pOnDemandBundle->OpenAsync(szBundleFileName, callback, 0, false))
+    {
+        return false;
+    }
+    return true;
+}
+
+void FEResourceManager::SetResourcePool(GLResourcePool* resourcePool)
+{
+    s_pResourcePool = resourcePool;
+}
+
+static inline void InsertSorted(
+    nlDLListSlotPool<PendingResourceLoad>& list,
+    PendingResourceLoad pendingResource)
+{
+    nlDLListIterator<PendingResourceLoad> insertAfter;
+    insertAfter = list.End();
+    if (pendingResource.pHandle->m_uFileBlock > (*insertAfter).pHandle->m_uFileBlock)
+    {
+        list.AddEnd(pendingResource);
+        return;
+    }
+
+    while ((*insertAfter).pHandle->m_type != FERT_SCENE
+           && pendingResource.pHandle->m_uFileBlock < (*insertAfter).pHandle->m_uFileBlock)
+    {
+        insertAfter.Retreat();
+    }
+
+    list.AddAfter(insertAfter, pendingResource);
+}
+
+void FEResourceManager::QueueResourceLoad(FEResourceHandle* pHandle, MemoryAllocator* pAllocator)
+{
+    if (pAllocator == 0)
+    {
+        pAllocator = CurrentAllocator;
+    }
+
+    PendingResourceLoad pendingResource(pHandle, pAllocator);
+    if (s_pOnDemandBundle != 0 && pHandle->m_type != FERT_SCENE && pendingResourceQueue.m_Head != 0)
+    {
+        BundleFileDirectoryEntry fileDirectoryEntry;
+        if (s_pOnDemandBundle->GetFileInfo(pHandle->m_hashID, &fileDirectoryEntry, false))
+        {
+            pHandle->m_uFileBlock = fileDirectoryEntry.m_blockNumber;
+            InsertSorted(pendingResourceQueue, pendingResource);
+            return;
+        }
+        else
+        {
+            pHandle->m_uFileBlock = -1;
+            pendingResourceQueue.AddEnd(pendingResource);
+            return;
+        }
+    }
+    pendingResourceQueue.AddEnd(pendingResource);
+}
+
+void FEResourceManager::UnloadResource(FEResourceHandle* pFeResourceHandle)
+{
+    switch (pFeResourceHandle->m_type)
+    {
+    case FERT_TEXTURE:
+        RemoveResourceFromResourceList(pFeResourceHandle);
+        break;
+    case FERT_SCENE:
+        s_pResourcePool->ReleaseResource(((FESceneResource*)pFeResourceHandle)->m_glResourceMarker);
+        break;
+    default:
+        break;
+    }
+}
+
+void FEResourceManager::UnloadPermanentResourceBundle()
+{
+    s_pPermanentBundle = new (8, false) BundleFile();
+    s_pPermanentBundle->Open(m_szPermanentBundleFileName, false);
+
+    unsigned long fileCount = s_pPermanentBundle->nNumFiles;
+    FEResourceHandle** pLoadedResourceHandle;
+    BundleFileDirectoryEntry fileDirectoryEntry;
+
+    UnloadResource(s_pPermanentBundleSceneResource);
+    for (unsigned long fileIndex = 0; fileIndex < fileCount; ++fileIndex)
+    {
+        s_pPermanentBundle->GetFileInfoByIndex(fileIndex, &fileDirectoryEntry);
+        if (s_loadedResourceList.FindGet(fileDirectoryEntry.m_hash, &pLoadedResourceHandle))
+        {
+            unsigned long hashtodelete = (*pLoadedResourceHandle)->GetHashID();
+            delete *pLoadedResourceHandle;
+            s_loadedResourceList.Remove(hashtodelete);
+        }
+    }
+
+    s_pPermanentBundle->Close();
+    delete s_pPermanentBundle;
+    s_pPermanentBundle = 0;
+    delete s_pPermanentBundleSceneResource;
+    s_pPermanentBundleSceneResource = 0;
+}
+
+ResourceResult FEResourceManager::IssueFontLoadRequest(FEFontResource* pFeFontResource)
+{
+    FEResourceHandle* pFeResourceHandle = (FEResourceHandle*)pFeFontResource;
+    nlFont* pExistingFont = FontManager::Instance()->GetFontByHashID(pFeResourceHandle->m_hashID);
+    pFeFontResource->SetFontReference(pExistingFont);
+    pFeResourceHandle->m_bValid = true;
+    return FERR_AlreadyLoaded;
+}
+
+void FEResourceManager::TextureResourceLoadComplete(void*, unsigned long uReadSize, unsigned long uParam)
+{
+    FETextureResource* pHandle = (FETextureResource*)uParam;
+    GLResourcePool* resourcePool = s_pResourcePool;
+    glBeginResource(pHandle->m_hashID);
+    glTextureAdd(pHandle->m_hashID, s_pResourceLoadBuffer, uReadSize, resourcePool);
+    glEndResource();
+    delete[] s_pResourceLoadBuffer;
+    s_pResourceLoadBuffer = 0;
+    unsigned long textureHandle = pHandle->m_hashID;
+    pHandle->SetTextureHandle(textureHandle);
+    FEResourceManager::Instance()->AddResourceToResourceList(pHandle);
+    pHandle->m_bValid = true;
+}
+
+ResourceResult FEResourceManager::IssueTextureLoadRequest(FETextureResource* pFeTextureResource, MemoryAllocator* pAllocator)
+{
+    FETextureResource* pFeExistingTextureResource = (FETextureResource*)FindExistingResourceInResourceList(pFeTextureResource);
+    if (pFeExistingTextureResource != 0
+        && pFeExistingTextureResource->GetResourceType() == pFeTextureResource->GetResourceType())
+    {
+        unsigned long textureHandle = pFeExistingTextureResource->GetTextureHandle();
+        pFeTextureResource->SetTextureHandle(textureHandle);
+        pFeTextureResource->m_bValid = pFeExistingTextureResource->m_bValid;
+        return FERR_AlreadyLoaded;
+    }
+
+    BundleFileDirectoryEntry fileDirectoryEntry;
+    if (s_pOnDemandBundle->GetFileInfo(pFeTextureResource->m_hashID, &fileDirectoryEntry, true))
+    {
+        if (pAllocator != 0)
+        {
+            PushAllocator(pAllocator);
+        }
+        unsigned char* pResourceLoadBuffer = (unsigned char*)nlMalloc(fileDirectoryEntry.m_length, 0x20, true);
+        s_pResourceLoadBuffer = pResourceLoadBuffer;
+        s_pOnDemandBundle->ReadFileAsync(
+            pFeTextureResource->m_hashID,
+            pResourceLoadBuffer,
+            fileDirectoryEntry.m_length,
+            FEResourceManager::TextureResourceLoadComplete,
+            (unsigned long)pFeTextureResource);
+        if (pAllocator != 0)
+        {
+            PopAllocator();
+        }
+    }
+    return FERR_WaitingForResource;
+}
+
+ResourceResult FEResourceManager::IssueSceneContextSwitch(FESceneResource* pFeSceneResource)
+{
+    if (s_pCurrentFESceneResourceContext != 0
+        && s_pCurrentFESceneResourceContext != pFeSceneResource
+        && s_pPermanentBundleSceneResource != s_pCurrentFESceneResourceContext)
+    {
+        s_pCurrentFESceneResourceContext->m_pFESceneContext->mState = FE_SCENE_READY;
+        s_pCurrentFESceneResourceContext->m_pFESceneContext->AllResourcesLoadedCallback();
+    }
+
+    pFeSceneResource->m_glResourceMarker = s_pResourcePool->MarkResource();
+    pFeSceneResource->m_bValid = true;
+    s_pCurrentFESceneResourceContext = pFeSceneResource;
+    return FERR_WaitingForResource;
+}
+
+ResourceResult FEResourceManager::IssueResourceLoadRequest(PendingResourceLoad pendingResource)
+{
+    ResourceResult resourceRequestResult = FERR_WaitingForResource;
+    s_pCurrentResourceBeingLoaded = pendingResource.pHandle;
+
+    switch (pendingResource.pHandle->m_type)
+    {
+    case FERT_TEXTURE:
+        resourceRequestResult = IssueTextureLoadRequest((FETextureResource*)s_pCurrentResourceBeingLoaded, pendingResource.pAllocator);
+        break;
+    case FERT_SCENE:
+        resourceRequestResult = IssueSceneContextSwitch((FESceneResource*)pendingResource.pHandle);
+        break;
+    case FERT_FONT:
+        resourceRequestResult = IssueFontLoadRequest((FEFontResource*)pendingResource.pHandle);
+        break;
+    default:
+        break;
+    }
+
+    return resourceRequestResult;
+}
+
+void FEResourceManager::Update(float dt)
+{
+    ResourceResult result;
+    bool bQueueNextResource = true;
+    while (bQueueNextResource)
+    {
+        if (s_pCurrentResourceBeingLoaded != 0 && !s_pCurrentResourceBeingLoaded->IsValid())
+        {
+            return;
+        }
+
+        if (s_pCurrentResourceBeingLoaded != 0)
+        {
+            pendingResourceQueue.RemoveStart(0);
+            s_pCurrentResourceBeingLoaded = 0;
+            if (pendingResourceQueue.m_Head == 0 && s_pCurrentFESceneResourceContext != 0)
+            {
+                s_pCurrentFESceneResourceContext->m_pFESceneContext->mState = FE_SCENE_READY;
+                s_pCurrentFESceneResourceContext->m_pFESceneContext->AllResourcesLoadedCallback();
+                s_pCurrentFESceneResourceContext = 0;
+            }
+        }
+
+        if (pendingResourceQueue.m_Head == 0)
+        {
+            return;
+        }
+
+        result = IssueResourceLoadRequest(pendingResourceQueue.Begin().m_Curr->entry);
+        bQueueNextResource = result == FERR_AlreadyLoaded;
+    }
+}
+
+GLResourcePool* FEResourceManager::GetResourcePool()
+{
+    return s_pResourcePool;
+}
+
+FEMiniBundle* FEResourceManager::LoadMiniBundle(const char* szBundleFileName)
+{
+    FEMiniBundle* miniBundle = (FEMiniBundle*)nlMalloc(sizeof(FEMiniBundle), 8, false);
+    nlStrNCpy(miniBundle->m_szBundleFileName, szBundleFileName, 0x20);
+    miniBundle->m_pSceneResource = new (8, false) FESceneResource();
+    miniBundle->m_pSceneResource->m_pFESceneContext = 0;
+    miniBundle->m_pSceneResource->m_hashID = nlStringLowerHash("MiniBundleContext");
+    miniBundle->m_pSceneResource->m_next = 0;
+    miniBundle->m_pSceneResource->m_prev = 0;
+    miniBundle->m_pSceneResource->m_type = FERT_SCENE;
+    nlStrNCpy(m_szPermanentBundleFileName, szBundleFileName, 0x20);
+    IssueSceneContextSwitch(miniBundle->m_pSceneResource);
+    LoadPermanentTextures();
+    s_pCurrentFESceneResourceContext = 0;
+    return miniBundle;
+}
+
+bool FEResourceManager::UnloadMiniBundle(FEMiniBundle* miniBundle)
+{
+    BundleFile* bundle = new (8, false) BundleFile();
+    bundle->Open(miniBundle->m_szBundleFileName, false);
+    unsigned long fileCount = bundle->nNumFiles;
+    FEResourceHandle** pLoadedResourceHandle;
+    BundleFileDirectoryEntry fileDirectoryEntry;
+
+    UnloadResource(miniBundle->m_pSceneResource);
+    for (unsigned long fileIndex = 0; fileIndex < fileCount; ++fileIndex)
+    {
+        bundle->GetFileInfoByIndex(fileIndex, &fileDirectoryEntry);
+        if (s_loadedResourceList.FindGet(fileDirectoryEntry.m_hash, &pLoadedResourceHandle))
+        {
+            unsigned long hashtodelete = (*pLoadedResourceHandle)->GetHashID();
+            delete *pLoadedResourceHandle;
+            s_loadedResourceList.Remove(hashtodelete);
+        }
+    }
+
+    bundle->Close();
+    delete bundle;
+    delete miniBundle->m_pSceneResource;
+    delete miniBundle;
+    return true;
+}

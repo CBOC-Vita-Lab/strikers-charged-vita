@@ -1,0 +1,35 @@
+diff --git a/src/NL/nlMemory.cpp b/src/NL/nlMemory.cpp
+index 62adffd..f7e8fdd 100644
+--- a/src/NL/nlMemory.cpp
++++ b/src/NL/nlMemory.cpp
+@@ -8,6 +8,12 @@ MemoryAllocator* CurrentAllocator = &StandardAllocator;
+ unsigned int AllocatorStackDepth = 1;
+ u8 gMemoryInitialized;
+ 
++static inline bool IsInAllocator(const MemoryAllocator& allocator, const void* ptr)
++{
++    const u8* base = (const u8*)allocator.m_memory;
++    return base != 0 && (const u8*)ptr >= base && (const u8*)ptr < base + allocator.m_memory_size;
++}
++
+ static inline void FreeMemory(void* ptr)
+ {
+     if (CurrentAllocator != &StandardAllocator && CurrentAllocator != &VirtualAllocator)
+@@ -16,12 +22,14 @@ static inline void FreeMemory(void* ptr)
+         return;
+     }
+ 
+-    s8 memoryRegion = (u32)ptr >> 28;
+-    if (memoryRegion == 8)
++    // NP: the console told MEM1 (0x80..) from MEM2 (0x90..) by the top nibble of the address. On a
++    // native host the two arenas live wherever the platform layer got them, so ask each allocator
++    // whether the pointer is inside the block it was initialised with.
++    if (IsInAllocator(StandardAllocator, ptr))
+     {
+         StandardAllocator.Free(ptr);
+     }
+-    else if (memoryRegion == 9)
++    else if (IsInAllocator(VirtualAllocator, ptr))
+     {
+         VirtualAllocator.Free(ptr);
+     }

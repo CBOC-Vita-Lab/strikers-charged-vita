@@ -1,0 +1,35 @@
+diff --git a/src/NL/gl/glTexture.cpp b/src/NL/gl/glTexture.cpp
+index 10a5850..b68a04a 100644
+--- a/src/NL/gl/glTexture.cpp
++++ b/src/NL/gl/glTexture.cpp
+@@ -7,6 +7,9 @@
+ #include "NL/glx/glxTexture.h"
+ #include "NL/nlMemory.h"
+ #include "NL/nlString.h"
++#ifdef NP_NATIVE
++#include "platform/assets/np_assets.h" /* npa_texture_entry_swap (NPA) */
++#endif
+ 
+ glTextureManager* gTextureManager;
+ u32 gDiffuseTextureSemantic = nlStringLowerHash("NLG_DIFFUSE");
+@@ -50,6 +53,10 @@ void glTextureAdd(unsigned long texture, const void* buffer,
+     unsigned long length, void* resourceInterface)
+ {
+     GLResourcePool* resource = (GLResourcePool*)resourceInterface;
++#ifdef NP_NATIVE
++    /* entries of FE / font BundleFiles arrive raw (big-endian header); idempotent for converted data */
++    npa_texture_entry_swap((void*)buffer, length);
++#endif
+     if (glIsTextureAnim(buffer, length))
+     {
+         glAddTextureAnim((void*)buffer, length, resource);
+@@ -66,6 +73,9 @@ void glTextureAdd(unsigned long texture, const void* buffer,
+ void glTextureReplace(unsigned long texture, const void* buffer,
+     unsigned long length)
+ {
++#ifdef NP_NATIVE
++    npa_texture_entry_swap((void*)buffer, length);
++#endif
+     glplatTextureReplace(glx_GetTex(texture), buffer, length);
+ }
+ 

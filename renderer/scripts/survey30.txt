@@ -1,0 +1,318 @@
+# survey_full.txt for a game that presents 30 frames per second (VGX_RATE=30): idle, hold and mash counts halved.
+# Workstream FI: the reference for the leave-one-out comparison of interpolated pictures.
+# --- boot screens, intro movie, title -------------------------------------------------------
+# A dismisses the wrist-strap screen and skips the intro movie (scene 22); stops at the title.
+mash 100 10 scene == 0
+log STATE title screen
+# The title accepts A once its intro animation has finished; it is then popped (scene != 0).
+mash 100 15 scene != 0
+wait scene == 1
+# Without a save file the game asks to create one (pop-up scene 10, default button = yes);
+# the main menu keeps its buttons dead until the save is loaded or created.
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 5
+mash 100 15 scene == 1
+wait nbuttons >= 8
+endif
+# The port's menu navigation puts the pointer on the first button: Domination Mode (ctx 0).
+wait onctx == 0
+log STATE main menu, pointer on Domination Mode
+# --- Domination Mode: options -> captains -> sidekicks -> sides -> stadium ---------------------
+idle 15
+press 100
+wait scene == 27
+wait nbuttons >= 10
+# Gameplay options (skill, series, 3-minute limit) are left at their defaults: go down to DONE.
+mash 4 15 onoff == 0x1470
+idle 10
+press 100
+wait scene == 2
+wait nbuttons >= 10
+# Captains: the pointer starts on the home team's panel. A opens the captain grid for it.
+wait onoff == 0x920
+idle 15
+press 100
+idle 30
+# Grid button 2 (third in the top row) = captain 3, Donkey Kong.
+mash 4 15 onoff == 0x218
+idle 10
+press 100
+idle 20
+# Right twice, up: the away team's panel. A, then grid button 3 = captain 6, Waluigi.
+mash 2 15 onoff == 0x380
+idle 10
+mash 8 15 onoff == 0x9D4
+idle 10
+press 100
+idle 30
+mash 4 15 onoff == 0x2CC
+idle 10
+press 100
+idle 30
+mash 4 15 onoff == 0xBF0
+idle 10
+press 100
+log captains confirmed
+wait scene == 3
+wait nbuttons >= 10
+# Sidekicks: the default line-ups are kept; down to DONE.
+idle 10
+mash 4 15 onoff == 0x11C8
+idle 10
+press 100
+wait scene == 4
+wait nbuttons >= 3
+# Sides: the pointer starts on HOME. A joins the home team (the away team is the CPU's).
+wait onoff == 0x20
+idle 15
+press 100
+idle 15
+mash 4 15 onoff == 0x188
+idle 10
+press 100
+wait scene == 5
+# Stadium: the default one; the pointer starts on PLAY.
+wait onoff == 0x110
+idle 15
+press 100
+log stadium confirmed, loading the match
+wait ingame == 1
+# A skips the walk-out cutscene (match state 0); state 1 is the kick-off, 5 open play.
+wait gs == 1
+log STATE kick-off
+wait gs == 5
+log STATE open play
+# --- play: stop once the match clock (seconds of open play) passes 62 -----------------------
+hold 9 0 71 12
+hold 8 0 66 -29
+hold 3 200 64 -34
+hold 12 0 64 -34
+hold 9 0 63 -36
+hold 13 0 56 -45
+hold 3 100 70 -15
+hold 5 0 70 -15
+hold 11 0 -72 0
+hold 7 0 -30 66
+hold 7 0 -72 7
+hold 10 200 -37 -62
+hold 11 0 7 -72
+hold 16 0 -37 -62
+hold 3 800 6 -72
+hold 8 0 6 -72
+hold 7 0 -9 -71
+hold 17 0 -64 -34
+hold 12 0 -66 29
+hold 3 100 -66 29
+hold 16 0 -66 29
+hold 18 0 -29 66
+hold 15 0 -68 23
+hold 5 20 -63 -36
+hold 11 0 -63 -36
+hold 13 0 -69 -22
+hold 16 0 -24 -68
+hold 3 200 -70 -17
+hold 10 0 -70 -17
+hold 10 0 -69 -20
+hold 15 0 -48 -54
+hold 3 400 -17 -70
+hold 9 0 -17 -70
+hold 16 0 -34 -63
+hold 15 0 72 0
+hold 3 100 38 61
+hold 13 0 38 61
+hold 15 0 58 43
+hold 13 0 62 37
+hold 3 140 50 51
+hold 13 0 50 51
+hold 15 0 2 72
+hold 16 0 48 53
+hold 3 200 -11 71
+hold 12 0 -11 71
+hold 15 0 4 72
+hold 3 10 30 66
+hold 11 0 30 66
+hold 17 0 53 48
+hold 11 0 35 63
+hold 3 200 -25 67
+hold 7 0 -25 67
+hold 11 0 50 52
+hold 8 0 72 0
+hold 11 0 72 0
+hold 3 100 63 -35
+hold 10 0 63 -35
+hold 15 0 60 40
+hold 15 200 33 64
+hold 2 0 33 64
+hold 15 0 -72 0
+hold 3 0 -71 14
+# Profile window: 600 frames of open play (check the log: match state must stay 5 inside it).
+hold 8 0 40 -60
+hold 10 0 66 -29
+hold 3 200 38 -61
+hold 9 0 38 -61
+hold 16 0 60 -39
+hold 3 100 49 -53
+hold 15 0 49 -53
+hold 13 0 54 -48
+hold 11 0 70 17
+hold 13 200 71 11
+hold 14 0 33 64
+hold 16 0 68 23
+hold 3 800 -72 0
+hold 7 0 -72 0
+hold 18 0 -71 -10
+hold 14 0 -47 -54
+hold 3 100 -1 -72
+hold 10 0 -1 -72
+hold 14 0 -53 -48
+hold 18 0 -19 -70
+hold 5 20 -20 -69
+hold 6 0 -20 -69
+hold 15 0 35 -63
+hold 14 0 72 -7
+hold 3 200 65 31
+hold 14 0 65 31
+hold 15 0 49 53
+hold 18 0 -4 72
+hold 11 0 -72 0
+hold 17 0 -71 -14
+hold 3 200 -67 27
+hold 12 0 -67 27
+hold 15 0 -69 20
+hold 13 0 -72 -3
+hold 3 100 -51 51
+hold 15 0 -51 51
+hold 7 0 72 0
+hold 12 0 56 45
+hold 11 200 59 41
+hold 13 0 31 65
+hold 13 0 -7 72
+hold 3 800 72 0
+hold 7 0 72 0
+hold 10 0 60 -40
+hold 17 0 69 19
+hold 3 100 65 31
+hold 11 0 65 31
+hold 16 0 71 -14
+hold 7 0 57 44
+hold 5 20 31 65
+hold 13 0 31 65
+hold 16 0 -37 62
+hold 3 200 -57 44
+hold 16 0 -57 44
+hold 11 0 -72 0
+hold 8 0 72 0
+hold 3 400 63 -34
+hold 5 0 63 -34
+hold 9 0 -1 -72
+hold 8 0 -22 -69
+hold 16 0 41 -59
+hold 3 100 72 0
+hold 13 0 72 0
+hold 9 0 72 0
+hold 14 0 63 -35
+hold 3 140 -2 -72
+hold 16 0 -2 -72
+hold 13 0 63 -34
+hold 13 0 51 -51
+hold 3 200 65 -31
+hold 11 0 65 -31
+hold 9 0 71 -11
+hold 15 0 55 -47
+hold 3 10 17 -70
+hold 16 0 17 -70
+hold 15 0 -17 -70
+hold 3 200 58 -43
+hold 11 0 58 -43
+hold 17 0 -72 0
+hold 3 100 -68 25
+hold 12 0 -68 25
+hold 18 0 -46 56
+hold 16 0 26 67
+hold 13 200 59 41
+hold 17 0 71 12
+hold 12 0 50 51
+hold 3 800 68 22
+hold 9 0 68 22
+hold 7 0 9 71
+hold 9 0 40 60
+hold 11 0 67 26
+hold 3 100 -72 0
+hold 11 0 -72 0
+hold 12 0 -66 -29
+hold 10 0 -60 40
+hold 10 0 -68 -24
+hold 5 20 72 0
+hold 6 0 72 0
+hold 16 0 52 -50
+hold 3 200 -13 -71
+hold 15 0 -13 -71
+hold 9 0 -26 -67
+hold 11 0 -32 -65
+hold 3 400 -44 -57
+hold 9 0 -44 -57
+hold 14 0 -72 0
+hold 16 0 -34 -64
+hold 3 100 -72 3
+hold 8 0 -72 3
+hold 18 0 -61 -38
+hold 16 0 -71 -12
+hold 3 140 -37 -62
+hold 6 0 -37 -62
+hold 11 0 -72 4
+hold 18 0 -72 2
+hold 3 200 72 0
+hold 11 0 72 0
+hold 15 0 64 -33
+hold 3 10 72 0
+hold 13 0 72 0
+hold 9 0 60 -40
+hold 15 0 72 0
+hold 3 200 44 -57
+hold 8 0 44 -57
+hold 10 0 3 -72
+hold 9 0 -72 0
+hold 3 100 -59 -42
+hold 5 0 -59 -42
+hold 15 0 -72 0
+hold 7 0 -47 -54
+hold 8 200 72 0
+hold 18 0 39 -60
+hold 12 0 -72 0
+hold 3 800 -69 19
+hold 15 0 -69 19
+hold 10 0 -44 -57
+hold 9 0 -36 -62
+hold 3 100 13 -71
+hold 11 0 13 -71
+hold 13 0 6 -72
+hold 5 20 -15 -71
+hold 11 0 -15 -71
+hold 14 0 -69 -21
+hold 18 0 -71 11
+hold 3 200 -70 17
+hold 11 0 -70 17
+hold 11 0 -72 0
+hold 11 0 -71 13
+hold 3 400 -64 33
+hold 10 0 -64 33
+hold 11 0 -13 71
+hold 18 0 -61 38
+hold 3 100 -71 11
+hold 11 0 -71 11
+hold 16 0 -33 64
+hold 7 0 -29 66
+log STATE pausing (survey)
+press 1000
+idle 75
+hold 1 4 0 0
+idle 30
+hold 1 4 0 0
+idle 30
+press 1000
+log STATE resumed (survey)
+idle 60
+exit

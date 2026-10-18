@@ -1,0 +1,8 @@
+# W5 CTL: the Vita build in Vita3K: Vita-button script (MODERN: Cross opens, Circle goes back) and the front-touch menu pointer
+MSC_INPUT_SCRIPT=ctl_menutouch.txt
+MSC_MAX_FRAMES=3000
+MSC_WATCH=1
+MSC_WATCH_BUTTONS=1
+MSC_WATCH_EVERY=300
+MSC_CTL_TRACE=1
+NP_DATA_DIR=ux0:data/mscharged/np-data

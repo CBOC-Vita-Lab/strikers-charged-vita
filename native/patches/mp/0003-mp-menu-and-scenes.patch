@@ -1,0 +1,88 @@
+Multiplayer 3/4: the old Nintendo Wi-Fi Connection entry starts the LAN mode: SHMainMenu::SelectItem/Update (radio, then the game's own online entry),
+BaseGameSceneManager::Push (login/Mii/hub screens become the LAN lobby; back from the lobby leaves), AsyncLoading fn_80119528 (front end rebuilt after a match),
+nlLocalization OnTableLoaded (entry renamed MULTIPLAYER). All hooks are no-ops outside a LAN session.
+
+diff --git a/src/Game/AsyncLoading.cpp b/src/Game/AsyncLoading.cpp
+index caa209b..329ef51 100644
+--- a/src/Game/AsyncLoading.cpp
++++ b/src/Game/AsyncLoading.cpp
+@@ -7,6 +7,7 @@
+ #include "Game/Physics/Physics.h"
+ #include "Game/HBMManager.h"
+ #include "Game/ObjectBlur.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ #include "Game/Sys/audio.h"
+ #include "Game/Render/StadiumLoading.h"
+@@ -1425,6 +1426,7 @@ extern "C" void fn_80119454(AsyncLoadingManager* manager)
+ 
+ extern "C" void fn_80119528(AsyncLoadingManager* manager)
+ {
++    NpLanBeforeInitializeFEState();  // multiplayer: the front end is rebuilt after a LAN match (np/patches/mp)
+     static GLMemoryRequirement requirements[] = {
+         { GLM_Header, 0x400 },
+         { GLM_VertexData, 0x800 },
+diff --git a/src/Game/FE/BaseGameSceneManager.cpp b/src/Game/FE/BaseGameSceneManager.cpp
+index 5749a35..9533ed2 100644
+--- a/src/Game/FE/BaseGameSceneManager.cpp
++++ b/src/Game/FE/BaseGameSceneManager.cpp
+@@ -75,6 +75,7 @@
+ #include "Game/FE/Overlay/OverlayHandlerChallengePreview.h"
+ #include "Game/FE/Overlay/OverlayHandlerControllerMap.h"
+ #include "Game/FE/Overlay/OverlayHandlerDefensivePlay.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ FEMiniBundle* gFEMiniBundle;
+ GLResourcePool* gFEResourcePool;
+@@ -274,6 +275,11 @@ BaseGameSceneManager::~BaseGameSceneManager()
+ 
+ BaseSceneHandler* BaseGameSceneManager::Push(SceneList newscene, ScreenMovement movement, bool popfirst)
+ {
++    // multiplayer: in a LAN session the online screens (login, Mii select, the hub after a match) become the LAN lobby
++    if (NpLanScenePush(this, &newscene, &movement, &popfirst))
++    {
++        return 0;
++    }
+     if (popfirst)
+     {
+         Pop();
+diff --git a/src/Game/SH/SHMainMenu.cpp b/src/Game/SH/SHMainMenu.cpp
+index 24301ef..4fa7d40 100644
+--- a/src/Game/SH/SHMainMenu.cpp
++++ b/src/Game/SH/SHMainMenu.cpp
+@@ -1,4 +1,5 @@
+ #include <RVLFaceLib/RFL_Database.h>
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+ #include "Game/SH/SHMainMenu.h"
+ 
+@@ -158,6 +159,7 @@ void SHMainMenu::SceneCreated()
+ void SHMainMenu::Update(float fDeltaT)
+ {
+     BaseSceneHandler::Update(fDeltaT);
++    NpLanMenuUpdate(this);  // multiplayer: once the radio is up, enter the LAN lobby (np/patches/mp)
+     if (SaveEnabled && !NormalSaveLoaded)
+     {
+         return;
+@@ -336,6 +338,10 @@ void SHMainMenu::SelectItem(unsigned int index, void* context)
+     }
+ 
+     FEAudio::PlayAnimAudioEvent(0x0A93E9A0, 0, 0, true);
++    if (NpLanMenuSelect(this, item))  // multiplayer: item 1 (the old Wi-Fi entry) starts the radio, then the LAN lobby
++    {
++        return;
++    }
+     if (item == 1)
+     {
+         if (!SaveEnabled)
+diff --git a/src/NL/nlLocalization.cpp b/src/NL/nlLocalization.cpp
+--- a/src/NL/nlLocalization.cpp
++++ b/src/NL/nlLocalization.cpp
+@@ -7,2 +7,3 @@
+ #include "NL/nlPrint.h"
++#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+ 
+@@ -67,2 +68,3 @@
+         (unsigned short*)(&pLocalization->m_LookupTable[pLocalization->m_pFile->StringCount]);
++    NpLanPatchLocalization(pLocalization);  // multiplayer: the old Wi-Fi menu entry is named MULTIPLAYER (np/patches/mp)
+ }
