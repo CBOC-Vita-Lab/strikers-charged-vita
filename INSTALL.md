@@ -1,5 +1,8 @@
 # Install
 
+For the desktop app and matching ZIP, see [Desktop Install](DESKTOP-INSTALL.md).
+The manual method below remains available. Private preview access is required.
+
 Use the matching `a8d4ad6` / `MSCN00003` private-preview package.
 [Start Here](START-HERE.txt) is the short version.
 
