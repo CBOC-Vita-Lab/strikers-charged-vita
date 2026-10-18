@@ -115,6 +115,11 @@ VPK_FILES := -a $(ART_ICON)=sce_sys/icon0.png \
 	-a $(LIVEAREA)/$(if $(filter 1,$(NP_PLAYER)),template.xml,template-lab.xml)=sce_sys/livearea/contents/template.xml \
 	-a $(ART_BG)=sce_sys/livearea/contents/bg.png \
 	-a $(ART_START)=sce_sys/livearea/contents/startup.png
+# Keep legal notices inside standalone VPKs as well as the source bundle.
+NOTICE_ROOT := $(abspath ..)
+NOTICE_FILES := $(wildcard $(NOTICE_ROOT)/licenses/*.txt) $(NOTICE_ROOT)/THIRD_PARTY_NOTICES.md \
+                $(wildcard $(NOTICE_ROOT)/renderer/third_party/LICENSE-*)
+VPK_FILES += $(foreach f,$(NOTICE_FILES),-a $(f)=licenses/$(notdir $(f)))
 ifneq ($(NP_ART_DIR),)
 VPK_FILES += -a $(NP_ART_DIR)/pic0.png=sce_sys/pic0.png
 # W5 BOOT: the loading screen's picture (960x544 RGB565 with a 12-byte header, make_vita_art.py); without it the loading screen is plain
@@ -162,7 +167,7 @@ $(D)/np-smoke.vpk: $(D)/np-smoke.eboot.bin $(D)/smoke.param.sfo
 GAME_SFO_ID := $(TID_game)|$(NP_APP_VER)|$(TITLE_game)
 $(shell mkdir -p $(D) && { [ "$$(cat $(D)/game.sfo.id 2>/dev/null)" = '$(GAME_SFO_ID)' ] || printf '%s' '$(GAME_SFO_ID)' > $(D)/game.sfo.id; })
 $(D)/game.param.sfo: $(D)/game.sfo.id
-$(D)/mscharged-np.vpk: $(D)/mscharged-np.eboot.bin $(D)/game.param.sfo $(ART_ICON) $(ART_BG) $(ART_START) $(ART_LOADING)
+$(D)/mscharged-np.vpk: $(D)/mscharged-np.eboot.bin $(D)/game.param.sfo $(ART_ICON) $(ART_BG) $(ART_START) $(ART_LOADING) $(NOTICE_FILES)
 	$(VBIN)/vita-pack-vpk -s $(D)/game.param.sfo -b $(D)/mscharged-np.eboot.bin $(VPK_FILES) $@
 	@ls -l $@; $(VBIN)/arm-vita-eabi-size $(D)/mscharged-np.elf
 $(D)/smoke.param.sfo:

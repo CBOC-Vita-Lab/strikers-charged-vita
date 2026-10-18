@@ -9,6 +9,9 @@
   reconstructed game source used by the native port.
 - **VitaSDK, vitaGL and their contributors:** underlying Vita tooling and
   graphics support.
+- **Rinnegatamante, bythos14, Yifan Lu and Lachlan Tychsen-Smith:** shader,
+  compiler-extension, import-stub and math libraries.
+- **Bitstream and DejaVu contributors:** console, button-prompt and UI fonts.
 
 The recovered source and upstream license texts are now included; see
 [Third-party Notices](THIRD_PARTY_NOTICES.md). The remaining linked-dependency

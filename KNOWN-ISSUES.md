@@ -11,7 +11,7 @@
   game progression need testing on the release candidate.
 - The current native source, renderer and patched vitaGL files are included.
   The dependency recipe and pinned source setup are also included. Full
-  linked-library provenance, resource licenses, release artwork and fresh
+  linked-library provenance, installed-artwork rights, combined-package licensing and fresh
   installation remain open requirements.
 - The runtime requires the owner's shader compiler module even when the
   startup cache is included. It is not part of the package.

@@ -51,24 +51,25 @@ The recipe builds an isolated copy with the recorded GLB options and an
 8 MiB uniform ring. Source pins were recovered from reference checkouts;
 they are not proof of byte-identical libraries in the installed executable.
 
-Packaging also needs rights-cleared artwork at the paths in
-`native/platform/vita/Makefile.vpk`. Original package images and shader seeds
-are not committed. Seeds must match the renderer and vitaGL options.
+Packaging needs the images at the paths in `native/platform/vita/Makefile.vpk`.
+Installed artwork and shader seeds remain private and are not committed.
+Seeds must match the renderer and vitaGL options.
 The normal output is `build/native/vita/pkg/np/mscharged-np.vpk`, title ID
 `MSCN00003`. This source-build path must pass the verification below before
-its output replaces a working installation.
+its output could be considered for installation. It is not the selected
+installer: that retains the installed executable, resources and artwork.
 
 ## Verification
 
 On 2026-10-18, the five dependency libraries built successfully with this
 helper. The recovered recipe also compiled and linked the native player,
-produced its Vita executable and generated the `MSCN00003` SFO. Packaging
-then stopped at the excluded `icon0-test.png`. The rebuilt executable is
-not byte-identical to the recovered one; the existing VPK was not replaced.
+produced its Vita executable and generated the `MSCN00003` SFO. The rebuilt
+executable is not byte-identical to the installed one and is excluded from
+the installation bundles. The installed build remains selected.
 
 Run `python3 -m unittest discover -s tests -v` for the file checker,
 game-preparation and dependency-setup tests. These are host tests, not
-gameplay tests. A release still needs exact source/dependency
+gameplay tests. A release still needs an exact source/dependency
 receipt, license review, fresh install and save-preserving upgrade tests.
 Do not run the old `native/platform/vita/session/` deployment scripts on a
 working console as part of a source build.

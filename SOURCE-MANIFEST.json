@@ -7152,7 +7152,7 @@
     },
     {
       "path": "native/platform/vita/Makefile.vpk",
-      "sha256": "f78e09e9b54fb9723c4f94c563ba90d6590b272b1a848fdec8929a28f7feca6e"
+      "sha256": "739e5ffd4efd0f08eb894c5d9de73a32a19db25be48a774ef555c5204bed7132"
     },
     {
       "path": "native/platform/vita/include/np_framesend.h",

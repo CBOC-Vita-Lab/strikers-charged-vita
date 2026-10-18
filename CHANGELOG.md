@@ -1,5 +1,11 @@
 # Changes
 
+## 2026-10-18: Installed Build Preserved
+
+- Kept the installed executable, artwork, loading image and shaders unchanged.
+- Kept source-build validation outputs outside the install bundle.
+- Added missing font and linked-library notices to the source.
+
 ## 2026-10-18: Dependency Setup
 
 - Recovered the library-build recipe and pinned its external source inputs.

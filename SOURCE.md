@@ -22,8 +22,10 @@ records the imported source files and their current hashes.
 
 Original upstream notices remain. Owner-specific names and paths were
 normalized; private logs, session data, original Git metadata, screenshots,
-package artwork, shader binaries and game data were left out. Current
+installed artwork, shader binaries and game data were left out. Current
 guides replace the old lab notebooks. No game logic was deliberately changed.
+The installer retains the installed executable and artwork; source-build
+validation outputs are not substituted for it.
 
 The recovered dependency recipe is now included with fixed source revisions
 in [dependencies/lock.json](dependencies/lock.json). It uses the exported
