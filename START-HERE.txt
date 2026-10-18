@@ -1,15 +1,14 @@
 MARIO STRIKERS CHARGED VITA
-Private candidate: a8d4ad6 / MSCN00003. Not cleared for redistribution.
+Private preview: a8d4ad6 / MSCN00003. Do not redistribute this package.
 
 REQUIRED: homebrew-enabled Vita, VitaShell, your own supported disc and
-your legitimately obtained libshacccg.suprx in ur0:data/. The module is not
-included, even though the VPK has a startup shader cache.
+your legitimately obtained libshacccg.suprx in ur0:data/.
 
 FIRST INSTALL
 1. Extract this entire install ZIP on your computer. Do not unzip the VPK.
-2. Open CHECK-DOWNLOAD.md to check the download, then PREPARE-GAME.md to
-   extract your own Wii USA Rev 1 (R4QE01) disc image.
-3. Using VitaShell USB or FTP, copy game/sys and game/files so you have:
+2. Open PREPARE-GAME.md and run its one-command helper with your own
+   Wii USA Rev 1 (R4QE01) disc image. It checks and extracts the game for you.
+3. Using VitaShell USB or FTP, copy prepared-game/sys and prepared-game/files:
      ux0:data/mscharged/game/sys/fst.bin
      ux0:data/mscharged/game/files/Art/
    Do not create game/game or game/DATA. Allow about 3 GB free on the Vita.
@@ -24,13 +23,13 @@ game, or replace the whole data folder as an ordinary app update.
 
 KEEP: game/ (your extracted disc), np-data/NAND/ (saves), np-player.txt
       (settings), and your own artwork. Do not use someone else's save.
-INCLUDED: player VPK, its matching startup/shader resources, guides and
-          an optional offline download checker. No compiler is needed.
+INCLUDED: player VPK, matching startup/shader resources, preparation helper,
+          source, guides, notices and an optional download checker.
 NOT INCLUDED: disc image, extracted game, saves, firmware or HD models.
 
 Keep the guides and notices on your computer; do not copy the whole ZIP
 contents into ux0:app/. The VPK installer places its own app resources.
 INSTALL.md has the full folder map, backup advice and troubleshooting.
 
-The package currently retains private installed artwork and an uncleared
-runtime. Do not share it. Fresh-install and source/rights review remain open.
+CHECK-DOWNLOAD.md has the optional file check. Technical and release notes
+are in BUILDING.md, SOURCE.md and KNOWN-ISSUES.md.

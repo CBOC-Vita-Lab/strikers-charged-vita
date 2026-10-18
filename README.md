@@ -14,30 +14,18 @@ controller layer.
 
 ## Install
 
-New to the package? Open [Start Here](START-HERE.txt).
+1. [Prepare your game](PREPARE-GAME.md) with the included helper. It downloads
+   the verified extractor and checks your **Wii USA Rev 1 (`R4QE01`)** dump.
+2. Copy the prepared `sys/` and `files/` into `ux0:data/mscharged/game/`.
+3. Install the matching player VPK with VitaShell and open the game.
 
-You need a homebrew-enabled Vita, VitaShell and your own supported game dump:
-**Wii USA Rev 1 (`R4QE01`)**. Game files are not included.
+[Start Here](START-HERE.txt) is the short checklist. [Install](INSTALL.md)
+has the requirements, folder map and update steps. The VPK already carries
+its startup shaders; no manual `eboot.bin` or shader replacement is needed.
 
-Installation uses a ready-made VPK plus your extracted `sys/` and `files/` folders
-under `ux0:data/mscharged/game/`. Follow [Install](INSTALL.md) for the layout
-and backup steps, with [game extraction](PREPARE-GAME.md) in a separate guide.
-You should not need to replace `eboot.bin` or run lab tools.
-
-## Release Status
-
-This is private release preparation for Claude's native `a8d4ad6` build.
-The installed executable and app resources have been packaged as a private
-VPK candidate without changing them. A fresh console read confirms the
-executable is that exact build. You will not need to compile the port.
-The native source, renderer, patched vitaGL source files and build notes are
-now in this repository. The dependency build setup is not yet complete;
-clean rebuilding, content clearance and fresh-install testing remain release
-gates. No public download is available.
-
-Level 7 has an emulator match test. Level 6, the Options cycle and the final
-package still need Vita acceptance. Menus can run below 30 FPS; no locked
-30 FPS or whole-game completion claim is made. See [Known Issues](KNOWN-ISSUES.md).
+The `a8d4ad6` package is a private preview, not a public download.
+Game data is not included. [Known Issues](KNOWN-ISSUES.md) and
+[Source Record](SOURCE.md) hold the testing and release details.
 
 [Controls](CONTROLS.md) | [Building](BUILDING.md) | [Source Record](SOURCE.md)
 | [Technical Notes](TECHNICAL.md) | [Included Files](ASSETS.md)

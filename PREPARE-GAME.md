@@ -4,7 +4,38 @@ Use your own **Wii USA Rev 1 (`R4QE01`)** dump. This creates the `sys/` and
 `files/` folders the port reads; it does not compile or modify the game.
 Allow about 3 GB of extra computer space, keeping your original dump intact.
 
-## 1. Get The Extractor
+## Easiest Method
+
+Install [Python 3](https://www.python.org/downloads/) on your computer if it
+is not already available. Extract the whole package, open Terminal or
+PowerShell in that folder, and run one command with your dump's filename:
+
+```powershell
+# Windows
+py -3 PREPARE-GAME.py "C:\Games\game.rvz"
+```
+
+```sh
+# Mac or Linux
+python3 PREPARE-GAME.py "/path/to/game.rvz"
+```
+
+ISO files work too. The helper downloads the official extractor for your
+computer, verifies its checksum, checks the disc revision, extracts with
+validation, and checks `main.dol` automatically. No Python packages are needed.
+Internet access is needed only for the first extractor download.
+
+When it says **READY**, copy `prepared-game/sys/` and `prepared-game/files/`
+into **`ux0:data/mscharged/game/`**, then return to [Install](INSTALL.md).
+It never connects to your Vita, uploads game data or replaces existing
+folders. To retry after an interruption, choose a new folder with
+`--output "prepared-game-2"`. Keep your original dump.
+
+## Manual Method
+
+Use this only if you prefer to run the extractor yourself.
+
+### 1. Get The Extractor
 
 Download the matching `nodtool` file from the official
 [v2.0.0-alpha.12 release](https://github.com/encounter/nod/releases/tag/v2.0.0-alpha.12):
@@ -22,7 +53,7 @@ or `nodtool` on Mac/Linux. Open PowerShell or Terminal in that folder.
 In the commands below, replace `game.rvz` with your dump's actual filename,
 keeping the quotes. ISO and RVZ are supported; no conversion is needed.
 
-## 2. Check And Extract
+### 2. Check And Extract
 
 Windows PowerShell:
 
@@ -58,7 +89,7 @@ Mac/Linux:
 Wait for a successful finish. A validation error means the dump needs
 checking; do not disable validation to force it through.
 
-## 3. Check The Result
+### 3. Check The Result
 
 Calculate the SHA-256 of `game/sys/main.dol`:
 

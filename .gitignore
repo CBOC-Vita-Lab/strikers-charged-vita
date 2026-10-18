@@ -13,3 +13,6 @@ build/
 *.pkl
 *.pth
 *.onnx
+.setup-tools/
+/prepared-game/
+*.rvz

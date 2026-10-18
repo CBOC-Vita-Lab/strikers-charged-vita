@@ -1,5 +1,12 @@
 # Included And Required Files
 
+The computer-side `PREPARE-GAME.py` helper is included under
+[MIT](CHECK-FILES-LICENSE.txt). It downloads an unmodified, checksum-pinned
+nodtool directly from its [official release](https://github.com/encounter/nod/releases/tag/v2.0.0-alpha.12).
+The downloaded extractor stays on the user's computer; it is not a game asset.
+The local install bundle includes the reviewed source, preparation tools,
+all linked guides and notices alongside the unchanged private VPK.
+
 The release should include the matching player executable, app metadata,
 permitted original release artwork, boot resources, matching shader resources
 and all required source/notices. Their final inventory is not approved yet.

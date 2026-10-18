@@ -1,5 +1,12 @@
 # Changes
 
+## 2026-10-18: Simpler Setup
+
+- Added one-command game preparation with a verified extractor download,
+  automatic disc checks and no replacement of existing output folders.
+- Shortened the quick start and moved detailed release notes out of the main flow.
+- Included preparation tools, source and linked guides in the local bundle.
+
 ## 2026-10-18: Source And Documentation
 
 - Added the recovered `a8d4ad6` native source, renderer and patched vitaGL files.
