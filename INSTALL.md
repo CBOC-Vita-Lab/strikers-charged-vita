@@ -13,14 +13,15 @@ Use the matching `a8d4ad6` / `MSCN00003` private-preview package.
 
 ## Installation
 
-1. [Prepare your own game](PREPARE-GAME.md) with the included one-command helper, then copy its
-   `sys/` and `files/` folders into `ux0:data/mscharged/game/`. The preparation
-   helper checks the revision and extracted files for you.
-2. Extract the install ZIP on your computer and [check the download](CHECK-DOWNLOAD.md).
+1. Extract the install ZIP on your computer. [Download checks](CHECK-DOWNLOAD.md) are optional.
    Leave `Strikers-a8d4ad6-private-candidate.vpk` intact. Copy it through
    VitaShell USB or FTP to `ux0:VPK/` (create that folder if needed), then
    end the transfer. In VitaShell, highlight the VPK, use the confirm button
    (usually Cross), and confirm installation.
+2. Copy your own supported game's `sys/` and `files/` folders into
+   `ux0:data/mscharged/game/`. Already have a complete extraction? Copy it
+   directly. Starting with an ISO or RVZ? [Extract it in Dolphin](PREPARE-GAME.md)
+   first; no Python is required. The preparation helper is optional.
 3. Open the Mario Strikers Charged bubble. Use [Controls](CONTROLS.md) for
    the default layout and closer camera options.
 
@@ -56,7 +57,7 @@ An ordinary app update replaces the **VPK only**, not your data folder.
 | `game/` | Keep. Copy your own extraction only for a first install or a verified repair. |
 | `np-data/NAND/` | Keep and back up. Never replace with bundled/test saves. |
 | `np-player.txt` | Keep your settings; no replacement config is bundled. |
-| Boot image and shader cache | Already inside the matching VPK; no manual replacement. |
+| App artwork and shader cache | Handled by the matching VPK; no manual replacement. |
 
 Exit the game and back up `ux0:data/mscharged/`, especially `np-data/NAND/`
 and `np-player.txt`. Install the updated **player** VPK with the same

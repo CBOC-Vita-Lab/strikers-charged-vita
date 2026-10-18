@@ -14,10 +14,14 @@ controller layer.
 
 ## Install
 
-1. [Prepare your game](PREPARE-GAME.md) with the included helper. It downloads
-   the verified extractor and checks your **Wii USA Rev 1 (`R4QE01`)** dump.
-2. Copy the prepared `sys/` and `files/` into `ux0:data/mscharged/game/`.
-3. Install the matching player VPK with VitaShell and open the game.
+1. Install the ready-made player VPK with VitaShell.
+2. Copy your own **Wii USA Rev 1 (`R4QE01`)** game's `sys/` and `files/`
+   folders into `ux0:data/mscharged/game/`.
+3. Open the Mario Strikers Charged bubble.
+
+Have an ISO or RVZ instead of folders? [Extract it with Dolphin](PREPARE-GAME.md).
+**No Python or compiling is needed for this install path.** The Python helper
+is an optional alternative that also checks the disc and extracted files.
 
 [Start Here](START-HERE.txt) is the short checklist. [Install](INSTALL.md)
 has the requirements, folder map and update steps. The VPK already carries

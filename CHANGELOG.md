@@ -1,5 +1,12 @@
 # Changes
 
+## 2026-10-18: Copy-And-Install Setup
+
+- Made the ready-made VPK and copy-folder steps the main install path.
+- Added Dolphin extraction instructions; Python is an optional helper only.
+- Used generic app art and the built-in loading screen instead of personal
+  fan art. Added notices without changing the installed executable or shaders.
+
 ## 2026-10-18: Installed Build Preserved
 
 - Kept the installed executable, artwork, loading image and shaders unchanged.

@@ -12,7 +12,7 @@ not the older recompiled port or a later experiment.
 | Title ID | `MSCN00003` |
 | Source export SHA-256 | `e4ab1ca7fcafc3f7fc11423412d63d4c21f4c1c1bd62d07f3f932597f786365a` |
 | Recovered player eboot SHA-256 | `4d238f2af1fc1e02d8d42e2cbebfd2eef15b32aa524398ab5e988d6114331005` |
-| Private candidate VPK SHA-256 | `a1eb4cfba10021af9af782bef47c00d9e1be1f5bc81507a2f1ce38dcae145f4c` |
+| Private candidate VPK SHA-256 | `201c4bb5ec892ba18fd58ad2bd8053be32c0356ee5e3f207448d0e011c4d4298` |
 
 The build manifest and recovered installed executable agree. That is
 provenance evidence, not a clean-rebuild or gameplay test. The export has no
@@ -24,8 +24,10 @@ Original upstream notices remain. Owner-specific names and paths were
 normalized; private logs, session data, original Git metadata, screenshots,
 installed artwork, shader binaries and game data were left out. Current
 guides replace the old lab notebooks. No game logic was deliberately changed.
-The installer retains the installed executable and artwork; source-build
-validation outputs are not substituted for it.
+The installer retains the installed executable and shaders; source-build
+validation outputs are not substituted for it. Only package artwork and
+notices change: generic project images replace personal fan art, and the
+existing built-in loading screen is used. See [Included Files](ASSETS.md).
 
 The recovered dependency recipe is now included with fixed source revisions
 in [dependencies/lock.json](dependencies/lock.json). It uses the exported

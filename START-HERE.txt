@@ -6,15 +6,18 @@ your legitimately obtained libshacccg.suprx in ur0:data/.
 
 FIRST INSTALL
 1. Extract this entire install ZIP on your computer. Do not unzip the VPK.
-2. Open PREPARE-GAME.md and run its one-command helper with your own
-   Wii USA Rev 1 (R4QE01) disc image. It checks and extracts the game for you.
-3. Using VitaShell USB or FTP, copy prepared-game/sys and prepared-game/files:
+2. Copy Strikers-a8d4ad6-private-candidate.vpk to ux0:VPK/ using VitaShell
+   USB or FTP (create VPK if needed). End the transfer, then open that VPK
+   in VitaShell and install it.
+3. Copy your own Wii USA Rev 1 (R4QE01) game's sys/ and files/ folders to:
      ux0:data/mscharged/game/sys/fst.bin
      ux0:data/mscharged/game/files/Art/
    Do not create game/game or game/DATA. Allow about 3 GB free on the Vita.
-4. Copy Strikers-a8d4ad6-private-candidate.vpk to ux0:VPK/ (create VPK if
-   needed). End the transfer, then open that VPK in VitaShell and install.
-5. Open the Mario Strikers Charged bubble. See CONTROLS.md for the layout.
+4. Open the Mario Strikers Charged bubble. See CONTROLS.md for the layout.
+
+ONLY HAVE AN ISO OR RVZ?
+PREPARE-GAME.md shows the Dolphin menu steps to extract it. No Python or
+compiling is needed for that route. The Python helper is optional.
 
 ALREADY INSTALLED?
 Back up ux0:data/mscharged/ first. Install only the matching new player VPK.
@@ -23,7 +26,7 @@ game, or replace the whole data folder as an ordinary app update.
 
 KEEP: game/ (your extracted disc), np-data/NAND/ (saves), np-player.txt
       (settings), and your own artwork. Do not use someone else's save.
-INCLUDED: player VPK, matching startup/shader resources, preparation helper,
+INCLUDED: player VPK, matching shaders, generic app art, optional preparation helper,
           source, guides, notices and an optional download checker.
 NOT INCLUDED: disc image, extracted game, saves, firmware or HD models.
 

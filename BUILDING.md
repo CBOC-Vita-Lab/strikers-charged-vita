@@ -51,13 +51,15 @@ The recipe builds an isolated copy with the recorded GLB options and an
 8 MiB uniform ring. Source pins were recovered from reference checkouts;
 they are not proof of byte-identical libraries in the installed executable.
 
-Packaging needs the images at the paths in `native/platform/vita/Makefile.vpk`.
-Installed artwork and shader seeds remain private and are not committed.
+Generic package images are included at the paths in
+`native/platform/vita/Makefile.vpk`; [ARTWORK.json](ARTWORK.json) records them.
+Personal installed artwork and shader seeds are not committed.
 Seeds must match the renderer and vitaGL options.
 The normal output is `build/native/vita/pkg/np/mscharged-np.vpk`, title ID
 `MSCN00003`. This source-build path must pass the verification below before
 its output could be considered for installation. It is not the selected
-installer: that retains the installed executable, resources and artwork.
+installer: that retains the installed executable and shaders, with generic
+app graphics and required notices. No rebuilt executable is selected.
 
 ## Verification
 

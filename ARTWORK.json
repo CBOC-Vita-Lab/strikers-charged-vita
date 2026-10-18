@@ -1,0 +1,16 @@
+{
+  "scope": "Original geometric project artwork recovered from the native source export; not installed fan art or gameplay screenshots",
+  "base_path": "native/platform/vita/vpk",
+  "generator": "native/platform/vita/vpk/art/make_art.py",
+  "font_notice": "licenses/DejaVu.txt",
+  "files": [
+    {"path": "icon0.png", "sha256": "e0dfc37a99beb6a37211fcc4441f771bbe3841efe5197f34e33aa3d6bc04ca9e", "width": 128, "height": 128},
+    {"path": "icon0-test.png", "sha256": "3653fc44f09cda0b9f2bf244f33632c38b5296017a18de5275ed5a7339b312e6", "width": 128, "height": 128},
+    {"path": "livearea/bg.png", "sha256": "0e39e01818d13a034f76404aed4cdd436413f9d2aa473e95b882407333db5cfa", "width": 840, "height": 500},
+    {"path": "livearea/startup.png", "sha256": "efc550d7ec5be645895ab8662e5aa7827522168b99c0a7a29af095990eaf4fe0", "width": 280, "height": 158},
+    {"path": "livearea/settings.png", "sha256": "f97e9852a68761e9614798aa9ef65180c27b2de94db644dbe62729114f504ead", "width": 280, "height": 124},
+    {"path": "art/mp-icon0.png", "sha256": "56f5630aefb8a25d99b22813cd8ce14de34a119b68602f1436d91a30273a5214", "width": 128, "height": 128},
+    {"path": "art/mp-bg.png", "sha256": "2d7896be143eff9d6290775c9fe936d9fbcbd9f32e53ef94550be14e40028572", "width": 840, "height": 500},
+    {"path": "art/mp-startup.png", "sha256": "72f48a3ff67547cd2042005b97607e33cd65f70518a6dc7637939fe69cca4174", "width": 280, "height": 158}
+  ]
+}
