@@ -14,6 +14,8 @@ controller layer.
 
 ## Install
 
+New to the package? Open [Start Here](START-HERE.txt).
+
 You need a homebrew-enabled Vita, VitaShell and your own supported game dump:
 **Wii USA Rev 1 (`R4QE01`)**. Game files are not included.
 

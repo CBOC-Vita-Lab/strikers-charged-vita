@@ -3,6 +3,7 @@
 The ready-made VPK is staged privately from the exact installed app.
 Fresh-install testing and public-release review are still pending. You do
 not need to compile the port. Do not substitute an older lab or Codex VPK.
+For the shortest path, open [Start Here](START-HERE.txt).
 
 ## You Need
 
@@ -16,8 +17,11 @@ not need to compile the port. Do not substitute an older lab or Codex VPK.
 1. [Extract your own game](PREPARE-GAME.md) on the computer, then copy its
    `sys/` and `files/` folders into `ux0:data/mscharged/game/`. The preparation
    guide includes a revision check; no compiling is needed.
-2. Check the release VPK against its supplied checksum, then install it with
-   VitaShell.
+2. Extract the install ZIP on your computer and [check the download](CHECK-DOWNLOAD.md).
+   Leave `Strikers-a8d4ad6-private-candidate.vpk` intact. Copy it through
+   VitaShell USB or FTP to `ux0:VPK/` (create that folder if needed), then
+   end the transfer. In VitaShell, highlight the VPK, use the confirm button
+   (usually Cross), and confirm installation.
 3. Open the Mario Strikers Charged bubble. Use [Controls](CONTROLS.md) for
    the default layout and closer camera options.
 
@@ -48,6 +52,16 @@ manual file-copy step for players. The final package must include its
 reviewed matching resources.
 
 ## Update And Back Up
+
+An ordinary app update replaces the **VPK only**, not your data folder.
+
+| Item | What To Do |
+| --- | --- |
+| Matching `MSCN00003` VPK | Install with VitaShell; do not unpack it over `ux0:app/`. |
+| `game/` | Keep. Copy your own extraction only for a first install or a verified repair. |
+| `np-data/NAND/` | Keep and back up. Never replace with bundled/test saves. |
+| `np-player.txt` | Keep your settings; no replacement config is bundled. |
+| Boot image and shader cache | Already inside the matching VPK; no manual replacement. |
 
 Exit the game and back up `ux0:data/mscharged/`, especially `np-data/NAND/`
 and `np-player.txt`. Install the updated **player** VPK with the same

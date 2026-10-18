@@ -1,0 +1,32 @@
+MARIO STRIKERS CHARGED VITA
+Private candidate: a8d4ad6 / MSCN00003. Not cleared for redistribution.
+
+FIRST INSTALL
+1. Extract this entire install ZIP on your computer. Do not unzip the VPK.
+2. Open CHECK-DOWNLOAD.md to check the download, then PREPARE-GAME.md to
+   extract your own Wii USA Rev 1 (R4QE01) disc image.
+3. Using VitaShell USB or FTP, copy game/sys and game/files so you have:
+     ux0:data/mscharged/game/sys/fst.bin
+     ux0:data/mscharged/game/files/Art/
+   Do not create game/game or game/DATA. Allow about 3 GB free on the Vita.
+4. Copy Strikers-a8d4ad6-private-candidate.vpk to ux0:VPK/ (create VPK if
+   needed). End the transfer, then open that VPK in VitaShell and install.
+5. Open the Mario Strikers Charged bubble. See CONTROLS.md for the layout.
+
+ALREADY INSTALLED?
+Back up ux0:data/mscharged/ first. Install only the matching new player VPK.
+Do not delete the bubble, replace individual eboot/shader files, recopy the
+game, or replace the whole data folder as an ordinary app update.
+
+KEEP: game/ (your extracted disc), np-data/NAND/ (saves), np-player.txt
+      (settings), and your own artwork. Do not use someone else's save.
+INCLUDED: player VPK, its matching startup/shader resources, guides and
+          an optional offline download checker. No compiler is needed.
+NOT INCLUDED: disc image, extracted game, saves, firmware or HD models.
+
+Keep the guides and notices on your computer; do not copy the whole ZIP
+contents into ux0:app/. The VPK installer places its own app resources.
+INSTALL.md has the full folder map, backup advice and troubleshooting.
+
+The package currently retains private installed artwork and an uncleared
+runtime. Do not share it. Fresh-install and source/rights review remain open.
