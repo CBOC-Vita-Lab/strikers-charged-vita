@@ -19,7 +19,8 @@ You need a homebrew-enabled Vita, VitaShell and your own supported game dump:
 
 Installation uses a ready-made VPK plus your extracted `sys/` and `files/` folders
 under `ux0:data/mscharged/game/`. Follow [Install](INSTALL.md) for the layout
-and backup steps. You should not need to replace `eboot.bin` or run lab tools.
+and backup steps, with [game extraction](PREPARE-GAME.md) in a separate guide.
+You should not need to replace `eboot.bin` or run lab tools.
 
 ## Release Status
 

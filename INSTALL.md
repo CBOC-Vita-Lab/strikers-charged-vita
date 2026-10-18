@@ -9,20 +9,21 @@ not need to compile the port. Do not substitute an older lab or Codex VPK.
 - A homebrew-enabled PS Vita and VitaShell.
 - Your own Mario Strikers Charged **Wii USA Rev 1 (`R4QE01`)** dump.
 - The matching ready-made native player VPK, application ID **`MSCN00003`**.
+- About 3 GB free on the Vita for the extracted game, app and saves.
 
 ## Installation
 
-1. Prepare your own game's data on the computer. The result must contain
-   `sys/` and `files/`, including `sys/fst.bin`. Copy those two folders into
-   `ux0:data/mscharged/game/`, not into another nested game folder.
+1. [Extract your own game](PREPARE-GAME.md) on the computer, then copy its
+   `sys/` and `files/` folders into `ux0:data/mscharged/game/`. The preparation
+   guide includes a revision check; no compiling is needed.
 2. Check the release VPK against its supplied checksum, then install it with
    VitaShell.
 3. Open the Mario Strikers Charged bubble. Use [Controls](CONTROLS.md) for
    the default layout and closer camera options.
 
-The exact supported extraction procedure still needs to be checked against
-the current source export. These steps are not yet a tested fresh-install
-guide. Do not download a pre-extracted game pack to fill that gap.
+The extraction was checked on macOS against the retained game files, with
+matching file contents. A fresh Vita install of this package is still
+untested. Game data is not supplied; use your own dump, not a downloaded pack.
 
 ## Folder Check
 
