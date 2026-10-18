@@ -25,6 +25,12 @@ normalized; private logs, session data, original Git metadata, screenshots,
 package artwork, shader binaries and game data were left out. Current
 guides replace the old lab notebooks. No game logic was deliberately changed.
 
-See [Building](BUILDING.md) for the dependency gaps and
+The recovered dependency recipe is now included with fixed source revisions
+in [dependencies/lock.json](dependencies/lock.json). It uses the exported
+patched vitaGL tree and recorded GLB options, without changing game code.
+The pins identify the recovered reference checkouts, not the exact archives
+linked into the original executable.
+
+See [Building](BUILDING.md) for build steps and
 [Third-party Notices](THIRD_PARTY_NOTICES.md) for licensing boundaries.
 The repository stays private until the remaining checks pass.

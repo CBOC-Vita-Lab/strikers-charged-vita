@@ -1,0 +1,127 @@
+# Recovered native-player dependency recipe. Use: python3 BUILD-DEPS.py
+# Sources and VitaSDK remain unchanged; output goes to build/dependencies/prefix.
+#
+#   lib/libtaihen_stub.a      import stubs for taiHEN's user library (generated
+#                             from its exports.yml; needed by SceShaccCgExt)
+#   lib/libSceShaccCgExt.a    patches the shader compiler module to accept the
+#                             Cg dialect vitaGL's GLSL translator emits
+#   lib/libmathneon.a         NEON maths used by vitaGL
+#   lib/libvitashark.a        runtime shader compiler front end (loads
+#                             ur0:data/libshacccg.suprx, which the user supplies)
+#   lib/libvitaGL.a           OpenGL ES 2-level API on sceGxm
+#
+# These are C libraries with GCC-specific options, compiled with VitaSDK's GCC
+# and each project's own flags.
+VITASDK ?= /opt/vitasdk
+VBIN := $(VITASDK)/bin
+ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+REFS ?= $(ROOT)/build/dependencies/sources
+DEPS_OUT ?= $(ROOT)/build/dependencies/prefix
+
+TAIHEN  := $(REFS)/yifanlu_taiHEN
+SHACCEXT := $(REFS)/bythos14_SceShaccCgExt
+MATHNEON := $(REFS)/Rinnegatamante_math-neon
+SHARK   := $(REFS)/Rinnegatamante_vitaShaRK
+VGL     := $(ROOT)/dependencies/vitaGL
+
+CC  := $(VBIN)/arm-vita-eabi-gcc
+CXX := $(VBIN)/arm-vita-eabi-g++
+AR  := $(VBIN)/arm-vita-eabi-gcc-ar
+O   := $(DEPS_OUT)
+INCDIR := $(O)/include
+LIBDIR := $(O)/lib
+
+# Match native/platform/vita/tools/vitadeps_glb.sh. The shipped vitaGL source
+# already contains its local patches; do not apply them a second time.
+VGL_OPTS := -DHAVE_SHADER_CACHE -DSTORE_DEPTH_STENCIL -DSKIP_SPLASHSCREEN -DHAVE_SHARK_LOG -DLOG_ERRORS -DHAVE_SCRATCH_MEMORY -DSKIP_ERROR_HANDLING -DDRAW_SPEEDHACK
+VGL_HASH := cdbba42-glb
+VGL_CFLAGS := -g -O3 -ffast-math -mtune=cortex-a9 -mfpu=neon -Wno-incompatible-pointer-types -Wno-stringop-overflow \
+              -mfp16-format=ieee -DVGL_GIT_HASH='"$(VGL_HASH)"' -I$(VGL)/source -I$(INCDIR) $(VGL_OPTS) \
+              -DsceClibPrintf=msc_vgl_printf -w
+VGL_CXXFLAGS := $(VGL_CFLAGS) -fexceptions -std=gnu++11 -Wno-write-strings
+
+VGL_C   := $(wildcard $(VGL)/source/*.c) $(wildcard $(VGL)/source/utils/*.c)
+VGL_CPP := $(wildcard $(VGL)/source/utils/*.cpp) $(wildcard $(VGL)/source/utils/preprocessor/*.cpp)
+VGL_OBJ := $(patsubst $(VGL)/source/%.c,$(O)/vitagl/%.o,$(VGL_C)) $(patsubst $(VGL)/source/%.cpp,$(O)/vitagl/%.o,$(VGL_CPP))
+
+SHARK_CFLAGS := -g -O2 -ffast-math -mtune=cortex-a9 -mfpu=neon -ftree-vectorize -I$(INCDIR) -w
+SHARK_OBJ := $(patsubst $(SHARK)/source/%.c,$(O)/vitashark/%.o,$(wildcard $(SHARK)/source/*.c))
+
+MATHNEON_CFLAGS := -g -O2 -ffast-math -mtune=cortex-a9 -mfpu=neon -ftree-vectorize -w
+MATHNEON_OBJ := $(patsubst $(MATHNEON)/source/%.c,$(O)/mathneon/%.o,$(wildcard $(MATHNEON)/source/*.c))
+
+# Upstream's CMake flags; the three -Wno-error are what VitaSDK's package
+# recipe adds for current GCC.
+SHACCEXT_CFLAGS := -O3 -ffast-math -mtune=cortex-a9 -mfpu=neon -fno-optimize-sibling-calls -ftree-vectorize \
+                   -I$(SHACCEXT)/include -I$(INCDIR) -w
+SHACCEXT_OBJ := $(O)/shacccgext/shacccg_ext.o $(O)/shacccgext/shacccg_ext_oop.o
+
+all: $(LIBDIR)/libvitaGL.a $(LIBDIR)/libvitashark.a $(LIBDIR)/libmathneon.a $(LIBDIR)/libSceShaccCgExt.a $(LIBDIR)/libtaihen_stub.a
+
+# ---- headers ---------------------------------------------------------------
+HEADERS := $(INCDIR)/taihen.h $(INCDIR)/shacccg_ext.h $(INCDIR)/math_neon.h $(INCDIR)/vitashark.h $(INCDIR)/vitaGL.h
+$(INCDIR)/taihen.h: $(TAIHEN)/taihen.h
+	@mkdir -p $(INCDIR); cp $< $@
+$(INCDIR)/shacccg_ext.h: $(SHACCEXT)/include/shacccg_ext.h
+	@mkdir -p $(INCDIR); cp $< $@
+$(INCDIR)/math_neon.h: $(MATHNEON)/source/math_neon.h
+	@mkdir -p $(INCDIR); cp $< $@
+$(INCDIR)/vitashark.h: $(SHARK)/source/vitashark.h
+	@mkdir -p $(INCDIR); cp $< $@
+$(INCDIR)/vitaGL.h: $(VGL)/source/vitaGL.h
+	@mkdir -p $(INCDIR); cp $< $@
+headers: $(HEADERS)
+
+# ---- taiHEN user import stubs ------------------------------------------------
+# vita-elf-export turns the module's export description into an import
+# database (its ELF argument is only hashed into the module NID, which import
+# stubs do not carry); vita-libs-gen writes one assembly stub per function.
+# The function NIDs are the toolchain's default (SHA-256 of the name), the
+# same rule the real taihen.skprx was built with.
+$(LIBDIR)/libtaihen_stub.a: $(TAIHEN)/exports.yml
+	@rm -rf $(O)/taihen && mkdir -p $(O)/taihen/gen $(LIBDIR)
+	$(VBIN)/vita-elf-export kernel $< $< $(O)/taihen/taihen_imports.yml
+	$(VBIN)/vita-libs-gen $(O)/taihen/taihen_imports.yml $(O)/taihen/gen
+	$(MAKE) --no-print-directory -C $(O)/taihen/gen > $(O)/taihen/gen.log 2>&1
+	cp $(O)/taihen/gen/libtaihen_stub.a $@
+
+# ---- libraries ---------------------------------------------------------------
+$(O)/mathneon/%.o: $(MATHNEON)/source/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(MATHNEON_CFLAGS) -c $< -o $@
+$(LIBDIR)/libmathneon.a: $(MATHNEON_OBJ)
+	@mkdir -p $(LIBDIR); rm -f $@; $(AR) -rc $@ $^
+
+$(O)/shacccgext/%.o: $(SHACCEXT)/src/%.c $(HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(SHACCEXT_CFLAGS) -c $< -o $@
+$(O)/shacccgext/%.o: $(SHACCEXT)/src/%.cpp $(HEADERS)
+	@mkdir -p $(dir $@)
+	$(CXX) -std=gnu++11 -fno-exceptions -fno-rtti -fpermissive $(SHACCEXT_CFLAGS) -c $< -o $@
+$(LIBDIR)/libSceShaccCgExt.a: $(SHACCEXT_OBJ)
+	@mkdir -p $(LIBDIR); rm -f $@; $(AR) -rc $@ $^
+
+$(O)/vitashark/%.o: $(SHARK)/source/%.c $(HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) $(SHARK_CFLAGS) -c $< -o $@
+$(LIBDIR)/libvitashark.a: $(SHARK_OBJ)
+	@mkdir -p $(LIBDIR); rm -f $@; $(AR) -rc $@ $^
+
+# Match the recovered recipe's 8 MiB uniform ring in an isolated build copy.
+VGL_UNIFORM_RING_MIB ?= 8
+$(O)/vitagl/utils/gxm_utils.o: $(VGL)/source/utils/gxm_utils.c $(HEADERS)
+	@mkdir -p $(dir $@) $(O)/vitagl-patched
+	sed 's/^#define UNIFORM_CIRCULAR_POOL_SIZE .*/#define UNIFORM_CIRCULAR_POOL_SIZE ($(VGL_UNIFORM_RING_MIB) * 1024 * 1024)/' $< > $(O)/vitagl-patched/gxm_utils.c
+	grep -q '^#define UNIFORM_CIRCULAR_POOL_SIZE ($(VGL_UNIFORM_RING_MIB) \* 1024 \* 1024)' $(O)/vitagl-patched/gxm_utils.c
+	$(CC) $(VGL_CFLAGS) -I$(VGL)/source/utils -c $(O)/vitagl-patched/gxm_utils.c -o $@
+$(O)/vitagl/%.o: $(VGL)/source/%.c $(HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) $(VGL_CFLAGS) -c $< -o $@
+$(O)/vitagl/%.o: $(VGL)/source/%.cpp $(HEADERS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(VGL_CXXFLAGS) -c $< -o $@
+$(LIBDIR)/libvitaGL.a: $(VGL_OBJ)
+	@mkdir -p $(LIBDIR); rm -f $@; $(AR) -rc $@ $^
+	@echo "vitaGL $(VGL_HASH) built with: $(VGL_OPTS) uniform-ring-$(VGL_UNIFORM_RING_MIB)MiB" | tee $(O)/vitagl/options.txt
+
+.PHONY: all headers

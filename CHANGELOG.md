@@ -1,5 +1,11 @@
 # Changes
 
+## 2026-10-18: Dependency Setup
+
+- Recovered the library-build recipe and pinned its external source inputs.
+- Added `BUILD-DEPS.py` to fetch and build them without changing VitaSDK.
+- Kept the original game, renderer and installed runtime unchanged.
+
 ## 2026-10-18: Simpler Setup
 
 - Added one-command game preparation with a verified extractor download,

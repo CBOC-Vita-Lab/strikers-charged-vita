@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "scope": "Recovered reference-source pins for the reconstructed dependency recipe; not a byte-identical installed-runtime receipt",
+  "vitagl_base": "cdbba4232cb93a741ba190be9a32143dfed12d8d",
+  "vitagl_source": "dependencies/vitaGL/source",
+  "vitagl_note": "This tree already includes the exported local patches. Do not apply them again.",
+  "dependencies": [
+    {"name": "yifanlu_taiHEN", "url": "https://github.com/yifanlu/taiHEN.git", "commit": "309b3800bcb8ebbd5e4f5e5e920af3da3590b829"},
+    {"name": "bythos14_SceShaccCgExt", "url": "https://github.com/bythos14/SceShaccCgExt.git", "commit": "fb0e9d338525b067f3679ab33571323336493cca"},
+    {"name": "Rinnegatamante_math-neon", "url": "https://github.com/Rinnegatamante/math-neon.git", "commit": "0faab814782c071ff4015527f1ca955ab1ccc470"},
+    {"name": "Rinnegatamante_vitaShaRK", "url": "https://github.com/Rinnegatamante/vitaShaRK.git", "commit": "df24065e65098b2d1ac533760109ad4367573f28"},
+    {"name": "bythos14_kubridge", "url": "https://github.com/bythos14/kubridge.git", "commit": "417ddde9a744eba98d769382c1c1372b8e119139"}
+  ]
+}

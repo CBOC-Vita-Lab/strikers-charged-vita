@@ -10,7 +10,7 @@ Keep file-level notices and the license texts with any permitted copy.
 | Native renderer | Retains `renderer/third_party/LICENSE-aurora`, `LICENSE-stb` and `LICENSE-xxhash`, plus file notices |
 | vitaGL | Rinnegatamante and contributors; GPL-3.0, text in `licenses/GPL-3.0.txt`; the local modified implementation is included |
 | Port-specific additions | Preserved source; no new blanket license is invented by this import |
-| File checker | `CHECK-FILES-LICENSE.txt`, applies only to that helper and its tests |
+| File checker and preparation/build helpers | MIT; `CHECK-FILES-LICENSE.txt` lists the covered scripts and tests |
 
 The upstream CC0 text and third-party license texts were retrieved from the
 exact imported upstream revision, not copied from an unrelated latest tree.
