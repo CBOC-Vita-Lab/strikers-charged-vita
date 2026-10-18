@@ -17,17 +17,18 @@ controller layer.
 You need a homebrew-enabled Vita, VitaShell and your own supported game dump:
 **Wii USA Rev 1 (`R4QE01`)**. Game files are not included.
 
-The intended install is a VPK plus your extracted `sys/` and `files/` folders
+Installation uses a ready-made VPK plus your extracted `sys/` and `files/` folders
 under `ux0:data/mscharged/game/`. Follow [Install](INSTALL.md) for the layout
 and backup steps. You should not need to replace `eboot.bin` or run lab tools.
 
 ## Release Status
 
 This is private release preparation for Claude's native `a8d4ad6` build.
-The installed executable and app resources have been recovered from a Vita;
-the executable matches that build exactly. Matching source/dependencies,
-release artwork clearance and a verified fresh-install package are still
-needed before publication. No release download is available yet.
+The installed executable and app resources have been packaged as a private
+VPK candidate without changing them. A fresh console read confirms the
+executable is that exact build. You will not need to compile the port.
+Matching source/dependencies, public-content clearance and fresh-install
+testing are still needed before publication. No public download is available.
 
 Level 7 has an emulator match test. Level 6, the Options cycle and the final
 package still need Vita acceptance. Menus can run below 30 FPS; no locked

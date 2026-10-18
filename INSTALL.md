@@ -1,14 +1,14 @@
 # Install
 
-This is a preparation draft, not a released installer. The current app was
-recovered read-only from a Vita, but the complete source and final release
-package are not ready. Do not use an older lab or Codex VPK in its place.
+The ready-made VPK is staged privately from the exact installed app.
+Fresh-install testing and public-release review are still pending. You do
+not need to compile the port. Do not substitute an older lab or Codex VPK.
 
 ## You Need
 
 - A homebrew-enabled PS Vita and VitaShell.
 - Your own Mario Strikers Charged **Wii USA Rev 1 (`R4QE01`)** dump.
-- The matching native player VPK, application ID **`MSCN00003`**, once released.
+- The matching ready-made native player VPK, application ID **`MSCN00003`**.
 
 ## Installation
 
