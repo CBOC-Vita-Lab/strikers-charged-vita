@@ -19,15 +19,17 @@ fixes, including the movie audio-buffer fix.
 
 ## Install
 
-The simplest route uses [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases):
+On an **Apple Silicon Mac**, the simplest route uses
+[CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases):
 
 1. Connect your Vita, then select the matching release ZIP or its extracted folder.
 2. Select your own **Wii USA Rev 1 (`R4QE01`)** ISO/RVZ or complete game extraction.
 3. Add any missing required file when prompted, choose your artwork, and install.
 
 [Desktop Install](DESKTOP-INSTALL.md) lists the requirements. No separate Python,
-Dolphin or compiling is needed for that route. Prefer manual setup? Install the
-VPK with VitaShell and copy your own game folders using [Install](INSTALL.md).
+Dolphin or compiling is needed for that route. Windows and Intel Mac users can
+follow [Install](INSTALL.md): install the VPK with VitaShell and copy your own
+game folders. Desktop builds for those platforms are not ready yet.
 
 [Start Here](START-HERE.txt) is the short checklist. [Install](INSTALL.md)
 has the requirements, folder map and update steps. The VPK already carries
