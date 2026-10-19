@@ -2,7 +2,7 @@
 
 For installation, use [Install](INSTALL.md). This page is for developers.
 
-Build the `a8d4ad6` native player from the source included here. Dependency
+Build the `a8d4ad6` native player plus the accepted movie update. Dependency
 setup uses fixed revisions rather than whichever upstream versions are newest.
 
 ## Source Layout
@@ -57,17 +57,18 @@ Personal installed artwork and shader seeds are not committed.
 Seeds must match the renderer and vitaGL options.
 The normal output is `build/native/vita/pkg/np/mscharged-np.vpk`, title ID
 `MSCN00003`. This source-build path must pass the verification below before
-its output could be considered for installation. It is not the selected
-installer: that retains the installed executable and shaders, with generic
-app graphics and required notices. No rebuilt executable is selected.
+its output could be considered for installation. The selected movie-update
+package uses the approved production rebuild, retaining the existing shader
+seeds and generic app graphics. See [Source Record](SOURCE.md) for its hashes;
+a separate build is not automatically byte-identical to that executable.
 
 ## Verification
 
 On 2026-10-18, the five dependency libraries built successfully with this
-helper. The recovered recipe also compiled and linked the native player,
-produced its Vita executable and generated the `MSCN00003` SFO. The rebuilt
-executable is not byte-identical to the installed one and is excluded from
-the installation bundles. The installed build remains selected.
+helper. That initial baseline rebuild was not selected. On 2026-10-19 the
+approved movie source was built for `MSCN00003`, installed through the guarded
+executable-update procedure and verified by readback. Its exact executable is
+now selected. This does not establish full VPK or desktop-installer acceptance.
 
 Run `python3 -m unittest discover -s tests -v` for the file checker,
 game-preparation and dependency-setup tests. These are host tests, not
@@ -75,3 +76,6 @@ gameplay tests. A release still needs an exact source/dependency
 receipt, license review, fresh install and save-preserving upgrade tests.
 Do not run the old `native/platform/vita/session/` deployment scripts on a
 working console as part of a source build.
+
+[Movie tests](tests/movie/README.md) cover the scheduler and real decoder,
+including audio-preserving skips, retries and mixer exclusion.

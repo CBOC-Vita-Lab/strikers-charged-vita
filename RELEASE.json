@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "strikers-movie-fix-20261019",
+  "date": "2026-10-19",
+  "baseNative": "a8d4ad6",
+  "renderer": "47e8568",
+  "titleId": "MSCN00003",
+  "package": {
+    "path": "Strikers-movie-fix-20261019.vpk",
+    "sha256": "1cbc5fa0b6b12bce3569c9c2909f5964a0a2f8923b175ee4f0eb7ce3792493ad",
+    "runtimeSha256": "b3e0bce8d2b55f310df44acc2c3d242132145e9bb6ae068bd4ce566c995d8277"
+  },
+  "sourceFiles": {
+    "native/src/Game/Sys/movie.cpp": {
+      "before": "0633a6ff02b4f994e18b5d7d7d82371abbdef8dc255b285b21e2a91fac6ab5e4",
+      "after": "d4253255e5b3c5fc586210fb44d251cfdef48aa370a81f92534560330442db7f"
+    },
+    "native/platform/sdk/src/thp_native.cpp": {
+      "before": "d082d6d2fa640cdac0fc3138ffa01e1b3366f94feac9e40d18d7a6a46ac01a77",
+      "after": "ae23d4e92b1f0459c0e376ec4a2527bb73b4f89cd43452d598bbb25a5cfb4aa1"
+    },
+    "native/platform/sdk/patches/thp/THPSimple.cpp.sed": {
+      "before": "a22583e990c2c7c78817d8b4a7a32745f99bdeb776b8c38896bdf9212d1b1548",
+      "after": "c4d4bebb6483835fe995aadeb09c461475e0b9cc5c31a8ceb52511b696d8db3e"
+    },
+    "native/include/RVL_SDK/thp/THPSimple.h": {
+      "before": "4933a7d53bdf8d53a63151ad5ed150a58dc74b360020ee912aa8ea1ed50e888e",
+      "after": "f3648e657c97a6076441a8d7a0f97d84bd628018859479ea77c5b6625a07b4f2"
+    },
+    "native/ref/RVL_SDK/thp/THPSimple.cpp": {
+      "before": "af382e02f68f401086eb0faca3f2b4943970804781189c3907f249f78cdf8da3",
+      "after": "1f90f7aaf527b7fd8f05437273a5b5426ab7d842288ec71c6fa746acc239a2d6"
+    }
+  },
+  "unchangedPackageMembers": {
+    "licenses/Apache-2.0.txt": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+    "licenses/BSD-3-Clause-GameSpy.txt": "d9e5160bf022392508493a7085dffbcbbbebaacd5f7602d29b0216eb784a576b",
+    "licenses/DejaVu.txt": "7a083b136e64d064794c3419751e5c7dd10d2f64c108fe5ba161eae5e5958a93",
+    "licenses/GPL-3.0.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "licenses/LGPL-3.0.txt": "6557adc4bc1d59232e27567a185dd70cf2ecca3154018b0be61ea29cf9e814e2",
+    "licenses/LICENSE-aurora": "40c03cee04cda570d1029b85b6c2ee7ba78431ab1a754b9d912091d73b8ecb18",
+    "licenses/LICENSE-stb": "bebfe904b14301657e4e5d655c811d51fd31b97c455b9cc2d8600d6bac6cff63",
+    "licenses/LICENSE-xxhash": "6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a",
+    "licenses/ODE-BSD.txt": "7ebe796b7fbe5f1436a0e657d316e7ac3b9368eb1ce668c66e0fcf5c8220d0e8",
+    "licenses/THIRD_PARTY_NOTICES.md": "2a8c179cdcaf2cfa5a3a802c3d0268ede2e7903da5ea09e807a3d0e627620116",
+    "licenses/math-neon-MIT.txt": "a0885b0834238a325f80903f94e8f41de46e241a82f689e7bb7bd89498eb944c",
+    "licenses/mscharged-decomp-CC0.txt": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
+    "licenses/taiHEN-MIT.txt": "b82d83d4c589bfba4c9ce82de4ba98d2b9186b5c59e6cb848bd7ef143b1af437",
+    "licenses/zlib.txt": "f267c06f9088df2f03796feeda1b49aeafbd209feeb7e93b1e3ca3381ffd9fbf",
+    "sce_sys/icon0.png": "e0dfc37a99beb6a37211fcc4441f771bbe3841efe5197f34e33aa3d6bc04ca9e",
+    "sce_sys/livearea/contents/bg.png": "0e39e01818d13a034f76404aed4cdd436413f9d2aa473e95b882407333db5cfa",
+    "sce_sys/livearea/contents/settings.png": "f97e9852a68761e9614798aa9ef65180c27b2de94db644dbe62729114f504ead",
+    "sce_sys/livearea/contents/startup.png": "efc550d7ec5be645895ab8662e5aa7827522168b99c0a7a29af095990eaf4fe0",
+    "sce_sys/livearea/contents/template.xml": "b3789c32d49a8f1c8b5fb801e605cb1c58abccdb762347a9c38f194a2babcb12",
+    "sce_sys/param.sfo": "886ae951e73bc8846fa89794b977b4807a152299a33799b5741e54711714ccc4",
+    "shadercache/bc447993.pack": "5fe9c07ca08cea80bb4b067d8d03db5dcf1577445bf6183a240fd6abfbe1c0ea",
+    "shadercache/vgx_shaderlist.bin": "1b429165af75f649d4d7727228aaedc53f772bd5feaaf379081e48737fdd2301"
+  },
+  "deviceVerification": {
+    "date": "2026-10-19T04:03:29.304510+00:00",
+    "method": "guarded executable update with readback",
+    "runtimeSha256": "b3e0bce8d2b55f310df44acc2c3d242132145e9bb6ae068bd4ce566c995d8277",
+    "protectedFilesUnchanged": 16,
+    "fullVpkInstallTested": false,
+    "desktopInstallTested": false
+  },
+  "publicReleaseAccepted": false
+}

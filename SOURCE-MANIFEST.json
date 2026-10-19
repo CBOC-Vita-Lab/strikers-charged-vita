@@ -1,6 +1,6 @@
 {
-  "date": "2026-10-18",
-  "scope": "Imported source files after documented privacy and documentation edits; not a binary-reproduction receipt",
+  "date": "2026-10-19",
+  "scope": "Imported source with the accepted movie update; RELEASE.json records the selected runtime and five changed source files",
   "files": [
     {
       "path": "dependencies/vitaGL/source/blending.c",
@@ -3484,7 +3484,7 @@
     },
     {
       "path": "native/include/RVL_SDK/thp/THPSimple.h",
-      "sha256": "4933a7d53bdf8d53a63151ad5ed150a58dc74b360020ee912aa8ea1ed50e888e"
+      "sha256": "f3648e657c97a6076441a8d7a0f97d84bd628018859479ea77c5b6625a07b4f2"
     },
     {
       "path": "native/include/decomp.h",
@@ -6824,7 +6824,7 @@
     },
     {
       "path": "native/platform/sdk/patches/thp/THPSimple.cpp.sed",
-      "sha256": "a22583e990c2c7c78817d8b4a7a32745f99bdeb776b8c38896bdf9212d1b1548"
+      "sha256": "c4d4bebb6483835fe995aadeb09c461475e0b9cc5c31a8ceb52511b696d8db3e"
     },
     {
       "path": "native/platform/sdk/patches/tpl/TPL.c.sed",
@@ -7008,7 +7008,7 @@
     },
     {
       "path": "native/platform/sdk/src/thp_native.cpp",
-      "sha256": "d082d6d2fa640cdac0fc3138ffa01e1b3366f94feac9e40d18d7a6a46ac01a77"
+      "sha256": "ae23d4e92b1f0459c0e376ec4a2527bb73b4f89cd43452d598bbb25a5cfb4aa1"
     },
     {
       "path": "native/platform/sdk/src/vi_native.cpp",
@@ -9856,7 +9856,7 @@
     },
     {
       "path": "native/ref/RVL_SDK/thp/THPSimple.cpp",
-      "sha256": "af382e02f68f401086eb0faca3f2b4943970804781189c3907f249f78cdf8da3"
+      "sha256": "1f90f7aaf527b7fd8f05437273a5b5426ab7d842288ec71c6fa746acc239a2d6"
     },
     {
       "path": "native/ref/RVL_SDK/tpl/TPL.c",
@@ -12076,7 +12076,7 @@
     },
     {
       "path": "native/src/Game/Sys/movie.cpp",
-      "sha256": "0633a6ff02b4f994e18b5d7d7d82371abbdef8dc255b285b21e2a91fac6ab5e4"
+      "sha256": "d4253255e5b3c5fc586210fb44d251cfdef48aa370a81f92534560330442db7f"
     },
     {
       "path": "native/src/Game/Sys/simpleparser.cpp",

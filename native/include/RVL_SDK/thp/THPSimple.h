@@ -21,6 +21,9 @@ extern "C"
     void THPSimpleAudioStop(void);
     int THPSimpleLoadStop(void);
     long THPSimpleDecode(long audioTrack);
+    // Consume the same packet, optionally leaving video planes untouched; 5 = read pending.
+    long THPSimpleDecodeVideo(long audioTrack, int decodeVideo);
+    unsigned THPSimpleGetDecodeCapacity(void);
     int THPSimpleGetVideoInfo(THPVideoInfo* videoInfo);
     s32 THPSimpleGetTotalFrame(void);
     int THPSimpleSetVolume(long vol, long time);

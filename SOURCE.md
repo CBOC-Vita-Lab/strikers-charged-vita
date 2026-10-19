@@ -1,7 +1,37 @@
 # Source Record
 
-Snapshot imported on 2026-10-18 from the completed native player build,
-not the older recompiled port or a later experiment.
+The selected build is the accepted movie update, based on the completed
+`a8d4ad6` native player. It is not the isolated movie-test application.
+
+## Selected Movie Update
+
+| Item | Recorded value |
+| --- | --- |
+| Package | `Strikers-movie-fix-20261019.vpk` |
+| Title ID | `MSCN00003` |
+| Native base / renderer | `a8d4ad6` / `47e8568` |
+| Executable SHA-256 | `b3e0bce8d2b55f310df44acc2c3d242132145e9bb6ae068bd4ce566c995d8277` |
+| VPK SHA-256 | `1cbc5fa0b6b12bce3569c9c2909f5964a0a2f8923b175ee4f0eb7ce3792493ad` |
+
+[RELEASE.json](RELEASE.json) binds the five changed source files to this
+production executable and records the unchanged package members. All 4,000
+native/renderer files matched the production source used for the approved
+update. The production and approved isolated build used identical movie code;
+the production build retains the normal title ID and data directory.
+
+The main-app executable was installed and read back on a physical Vita on
+2026-10-19. All 16 protected app, save and settings files matched their
+pre-install hashes. That was an executable-only update, not a full VPK or
+desktop-installer installation test. Those checks remain open.
+
+The shared package uses the same executable with the previously reviewed
+generic art, notices and shader seeds. No personal fan art, game data,
+proprietary shader compiler, device address or save is included.
+
+## Original Import
+
+The original native snapshot was imported on 2026-10-18. These hashes identify
+the older baseline, not the selected movie update:
 
 | Item | Recorded value |
 | --- | --- |
@@ -14,7 +44,7 @@ not the older recompiled port or a later experiment.
 | Recovered player eboot SHA-256 | `4d238f2af1fc1e02d8d42e2cbebfd2eef15b32aa524398ab5e988d6114331005` |
 | Private candidate VPK SHA-256 | `201c4bb5ec892ba18fd58ad2bd8053be32c0356ee5e3f207448d0e011c4d4298` |
 
-The build manifest and recovered installed executable agree. That is
+The original build manifest and recovered installed executable agree. That is
 provenance evidence, not a clean-rebuild or gameplay test. The export has no
 Git history; the new repository commit identifies the reviewed snapshot,
 not the original build commit. [SOURCE-MANIFEST.json](SOURCE-MANIFEST.json)
@@ -23,11 +53,10 @@ records the imported source files and their current hashes.
 Original upstream notices remain. Owner-specific names and paths were
 normalized; private logs, session data, original Git metadata, screenshots,
 installed artwork, shader binaries and game data were left out. Current
-guides replace the old lab notebooks. No game logic was deliberately changed.
-The installer retains the installed executable and shaders; source-build
-validation outputs are not substituted for it. Only package artwork and
-notices change: generic project images replace personal fan art, and the
-existing built-in loading screen is used. See [Included Files](ASSETS.md).
+guides replace the old lab notebooks. The later movie update changes only the
+five files listed in `RELEASE.json`; the renderer, controls and gameplay code
+outside that movie path are unchanged. Generic project images replace personal
+fan art, and the existing built-in loading screen is used. See [Included Files](ASSETS.md).
 
 The recovered dependency recipe is now included with fixed source revisions
 in [dependencies/lock.json](dependencies/lock.json). It uses the exported

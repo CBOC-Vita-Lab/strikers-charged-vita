@@ -9,15 +9,17 @@ all linked guides and notices alongside the ready-made private VPK.
 
 ## Installed Build
 
-The selected private VPK retains the installed `a8d4ad6` executable,
-application metadata and matching shader resources byte-for-byte. No rebuilt
-executable replaces them. Source-build checks are separate from the installer.
+The selected private VPK contains the approved movie-update executable,
+byte-for-byte identical to the verified main-app update on a physical Vita.
+Application metadata and matching shader resources are unchanged.
+[RELEASE.json](RELEASE.json) records the package, runtime and source hashes.
 
 The package uses the project's generic icon and LiveArea graphics, recorded
 in [ARTWORK.json](ARTWORK.json), instead of the console's personal fan art.
 The optional fan-art background and loading picture are omitted; the same
 executable provides its built-in plain loading screen. Required font and
-library notices are included. No game code or shaders were changed.
+library notices are included. Only the five movie source files changed;
+the renderer and packaged shaders are unchanged.
 
 Personal artwork is kept separately and is not shared. Installation-generated
 package records are not part of the VPK.

@@ -9,6 +9,7 @@ void NpThpFixInfo(void*, int);\
 void NpThpFixFrame(void*, unsigned int);\
 int NpThpVideoDecode(void*, void*, void*, void*, void*, int, unsigned, unsigned);\
 void NpThpPrefetch(const void*, int, unsigned, unsigned);\
+void NpThpDiscard(const void*, int);\
 void NpThpReset(void);\
 }
 s/^\( *\)memcpy(&SimpleControl\.compInfo, WorkBuffer, sizeof(THPFrameCompInfo));/\1NpThpFixCompInfo(WorkBuffer);\n&/
@@ -42,7 +43,7 @@ static inline void NpThpPrefetchNextFrames()\
         }\
     }\
 }
-s/^\( *\)checkPrefetch();/\1NpThpPrefetchNextFrames();\n&/
+s/^\( *\)checkPrefetch();/\1if (decodeVideo) NpThpPrefetchNextFrames();\n&/
 /^extern "C" int THPSimpleOpen(const char\* fileName)$/{n;s/{/{\n    NpThpReset();/}
 /^extern "C" int THPSimpleClose()$/{n;s/{/{\n    NpThpReset();/}
 /^extern "C" int THPSimplePreLoad(long loop)$/{n;s/{/{\n    NpThpReset();/}

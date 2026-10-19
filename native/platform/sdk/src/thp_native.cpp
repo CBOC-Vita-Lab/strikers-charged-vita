@@ -230,7 +230,22 @@ int NpThpVideoDecode(void* file, void* tileY, void* tileU, void* tileV, void* wo
     return NpThpDecodeNow(file, tileY, tileU, tileV);
 }
 
-// A movie is opened, closed, restarted or stopped: nothing of the lanes may be in flight or kept.
+// A skipped packet can already be referenced by a decode-ahead worker. Drain that
+// job before THPSimple invalidates/refills its compressed read buffer. Do not copy
+// its planes or start a new video decode for packets that were never queued.
+void NpThpDiscard(const void* video, int frame) {
+    if (g_lanes.enabled != 1) return;
+    for (int i = 0; i < g_lanes.depth; ++i) {
+        Slot& sl = g_lanes.slot[i];
+        if (SlotState(sl) != kIdle && sl.src == video && sl.frame == frame) {
+            SlotWait(sl);
+            SlotRelease(sl);
+            ++g_lanes.stale;
+        }
+    }
+}
+
+// A movie is opened, closed, restarted or stopped: no lane may still be in flight.
 void NpThpReset(void) {
     if (g_lanes.enabled != 1) return;
     for (int i = 0; i < kMaxSlots; ++i) {

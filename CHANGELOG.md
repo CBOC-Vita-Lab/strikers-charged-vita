@@ -1,5 +1,13 @@
 # Changes
 
+## 2026-10-19: Movie Update
+
+- Improved intro and stadium-preview pacing while keeping the movie audio.
+- Fixed audio-buffer access during playback and retries after delayed reads.
+- Added regression tests for movie scheduling, audio and decoder-buffer reuse.
+- Included the matching production VPK with generic art and existing shaders.
+  Its executable matches the verified main-app update on a physical Vita.
+
 ## 2026-10-18: Launch Preparation
 
 - Made the desktop installer the main quick-start route, with manual setup

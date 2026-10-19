@@ -5,8 +5,8 @@ and graphics support.
 
 Around 30 FPS is what we've been able to achieve in testing so far, though
 performance varies by scene. There are still bugs to fix and performance
-improvements to make. The new intro and stadium-preview changes are being
-checked before the launch package is selected.
+improvements to make. This build includes the latest intro and stadium-preview
+fixes, including the movie audio-buffer fix.
 
 ## In This Build
 
@@ -15,6 +15,7 @@ checked before the launch package is selected.
 - GPU skinning, renderer optimizations and a packaged startup shader cache.
 - Recent fixes for startup delays, loading-screen flicker and stadium-preview
   audio timing.
+- Smoother movie pacing without dropping the audio when a picture is skipped.
 
 ## Install
 
@@ -32,8 +33,10 @@ VPK with VitaShell and copy your own game folders using [Install](INSTALL.md).
 has the requirements, folder map and update steps. The VPK already carries
 its startup shaders; no manual `eboot.bin` or shader replacement is needed.
 
-The current `a8d4ad6` download is an older private preview, not the upcoming
-movie-update launch build. Do not mistake it for the latest test candidate.
+Use `Strikers-movie-fix-20261019.vpk` or its matching install ZIP. The complete
+files are also in this repository. The executable matches the approved update
+installed on a physical Vita; the full desktop installation still needs its
+own hardware check. This remains a private release, not the public launch.
 Game data and the proprietary shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and
 [Source Record](SOURCE.md) hold the testing and release details.
 

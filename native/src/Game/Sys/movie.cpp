@@ -20,6 +20,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include "NL/nlstring_tmpl.h"
 #include "NL/gl/glTexture.h"
 #ifdef NP_NATIVE
@@ -47,6 +48,12 @@ static unsigned int g_uStartFrame;
 static bool g_bMovieMustStop;
 static unsigned long resourceMarker;
 static unsigned int g_uLastPlayFrame;
+#ifdef NP_NATIVE
+static unsigned int g_uMoviePictures;
+static unsigned int g_uMovieSkips;
+static unsigned int g_uMovieAudioFull;
+static unsigned int g_uMovieReadWaits;
+#endif
 
 bool MovieInit()
 {
@@ -149,6 +156,13 @@ bool MovieStart(
     }
 
     fn_80372970(bMono);
+    g_uNextDecodeFrame = glxGetFrameCount();
+    g_uLastDecodeRenderTick = g_uRenderTickCount - 1;
+#ifdef NP_NATIVE
+    g_uMoviePictures = g_uMovieSkips = g_uMovieAudioFull = g_uMovieReadWaits = 0;
+    fprintf(stderr, "[movie-fix] start %s %ux%u; clock=%s\n", fileName,
+        videoInfo.xSize, videoInfo.ySize, getenv("MSC_MOVIE_CATCHUP") ? getenv("MSC_MOVIE_CATCHUP") : "bounded");
+#endif
     g_bFinished = false;
     start = true;
     g_bActive = true;
@@ -172,6 +186,8 @@ bool MovieStop()
 #ifdef NP_NATIVE
     // FPS (np/fps.h): the movie's speed in retraces (decodes follow the retrace count, not the drawn frames): a line for the proof runs
     NpFpsMovieEnd(g_uDecodeCount, glxGetFrameCount() - g_uStartFrame);
+    fprintf(stderr, "[movie-fix] consumed=%u pictures=%u skipped=%u audio_full=%u read_waits=%u retraces=%u\n",
+        g_uDecodeCount, g_uMoviePictures, g_uMovieSkips, g_uMovieAudioFull, g_uMovieReadWaits, glxGetFrameCount() - g_uStartFrame);
 #endif
     int lastFrame = THPSimpleGetTotalFrame() - 1;
     int currentFrame = (int)(unsigned int)g_uCurrentFrame;
@@ -229,27 +245,27 @@ bool MoviePlay()
     bool decode = false;
 #ifdef NP_NATIVE
     unsigned int catchUp = 0;
-    bool movieClock = false;   // the next decode is due on the movie's own schedule (see below)
+    static const bool movieClock = [] { const char* e = getenv("MSC_MOVIE_CATCHUP"); return !(e && e[0] == '0'); }();
+    if (movieClock)
+    {
+        // MoviePlay is called after EVERY task. Bound work by render ticks, not
+        // retraces: a slow decode must never monopolize the rest of the task loop.
+        // The same clock applies to stadium previews (SetSyncedDecode(false)).
+        if ((int)(frame - g_uNextDecodeFrame) >= 0 && g_uRenderTickCount != g_uLastDecodeRenderTick)
+        {
+            decode = true;
+            g_uLastDecodeRenderTick = g_uRenderTickCount;
+            catchUp = (frame - g_uNextDecodeFrame) / 2;
+            if (catchUp > 2) catchUp = 2;
+        }
+    }
+    else
 #endif
     if (g_bSyncedDecode)
     {
         if (frame >= g_uNextDecodeFrame)
         {
             decode = true;
-#ifdef NP_NATIVE
-            // NP (17 Oct): one decode per call followed the game's frames, not the movie's. A menu below 30 fps (the stadium select at ~21 fps
-            // on the Vita, GPU-bound) played its preview at 70 % speed: 466 decodes in 1,321 retraces, and the movie's sound ran dry between the
-            // decodes (the maintainer: "audio stutter when the stadium select screen happens"). The movie frames that fell due since the last call are
-            // decoded now (at most two more, the shown picture is the last one), and the next one is due two retraces after the last due
-            // one, so the movie keeps 29.97 fps. A game at a steady 30 fps decodes as before. MSC_MOVIE_CATCHUP=0 brings back one per call.
-            static const bool kCatchUp = [] { const char* e = getenv("MSC_MOVIE_CATCHUP"); return !(e && e[0] == '0'); }();
-            if (kCatchUp)
-            {
-                movieClock = true;
-                catchUp = (frame - g_uNextDecodeFrame) / 2;
-                if (catchUp > 2) catchUp = 2;
-            }
-#endif
         }
     }
     else if (g_uRenderTickCount != g_uLastDecodeRenderTick)
@@ -260,8 +276,6 @@ bool MoviePlay()
 
     if (decode)
     {
-        ++g_uDecodeCount;
-
         if (g_bSyncedDecode)
         {
             GXSetDrawDone();
@@ -275,49 +289,60 @@ bool MoviePlay()
             nlServiceFileSystem();
         }
 
-        int error = THPSimpleDecode(0);
-        if (error == 1 || error == 2)
-        {
-            g_bFinished = true;
-            return false;
-        }
-
-        if (start)
-        {
-            THPSimpleAudioStart();
-            start = false;
-        }
-
-        ++g_uCurrentFrame;
 #ifdef NP_NATIVE
-        if (movieClock)
-        {
-            const unsigned int due = g_uNextDecodeFrame;
-            unsigned int extra = 0;
-            while (extra < catchUp)
-            {
-                // (a frame not read yet, or the sound buffers full: stop catching up, the next call goes on; the end of the movie is
-                //  found by the regular decode as before)
-                if (THPSimpleDecode(0) != 0) break;
-                ++extra;
-                ++g_uDecodeCount;
-                ++g_uCurrentFrame;
-            }
-            g_uNextDecodeFrame = due + 2 * (extra + 1);
-            if (frame >= g_uNextDecodeFrame + 4) g_uNextDecodeFrame = frame + 2;   // far behind (a long hitch): no burst later
-        }
-        else
-        {
-            g_uNextDecodeFrame = frame + 2;
-        }
+        unsigned int packets = movieClock ? catchUp + 1 : 1;
+        // Always display the last packet we can actually accept. Otherwise a full
+        // audio ring or pending disk read could leave only skipped pictures.
+        const unsigned int capacity = THPSimpleGetDecodeCapacity();
+        // A callback can free a slot after the snapshot. Probe it with a picture.
+        if (!capacity) packets = 1;
+        else if (packets > capacity) packets = capacity;
 #else
-        g_uNextDecodeFrame = frame + 2;
+        const unsigned int packets = 1;
 #endif
-
-        GXInvalidateTexAll();
-        pTex[0]->Prepare();
-        pTex[1]->Prepare();
-        pTex[2]->Prepare();
+        bool picture = false;
+        for (unsigned int packet = 0; packet < packets; ++packet)
+        {
+            const bool show = packet + 1 == packets;
+            const int error = THPSimpleDecodeVideo(0, show);
+            if (error == 1 || error == 2 || error == 4)
+            {
+#ifdef NP_NATIVE
+                fprintf(stderr, "[movie-fix] stopped code=%d at packet=%u\n", error, g_uCurrentFrame);
+#endif
+                g_bFinished = true;
+                return false;
+            }
+            if (error != 0)
+            {
+#ifdef NP_NATIVE
+                if (error == 3) ++g_uMovieAudioFull;
+                if (error == 5) ++g_uMovieReadWaits;
+#endif
+                break;  // backpressure: this packet and its deadline remain pending
+            }
+            ++g_uDecodeCount;
+            ++g_uCurrentFrame;
+#ifdef NP_NATIVE
+            if (show) ++g_uMoviePictures; else ++g_uMovieSkips;
+            g_uNextDecodeFrame = movieClock ? g_uNextDecodeFrame + 2 : frame + 2;
+#else
+            g_uNextDecodeFrame = frame + 2;
+#endif
+            if (start)
+            {
+                THPSimpleAudioStart();
+                start = false;
+            }
+            picture = show;
+        }
+        if (picture)
+        {
+            GXInvalidateTexAll();
+            pTex[0]->Prepare();
+            pTex[1]->Prepare();
+            pTex[2]->Prepare();
+        }
     }
     else
     {

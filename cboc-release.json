@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "strikers-movie-fix-20261019",
+  "titleId": "MSCN00003",
+  "displayName": "Mario Strikers Charged",
+  "version": "a8d4ad6-movie1",
+  "minInstallerVersion": "0.1.0",
+  "visibility": "private",
+  "releaseState": "ready",
+  "recipeId": "strikers",
+  "package": {
+    "path": "Strikers-movie-fix-20261019.vpk",
+    "sha256": "1cbc5fa0b6b12bce3569c9c2909f5964a0a2f8923b175ee4f0eb7ce3792493ad",
+    "runtimeSha256": "b3e0bce8d2b55f310df44acc2c3d242132145e9bb6ae068bd4ce566c995d8277"
+  },
+  "requiredInputs": [
+    {
+      "id": "game",
+      "label": "Wii USA Rev 1 game file (R4QE01)",
+      "kind": "strikers-disc"
+    },
+    {
+      "id": "shader",
+      "label": "Shader compiler (libshacccg.suprx)",
+      "kind": "shader-compiler"
+    }
+  ],
+  "optionalInputs": [],
+  "destinations": {
+    "data": "ux0:data/mscharged/game"
+  },
+  "protectedPaths": [
+    "ux0:data/mscharged/np-data/NAND",
+    "ux0:data/mscharged/np-player.txt"
+  ],
+  "prerequisites": [
+    "shader-compiler"
+  ],
+  "limits": {
+    "maxFiles": 10000,
+    "maxFileBytes": 17179869184,
+    "maxTotalBytes": 34359738368
+  },
+  "appUpdateFrom": [
+    "01db0f17d49031730e1d65b9eb9bf555bcebe9fc599a7c0ac11474ce50137989"
+  ]
+}

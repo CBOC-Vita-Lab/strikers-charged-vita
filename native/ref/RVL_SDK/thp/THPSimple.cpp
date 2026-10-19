@@ -11,6 +11,9 @@
 #include <revolution/os/OSThread.h>
 #include <revolution/thp/THPFile.h>
 #include <string.h>
+#ifdef NP_NATIVE
+#include <stdio.h>
+#endif
 
 extern "C"
 {
@@ -73,6 +76,11 @@ static s16* CurAudioBuffer;
 static s32 AudioSystem;
 static long WorkBuffer[16] ALIGN(32);
 static s16 SoundBuffer[2][192] ALIGN(32);
+#ifdef NP_NATIVE
+static unsigned NpThpAudioGapBlocks;
+static unsigned NpThpAudioGapSamples;
+static bool NpThpAudioIssuedForHead;
+#endif
 
 static unsigned short VolumeTable[128] = {
     0x0000,
@@ -339,6 +347,9 @@ extern "C" int THPSimpleOpen(const char* fileName)
     SimpleControl.nextDecodeIndex = 0;
     SimpleControl.audioDecodeIndex = 0;
     SimpleControl.audioOutputIndex = 0;
+#ifdef NP_NATIVE
+    NpThpAudioIssuedForHead = false;
+#endif
     SimpleControl.preFetchState = 0;
     SimpleControl.audioState = 0;
     SimpleControl.loop = 0;
@@ -498,6 +509,11 @@ extern "C" int THPSimplePreLoad(long loop)
 
     if (SimpleControl.open && SimpleControl.preFetchState == 0)
     {
+#ifdef NP_NATIVE
+        __atomic_store_n(&NpThpAudioGapBlocks, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&NpThpAudioGapSamples, 0, __ATOMIC_RELAXED);
+        NpThpAudioIssuedForHead = false;
+#endif
         readNum = 10;
         if (loop == 0 && SimpleControl.numFrames < 10)
         {
@@ -543,7 +559,17 @@ extern "C" void THPSimpleAudioStart()
 
 extern "C" void THPSimpleAudioStop()
 {
+#ifdef NP_NATIVE
+    const bool wasPlaying = SimpleControl.audioState == 1 && SimpleControl.audioExist;
     SimpleControl.audioState = 0;
+    if (wasPlaying)
+        fprintf(stderr, "[movie-audio] gaps=%u missing_samples=%u rate=%u\n",
+            __atomic_load_n(&NpThpAudioGapBlocks, __ATOMIC_RELAXED),
+            __atomic_load_n(&NpThpAudioGapSamples, __ATOMIC_RELAXED),
+            (unsigned)SimpleControl.audioInfo.sndFrequency);
+#else
+    SimpleControl.audioState = 0;
+#endif
 }
 
 extern "C" int THPSimpleLoadStop()
@@ -552,6 +578,9 @@ extern "C" int THPSimpleLoadStop()
 
     if (SimpleControl.open && SimpleControl.audioState == 0)
     {
+#ifdef NP_NATIVE
+        NpThpAudioIssuedForHead = false;
+#endif
         SimpleControl.preFetchState = 0;
         if (SimpleControl.readProgress != 0)
         {
@@ -615,6 +644,23 @@ static inline void checkPrefetch()
 
 extern "C" long THPSimpleDecode(long audioTrack)
 {
+    const long result = THPSimpleDecodeVideo(audioTrack, 1);
+    return result == 5 ? 2 : result;
+}
+
+extern "C" unsigned THPSimpleGetDecodeCapacity(void)
+{
+    const int old = OSDisableInterrupts();
+    unsigned count = 0;
+    while (count < 6 && SimpleControl.readBuffer[(SimpleControl.nextDecodeIndex + count) % 10].isValid
+           && (!SimpleControl.audioExist || SimpleControl.audioBuffer[(SimpleControl.audioDecodeIndex + count) % 6].validSample == 0))
+        ++count;
+    OSRestoreInterrupts(old);
+    return count;
+}
+
+extern "C" long THPSimpleDecodeVideo(long audioTrack, int decodeVideo)
+{
     int old;
     unsigned long i;
     unsigned char* ptr;
@@ -634,6 +680,45 @@ extern "C" long THPSimpleDecode(long audioTrack)
             if (audioTrack < 0 || (unsigned long)audioTrack >= SimpleControl.audioInfo.sndNumTracks)
                 return 4;
 
+#ifdef NP_NATIVE
+            // Publish this due packet's audio before any picture/worker wait.
+            // A failed picture can be retried without issuing its audio twice.
+            if (!NpThpAudioIssuedForHead)
+            {
+                if (SimpleControl.audioBuffer[SimpleControl.audioDecodeIndex].validSample != 0)
+                    return 3;
+                unsigned char* audioPtr = ptr;
+                unsigned long* audioSize = compSizePtr;
+                for (i = 0; i < SimpleControl.compInfo.numComponents; ++i)
+                {
+                    if (SimpleControl.compInfo.frameComp[i] == 1)
+                    {
+                        THPAudioBuffer& audio = SimpleControl.audioBuffer[SimpleControl.audioDecodeIndex];
+                        sample = THPAudioDecode(audio.buffer, audioPtr + *audioSize * audioTrack, 0);
+                        old = OSDisableInterrupts();
+                        audio.curPtr = audio.buffer;
+                        audio.validSample = sample;
+                        OSRestoreInterrupts(old);
+                        if (++SimpleControl.audioDecodeIndex >= 6)
+                            SimpleControl.audioDecodeIndex = 0;
+                        NpThpAudioIssuedForHead = true;
+                        break;
+                    }
+                    audioPtr += *audioSize++;
+                }
+            }
+            for (i = 0; i < SimpleControl.compInfo.numComponents; ++i)
+            {
+                if (SimpleControl.compInfo.frameComp[i] == 0)
+                {
+                    if (decodeVideo && !VideoDecode(ptr))
+                        return 1;
+                    if (!decodeVideo)
+                        NpThpDiscard(ptr, SimpleControl.readBuffer[SimpleControl.nextDecodeIndex].frameNumber);
+                }
+                ptr += *compSizePtr++;
+            }
+#else
             if (SimpleControl.audioBuffer[SimpleControl.audioDecodeIndex].validSample == 0)
             {
                 for (i = 0; i < SimpleControl.compInfo.numComponents; i++)
@@ -641,8 +726,12 @@ extern "C" long THPSimpleDecode(long audioTrack)
                     switch (SimpleControl.compInfo.frameComp[i])
                     {
                     case 0:
-                        if (!VideoDecode(ptr))
+                        if (decodeVideo && !VideoDecode(ptr))
                             return 1;
+#ifdef NP_NATIVE
+                        if (!decodeVideo)
+                            NpThpDiscard(ptr, SimpleControl.readBuffer[SimpleControl.nextDecodeIndex].frameNumber);
+#endif
                         break;
                     case 1:
                         sample = THPAudioDecode(SimpleControl.audioBuffer[SimpleControl.audioDecodeIndex].buffer, ptr + *compSizePtr * audioTrack, 0);
@@ -662,6 +751,7 @@ extern "C" long THPSimpleDecode(long audioTrack)
             {
                 return 3;
             }
+#endif
         }
         else
         {
@@ -670,8 +760,12 @@ extern "C" long THPSimpleDecode(long audioTrack)
                 switch (SimpleControl.compInfo.frameComp[i])
                 {
                 case 0:
-                    if (!VideoDecode(ptr))
+                    if (decodeVideo && !VideoDecode(ptr))
                         return 1;
+#ifdef NP_NATIVE
+                    if (!decodeVideo)
+                        NpThpDiscard(ptr, SimpleControl.readBuffer[SimpleControl.nextDecodeIndex].frameNumber);
+#endif
                     break;
                 }
                 ptr += *compSizePtr;
@@ -679,6 +773,9 @@ extern "C" long THPSimpleDecode(long audioTrack)
             }
         }
 
+#ifdef NP_NATIVE
+        NpThpAudioIssuedForHead = false;
+#endif
         SimpleControl.readBuffer[SimpleControl.nextDecodeIndex].isValid = 0;
         SimpleControl.nextDecodeIndex = (SimpleControl.nextDecodeIndex + 1 >= 10) ? 0 : SimpleControl.nextDecodeIndex + 1;
 
@@ -686,6 +783,12 @@ extern "C" long THPSimpleDecode(long audioTrack)
         return 0;
     } while (false);
 
+    if (SimpleControl.open && SimpleControl.preFetchState == 1 && !SimpleControl.dvdError
+        && (SimpleControl.loop || SimpleControl.readProgress || (unsigned long)SimpleControl.totalReadFrame < SimpleControl.numFrames))
+    {
+        checkPrefetch();
+        return 5;
+    }
     return 2;
 }
 
@@ -775,6 +878,10 @@ static void MixAudio(short* destination, short* source, unsigned long sample)
                 source = libsrc;
             }
 
+#ifdef NP_NATIVE
+            __atomic_fetch_add(&NpThpAudioGapBlocks, 1, __ATOMIC_RELAXED);
+            __atomic_fetch_add(&NpThpAudioGapSamples, sample, __ATOMIC_RELAXED);
+#endif
             memcpy(destination, source, sample << 2);
         }
         else
@@ -837,6 +944,10 @@ static void MixAudio(short* destination, short* source, unsigned long sample)
                 destination = dst;
             }
 
+#ifdef NP_NATIVE
+            __atomic_fetch_add(&NpThpAudioGapBlocks, 1, __ATOMIC_RELAXED);
+            __atomic_fetch_add(&NpThpAudioGapSamples, sample, __ATOMIC_RELAXED);
+#endif
             memset(destination, 0, sample << 2);
         }
         else
@@ -869,7 +980,12 @@ static void THPAudioMixCallback()
     {
         SoundBufferIndex ^= 1;
         AIInitDMA(SoundBuffer[SoundBufferIndex], sizeof(SoundBuffer[0]));
+#ifdef NP_NATIVE
+        // The producer runs on another CPU; protect its ring while consuming it.
+        BOOL old = OSDisableInterrupts();
+#else
         BOOL old = OSEnableInterrupts();
+#endif
         MixAudio(SoundBuffer[SoundBufferIndex], NULL, 0x60);
         DCFlushRange(SoundBuffer[SoundBufferIndex], sizeof(SoundBuffer[0]));
         OSRestoreInterrupts(old);
@@ -891,7 +1007,11 @@ static void THPAudioMixCallback()
 
         SoundBufferIndex ^= 1;
         AIInitDMA(SoundBuffer[SoundBufferIndex], sizeof(SoundBuffer[0]));
+#ifdef NP_NATIVE
+        BOOL old = OSDisableInterrupts();
+#else
         BOOL old = OSEnableInterrupts();
+#endif
         if (CurAudioBuffer != NULL)
             DCInvalidateRange(CurAudioBuffer, sizeof(SoundBuffer[0]));
         MixAudio(SoundBuffer[SoundBufferIndex], CurAudioBuffer, 0x60);

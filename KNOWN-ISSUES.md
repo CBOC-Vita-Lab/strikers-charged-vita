@@ -1,13 +1,15 @@
 # Known Issues And Test Limits
 
-- The new intro and stadium-preview changes are under separate hardware
-  testing. The older `a8d4ad6` download does not contain them. A newer test
-  executable is not automatically the launch build.
+- The approved movie fix is included. Its production executable was installed
+  and read back on a physical Vita, preserving saves, settings and artwork.
+  A full VPK install and desktop-installer hardware test are separate checks
+  and remain open. The older `a8d4ad6` download is superseded.
 - Main and stadium-selection menus can run below 30 FPS. Older console
   measurements of those screens are not a performance guarantee for the
   final package.
-- Loading-screen flicker and stadium-preview audio timing have code fixes;
-  confirmation on the final Vita package is still pending.
+- Movie improvements have been checked by the tester. Wider playback and
+  progression testing is still needed; this is not a claim of flawless audio
+  or a guaranteed frame rate in every scene.
 - Camera level 7 completed an emulator match. Level 6 gameplay and cycling
   levels 5/6/7 through Options were not tested in that handoff.
 - Two-Vita LAN, Classic controls, rear touch, save/update behavior and wider
@@ -16,8 +18,8 @@
   The dependency recipe and pinned source setup are also included. Full
   linked-library provenance, combined-package licensing and fresh
   installation remain open requirements.
-- The retained executable contains original Linux build-workspace paths.
-  Binary privacy review remains open; repackaging art does not remove them.
+- The executable retains generic Linux build-workspace paths. Their exact
+  bytes were reviewed separately from the private artwork, which is excluded.
 - The runtime requires the owner's shader compiler module even when the
   startup cache is included. It is not part of the package.
 
