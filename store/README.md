@@ -5,9 +5,11 @@ This directory holds the VitaDB submission for the existing
 
 ## Submission
 
-The submission text is in [vitadb-submission.md](vitadb-submission.md).
-Submission through CBOC-Vita is being prepared; a listing has not been confirmed.
-VitaDB's maintainers decide whether to add the entry.
+Submitted through CBOC-Vita on 2026-10-19:
+[VitaDB contribution #122](https://github.com/Rinnegatamante/VitaDB-contributions/issues/122).
+The posted text is in [vitadb-submission.md](vitadb-submission.md).
+This is a listing request, not confirmation that the game is available in VitaDB.
+VitaDB's maintainers decide whether to add the entry. No hold was requested.
 
 The public VPK, installation ZIP and their checksums are unchanged. The entry
 uses title ID `MSCN00003`, the release tag as its version, and the VPK's existing
