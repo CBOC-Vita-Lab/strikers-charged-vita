@@ -2100,6 +2100,13 @@ int vgxn_init(const vgxn_config* config) {
     return ok ? 1 : 0;
 }
 void vgxn_shutdown(void) {}
+
+int vgxn_vita_wait_idle(void) {
+    // The experimental wall-clock presenter can redraw independently of game
+    // frames. Refuse takeover in that mode rather than race its scanout.
+    if (vgx::present::Enabled() || !vgx::rec::WaitPresented(2000)) return 0;
+    return sceGxmDisplayQueueFinish() >= 0;
+}
 // MSC_VITA_DRAW_EVERY=N (env.txt; emulator / test runs): only every Nth presented frame is rasterised, the others are recorded and replayed with every draw call
 // skipped (textures, shaders, state, EFB copies and the game's own work are all unchanged). In Vita3K the draws are what a frame costs (about 200 ms of a 240 ms
 // frame in a match, software GL), so a whole match plays in minutes instead of an hour; NPV3 (np/docs/wave3-NPV3.md). Default 1 = every frame, as always.

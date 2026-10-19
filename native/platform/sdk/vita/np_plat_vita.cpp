@@ -14,6 +14,7 @@
 //   NP_VITA_PRIO_<ROLE>   = a priority as sceKernelChangeThreadPriority takes it (lower = more urgent)
 //   NP_VITA_STACK_KIB     = minimum stack of the threads made here (default 128)
 #include "np/np_plat.h"
+#include "np/modal_clock.h"
 
 #include <errno.h>
 #include <malloc.h>
@@ -32,13 +33,18 @@
 // ---------------------------------------------------------------------------------------------
 // Time
 static NpTimeSource g_time_source = 0;
+static NpModalClock g_modalClock;
 
 uint64_t np_time_real_ns(void) { return (uint64_t)sceKernelGetSystemTimeWide() * 1000ull; }
 uint64_t np_time_ns(void) {
     NpTimeSource f = g_time_source;
-    return f ? f() : np_time_real_ns();
+    return f ? f() : g_modalClock.Now(np_time_real_ns);
 }
 void np_time_set_source(NpTimeSource fn) { g_time_source = fn; }
+extern "C" void np_time_pause(int paused) {
+    if (paused) g_modalClock.Pause(np_time_real_ns());
+    else g_modalClock.Resume(np_time_real_ns());
+}
 
 void np_sleep_ns(uint64_t ns) {
     uint64_t us = (ns + 999u) / 1000u;

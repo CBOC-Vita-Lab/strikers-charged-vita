@@ -252,7 +252,11 @@ void LoadEnvFile() {
     for (int i = 0; i < g_envNameCount; ++i) unsetenv(g_envNames[i]);
     g_envNameCount = 0;
     DefaultVariables();
+#if defined(NP_PLAYER)
+    const SceUID fd = sceIoOpen(NpSettingsScreen::SavedFilePath(), SCE_O_RDONLY, 0);
+#else
     const SceUID fd = sceIoOpen(NP_ENV_FILE, SCE_O_RDONLY, 0);
+#endif
     if (fd < 0) return;
     static char text[16384];   // (the Settings screen appends its lines at the end of np-player.txt: the whole file must be read)
     const int got = sceIoRead(fd, text, sizeof(text) - 1);

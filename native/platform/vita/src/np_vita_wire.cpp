@@ -14,7 +14,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 
+#include <psp2/display.h>
 #include <psp2/kernel/threadmgr.h>
 
 // ---- NPS (platform/sdk/include/np/np_sdk.h, np_plat.h): redeclared, so that this file needs neither
@@ -49,6 +51,11 @@ enum NpRole { NP_ROLE_GAME = 0, NP_ROLE_OSTHREAD, NP_ROLE_AUDIO, NP_ROLE_IO, NP_
 typedef void (*NpThreadHook)(const char* name, NpRole role);
 void np_plat_set_thread_hook(NpThreadHook hook) __attribute__((weak));
 int NpVirtualTimeActive(void) __attribute__((weak));   // platform/harness/include/np_time.h
+int OSDisableInterrupts(void) __attribute__((weak));
+int OSRestoreInterrupts(int) __attribute__((weak));
+void np_time_pause(int paused) __attribute__((weak));
+void NpFsJoin(void) __attribute__((weak));
+int vgxn_vita_wait_idle(void) __attribute__((weak));
 
 // ---- NPR (platform/gx/include/np_gx.h and vgx native/vgx_native_vita.h)
 enum { VGXN_ROLE_COLLECTOR = 0, VGXN_ROLE_DISPLAY_QUEUE = 1, VGXN_ROLE_PLAYER = 2, VGXN_ROLE_RENDER = 3 };
@@ -78,6 +85,10 @@ int np_gx_start(const np_gx_config* config) __attribute__((weak));
 }
 
 namespace {
+std::atomic<bool> g_settingsActive{false};
+std::atomic<uint32_t> g_settingsReleaseButtons{0};
+int g_settingsInterrupts = 0;
+SceDisplayFrameBuf g_settingsPreviousFrame;
 
 // ---- audio -----------------------------------------------------------------------------------
 // The SDK's audio thread delivers a 3 ms block (96 frames at 32 kHz) per call and treats the call's
@@ -140,6 +151,9 @@ int InputSource(int pad, NpRawPad* out) {
     }
     NpVitaInput in;
     if (!NpVitaReadInput(&in)) return 1;
+    // Suppress only still-held UI buttons. Touch, sticks and unrelated buttons
+    // remain live, including a finger resting on the rear panel.
+    in.buttons &= ~g_settingsReleaseButtons.fetch_and(in.buttons, std::memory_order_relaxed);
     out->buttons = in.buttons;
     out->lx = in.lx; out->ly = in.ly; out->rx = in.rx; out->ry = in.ry;
     int n = in.touchCount;
@@ -215,6 +229,7 @@ int StallWatch(SceSize, void*) {
         sceKernelDelayThread(5 * 1000 * 1000);
         const uint64_t frames = VitaPlatform::FrameCount();
         VitaPlan::Heartbeat(frames);   // (the core plan's guard file: cleared once 300 frames were presented)
+        if (g_settingsActive.load(std::memory_order_acquire)) { lastFrames = frames; quiet = 0; continue; }
         if (frames != lastFrames) { lastFrames = frames; quiet = 0; continue; }
         quiet += 5;
         if (quiet == 30) VitaPlan::Failed("no frame for 30 s");
@@ -235,6 +250,43 @@ int StallWatch(SceSize, void*) {
 }
 
 namespace VitaPlatform {
+
+bool SettingsActive() { return g_settingsActive.load(std::memory_order_acquire); }
+
+bool BeginSettings() {
+    if (!OSDisableInterrupts || !OSRestoreInterrupts || !np_time_pause || !vgxn_vita_wait_idle) return false;
+    if (NpFsJoin) NpFsJoin();
+    if (!vgxn_vita_wait_idle()) {
+        std::fprintf(stderr, "[settings] display could not be drained; game left running\n");
+        return false;
+    }
+    std::memset(&g_settingsPreviousFrame, 0, sizeof(g_settingsPreviousFrame));
+    g_settingsPreviousFrame.size = sizeof(g_settingsPreviousFrame);
+    if (sceDisplayGetFrameBuf(&g_settingsPreviousFrame, SCE_DISPLAY_SETBUF_NEXTFRAME) < 0 || !g_settingsPreviousFrame.base) return false;
+    // The game's OS threads share its scheduler; callbacks (VI, audio, disc and
+    // alarms) share this lock. Raw Vita input/file/display calls do not need it.
+    g_settingsInterrupts = OSDisableInterrupts();
+    np_time_pause(1);
+    if (!VitaAudio::Pause(true)) {
+        np_time_pause(0);
+        OSRestoreInterrupts(g_settingsInterrupts);
+        return false;
+    }
+    g_settingsActive.store(true, std::memory_order_release);
+    std::fprintf(stderr, "[settings] game paused at frame %llu\n", static_cast<unsigned long long>(FrameCount()));
+    return true;
+}
+
+void EndSettings() {
+    VitaInput::Raw raw;
+    g_settingsReleaseButtons.store(VitaInput::Read(raw) ? raw.buttons : 0, std::memory_order_release);
+    sceDisplaySetFrameBuf(&g_settingsPreviousFrame, SCE_DISPLAY_SETBUF_NEXTFRAME);
+    sceDisplayWaitVblankStart();
+    np_time_pause(0);
+    VitaAudio::Pause(false);
+    g_settingsActive.store(false, std::memory_order_release);
+    OSRestoreInterrupts(g_settingsInterrupts);
+}
 
 // Returns how many of the five hooks were available (5 = SDK layer and renderer both linked).
 int WireSdkAndRenderer() {

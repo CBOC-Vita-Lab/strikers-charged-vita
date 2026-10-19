@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "releaseId": "strikers-quiet-20261019",
+  "releaseId": "strikers-settings-20261019",
   "date": "2026-10-19",
   "baseNative": "a8d4ad6",
   "renderer": "47e8568",
   "titleId": "MSCN00003",
   "package": {
-    "path": "Strikers-quiet-20261019.vpk",
-    "sha256": "8b2e97f5e13d256eb1b752dabf2435fd10454e9c007dcc4e9f293f892ff87df0",
-    "runtimeSha256": "746a56378030442b49f07fd1cbb5692b3df476d535e873553c585294e14e9cab"
+    "path": "Strikers-settings-20261019.vpk",
+    "sha256": "43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a",
+    "runtimeSha256": "0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4"
   },
   "sourceFiles": {
     "native/src/Game/Sys/movie.cpp": {
@@ -45,15 +45,15 @@
     },
     "native/platform/vita/src/np_vita_platform.cpp": {
       "before": "013be854e15a93ab54956fb6ad0032457adc8852f3f9bcad2fef7324c17058e4",
-      "after": "550a12969d3eb1cf29bc72cf37e7e14ab017f6620e60e9417a3a17728dc67d9f"
+      "after": "8454ed0607e6334d63dde9beb514072377e816ae7229d6c23f0c463d1c5349fc"
     },
     "native/platform/vita/src/np_vita_internal.h": {
       "before": "d8ed9448fbeb352e7723445f1b3e8480727027ee1f4da080eec11426bc439973",
-      "after": "a1c8d1e7d578c8d563b8064462ef9bfae743b95c53e8fac4e9502d69c5a67454"
+      "after": "8c531c4462452a5ca6648150393ee2ff6177a3c5d5251c11788fa5587b342ab8"
     },
     "native/platform/vita/src/np_vita_main.cpp": {
       "before": "b9bfc67585f19201b3865fc9fa2a7804cccfe6a65ead6437ceb5b279f38a0d48",
-      "after": "67b3f78e74aa7213f0b03e3b9d5b8855665deaf61a26aa23dc51caf87f8b1a97"
+      "after": "f6f508b6d61fd323e60652e216788507d9c34179778da15542e192f94e2b8569"
     },
     "native/platform/vita/src/vita_log.cpp": {
       "before": "de59fcda85146571ad32a7b3a20a1e60010c000cd046868bf463c6f6bfb5ad6f",
@@ -65,7 +65,7 @@
     },
     "native/platform/vita/src/np_vita_wire.cpp": {
       "before": "9bb414ecdc87850047ab30961368ca7d57190bbbb230e5a64ad49a65b96626d5",
-      "after": "44cc13b35baef60b698bc4f6e566447f203d8fda156e66081c244eb8f82119c0"
+      "after": "31c606d2d17b3560d74610cb5538a934213b7c9a2fcd669640f3dfe35ccb7af2"
     },
     "native/platform/vita/tests/test_silent_frames.cpp": {
       "before": null,
@@ -78,6 +78,50 @@
     "native/platform/vita/tests/test_silent_log.cpp": {
       "before": null,
       "after": "3925697fe877829ba76593f9e7f64f045c545f65fbcdde51eec1a8d20620e19c"
+    },
+    "native/platform/sdk/vita/np_plat_vita.cpp": {
+      "before": "633598c28cde14a1a3c688e1450db53ff9e1ddc771587e6a44d36ca6a06dd20f",
+      "after": "f11493958a088fe9eea843065d079c293a87aa3e2dae30d6f21bcfc8feba05e8"
+    },
+    "native/platform/sdk/include/np/modal_clock.h": {
+      "before": null,
+      "after": "df8a882a2e989274488dcaebe22d2cea13e2cc0075be508f88a9031f9c9b654f"
+    },
+    "native/platform/vita/src/np_settings.h": {
+      "before": "a206314be1a8096d7f4f7329995263578be78651d83c51394de1f37f263cdb26",
+      "after": "fac2ef5b085ccd876509e8ae711ff440e39826af84f4ec1018dd079a2158c940"
+    },
+    "native/platform/vita/src/np_settings.cpp": {
+      "before": "a6e48d5e790dd411673b43a0e04e56b0132de508ab77f0647411b724f6f0a549",
+      "after": "10f2cfd39c51516f29b98d976b8bee3a3d3848fef9313f8625e83b6ff4a1417a"
+    },
+    "native/platform/vita/src/np_vita_settings.h": {
+      "before": "cf622cfd8b42ed648526eb4d16f0fa648ff0d8e75cf1f986806efde250e40bf5",
+      "after": "8c90a092eb8bd23cd9329fe6cf43675e1dde3a1c03f9b92d15e563c1317d415d"
+    },
+    "native/platform/vita/src/np_vita_settings.cpp": {
+      "before": "7b75f3b92a910f79dd860f02ad8e0547e07925251a6d00f1019c013f0c042bed",
+      "after": "349ca3a81625b547864029a43a63dad186e75fc30603d327f4c01597b8f9f69d"
+    },
+    "native/platform/vita/src/np_vita_audio.cpp": {
+      "before": "f09ed7014350b9dc5f02037a8231a4004ad4f0f845f9b513078a0a795816267a",
+      "after": "5c6119e5014e11c4b8a981b2fd678f8cfa7404bd0fbf5a8da97822dd6206114a"
+    },
+    "native/platform/vita/src/vita_console.cpp": {
+      "before": "aaf11ef6cc69cfaf40215b732be92a5898a94a623c1ad02f77ed1d29e63baa71",
+      "after": "1beddcbdf93bf30a1d30e33686ba89af556fe77ac491981c142f4564117d5336"
+    },
+    "renderer/vita/vgx_host_vita.cpp": {
+      "before": "df2b32b72cacf070df636a108baf29da0883ec0d6582aa2fc26da7339d95ac18",
+      "after": "56721f84e42ac8e00071a0a5677dc1d7bbba39e45f5f84325803e284fbecf6c0"
+    },
+    "renderer/src/vgx_rec.cpp": {
+      "before": "be53c6dcdf5218875b7bb6bc8efad7e21dbdfd187ba33ec2aa5e685836d76a8b",
+      "after": "01738028444d8fabc0e6fe82f95b1451d39faab348b7249703210fc9b5e31772"
+    },
+    "renderer/src/vgx_rec.h": {
+      "before": "39e0c16bff5f29aa48f0e941cb3af4392dc65853ed8c3d07631693d958596852",
+      "after": "ebe1c142ba27ff3b88f9ee1ff4a234ec69f3811915b428c6038efb683431be9e"
     }
   },
   "unchangedPackageMembers": {
@@ -105,17 +149,23 @@
     "shadercache/vgx_shaderlist.bin": "1b429165af75f649d4d7727228aaedc53f772bd5feaaf379081e48737fdd2301"
   },
   "deviceVerification": {
-    "date": "2026-10-19T06:06:22.479673+00:00",
-    "method": "guarded executable update with independent readback",
-    "runtimeSha256": "746a56378030442b49f07fd1cbb5692b3df476d535e873553c585294e14e9cab",
-    "protectedFilesUnchanged": 42,
+    "date": "2026-10-19",
+    "method": "Previously recorded executable-only update and LiveArea settings check",
+    "runtimeSha256": "0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4",
+    "protectedFilesUnchanged": 16,
+    "liveAreaSettingsChecked": true,
     "fullVpkInstallTested": false,
     "desktopInstallTested": false,
-    "physicalGameplayTested": false
+    "fullMatchPlaythroughTested": false
   },
   "publicReleaseAccepted": false,
   "buildOptions": {
     "NP_PLAYER": 1,
     "NP_LOGGING": 0
+  },
+  "publicationChecks": {
+    "runtimeRebuilt": false,
+    "newTestsRun": false,
+    "deviceModified": false
   }
 }

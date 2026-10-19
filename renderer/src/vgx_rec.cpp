@@ -204,6 +204,12 @@ void NotifyExecuted() {
     }
     g_syncCv.notify_all();
 }
+bool WaitPresented(unsigned timeoutMs) {
+    if (g_mode != MODE_THREAD) return true; // These modes submit synchronously.
+    std::unique_lock<std::mutex> lk(g_syncMtx);
+    const uint64_t n = g_presented.load(std::memory_order_relaxed);
+    return g_syncCv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [n] { return g_executed >= n; });
+}
 // MSC_VGX_ASYNCLOG=1 (VRS, 16 Oct): the counters of the game / player / back end hand-shake for a stall of MSC_VGX_BACKEND_THREAD=1 (read without the lock: a diagnostic).
 void AsyncDump(const char* tag, uint32_t playerStage, uint32_t backStage, uint32_t execCmd, uint64_t handed, uint64_t drawn) {
     const bool got = g_syncMtx.try_lock();

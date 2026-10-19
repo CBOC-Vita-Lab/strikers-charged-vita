@@ -2,7 +2,7 @@
 
 For installation, use [Install](INSTALL.md). This page is for developers.
 
-Build the `a8d4ad6` native player plus the movie and quiet-logging updates. Dependency
+Build the `a8d4ad6` native player plus the movie, quiet-logging and LiveArea settings updates. Dependency
 setup uses fixed revisions rather than whichever upstream versions are newest.
 
 ## Source Layout

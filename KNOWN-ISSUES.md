@@ -1,10 +1,14 @@
 # Known Issues And Test Limits
 
-- The movie fixes and quiet-logging update are included. The executable was installed
-  and read back on a physical Vita, preserving saves, settings and artwork.
-  A full VPK install and desktop-installer hardware test are separate checks
-  and remain open. Fresh gameplay validation of the quiet build also remains
-  open. Earlier downloads are superseded.
+- The movie, quiet-logging and LiveArea settings updates are included. The
+  executable was installed and read back on a physical Vita, preserving saves,
+  settings and artwork. Opening, returning from and reopening Settings were
+  checked on that normal-title build. Full VPK/desktop installation and a
+  complete-match playthrough of this release remain open. No new tests were
+  run when packaging this update.
+- Saved port settings take effect on the next launch. Use **Save and Restart**
+  to apply them now. The experimental independent interpolation presenter is
+  not supported by the settings overlay and remains disabled by default.
 - Main and stadium-selection menus can run below 30 FPS. Older console
   measurements of those screens are not a performance guarantee for the
   final package.

@@ -1,18 +1,18 @@
 MARIO STRIKERS CHARGED VITA
-Quiet preview: 2026-10-19 / MSCN00003. Source/package licensing review and
+Settings preview: 2026-10-19 / MSCN00003. Source/package licensing review and
 full installation testing remain pending. Publication is not third-party
 approval or a grant of additional redistribution rights.
 
 REQUIRED: homebrew-enabled Vita, VitaShell, your own supported disc and
 your legitimately obtained libshacccg.suprx in ur0:data/.
 
-EASIEST: Use CBOC Vita Installer 0.1.8 or newer with the matching release ZIP
+EASIEST: Use CBOC Vita Installer 0.1.10 or newer with the matching release ZIP
 or complete folder. Connect your Vita, select your own game, then install.
 See DESKTOP-INSTALL.md. No separate Python or Dolphin installation is needed.
 
 MANUAL INSTALL
 1. Extract this entire install ZIP on your computer. Do not unzip the VPK.
-2. Copy Strikers-quiet-20261019.vpk to ux0:VPK/ using VitaShell
+2. Copy Strikers-settings-20261019.vpk to ux0:VPK/ using VitaShell
    USB or FTP (create VPK if needed). End the transfer, then open that VPK
    in VitaShell and install it.
 3. Copy your own Wii USA Rev 1 (R4QE01) game's sys/ and files/ folders to:
@@ -20,6 +20,7 @@ MANUAL INSTALL
      ux0:data/mscharged/game/files/Art/
    Do not create game/game or game/DATA. Allow about 3 GB free on the Vita.
 4. Open the Mario Strikers Charged bubble. See CONTROLS.md for the layout.
+   PS > LiveArea Settings opens settings without restarting your game.
 
 ONLY HAVE AN ISO OR RVZ?
 PREPARE-GAME.md shows the Dolphin menu steps to extract it. No Python or

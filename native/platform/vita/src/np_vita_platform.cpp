@@ -7,6 +7,7 @@
 #include "np_vita_internal.h"
 #include "plat_realclock.h"
 #include "vita_lab.h"
+#include "np_vita_settings.h"
 
 #include <atomic>
 #include <cstdio>
@@ -186,6 +187,9 @@ extern "C" void np_vita_radio_pump(void) __attribute__((weak));
 // The hook np_harness.cpp's NpOnFramePresented calls first, on the game thread at every frame end.
 extern "C" void NpVitaOnFramePresented(void) {
     if (np_vita_radio_pump) np_vita_radio_pump();   // once per presented frame (the game polls the link's receive ring itself)
+#if defined(__vita__) && defined(NP_PLAYER)
+    NpSettingsScreen::Pump();
+#endif
     VitaPlatform::OnFramePresented();
     VitaLab::OnFramePresented();   // lab builds: the deliberate-failure switches
 }

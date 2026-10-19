@@ -78,7 +78,8 @@ int RowCount();
 Row GetRow(int index);
 // Draws the whole screen into pixels (kWidth x kHeight, 0xAABBGGRR). selected = row index; message (may be null) is shown in the status line,
 // error = in red.
-void Draw(uint32_t* pixels, const State& state, int selected, const char* message, bool error);
+void Draw(uint32_t* pixels, const State& state, int selected, const char* message, bool error, bool running = false);
+void DrawRestartConfirmation(uint32_t* pixels, bool restart);
 // W5 CTL: the controls page (Triangle on the list): every button of the layout the CONTROLS row holds, with and without the ball,
 // the rear touchpad, the minigames and the menus.
 void DrawControls(uint32_t* pixels, const State& state);

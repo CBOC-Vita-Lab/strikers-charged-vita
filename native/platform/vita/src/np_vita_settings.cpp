@@ -25,11 +25,15 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <cctype>
+
+extern "C" bool np_vita_radio_dialog_active(void) __attribute__((weak));
 
 namespace NpSettingsScreen {
 namespace {
 
 constexpr const char* kSettingsFile = "ux0:/data/mscharged/np-player.txt";
+constexpr const char* kSettingsBackup = "ux0:/data/mscharged/np-player.txt.bak";
 constexpr const char* kOpenMarker = "ux0:/data/mscharged/np-settings-open";
 
 bool ReadFile(const char* path, std::string& out) {
@@ -47,16 +51,29 @@ bool ReadFile(const char* path, std::string& out) {
     return true;
 }
 
-// Temporary name + rename, so that a power-off in the middle leaves the old file (the settings file is a player's, not ours to lose).
+bool Exists(const char* path);
+
+// Keep the last file until its replacement is installed. A failed rename must not erase it.
 bool WriteFile(const char* path, const std::string& text) {
     std::string temporary = std::string(path) + ".tmp";
+    std::string backup = std::string(path) + ".bak";
+    if (Exists(backup.c_str())) {
+        if (!Exists(path)) {
+            if (sceIoRename(backup.c_str(), path) < 0) return false;
+        } else if (sceIoRemove(backup.c_str()) < 0) return false;
+    }
     const SceUID fd = sceIoOpen(temporary.c_str(), SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
     if (fd < 0) return false;
     bool ok = text.empty() || sceIoWrite(fd, text.data(), static_cast<SceSize>(text.size())) == static_cast<int>(text.size());
     if (sceIoClose(fd) < 0) ok = false;
     if (ok) {
-        sceIoRemove(path);   // the Vita's rename does not replace
-        ok = sceIoRename(temporary.c_str(), path) >= 0;
+        const bool had = Exists(path);
+        if (had && sceIoRename(path, backup.c_str()) < 0) ok = false;
+        if (ok) {
+            ok = sceIoRename(temporary.c_str(), path) >= 0;
+            if (!ok && had) sceIoRename(backup.c_str(), path);
+            if (ok && had) sceIoRemove(backup.c_str());
+        }
     }
     if (!ok) sceIoRemove(temporary.c_str());
     return ok;
@@ -68,6 +85,21 @@ bool Exists(const char* path) {
 }
 
 uint64_t NowMs() { return sceKernelGetProcessTimeWide() / 1000u; }
+
+bool IsSettingsParameter(const char* param) {
+    const char* p = std::strstr(param, "-settings");
+    if (!p) return false;
+    auto boundary = [](char c) { return !c || std::isspace(static_cast<unsigned char>(c)) || c == ':' || c == '=' || c == '&' || c == '"'; };
+    return (p == param || boundary(p[-1])) && boundary(p[9]);
+}
+
+bool TakeSettingsParameter() {
+    char param[1024] = {};
+    const int rc = sceAppMgrGetAppParam(param);
+    if (rc < 0 || !std::memchr(param, 0, sizeof(param))) return false;
+    if (param[0]) std::fprintf(stderr, "[settings] received parameter: \"%.200s\"\n", param);
+    return IsSettingsParameter(param);
+}
 
 bool HasArgument(int argc, char** argv, const char* word) {
     // from argv[0] on: the arguments of sceAppMgrLoadExec become the new process's argv as they are (Vita3K logs "argument at 0: -play"), so "-play" may be argv[0]
@@ -103,20 +135,25 @@ void Shot(const char* name, const uint32_t* pixels) {
 
 } // namespace
 
+const char* SavedFilePath() {
+    if (!Exists(kSettingsFile) && Exists(kSettingsBackup)) {
+        if (sceIoRename(kSettingsBackup, kSettingsFile) < 0) return kSettingsBackup;
+        std::fprintf(stderr, "[settings] recovered interrupted config replacement\n");
+    }
+    return kSettingsFile;
+}
+
 bool Requested(int argc, char** argv) {
     // what the system passed (a LiveArea start has no arguments; the relaunch of "Save and start" has "-play"), for the log of a console test
     if (argc > 0 && argv)
         std::fprintf(stderr, "[settings] start arguments: argc=%d%s%.60s%s%.60s\n", argc, argv[0] ? " argv[0]=" : "", argv[0] ? argv[0] : "",
                      argc > 1 && argv[1] ? " argv[1]=" : "", argc > 1 && argv[1] ? argv[1] : "");
+    // GetAppParam consumes the pending parameter, including an old -settings on an explicit restart.
+    const bool parameter = TakeSettingsParameter();
     if (HasArgument(argc, argv, "-play")) return false;   // started again by "Save and start"
     if (Exists(kOpenMarker)) return true;
     if (HasArgument(argc, argv, "-settings")) return true;
-    char param[1024] = {};
-    const int paramResult = sceAppMgrGetAppParam(param);
-    param[sizeof(param) - 1] = 0;
-    // logged whenever there is one, so that a console test can tell what the LiveArea button really passes (the template's target is psla:-settings)
-    if (paramResult >= 0 && param[0]) std::fprintf(stderr, "[settings] launch parameter: \"%.200s\"\n", param);
-    if (paramResult >= 0 && std::strstr(param, "settings")) return true;
+    if (parameter) return true;
     // L + R held while the game starts (a few samples: the controller needs a moment after the start)
     for (int i = 0; i < 4; ++i) {
         VitaInput::Raw raw;
@@ -126,11 +163,11 @@ bool Requested(int argc, char** argv) {
     return false;
 }
 
-Result Run() {
+Result Run(bool running) {
     uint32_t* screen = VitaConsole::TakeScreen();
-    if (!screen) return Result::kStart;   // no display: carry on, the game will say what is wrong
+    if (!screen) return running ? Result::kReturn : Result::kStart;
     std::string text;
-    const bool had = ReadFile(kSettingsFile, text);
+    const bool had = ReadFile(SavedFilePath(), text);
     NpSettings::State state;
     NpSettings::Load(state, had ? text.c_str() : nullptr);
     std::fprintf(stderr, "[settings] screen open (%s, %u bytes)\n", had ? "np-player.txt read" : "no np-player.txt yet", static_cast<unsigned>(text.size()));
@@ -152,13 +189,14 @@ Result Run() {
 
     int selected = 0;
     bool controlsPage = false;   // W5 CTL: Triangle shows every button of the chosen layout
+    bool confirming = false, confirmRestart = false;
     std::string message;
     bool messageIsError = false;
     uint64_t messageUntil = 0;
     bool dirty = true;
     uint32_t previous = 0xFFFFFFFFu;   // buttons of the last sample (a press is a change to down)
     uint64_t repeatAt = 0;
-    Result result = Result::kExit;
+    Result result = running ? Result::kReturn : Result::kExit;
     bool done = false;
 
     auto save = [&]() {
@@ -196,7 +234,8 @@ Result Run() {
                 else if (w == "triangle") key = kKeyTriangle;
                 else if (w.compare(0, 5, "shot:") == 0) {
                     if (controlsPage) NpSettings::DrawControls(screen, state);
-                    else NpSettings::Draw(screen, state, selected, message.c_str(), messageIsError);
+                    else NpSettings::Draw(screen, state, selected, message.c_str(), messageIsError, running);
+                    if (confirming) NpSettings::DrawRestartConfirmation(screen, confirmRestart);
                     Shot(w.c_str() + 5, screen);
                 } else if (w.compare(0, 5, "wait:") == 0) script.readyAt = now + static_cast<uint64_t>(std::atoi(w.c_str() + 5));
             }
@@ -229,6 +268,16 @@ Result Run() {
             }
         }
 
+        if (key != kKeyNone && confirming) {
+            dirty = true;
+            if (key == kKeyCircle || (key == kKeyCross && !confirmRestart)) confirming = false;
+            else if (key == kKeyLeft || key == kKeyRight || key == kKeyUp || key == kKeyDown) confirmRestart = !confirmRestart;
+            else if (key == kKeyCross && confirmRestart) {
+                if (save()) { result = Result::kRestart; done = true; }
+                else { confirming = false; messageUntil = now + 4000; }
+            }
+            key = kKeyNone;
+        }
         if (key != kKeyNone && (controlsPage || key == kKeyTriangle)) {
             // the controls page: Left/Right change the layout (the CONTROLS row), Circle / Cross / Triangle go back to the list
             dirty = true;
@@ -252,7 +301,7 @@ Result Run() {
             else if (key == kKeyDown) selected = (selected + 1) % rows;
             else if (key == kKeyCircle) {
                 std::fprintf(stderr, "[settings] left without saving\n");
-                result = Result::kExit;
+                result = running ? Result::kReturn : Result::kExit;
                 done = true;
             } else {
                 const int direction = key == kKeyLeft ? -1 : 1;
@@ -267,9 +316,12 @@ Result Run() {
                     if (row.kind == NpSettings::kRowReset) {
                         NpSettings::ResetAll(state);
                     } else if (row.kind == NpSettings::kRowSaveStart || row.kind == NpSettings::kRowSaveExit) {
-                        if (save()) {
-                            result = row.kind == NpSettings::kRowSaveStart ? Result::kStart : Result::kExit;
-                            NpSettings::Draw(screen, state, selected, message.c_str(), messageIsError);
+                        if (running && row.kind == NpSettings::kRowSaveExit) {
+                            confirming = true;
+                            confirmRestart = false;
+                        } else if (save()) {
+                            result = running ? Result::kReturn : (row.kind == NpSettings::kRowSaveStart ? Result::kStart : Result::kExit);
+                            NpSettings::Draw(screen, state, selected, message.c_str(), messageIsError, running);
                             VitaConsole::PresentScreen();
                             sceKernelDelayThread(600 * 1000);
                             done = true;
@@ -287,7 +339,8 @@ Result Run() {
         }
         if (dirty) {
             if (controlsPage) NpSettings::DrawControls(screen, state);
-            else NpSettings::Draw(screen, state, selected, message.c_str(), messageIsError);
+            else NpSettings::Draw(screen, state, selected, message.c_str(), messageIsError, running);
+            if (confirming) NpSettings::DrawRestartConfirmation(screen, confirmRestart);
             VitaConsole::PresentScreen();
             dirty = false;
         }
@@ -295,11 +348,11 @@ Result Run() {
         // a scripted run that has used up its words and had no pad: stop after the last one (nobody is there to press anything)
         if (!script.words.empty() && script.next >= script.words.size() && now >= script.readyAt + 1000 && !done) {
             std::fprintf(stderr, "[settings] test script finished\n");
-            result = Result::kExit;
+            result = running ? Result::kReturn : Result::kExit;
             done = true;
         }
     }
-    VitaConsole::ReleaseScreen();
+    VitaConsole::ReleaseScreen(running);
     if (result == Result::kStart) {
         // The game starts again as a fresh process so that every variable of the new file is read where the game reads it. If the system will not do that,
         // the caller reads the file again and goes on in this process.
@@ -308,6 +361,27 @@ Result Run() {
         std::fprintf(stderr, "[settings] sceAppMgrLoadExec returned 0x%X: carrying on in this process\n", static_cast<unsigned>(rc));
     }
     return result;
+}
+
+void Pump() {
+    static uint64_t nextPoll = 0;
+    static bool pending = false;
+    const uint64_t now = NowMs();
+    if (now < nextPoll) return;
+    nextPoll = now + 250;
+    pending = TakeSettingsParameter() || pending;
+    if (!pending || VitaBootScreen::Active() || (np_vita_radio_dialog_active && np_vita_radio_dialog_active())) return;
+    pending = false;
+    if (!VitaPlatform::BeginSettings()) return;
+    const Result result = Run(true);
+    VitaPlatform::EndSettings();
+    std::fprintf(stderr, "[settings] returned to running game%s\n", result == Result::kRestart ? "; restart confirmed" : "");
+    VitaLog::Flush();
+    if (result == Result::kRestart) {
+        char* argv[] = {const_cast<char*>("-play"), nullptr};
+        const int rc = sceAppMgrLoadExec("app0:eboot.bin", argv, nullptr);
+        std::fprintf(stderr, "[settings] restart failed (0x%X); saved changes apply next launch\n", static_cast<unsigned>(rc));
+    }
 }
 
 } // namespace NpSettingsScreen

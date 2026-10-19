@@ -274,6 +274,8 @@ void SetGuestMemoryProbe(uint64_t (*fn)(const void*, size_t));
 // in thread mode.
 uint32_t PlayPending();
 void PlayerThreadMain();
+// Producer stopped at a frame boundary: wait for all submitted frames, without adding a frame.
+bool WaitPresented(unsigned timeoutMs);
 // With MSC_VGX_BACKEND_THREAD=1 the player runs on a thread PlayerThreadMain creates. `fn` is
 // called first thing on that thread (the host pins it to a core there). Set it before
 // PlayerThreadMain.

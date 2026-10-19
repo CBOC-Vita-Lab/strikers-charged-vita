@@ -370,7 +370,7 @@ int Text(uint32_t* px, int x, int y, uint32_t color, const char* s, int scale = 
 
 } // namespace
 
-void Draw(uint32_t* px, const State& s, int selected, const char* message, bool error) {
+void Draw(uint32_t* px, const State& s, int selected, const char* message, bool error, bool running) {
     Rect(px, 0, 0, kWidth, kHeight, kBack);
     // header band: the title, with a darker lower edge
     Rect(px, 0, 0, kWidth, 62, kBand);
@@ -416,8 +416,8 @@ void Draw(uint32_t* px, const State& s, int selected, const char* message, bool 
             break;
         }
         case kRowReset: label = "RESET TO DEFAULTS"; valueColor = kDim; break;
-        case kRowSaveStart: label = "SAVE AND START"; valueColor = kGreen; break;
-        case kRowSaveExit: label = "SAVE AND EXIT"; valueColor = kGreen; break;
+        case kRowSaveStart: label = running ? "SAVE AND RETURN" : "SAVE AND START"; valueColor = kGreen; break;
+        case kRowSaveExit: label = running ? "SAVE AND RESTART" : "SAVE AND EXIT"; valueColor = kGreen; break;
         default: break;
         }
         const uint32_t labelColor = (row.kind == kRowSaveStart || row.kind == kRowSaveExit) ? kGreen : (on ? kWhite : kDim);
@@ -442,15 +442,32 @@ void Draw(uint32_t* px, const State& s, int selected, const char* message, bool 
         break;
     case kRowOption: help1 = kTable[sel.option].help[0]; help2 = kTable[sel.option].help[1]; break;
     case kRowReset: help1 = "Puts every option above back to the game's choice. Other lines stay."; break;
-    case kRowSaveStart: help1 = "Writes ux0:data/mscharged/np-player.txt and starts the game."; break;
-    case kRowSaveExit: help1 = "Writes np-player.txt and returns to the LiveArea."; break;
+    case kRowSaveStart:
+        help1 = running ? "Saves for the next launch. Your current game continues unchanged."
+                        : "Writes ux0:data/mscharged/np-player.txt and starts the game.";
+        break;
+    case kRowSaveExit:
+        help1 = running ? "Apply saved settings now by restarting. Unsaved match progress is lost."
+                        : "Writes np-player.txt and returns to the LiveArea.";
+        break;
     default: break;
     }
     Rect(px, 20, 458, kWidth - 40, 2, kBandLow);
     Text(px, 24, 462, kDim, help1);
     if (message && *message) Text(px, 24, 486, error ? kRed : kGreen, message);
     else Text(px, 24, 486, kDim, help2);
-    Text(px, 24, 516, kHint, "Up/Down: select  Left/Right, Cross: change  Triangle: controls  Circle: leave");
+    Text(px, 24, 516, kHint, running ? "Up/Down: select  Left/Right, Cross: change  Triangle: controls  Circle: back"
+                                   : "Up/Down: select  Left/Right, Cross: change  Triangle: controls  Circle: leave");
+}
+
+void DrawRestartConfirmation(uint32_t* px, bool restart) {
+    Rect(px, 80, 160, 800, 220, kBack);
+    Rect(px, 80, 160, 800, 3, kEdge);
+    Text(px, 112, 180, kWhite, "RESTART THE GAME?", 2);
+    Text(px, 112, 242, kDim, "Unsaved match progress will be lost.");
+    Rect(px, restart ? 480 : 112, 300, 320, 38, kSelect);
+    Text(px, 136, 308, restart ? kDim : kWhite, "CANCEL");
+    Text(px, 504, 308, restart ? kWhite : kDim, "SAVE AND RESTART");
 }
 
 int FirstVisibleRow(int selected) {

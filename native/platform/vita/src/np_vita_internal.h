@@ -57,6 +57,10 @@ void LastFault(uint32_t* address, uint32_t* pc, uint32_t* type);
 // of NPS's SDK layer and the services of NPR's renderer, whichever of them is linked (weak references).
 // Returns how many of those hooks were available.
 int WireSdkAndRenderer();
+// Modal settings: drain presentation, park game callbacks/audio, and preserve game time.
+bool BeginSettings();
+void EndSettings();
+bool SettingsActive();
 
 // Start-up checks of the platform's own logic (pad mapping table, log line splitter, job pool). Cheap; run on every boot and logged as one line.
 bool SelfTest();
@@ -164,7 +168,7 @@ const uint32_t* Pixels();             // kWidth x kHeight, 0xAABBGGRR
 // text rows and the log tail stop drawing), PresentScreen hands it to the display, ReleaseScreen gives the console its rows back.
 uint32_t* TakeScreen();
 void PresentScreen();
-void ReleaseScreen();
+void ReleaseScreen(bool preservePixels = false);
 bool DumpPpm(const char* path);       // check builds: write the screen as a picture
 // The text (status rows and log tail) is drawn only once ShowText() was called (W5 BOOT: the player build's loading screen has the
 // framebuffer until the game shows its first picture; vita_bootscreen.cpp). Any thread; the drawing happens at the next Refresh.
@@ -209,6 +213,8 @@ void LastState(uint16_t* buttons, int* stickX, int* stickY);
 } // namespace VitaInput
 
 namespace VitaAudio {
+// Freeze queue consumption, not just volume. The caller parks the SDK producer.
+bool Pause(bool paused);
 struct Stats {
     uint32_t queuedFrames = 0;        // currently in the ring
     uint32_t droppedBlocks = 0;       // pushes refused because the ring was full

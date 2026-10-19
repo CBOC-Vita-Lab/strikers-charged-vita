@@ -48,6 +48,7 @@ VitaAudioQueue::Policy g_policy = VitaAudioQueue::Policy::kElastic;
 std::atomic<uint32_t> g_sampleRate{0};
 std::atomic<bool> g_run{false};
 std::atomic<bool> g_open{false};
+std::atomic<bool> g_paused{false}, g_pauseAcknowledged{false};
 std::atomic<int> g_volume{32768};     // 0..32768 (0 dB), already includes mute
 bool g_reportedDrop = false;
 
@@ -102,7 +103,11 @@ int OutputThread(SceSize, void*) {
         }
         Frame* const period = periods[cur];
         cur = cur + 1 == kOutBuffers ? 0 : cur + 1;
-        if (ring) {
+        const bool paused = g_paused.load(std::memory_order_acquire);
+        g_pauseAcknowledged.store(paused, std::memory_order_release);
+        if (paused) {
+            std::memset(period, 0, sizeof(Frame) * kPeriodFrames);
+        } else if (ring) {
             // Write the newest period into this slot after sending the one it held (g_delayPeriods periods old).
             Frame* const p = ring + static_cast<size_t>(slot) * kPeriodFrames;
             std::memcpy(period, p, sizeof(Frame) * kPeriodFrames);
@@ -168,7 +173,9 @@ bool StartDevice(uint32_t sampleRate) {
         const auto periodTime = std::chrono::microseconds(1000000ull * kPeriodFrames / sampleRate);
         auto next = std::chrono::steady_clock::now();
         while (g_run.load(std::memory_order_relaxed)) {
-            Dequeue(period, kPeriodFrames);
+            const bool paused = g_paused.load(std::memory_order_acquire);
+            g_pauseAcknowledged.store(paused, std::memory_order_release);
+            if (!paused) Dequeue(period, kPeriodFrames);
             next += periodTime;
             std::this_thread::sleep_until(next);
         }
@@ -293,6 +300,19 @@ int NpAudioPaceFrames(void) {
 } // extern "C"
 
 namespace VitaAudio {
+bool Pause(bool paused) {
+    g_paused.store(paused, std::memory_order_release);
+    for (int i = 0; i < 100; ++i) {
+        if (!g_run.load(std::memory_order_acquire) || g_pauseAcknowledged.load(std::memory_order_acquire) == paused) return true;
+#if defined(__vita__)
+        sceKernelDelayThread(1000);
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+    }
+    if (paused) g_paused.store(false, std::memory_order_release);
+    return false;
+}
 Stats GetStats() {
     Stats stats;
     const VitaAudioQueue::Stats queue = g_queue.GetStats();

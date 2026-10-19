@@ -1,5 +1,13 @@
 # Changes
 
+## 2026-10-19: LiveArea Settings Update
+
+- Open Settings from LiveArea while the game is running, then return to play.
+- Save changes for the next launch, or restart only after confirmation.
+- Pause game timing and audio while settings are open.
+- Retain the movie fixes and disabled runtime logging.
+- Include matching source, VPK and ZIP. Desktop setup requires installer 0.1.10+.
+
 ## 2026-10-19: Quiet Update
 
 - Disabled runtime logging, console output and startup diagnostic probes.

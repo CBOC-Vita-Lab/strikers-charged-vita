@@ -1,31 +1,36 @@
 # Source Record
 
-The selected build is the quiet-logging update, based on the completed
+The selected build adds LiveArea settings to the quiet-logging update, based on the completed
 `a8d4ad6` native player. It is not the isolated movie-test application.
 
-## Selected Quiet Update
+## Selected Settings Update
 
 | Item | Recorded value |
 | --- | --- |
-| Package | `Strikers-quiet-20261019.vpk` |
+| Package | `Strikers-settings-20261019.vpk` |
 | Title ID | `MSCN00003` |
 | Native base / renderer | `a8d4ad6` / `47e8568` |
-| Executable SHA-256 | `746a56378030442b49f07fd1cbb5692b3df476d535e873553c585294e14e9cab` |
-| VPK SHA-256 | `8b2e97f5e13d256eb1b752dabf2435fd10454e9c007dcc4e9f293f892ff87df0` |
+| Executable SHA-256 | `0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4` |
+| VPK SHA-256 | `43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a` |
 | Player build flags | `NP_PLAYER=1 NP_LOGGING=0` |
 
 [RELEASE.json](RELEASE.json) binds the source changes to this executable and
-records the unchanged package members. All 4,003 native/renderer files match
-the production source. The five movie fixes are unchanged. Nine existing
-platform/build files and three new source/test files implement the quiet build;
-the normal title ID, data directory and renderer are unchanged.
+records the unchanged package members. All 4,004 native/renderer files match
+the production source. Fourteen existing files and one new clock header add
+the settings fix to the quiet build. The five movie-fix files, silent logging,
+normal title ID and data directory are preserved.
 
-The main-app executable was installed and read back on a physical Vita on
-2026-10-19. All 42 checked Strikers app, save, settings and profile files matched their
-pre-install hashes. That was an executable-only update, not a full VPK or
-desktop-installer installation test. Those checks and fresh quiet-build
-gameplay testing remain open. The silent logger and 1,200-frame tests passed
-with address/undefined-behavior sanitizers; ordinary save-style writes remain enabled.
+Previously recorded checks on 2026-10-19 covered settings during boot, intro,
+menus and a live match in a separate diagnostic app. The normal-title quiet
+executable was then installed and read back. All 16 protected art, metadata,
+shader, settings and save files matched their pre-update hashes. Settings
+opened, returned to the intro and reopened without changing the process or log.
+
+That was an executable-only update, not a full VPK or desktop-installer
+installation. Those checks, a full-match playthrough and wider controls
+acceptance remain open. Earlier settings, timing, audio, movie and silent-I/O
+regressions are recorded in the development handoff. No new tests or Vita
+changes were made for this packaging update; the existing runtime was not rebuilt.
 
 The shared package uses the same executable with the previously reviewed
 generic art, notices and shader seeds. No personal fan art, game data,
@@ -56,8 +61,8 @@ records the imported source files and their current hashes.
 Original upstream notices remain. Owner-specific names and paths were
 normalized; private logs, session data, original Git metadata, screenshots,
 installed artwork, shader binaries and game data were left out. Current
-guides replace the old lab notebooks. Later movie and quiet-logging changes
-are listed in `RELEASE.json`; the renderer and controls are unchanged.
+guides replace the old lab notebooks. Later movie, quiet-logging and settings
+changes are listed in `RELEASE.json`; gameplay control mappings are unchanged.
 Generic project images replace personal
 fan art, and the existing built-in loading screen is used. See [Included Files](ASSETS.md).
 

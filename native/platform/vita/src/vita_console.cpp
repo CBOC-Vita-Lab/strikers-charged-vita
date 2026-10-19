@@ -245,13 +245,14 @@ uint32_t* TakeScreen() {
 void PresentScreen() {
     if (g_ready) Scanout();
 }
-void ReleaseScreen() {
+void ReleaseScreen(bool preservePixels) {
     if (!g_screenTaken) return;
     g_screenTaken = false;
     for (int row = 0; row < kRows; ++row) g_rows[row].dirty = true;
     g_tailGeneration = 0xFFFFFFFFu;
     if (VitaBootScreen::Active()) { VitaBootScreen::Resume(); return; }   // the loading screen again
-    for (int i = 0; i < kWidth * kHeight; ++i) g_pixels[i] = kBackground;
+    if (!preservePixels)
+        for (int i = 0; i < kWidth * kHeight; ++i) g_pixels[i] = kBackground;
 }
 
 const uint32_t* Pixels() { return g_pixels; }

@@ -5,6 +5,18 @@ port's Settings screen; Triangle there opens its control guide. The tables
 below follow `native/platform/sdk/input/np_control_table.h`. Source review
 does not replace a complete current-build Vita input test.
 
+## Port Settings
+
+Press **PS**, then choose the bubble's **Settings** button in LiveArea.
+The game pauses while settings are open.
+
+- **Circle:** return to your game without saving.
+- **Save and Return:** keep playing; saved changes apply on the next launch.
+- **Save and Restart:** apply changes now, after a separate restart confirmation.
+
+To enable the existing extra-arena option, turn **Bonus Stadiums** on, then
+choose **Save and Restart** and confirm. This does not change earned progress.
+
 ## Modern
 
 | Input | With the ball | Without the ball |
