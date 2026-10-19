@@ -23,5 +23,10 @@ Keep the computer and Vita awake through preparation, copying and checks.
 The progress display covers the current step, not a guaranteed total time.
 If disconnected, reconnect the same Vita and choose **Resume**.
 
+For compatible updates, choose **Update app** to skip disc preparation and keep
+verified game data. It requires the completed install receipt on the same
+computer and Vita. Missing or changed data requires **Full setup**. An update
+still needs your confirmation; matching files are not recopied.
+
 This is a private preview, not a public release. The bundle retains the
 selected `a8d4ad6` runtime; custom art does not rebuild the game.
