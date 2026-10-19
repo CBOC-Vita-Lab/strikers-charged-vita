@@ -1,28 +1,31 @@
 # Source Record
 
-The selected build is the accepted movie update, based on the completed
+The selected build is the quiet-logging update, based on the completed
 `a8d4ad6` native player. It is not the isolated movie-test application.
 
-## Selected Movie Update
+## Selected Quiet Update
 
 | Item | Recorded value |
 | --- | --- |
-| Package | `Strikers-movie-fix-20261019.vpk` |
+| Package | `Strikers-quiet-20261019.vpk` |
 | Title ID | `MSCN00003` |
 | Native base / renderer | `a8d4ad6` / `47e8568` |
-| Executable SHA-256 | `b3e0bce8d2b55f310df44acc2c3d242132145e9bb6ae068bd4ce566c995d8277` |
-| VPK SHA-256 | `1cbc5fa0b6b12bce3569c9c2909f5964a0a2f8923b175ee4f0eb7ce3792493ad` |
+| Executable SHA-256 | `746a56378030442b49f07fd1cbb5692b3df476d535e873553c585294e14e9cab` |
+| VPK SHA-256 | `8b2e97f5e13d256eb1b752dabf2435fd10454e9c007dcc4e9f293f892ff87df0` |
+| Player build flags | `NP_PLAYER=1 NP_LOGGING=0` |
 
-[RELEASE.json](RELEASE.json) binds the five changed source files to this
-production executable and records the unchanged package members. All 4,000
-native/renderer files matched the production source used for the approved
-update. The production and approved isolated build used identical movie code;
-the production build retains the normal title ID and data directory.
+[RELEASE.json](RELEASE.json) binds the source changes to this executable and
+records the unchanged package members. All 4,003 native/renderer files match
+the production source. The five movie fixes are unchanged. Nine existing
+platform/build files and three new source/test files implement the quiet build;
+the normal title ID, data directory and renderer are unchanged.
 
 The main-app executable was installed and read back on a physical Vita on
-2026-10-19. All 16 protected app, save and settings files matched their
+2026-10-19. All 42 checked Strikers app, save, settings and profile files matched their
 pre-install hashes. That was an executable-only update, not a full VPK or
-desktop-installer installation test. Those checks remain open.
+desktop-installer installation test. Those checks and fresh quiet-build
+gameplay testing remain open. The silent logger and 1,200-frame tests passed
+with address/undefined-behavior sanitizers; ordinary save-style writes remain enabled.
 
 The shared package uses the same executable with the previously reviewed
 generic art, notices and shader seeds. No personal fan art, game data,
@@ -53,9 +56,9 @@ records the imported source files and their current hashes.
 Original upstream notices remain. Owner-specific names and paths were
 normalized; private logs, session data, original Git metadata, screenshots,
 installed artwork, shader binaries and game data were left out. Current
-guides replace the old lab notebooks. The later movie update changes only the
-five files listed in `RELEASE.json`; the renderer, controls and gameplay code
-outside that movie path are unchanged. Generic project images replace personal
+guides replace the old lab notebooks. Later movie and quiet-logging changes
+are listed in `RELEASE.json`; the renderer and controls are unchanged.
+Generic project images replace personal
 fan art, and the existing built-in loading screen is used. See [Included Files](ASSETS.md).
 
 The recovered dependency recipe is now included with fixed source revisions

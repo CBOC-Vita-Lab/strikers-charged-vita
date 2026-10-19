@@ -1,16 +1,16 @@
 MARIO STRIKERS CHARGED VITA
-Private movie update: 2026-10-19 / MSCN00003. Do not redistribute this package.
+Private quiet update: 2026-10-19 / MSCN00003. Do not redistribute this package.
 
 REQUIRED: homebrew-enabled Vita, VitaShell, your own supported disc and
 your legitimately obtained libshacccg.suprx in ur0:data/.
 
-EASIEST: Use CBOC Vita Installer 0.1.6 or newer with the matching release ZIP
+EASIEST: Use CBOC Vita Installer 0.1.8 or newer with the matching release ZIP
 or complete folder. Connect your Vita, select your own game, then install.
 See DESKTOP-INSTALL.md. No separate Python or Dolphin installation is needed.
 
 MANUAL INSTALL
 1. Extract this entire install ZIP on your computer. Do not unzip the VPK.
-2. Copy Strikers-movie-fix-20261019.vpk to ux0:VPK/ using VitaShell
+2. Copy Strikers-quiet-20261019.vpk to ux0:VPK/ using VitaShell
    USB or FTP (create VPK if needed). End the transfer, then open that VPK
    in VitaShell and install it.
 3. Copy your own Wii USA Rev 1 (R4QE01) game's sys/ and files/ folders to:

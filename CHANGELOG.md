@@ -1,5 +1,12 @@
 # Changes
 
+## 2026-10-19: Quiet Update
+
+- Disabled runtime logging, console output and startup diagnostic probes.
+- Kept the intro, stadium-preview and movie-audio fixes, plus normal save I/O.
+- Updated the matching source, VPK, install ZIP and checksums.
+- Requires CBOC Vita Installer 0.1.8 or newer for desktop installation.
+
 ## 2026-10-19: Movie Update
 
 - Improved intro and stadium-preview pacing while keeping the movie audio.

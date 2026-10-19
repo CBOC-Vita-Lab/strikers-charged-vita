@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -174,7 +175,7 @@ void SetUpCpu() {
     // Which thread runs where: vita_threads.cpp (the plan, and MSC_VITA_CORE_* in env.txt).
     // The game thread is this one, core 0 by default.
     const int affinity = VitaThreads::PinCurrentThread(VitaThreads::kGame, false);
-    VitaThreads::LogPlan();
+    if (NP_LOGGING) VitaThreads::LogPlan();
     int want = 444;
     if (const char* t = std::getenv("MSC_VITA_CPU_MHZ")) {
         const int v = std::atoi(t);
@@ -185,6 +186,7 @@ void SetUpCpu() {
     const int bus = scePowerSetBusClockFrequency(222);
     const int gpu = scePowerSetGpuClockFrequency(222);
     const int xbar = scePowerSetGpuXbarClockFrequency(166);
+    if (!NP_LOGGING) return; // Keep clock/affinity settings; omit diagnostic probe threads.
     std::fprintf(stderr, "[vita] clocks: CPU %d MHz, bus %d MHz, GPU %d MHz, GPU xbar %d MHz (set calls returned 0x%X 0x%X 0x%X 0x%X; affinity 0x%X)\n",
                  scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(),
                  scePowerGetGpuXbarClockFrequency(), static_cast<unsigned>(arm), static_cast<unsigned>(bus),
@@ -328,6 +330,11 @@ extern "C" const char* NpGameRootPath(void) {
 }
 
 int main(int argc, char** argv) {
+    if (!NP_LOGGING) {
+        std::cout.setstate(std::ios_base::badbit);
+        std::cerr.setstate(std::ios_base::badbit);
+        std::clog.setstate(std::ios_base::badbit);
+    }
     VitaPlatform::BootStage("platform start-up");
     std::atexit([] { VitaLog::Flush(); });
 #if defined(NP_PLAYER)
@@ -355,9 +362,11 @@ int main(int argc, char** argv) {
         ApplyPlan();
     });
     SetUpCpu();
-    LogSystemState();
-    if (VitaMem::Checkpoint) VitaMem::Checkpoint("start of main");
-    VitaPlatform::SelfTest();
+    if (NP_LOGGING) {
+        LogSystemState();
+        if (VitaMem::Checkpoint) VitaMem::Checkpoint("start of main");
+        VitaPlatform::SelfTest();
+    }
 
     // std::filesystem and relative paths need POSIX-looking paths; see np_vita_internal.h.
     VitaPlatform::BootStage("checking the data directory ux0:data/mscharged");

@@ -2,7 +2,7 @@
 
 For installation, use [Install](INSTALL.md). This page is for developers.
 
-Build the `a8d4ad6` native player plus the accepted movie update. Dependency
+Build the `a8d4ad6` native player plus the movie and quiet-logging updates. Dependency
 setup uses fixed revisions rather than whichever upstream versions are newest.
 
 ## Source Layout
@@ -35,7 +35,7 @@ export VDEPS="$PWD/build/dependencies/prefix"
 export KUBRIDGE="$PWD/build/dependencies/sources/bythos14_kubridge"
 make -C native -j2 TARGET=vita WITH_SDK=1 WITH_GX=1 \
   BUILD_ROOT="$PWD/build/native" GX_VGX="$PWD/renderer" \
-  VDEPS="$VDEPS" LTO=thin NP_PLAYER=1 \
+  VDEPS="$VDEPS" LTO=thin NP_PLAYER=1 NP_LOGGING=0 \
   'OPT=-O2 -ffunction-sections -fdata-sections' DEBUG=-g0 vpk
 ```
 
@@ -45,6 +45,9 @@ into VitaSDK or reset existing checkouts. To download source without
 compiling, use `python3 BUILD-DEPS.py --fetch-only` on any supported host.
 Rerunning is safe after an interrupted download. Each build recompiles the
 libraries so changed headers or compiler options cannot leave stale objects.
+
+`NP_LOGGING=0` selects the quiet player build. It disables runtime diagnostics
+without suppressing ordinary game/save file writes.
 
 The vitaGL source already has the exported patches. Do not apply them again.
 The recipe builds an isolated copy with the recorded GLB options and an

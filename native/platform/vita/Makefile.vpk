@@ -43,7 +43,7 @@ NP_LTOLINK := -Wl$(comma)-plugin$(comma)$(LLVMGOLD) $(if $(filter thin,$(NP_CLAN
 endif
 CXXFLAGS := -std=gnu++17 $(NP_OPT) $(NP_VARCH) $(NP_VDEFS) $(NP_VCXXSYS) $(INC) -w -Wno-psabi -MMD
 PLATSRC := np_vita_main np_vita_process np_vita_platform np_vita_input np_vita_audio np_vita_crash np_jobs np_framesend \
-           vita_log vita_console vita_lab vita_memreport vita_threads vita_probe vita_plan np_vita_selftest np_vita_wire np_vita_settings np_settings np_fps_probe vita_bootscreen
+           vita_log vita_silent_stdio vita_console vita_lab vita_memreport vita_threads vita_probe vita_plan np_vita_selftest np_vita_wire np_vita_settings np_settings np_fps_probe vita_bootscreen
 HARNSRC := np_harness np_vclock np_harness_game np_wrap_swap
 POBJS := $(patsubst %,$(D)/obj/%.o,$(PLATSRC)) $(patsubst %,$(D)/obj/h_%.o,$(HARNSRC)) $(D)/obj/vita_pad.o
 objs: $(POBJS)

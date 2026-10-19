@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "releaseId": "strikers-movie-fix-20261019",
+  "releaseId": "strikers-quiet-20261019",
   "date": "2026-10-19",
   "baseNative": "a8d4ad6",
   "renderer": "47e8568",
   "titleId": "MSCN00003",
   "package": {
-    "path": "Strikers-movie-fix-20261019.vpk",
-    "sha256": "1cbc5fa0b6b12bce3569c9c2909f5964a0a2f8923b175ee4f0eb7ce3792493ad",
-    "runtimeSha256": "b3e0bce8d2b55f310df44acc2c3d242132145e9bb6ae068bd4ce566c995d8277"
+    "path": "Strikers-quiet-20261019.vpk",
+    "sha256": "8b2e97f5e13d256eb1b752dabf2435fd10454e9c007dcc4e9f293f892ff87df0",
+    "runtimeSha256": "746a56378030442b49f07fd1cbb5692b3df476d535e873553c585294e14e9cab"
   },
   "sourceFiles": {
     "native/src/Game/Sys/movie.cpp": {
@@ -30,6 +30,54 @@
     "native/ref/RVL_SDK/thp/THPSimple.cpp": {
       "before": "af382e02f68f401086eb0faca3f2b4943970804781189c3907f249f78cdf8da3",
       "after": "1f90f7aaf527b7fd8f05437273a5b5426ab7d842288ec71c6fa746acc239a2d6"
+    },
+    "native/Makefile": {
+      "before": "ccde4e126c9e1b2b0b0e7a6c6754f94a91fb22e28012a65d295ab8a12c534bfa",
+      "after": "0bd9395be7a3eb6ce468355c966b32a64b8c53b43b44d440a6406fd7b49f3485"
+    },
+    "native/platform/vita/vita.mk": {
+      "before": "abc16625adad317037bee6d6a857a67d643d7dbf7ed74a510040f853f3f75adc",
+      "after": "720ad3b6a49118a7e2af3afe92f0fac2e404ae69447d6ad87e6708d4975e7f62"
+    },
+    "native/platform/vita/Makefile.vpk": {
+      "before": "739e5ffd4efd0f08eb894c5d9de73a32a19db25be48a774ef555c5204bed7132",
+      "after": "146a455fa5d83b754d2bc248c732b5bdd1add6a4918fbbe58f55a0abd3785284"
+    },
+    "native/platform/vita/src/np_vita_platform.cpp": {
+      "before": "013be854e15a93ab54956fb6ad0032457adc8852f3f9bcad2fef7324c17058e4",
+      "after": "550a12969d3eb1cf29bc72cf37e7e14ab017f6620e60e9417a3a17728dc67d9f"
+    },
+    "native/platform/vita/src/np_vita_internal.h": {
+      "before": "d8ed9448fbeb352e7723445f1b3e8480727027ee1f4da080eec11426bc439973",
+      "after": "a1c8d1e7d578c8d563b8064462ef9bfae743b95c53e8fac4e9502d69c5a67454"
+    },
+    "native/platform/vita/src/np_vita_main.cpp": {
+      "before": "b9bfc67585f19201b3865fc9fa2a7804cccfe6a65ead6437ceb5b279f38a0d48",
+      "after": "67b3f78e74aa7213f0b03e3b9d5b8855665deaf61a26aa23dc51caf87f8b1a97"
+    },
+    "native/platform/vita/src/vita_log.cpp": {
+      "before": "de59fcda85146571ad32a7b3a20a1e60010c000cd046868bf463c6f6bfb5ad6f",
+      "after": "9d7bf9df2ecd7f6d54797cd6c3626bfeb6fa2952e3d62bfff8f6af472378b0a7"
+    },
+    "native/platform/vita/src/np_vita_selftest.cpp": {
+      "before": "09a8522595e68aa1be60ce364973112c0034ced50369bbdedc0bd919f1dbe45c",
+      "after": "44711d27ba06dfbc0d0791caa6eba1b436ab34392e4cf062dc3ae69f859c2d58"
+    },
+    "native/platform/vita/src/np_vita_wire.cpp": {
+      "before": "9bb414ecdc87850047ab30961368ca7d57190bbbb230e5a64ad49a65b96626d5",
+      "after": "44cc13b35baef60b698bc4f6e566447f203d8fda156e66081c244eb8f82119c0"
+    },
+    "native/platform/vita/tests/test_silent_frames.cpp": {
+      "before": null,
+      "after": "c6a018c975f0e272a7265f2128e352d9f51fe51f70aed0b1381ca7c10848da35"
+    },
+    "native/platform/vita/src/vita_silent_stdio.cpp": {
+      "before": null,
+      "after": "853a1353336feb82dd8eeca92629341800081371290898f408afe3eccc523e3c"
+    },
+    "native/platform/vita/tests/test_silent_log.cpp": {
+      "before": null,
+      "after": "3925697fe877829ba76593f9e7f64f045c545f65fbcdde51eec1a8d20620e19c"
     }
   },
   "unchangedPackageMembers": {
@@ -57,12 +105,17 @@
     "shadercache/vgx_shaderlist.bin": "1b429165af75f649d4d7727228aaedc53f772bd5feaaf379081e48737fdd2301"
   },
   "deviceVerification": {
-    "date": "2026-10-19T04:03:29.304510+00:00",
-    "method": "guarded executable update with readback",
-    "runtimeSha256": "b3e0bce8d2b55f310df44acc2c3d242132145e9bb6ae068bd4ce566c995d8277",
-    "protectedFilesUnchanged": 16,
+    "date": "2026-10-19T06:06:22.479673+00:00",
+    "method": "guarded executable update with independent readback",
+    "runtimeSha256": "746a56378030442b49f07fd1cbb5692b3df476d535e873553c585294e14e9cab",
+    "protectedFilesUnchanged": 42,
     "fullVpkInstallTested": false,
-    "desktopInstallTested": false
+    "desktopInstallTested": false,
+    "physicalGameplayTested": false
   },
-  "publicReleaseAccepted": false
+  "publicReleaseAccepted": false,
+  "buildOptions": {
+    "NP_PLAYER": 1,
+    "NP_LOGGING": 0
+  }
 }

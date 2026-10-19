@@ -11,6 +11,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#ifndef NP_LOGGING
+#define NP_LOGGING 1
+#endif
+
 struct NpPadState;
 
 namespace VitaPlatform {

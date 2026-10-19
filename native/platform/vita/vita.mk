@@ -69,6 +69,7 @@ NP_RELEASE ?= 0
 # (all native builds; the first start copies the recompiled game's save there when there is none: np_vita_save.cpp), the game data is the
 # recompiled build's extracted disc.
 NP_PLAYER ?= $(if $(filter 1,$(NP_RELEASE)),1,0)
+NP_LOGGING ?= 1
 ifeq ($(NP_RELEASE),1)
 NP_TITLE_ID ?= MSCH00002
 NP_TITLE    ?= Mario Strikers Charged
@@ -86,6 +87,7 @@ NP_APP_VER  ?= 01.00
 LAB ?= $(if $(filter 1,$(NP_RELEASE) $(NP_PLAYER)),0,1)
 
 NP_VDEFS := -DNP_VITA=1 $(if $(filter 1,$(NP_PLAYER)),-DNP_PLAYER=1) -DNP_TITLE_ID='"$(NP_TITLE_ID)"' $(if $(filter 1,$(LAB)),-DMSC_LAB=1 '-DMSC_LAB_BUILD_ID="np-$(shell git -C $(NPV_DIR) rev-parse --short HEAD 2>/dev/null)-$(shell date +%m%d.%H%M%S)"')
+NP_VDEFS += -DNP_LOGGING=$(NP_LOGGING)
 
 # Optimisation flag sets for the game's objects (the game's Makefile picks one):
 #   base   -O2, no unsafe math
@@ -129,5 +131,9 @@ NP_VWRAPS := -Wl,--wrap=pthread_create \
              -Wl,--wrap=sceClibMspaceFree
 ifeq ($(LAB),1)
 NP_VWRAPS += -Wl,--wrap=sceKernelExitProcess -Wl,--wrap=_exit
+endif
+ifeq ($(NP_LOGGING),0)
+NP_VCOMMA := ,
+NP_VWRAPS += $(addprefix -Wl$(NP_VCOMMA)--wrap=,printf vprintf fprintf vfprintf puts putchar fputs fputc putc fwrite np_log OSReport OSVReport)
 endif
 endif # NP_VITA_MK

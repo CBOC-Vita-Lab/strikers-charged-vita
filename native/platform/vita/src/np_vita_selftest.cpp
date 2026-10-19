@@ -55,7 +55,8 @@ bool SelfTest() {
         VitaInput::Map(VitaInput::Raw{}, s);
     }
 
-    // Log tail: wrapping and ordering.
+    // Log tail: wrapping and ordering (absent in silent player builds).
+#if NP_LOGGING
     {
         // A 120-character line; it also shows up once in the log file.
         char marker[160];
@@ -78,6 +79,7 @@ bool SelfTest() {
         }
         expect(ok, "a 120-character log line wraps to 80 + indented 40 in the console tail");
     }
+#endif
 
     // Job pool: every item of a small job exactly once (whatever the lane count).
     {

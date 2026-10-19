@@ -32,6 +32,7 @@
 #endif
 
 namespace VitaLog {
+#if NP_LOGGING
 namespace {
 
 constexpr size_t kBufferSize = 8192;
@@ -283,7 +284,25 @@ void EmergencyLine(const char* text) noexcept {
         g_mutex.unlock();
     }
 }
+#endif
+#else
+void Open(const char*, const char*) {}
+void Write(const char*, size_t) {}
+void SetSynchronous(bool) {}
+void Flush() noexcept {}
+void FlushIfDue() {}
+int Tail(char[][kTailColumns + 1], int, uint32_t* generation) {
+    if (generation) *generation = 0;
+    return 0;
+}
+bool SwitchFile(const char*, const char*) { return false; }
+const char* CurrentPath() { return ""; }
+void Pause() {}
+void Resume() {}
+void EmergencyLine(const char*) noexcept {}
+#endif
 
+#if defined(__vita__)
 namespace {
 // newlib's FILE keeps its write function in the object; stdout and stderr are
 // the process-wide __sf[1] and __sf[2], shared by every thread and by
@@ -291,7 +310,7 @@ namespace {
 // the function captures all of it without pipes or a pump thread.
 _READ_WRITE_RETURN_TYPE HookedWrite(struct _reent*, void*, const char* data, _READ_WRITE_BUFSIZE_TYPE size) {
     Write(data, static_cast<size_t>(size));
-    VitaConsole::RefreshThrottled(200);
+    if (NP_LOGGING) VitaConsole::RefreshThrottled(200);
     return static_cast<_READ_WRITE_RETURN_TYPE>(size);
 }
 } // namespace

@@ -16,7 +16,9 @@ class MovieReleaseTests(unittest.TestCase):
         release = json.loads((ROOT / "RELEASE.json").read_text())
         inventory = json.loads((ROOT / "SOURCE-MANIFEST.json").read_text())
         entries = {item["path"]: item["sha256"] for item in inventory["files"]}
-        self.assertEqual(len(release["sourceFiles"]), 5)
+        self.assertEqual(len(release["sourceFiles"]), 17)
+        self.assertEqual(release["buildOptions"], {"NP_PLAYER": 1, "NP_LOGGING": 0})
+        self.assertEqual(sum(hashes["before"] is None for hashes in release["sourceFiles"].values()), 3)
         for path, hashes in release["sourceFiles"].items():
             with self.subTest(path=path):
                 self.assertNotEqual(hashes["before"], hashes["after"])
@@ -45,7 +47,8 @@ class MovieReleaseTests(unittest.TestCase):
         release = json.loads((ROOT / "RELEASE.json").read_text())
         evidence = release["deviceVerification"]
         self.assertEqual(evidence["runtimeSha256"], release["package"]["runtimeSha256"])
-        self.assertEqual(evidence["protectedFilesUnchanged"], 16)
+        self.assertEqual(evidence["protectedFilesUnchanged"], 42)
+        self.assertIs(evidence["physicalGameplayTested"], False)
         self.assertIs(evidence["fullVpkInstallTested"], False)
         self.assertIs(evidence["desktopInstallTested"], False)
         self.assertIs(release["publicReleaseAccepted"], False)

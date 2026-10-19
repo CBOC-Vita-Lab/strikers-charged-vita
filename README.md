@@ -6,7 +6,8 @@ and graphics support.
 Around 30 FPS is what we've been able to achieve in testing so far, though
 performance varies by scene. There are still bugs to fix and performance
 improvements to make. This build includes the latest intro and stadium-preview
-fixes, including the movie audio-buffer fix.
+fixes, including the movie audio-buffer fix. Runtime logging is disabled in
+this build.
 
 ## In This Build
 
@@ -35,7 +36,8 @@ game folders. Desktop builds for those platforms are not ready yet.
 has the requirements, folder map and update steps. The VPK already carries
 its startup shaders; no manual `eboot.bin` or shader replacement is needed.
 
-Use `Strikers-movie-fix-20261019.vpk` or its matching install ZIP. The complete
+Use `Strikers-quiet-20261019.vpk` or `Strikers-quiet-20261019-install.zip`
+with CBOC Vita Installer 0.1.8 or newer. The complete
 files are also in this repository. The executable matches the approved update
 installed on a physical Vita; the full desktop installation still needs its
 own hardware check. This remains a private release, not the public launch.

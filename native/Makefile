@@ -298,7 +298,7 @@ vpk: $(OBJS) $(PLATOBJ) $(STUBLIB) $(EXTRALIBS)
 	@# MAKEFLAGS is dropped: it would carry TARGET=vita into Makefile.vpk (vita_clang.mk has a variable of that name)
 	env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL $(MAKE) -f platform/vita/Makefile.vpk vpk NP_VBUILD=$(abspath $(VPK_OUT)) \
 	  NP_GAME_OBJS='$(OBJS) $(PLATOBJ)' NP_GAME_LIBS='$(EXTRALIBS) $(STUBLIB) $(GX_LDLIBS)' NP_EXTRA_WRAPS='$(VPK_WRAPS)' \
-	  $(if $(NP_RELEASE),NP_RELEASE=$(NP_RELEASE)) $(if $(NP_PLAYER),NP_PLAYER=$(NP_PLAYER)) $(if $(LAB),LAB=$(LAB)) $(if $(NP_TITLE_ID),NP_TITLE_ID=$(NP_TITLE_ID)) \
+	  $(if $(NP_RELEASE),NP_RELEASE=$(NP_RELEASE)) $(if $(NP_PLAYER),NP_PLAYER=$(NP_PLAYER)) $(if $(NP_LOGGING),NP_LOGGING=$(NP_LOGGING)) $(if $(LAB),LAB=$(LAB)) $(if $(NP_TITLE_ID),NP_TITLE_ID=$(NP_TITLE_ID)) \
 	  $(if $(NP_SEED_DIR),NP_SEED_DIR=$(abspath $(NP_SEED_DIR))) $(if $(NP_SHADER_SEED),NP_SHADER_SEED=$(abspath $(NP_SHADER_SEED))) $(if $(NP_LTO),NP_LTO=$(NP_LTO)) $(if $(NP_COMPILER),NP_COMPILER=$(NP_COMPILER)) $(if $(LTOFLAG),NP_CLANG_LTO=$(LTO))
 endif
 

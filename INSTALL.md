@@ -3,7 +3,7 @@
 For the desktop app and matching ZIP, see [Desktop Install](DESKTOP-INSTALL.md).
 The manual method below remains available. Private preview access is required.
 
-Use `Strikers-movie-fix-20261019.vpk`, application ID `MSCN00003`.
+Use `Strikers-quiet-20261019.vpk`, application ID `MSCN00003`.
 [Start Here](START-HERE.txt) is the short version.
 
 ## You Need
@@ -17,7 +17,7 @@ Use `Strikers-movie-fix-20261019.vpk`, application ID `MSCN00003`.
 ## Installation
 
 1. Extract the install ZIP on your computer. [Download checks](CHECK-DOWNLOAD.md) are optional.
-   Leave `Strikers-movie-fix-20261019.vpk` intact. Copy it through
+   Leave `Strikers-quiet-20261019.vpk` intact. Copy it through
    VitaShell USB or FTP to `ux0:VPK/` (create that folder if needed), then
    end the transfer. In VitaShell, highlight the VPK, use the confirm button
    (usually Cross), and confirm installation.

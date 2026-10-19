@@ -105,10 +105,11 @@ unsigned long BootMs() {
 
 void BootStage(const char* text) {
     std::snprintf(g_stage, sizeof(g_stage), "%s", text);
+    VitaBootScreen::Stage(text);
+    if (!NP_LOGGING) return;
     char line[200];
     std::snprintf(line, sizeof line, "[vita] stage: %s  [+%lu ms]\n", text, BootMs());
     std::fputs(line, stderr);   // (one piece: the loading screen's and the clock's threads write too)
-    VitaBootScreen::Stage(text);
     std::fflush(stderr);
     VitaLog::Flush();
     UpdateStatusLines(0.0, 0.0, false);
@@ -116,11 +117,12 @@ void BootStage(const char* text) {
 }
 
 void OnFramePresented() {
+    const uint64_t frames = g_frames.fetch_add(1, std::memory_order_relaxed) + 1;
+    VitaBootScreen::Frame(frames);
+    if (!NP_LOGGING) return;
     static uint64_t lastUs = NowUs();
     static uint64_t lastCpuUs = ThreadCpuUs();
     static uint64_t lastFrames = 0;
-    const uint64_t frames = g_frames.fetch_add(1, std::memory_order_relaxed) + 1;
-    VitaBootScreen::Frame(frames);
 
     VitaLog::FlushIfDue();
     // Memory figures (vita_memreport.cpp): the C heap's high-water mark is a sample every 30 frames.
@@ -193,11 +195,12 @@ extern "C" void NpPlatformFatal(const char* category, const char* details) { Vit
 // W5 BOOT: a moment of the game's start (np/boot.h NpBootMark: the boot screens, the title screen), with the time since the process started.
 // The game's boot screens end the loading screen.
 extern "C" void NpPlatformBootMark(const char* what) {
+    if (what && std::strncmp(what, "boot screens", 12) == 0) VitaBootScreen::Finish("the game shows its boot screens");
+    if (!NP_LOGGING) return;
     char line[200];
     std::snprintf(line, sizeof line, "[boot] %s  [+%lu ms, frame %llu]\n", what ? what : "", VitaPlatform::BootMs(),
                   static_cast<unsigned long long>(VitaPlatform::FrameCount()));
     std::fputs(line, stderr);
-    if (what && std::strncmp(what, "boot screens", 12) == 0) VitaBootScreen::Finish("the game shows its boot screens");
 }
 
 #if defined(__vita__)

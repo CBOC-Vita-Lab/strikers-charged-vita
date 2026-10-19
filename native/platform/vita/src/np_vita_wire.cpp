@@ -218,6 +218,7 @@ int StallWatch(SceSize, void*) {
         if (frames != lastFrames) { lastFrames = frames; quiet = 0; continue; }
         quiet += 5;
         if (quiet == 30) VitaPlan::Failed("no frame for 30 s");
+        if (!NP_LOGGING) continue; // The core-plan guard remains functional without stall reports.
         if (quiet != 15 && !(quiet > 15 && quiet % 30 == 0)) continue;
         SceKernelThreadInfo info;
         std::memset(&info, 0, sizeof(info));

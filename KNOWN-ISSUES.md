@@ -1,9 +1,10 @@
 # Known Issues And Test Limits
 
-- The approved movie fix is included. Its production executable was installed
+- The movie fixes and quiet-logging update are included. The executable was installed
   and read back on a physical Vita, preserving saves, settings and artwork.
   A full VPK install and desktop-installer hardware test are separate checks
-  and remain open. The older `a8d4ad6` download is superseded.
+  and remain open. Fresh gameplay validation of the quiet build also remains
+  open. Earlier downloads are superseded.
 - Main and stadium-selection menus can run below 30 FPS. Older console
   measurements of those screens are not a performance guarantee for the
   final package.
