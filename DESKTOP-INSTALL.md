@@ -1,8 +1,8 @@
 # Mario Strikers Charged
 
 This package keeps the intro, stadium-preview and movie-audio fixes, with runtime logging disabled.
-The repository is public, but the install ZIP and desktop app downloads remain
-unpublished drafts. These steps apply to testers who already have access.
+The install ZIP and Apple Silicon desktop app are available from the public
+release links below.
 Combined-package licensing review and full installation testing are pending;
 publication does not mean third-party approval.
 Use CBOC Vita Installer **0.1.8 or newer** so it recognizes this release.
@@ -25,8 +25,8 @@ It is not included in this download.
 4. Choose default or custom artwork, then click **Install**.
 
 Download the named ZIP from **Releases > Assets**, or use the complete repository
-folder. Leave the release ZIP zipped; the installer opens it. Private releases
-need to be downloaded in your browser using an account with access.
+folder. Leave the release ZIP zipped; the installer opens it. You can also paste
+`https://github.com/CBOC-Vita-Lab/strikers-charged-vita` into the app's GitHub option.
 For an extracted folder, select the whole folder containing
 `cboc-release.json` and its matching VPK, not just one file from it.
 

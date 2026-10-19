@@ -25,8 +25,7 @@ this build.
 
 ## Install
 
-The current **`Strikers-quiet-20261019-install.zip`** is attached to an
-unpublished release draft. It is not a public release download yet.
+Download **[Strikers-quiet-20261019-install.zip](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/download/strikers-quiet-20261019/Strikers-quiet-20261019-install.zip)**.
 The matching VPK, shaders, generic artwork, source and guides are available
 individually in this repository. **Code > Download ZIP**, then extracting the
 whole folder, provides the complete repository files.
@@ -35,9 +34,8 @@ You need a homebrew-enabled Vita, VitaShell, your own **Wii USA Rev 1
 (`R4QE01`)** game and a legitimately obtained `libshacccg.suprx`.
 That last item is a one-time Vita module, not a desktop program.
 
-For testers with the **Apple Silicon Mac** preview of
-[CBOC Vita Installer 0.1.9](https://github.com/CBOC-Vita-Lab/vita-installer),
-the intended simple route is:
+For **Apple Silicon Mac**, download
+[CBOC Vita Installer 0.1.9](https://github.com/CBOC-Vita-Lab/vita-installer/releases/tag/v0.1.9):
 
 1. Connect your Vita, then select the matching release ZIP or its extracted folder.
 2. Select your own **Wii USA Rev 1 (`R4QE01`)** ISO/RVZ or complete game extraction.
@@ -60,7 +58,7 @@ Already installed? Back up your saves and install only
 `Strikers-quiet-20261019.vpk`; there is no need to recopy unchanged game data.
 Installer 0.1.8 or newer recognizes this package. The executable matches the approved update
 installed on a physical Vita; the full desktop installation still needs its
-own hardware check. The repository is public; release downloads remain drafts.
+own hardware check. The repository and current release downloads are public.
 Game data and the proprietary shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and
 [Source Record](SOURCE.md) hold the testing and release details.
 

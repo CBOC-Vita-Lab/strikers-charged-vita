@@ -33,5 +33,5 @@ its redistribution basis is not established here. No plugin is bundled.
 The complete combined package still needs a corresponding-source and license
 review. The repository was made public at the publisher's request with that
 review pending. Publication does not establish third-party approval or grant
-rights beyond the applicable licenses. The VPK is present in repository history;
-keeping a release draft unpublished does not make that committed binary private.
+rights beyond the applicable licenses. The selected VPK is available in the
+repository and public release with this review still pending.

@@ -69,4 +69,5 @@ linked into the original executable.
 
 See [Building](BUILDING.md) for build steps and
 [Third-party Notices](THIRD_PARTY_NOTICES.md) for licensing boundaries.
-The repository stays private until the remaining checks pass.
+The repository and selected release are public at the publisher's request.
+The outstanding licensing and installation checks remain documented, not waived.
