@@ -11,6 +11,9 @@
   graphics support.
 - **Rinnegatamante, bythos14, Yifan Lu and Lachlan Tychsen-Smith:** shader,
   compiler-extension, import-stub and math libraries.
+- **bythos14 and kubridge contributors:**
+  [kubridge](https://github.com/bythos14/kubridge), whose header and export
+  definitions are referenced by the build. The plugin is not bundled.
 - **Bitstream and DejaVu contributors:** console, button-prompt and UI fonts.
 
 The recovered source and upstream license texts are now included; see

@@ -28,6 +28,9 @@ Supply your own supported game dump. Extracted retail data, music, movies,
 logos, saves, NAND contents and test profiles are not included. A code
 license does not grant rights to the original game assets.
 
-Useful gameplay screenshots will be added only when their source, build, sharing
-basis and privacy review are established. No borrowed promotional images or
-emulator shots presented as Vita performance proof are included here.
+[Store screenshots](store/screenshots/README.md) show existing physical-Vita
+captures from the settings update. Their build context and hashes are recorded;
+the gameplay capture is from the isolated diagnostic build, not evidence of
+a fresh installation of the public VPK. The images contain no account names,
+device addresses or private artwork. They illustrate the port and do not grant
+rights to extract or redistribute the original game's artwork.

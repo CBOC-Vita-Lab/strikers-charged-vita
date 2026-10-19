@@ -69,3 +69,5 @@ Game data and the proprietary shader compiler are not included. [Known Issues](K
 | [Licenses](THIRD_PARTY_NOTICES.md) | [Changes](CHANGELOG.md) | [Credits](CREDITS.md)
 
 Upstream contributors retain their credit and rights; see [Credits](CREDITS.md).
+
+[Store listing details and screenshots](store/README.md).

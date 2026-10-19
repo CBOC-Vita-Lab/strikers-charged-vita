@@ -12,6 +12,7 @@ Keep file-level notices and the license texts with any permitted copy.
 | vitaShaRK | Rinnegatamante; LGPL-3.0-or-later, `licenses/LGPL-3.0.txt`; includes xxHash under its retained BSD notice |
 | SceShaccCgExt | bythos14 and contributors; GPL-3.0, `licenses/GPL-3.0.txt` |
 | taiHEN import stubs | Generated from Yifan Lu's pinned exports; MIT, `licenses/taiHEN-MIT.txt` |
+| kubridge interface definitions | bythos14 and contributors; [pinned header and exports](https://github.com/bythos14/kubridge/tree/417ddde9a744eba98d769382c1c1372b8e119139); no license statement found at that revision, redistribution basis not established; plugin not bundled |
 | math-neon | Lachlan Tychsen-Smith; MIT, `licenses/math-neon-MIT.txt` |
 | DejaVu fonts | Bitstream Vera / DejaVu terms in `licenses/DejaVu.txt`; rasterized Mono and Condensed Bold glyphs are included in the console and button prompts, with Sans Bold used in original project artwork |
 | zlib 1.2.2 | Jean-loup Gailly and Mark Adler; `licenses/zlib.txt`, with original source notices retained |
@@ -28,8 +29,9 @@ The source-build VPK carries these license texts and renderer notices in
 `licenses/`. The DejaVu text is from the font project's
 [2.37 release](https://github.com/dejavu-fonts/dejavu-fonts/blob/version_2_37/LICENSE).
 
-The kubridge header/export input has no license file at the pinned revision;
-its redistribution basis is not established here. No plugin is bundled.
+The [kubridge project](https://github.com/bythos14/kubridge) is credited above.
+Its header/export input has no license file at the pinned revision; attribution
+and a source link do not establish redistribution permission. No plugin is bundled.
 The complete combined package still needs a corresponding-source and license
 review. The repository was made public at the publisher's request with that
 review pending. Publication does not establish third-party approval or grant
