@@ -1,5 +1,8 @@
 # Known Issues And Test Limits
 
+- The new intro and stadium-preview changes are under separate hardware
+  testing. The older `a8d4ad6` download does not contain them. A newer test
+  executable is not automatically the launch build.
 - Main and stadium-selection menus can run below 30 FPS. Older console
   measurements of those screens are not a performance guarantee for the
   final package.
@@ -18,4 +21,5 @@
 - The runtime requires the owner's shader compiler module even when the
   startup cache is included. It is not part of the package.
 
-No whole-game, universal compatibility or locked-framerate claim is made.
+The performance description is what testing has reached so far, not a promise
+that every scene runs at the same frame rate.

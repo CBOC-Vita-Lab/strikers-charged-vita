@@ -1,8 +1,12 @@
 # Mario Strikers Charged Vita
 
-A native PS Vita port of Mario Strikers Charged, based on the reconstructed
-Wii source. It runs the game as ARM code, with a Vita graphics, audio and
-controller layer.
+A native PS Vita port of Mario Strikers Charged, with Vita controls, audio
+and graphics support.
+
+Around 30 FPS is what we've been able to achieve in testing so far, though
+performance varies by scene. There are still bugs to fix and performance
+improvements to make. The new intro and stadium-preview changes are being
+checked before the launch package is selected.
 
 ## In This Build
 
@@ -14,26 +18,27 @@ controller layer.
 
 ## Install
 
-1. Install the ready-made player VPK with VitaShell.
-2. Copy your own **Wii USA Rev 1 (`R4QE01`)** game's `sys/` and `files/`
-   folders into `ux0:data/mscharged/game/`.
-3. Open the Mario Strikers Charged bubble.
+The simplest route uses [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases):
 
-Have an ISO or RVZ instead of folders? [Extract it with Dolphin](PREPARE-GAME.md).
-**No Python or compiling is needed for this install path.** The Python helper
-is an optional alternative that also checks the disc and extracted files.
+1. Connect your Vita, then select the matching release ZIP or its extracted folder.
+2. Select your own **Wii USA Rev 1 (`R4QE01`)** ISO/RVZ or complete game extraction.
+3. Add any missing required file when prompted, choose your artwork, and install.
+
+[Desktop Install](DESKTOP-INSTALL.md) lists the requirements. No separate Python,
+Dolphin or compiling is needed for that route. Prefer manual setup? Install the
+VPK with VitaShell and copy your own game folders using [Install](INSTALL.md).
 
 [Start Here](START-HERE.txt) is the short checklist. [Install](INSTALL.md)
 has the requirements, folder map and update steps. The VPK already carries
 its startup shaders; no manual `eboot.bin` or shader replacement is needed.
 
-The `a8d4ad6` package is a private preview, not a public download.
-Game data is not included. [Known Issues](KNOWN-ISSUES.md) and
+The current `a8d4ad6` download is an older private preview, not the upcoming
+movie-update launch build. Do not mistake it for the latest test candidate.
+Game data and the proprietary shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and
 [Source Record](SOURCE.md) hold the testing and release details.
 
 [Controls](CONTROLS.md) | [Building](BUILDING.md) | [Source Record](SOURCE.md)
 | [Technical Notes](TECHNICAL.md) | [Included Files](ASSETS.md)
 | [Licenses](THIRD_PARTY_NOTICES.md) | [Changes](CHANGELOG.md) | [Credits](CREDITS.md)
 
-CBOC, Claude and ChatGPT contributed to the port and release preparation;
-upstream contributors retain their credit and rights.
+Upstream contributors retain their credit and rights; see [Credits](CREDITS.md).

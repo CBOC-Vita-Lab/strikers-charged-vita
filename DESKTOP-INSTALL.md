@@ -1,5 +1,8 @@
 # Mario Strikers Charged
 
+The ZIP below is the older private preview. The new intro and stadium-preview
+update is still being tested and is not in that download yet.
+
 Requires a homebrew-enabled Vita, VitaShell, your own **Wii USA Rev 1
 (`R4QE01`)** ISO/RVZ, and `libshacccg.suprx` obtained legitimately. A complete
 validated `sys`/`files` extraction also works.
@@ -12,6 +15,8 @@ validated `sys`/`files` extraction also works.
 Download the named ZIP from **Releases > Assets**, not **Code > Download ZIP**
 or the source-code archives. Leave it zipped; the installer opens it. Private
 releases need to be downloaded in your browser using an account with access.
+An extracted release folder also works: select the whole folder containing
+`cboc-release.json` and its matching VPK, not just one file from it.
 
 No separate Python or Dolphin installation is needed. The first ISO/RVZ
 preparation downloads a verified extraction tool; later runs can use its cache.

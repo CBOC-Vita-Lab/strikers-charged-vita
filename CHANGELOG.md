@@ -1,5 +1,14 @@
 # Changes
 
+## 2026-10-18: Launch Preparation
+
+- Made the desktop installer the main quick-start route, with manual setup
+  still available.
+- Clarified that ZIPs and complete extracted release folders both work.
+- Kept the older private preview clearly separate from the intro/stadium
+  update still undergoing hardware tests.
+- Shortened the project description and clarified the remaining performance work.
+
 ## 2026-10-18: Copy-And-Install Setup
 
 - Made the ready-made VPK and copy-folder steps the main install path.
