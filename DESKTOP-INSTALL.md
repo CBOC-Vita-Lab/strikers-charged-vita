@@ -1,4 +1,10 @@
-# Mario Strikers Charged
+# Optional Desktop Installer
+
+**The game does not require this program.** It runs directly on the Vita.
+For Windows, Intel Mac or Linux, use [Manual Install](INSTALL.md): extract your
+own game, copy its folders and install the ready-made VPK in VitaShell. Apple
+Silicon Mac users can use that method too. Both routes install the same VPK.
+Once installed, no computer or desktop app is needed while playing.
 
 This package adds the LiveArea settings fix and keeps the intro, stadium-preview
 and movie-audio fixes, with runtime logging disabled.
@@ -6,8 +12,8 @@ The install ZIP and Apple Silicon desktop app are available from the public
 release links below.
 Combined-package licensing review and full installation testing are pending;
 publication does not mean third-party approval.
-Use CBOC Vita Installer **0.1.10 or newer** so it recognizes this release.
-Use the **Apple Silicon Mac 0.1.11 preview** for the current desktop route.
+Only the optional helper's current download is Apple Silicon Mac-only.
+Use the **0.1.11 preview** for this automated desktop route.
 It fixes the earlier Mac signature problem. The app is not Apple-notarized;
 see [first-launch help](https://github.com/CBOC-Vita-Lab/vita-installer/blob/main/docs/mac-open.md).
 Intel Mac and Windows packages are still validation candidates. Until their

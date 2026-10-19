@@ -37,5 +37,4 @@ with its line in `SHA256SUMS` (letter case does not matter):
 
 A matching checksum checks file consistency, not the trustworthiness of
 the source, game compatibility or permission to redistribute. Get packages
-from the project's verified release location; these private candidates
-are not public releases. Unlisted files are not checked.
+from the project's official release page. Unlisted files are not checked.

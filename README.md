@@ -3,6 +3,10 @@
 A native PS Vita port of Mario Strikers Charged, with Vita controls, audio
 and graphics support.
 
+**The desktop installer is optional.** The game runs on your **PS Vita**.
+You can set it up manually from **Windows, macOS (Intel or Apple Silicon),
+or Linux** using VitaShell. No computer or desktop app is needed while playing.
+
 **Public preview.** Combined-package licensing and corresponding-source review
 are still pending, as is a complete installation test through the desktop app.
 Publication is not a claim of third-party approval. See
@@ -27,44 +31,46 @@ return without restarting.
 
 ## Install
 
-Download **[Strikers-settings-20261019-install.zip](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/download/strikers-settings-20261019/Strikers-settings-20261019-install.zip)**.
-The matching VPK, shaders, generic artwork, source and guides are available
-individually in this repository. **Code > Download ZIP**, then extracting the
-whole folder, provides the complete repository files.
+### Without Our Desktop App
 
-You need a homebrew-enabled Vita, VitaShell, your own **Wii USA Rev 1
-(`R4QE01`)** game and a legitimately obtained `libshacccg.suprx`.
-That last item is a one-time Vita module, not a desktop program.
+**Windows, Mac or Linux. No Python or compiling required.**
 
-For **Apple Silicon Mac**, download
-[CBOC Vita Installer 0.1.11](https://github.com/CBOC-Vita-Lab/vita-installer/releases/tag/v0.1.11):
+You need a homebrew-enabled Vita, VitaShell, about 3 GB free, your own
+**Wii USA Rev 1 (`R4QE01`)** game dump and a legitimately obtained
+`libshacccg.suprx`. The last file is a one-time Vita module, not a PC program.
 
-1. Connect your Vita, then paste this repository's URL or select the release ZIP/folder.
-2. Select your own **Wii USA Rev 1 (`R4QE01`)** ISO/RVZ or complete game extraction.
-3. Add any missing required file when prompted, choose your artwork, and install.
+1. Download [the ready-made VPK](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/download/strikers-settings-20261019/Strikers-settings-20261019.vpk), or the [complete install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/download/strikers-settings-20261019/Strikers-settings-20261019-install.zip) with guides and source. Keep the VPK intact.
+2. [Extract your ISO/RVZ in Dolphin](PREPARE-GAME.md#dolphin-no-python-needed). Already have the complete `sys/` and `files/` folders? Skip extraction. Dolphin is only used to extract files, not to run the game on Vita.
+3. Copy `sys/` and `files/` into `ux0:data/mscharged/game/`, and the VPK to `ux0:VPK/`. Use [USB, FTP or an already configured memory card](INSTALL.md#choose-a-transfer-method).
+4. If missing, place your `libshacccg.suprx` at `ur0:data/libshacccg.suprx`. End the transfer, install the VPK in VitaShell, then launch the Strikers bubble.
 
-[Desktop Install](DESKTOP-INSTALL.md) has connection and recovery details.
-No separate Python, Dolphin or compiling is needed for that route.
-Version 0.1.11 fixes the earlier Mac app signature problem. It is still
-unnotarized; see [first-launch help](https://github.com/CBOC-Vita-Lab/vita-installer/blob/main/docs/mac-open.md)
-if macOS cannot verify the developer.
+**[Full manual guide](INSTALL.md)** includes exact folders, transfer steps and
+the shader-module copy step. [Start Here](START-HERE.txt) is the short checklist.
+The VPK includes the player, startup shaders and default artwork; no separate
+`eboot.bin`, shader-cache replacement or desktop installer is needed.
 
-Prefer to copy files yourself? [Manual installation](INSTALL.md) covers
-VitaShell, exact folders and backups on any computer. [Game preparation](PREPARE-GAME.md)
-explains disc extraction; [Technical notes](TECHNICAL.md) and [Building](BUILDING.md)
-cover the source. Intel Mac and Windows desktop packages remain validation
-candidates, not accepted player downloads.
+## Optional Desktop App
 
-[Start Here](START-HERE.txt) is the short checklist. [Install](INSTALL.md)
-has the requirements, folder map and update steps. The VPK already carries
-its startup shaders; no manual `eboot.bin` or shader replacement is needed.
+[CBOC Vita Installer 0.1.11](https://github.com/CBOC-Vita-Lab/vita-installer/releases/tag/v0.1.11)
+automates preparation and transfer. **Only this helper's current download is
+Apple Silicon Mac-only, not the game's manual setup.**
 
-Already installed? Back up your saves and install only
-`Strikers-settings-20261019.vpk`; there is no need to recopy unchanged game data.
-Installer 0.1.10 or newer recognizes this package. The executable matches the approved update
-installed on a physical Vita; the full desktop installation still needs its
-own hardware check. The repository and current release downloads are public.
-Game data and the proprietary shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and
+Open the app, connect the Vita, paste this repo's URL (or select its ZIP/folder),
+choose your own game and any missing required files, then install.
+No separate Python or Dolphin installation is needed for this route.
+[Desktop guide](DESKTOP-INSTALL.md) / [Mac first-launch help](https://github.com/CBOC-Vita-Lab/vita-installer/blob/main/docs/mac-open.md).
+The app is not Apple-notarized. Intel Mac and Windows app builds remain under
+validation; use the manual guide instead. Both routes install the same VPK.
+
+## Already Installed?
+
+Back up your saves and settings, then install only the matching
+`Strikers-settings-20261019.vpk` in VitaShell. Keep your existing game data.
+No desktop app or repeat extraction is needed. See [Update and Back Up](INSTALL.md#update-and-back-up).
+
+The executable matches the recorded physical-Vita update; a full fresh desktop
+installation still needs its own hardware check. Game data and the proprietary
+shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and
 [Source Record](SOURCE.md) hold the testing and release details.
 
 [Controls](CONTROLS.md) | [Building](BUILDING.md) | [Source Record](SOURCE.md)

@@ -1,5 +1,9 @@
 # Prepare Your Game
 
+**This is the manual route; CBOC Vita Installer is not required.**
+It can be done on Windows, macOS (Intel or Apple Silicon), or Linux. The game
+runs on Vita, not in Dolphin. No computer is needed after installation.
+
 Use your own **Wii USA Rev 1 (`R4QE01`)** dump. If you already have its
 complete `sys/` and `files/` folders, skip extraction and [copy them to the
 Vita](INSTALL.md#installation). Do not copy the ISO or RVZ itself.
@@ -7,14 +11,15 @@ Vita](INSTALL.md#installation). Do not copy the ISO or RVZ itself.
 ## Dolphin: No Python Needed
 
 1. Install [Dolphin](https://dolphin-emu.org/download/) on your computer and
-   add the folder containing your own ISO or RVZ to its game list.
+   add the folder containing your own ISO or RVZ to its game list. Choose
+   the Windows or macOS download, or the official Linux Flatpak on that page.
 2. Right-click the game and open **Properties**. Under **Info**, check
    **Game ID: R4QE01** and **Revision 1** in the game name.
 3. Open **Filesystem**. Right-click **Data Partition (0) - R4QE01** and
    choose **Extract Entire Partition...**. Select a new, empty folder;
    allow about 3 GB extra space and wait for extraction to finish.
 4. Copy the resulting `sys/` and `files/` folders into
-   **`ux0:data/mscharged/game/`** using VitaShell USB or FTP.
+   **`ux0:data/mscharged/game/`** using [USB, FTP or your configured memory card](INSTALL.md#choose-a-transfer-method).
 
 Choose the entire **data partition**, not the update partition or just
 **Extract Files...**, which leaves out the system files. Keep your original
@@ -30,6 +35,10 @@ ux0:data/mscharged/game/files/Art/
 
 Do not add another `game/` or `DATA/` level. Other extracted partition
 metadata is not needed. Return to [Install](INSTALL.md).
+
+That is all the game-data preparation this Strikers package needs. The VPK
+contains its playback fixes and startup shaders; you do not need to run the
+desktop installer for an extra movie or image conversion step.
 
 ## Optional: Automatic Extraction And Checks
 
