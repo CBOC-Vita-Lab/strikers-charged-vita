@@ -1,6 +1,10 @@
 # Mario Strikers Charged
 
 This package keeps the intro, stadium-preview and movie-audio fixes, with runtime logging disabled.
+The repository is public, but the install ZIP and desktop app downloads remain
+unpublished drafts. These steps apply to testers who already have access.
+Combined-package licensing review and full installation testing are pending;
+publication does not mean third-party approval.
 Use CBOC Vita Installer **0.1.8 or newer** so it recognizes this release.
 Use the **Apple Silicon Mac 0.1.9 preview** for the current desktop route.
 Intel Mac and Windows packages are still validation candidates. Until their
@@ -46,6 +50,6 @@ verified game data. It requires the completed install receipt on the same
 computer and Vita. Missing or changed data requires **Full setup**. An update
 still needs your confirmation; matching files are not recopied.
 
-This is a private release. The executable matches the verified update on a
+This is a preview. The executable matches the verified update on a
 physical Vita, but full installation through this desktop app still needs a
 hardware check. Custom art changes the package images, not the game executable.

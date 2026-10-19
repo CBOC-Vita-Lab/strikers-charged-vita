@@ -30,5 +30,8 @@ The source-build VPK carries these license texts and renderer notices in
 
 The kubridge header/export input has no license file at the pinned revision;
 its redistribution basis is not established here. No plugin is bundled.
-The complete combined package still needs a corresponding-source and license review. This is private preparation,
-not a statement that a public binary is cleared for redistribution.
+The complete combined package still needs a corresponding-source and license
+review. The repository was made public at the publisher's request with that
+review pending. Publication does not establish third-party approval or grant
+rights beyond the applicable licenses. The VPK is present in repository history;
+keeping a release draft unpublished does not make that committed binary private.

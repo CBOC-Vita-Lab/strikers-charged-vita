@@ -3,6 +3,11 @@
 A native PS Vita port of Mario Strikers Charged, with Vita controls, audio
 and graphics support.
 
+**Public preview.** Combined-package licensing and corresponding-source review
+are still pending, as is a complete installation test through the desktop app.
+Publication is not a claim of third-party approval. See
+[Notices](THIRD_PARTY_NOTICES.md) and [Known Issues](KNOWN-ISSUES.md).
+
 Around 30 FPS is what we've been able to achieve in testing so far, though
 performance varies by scene. There are still bugs to fix and performance
 improvements to make. This build includes the latest intro and stadium-preview
@@ -20,17 +25,19 @@ this build.
 
 ## Install
 
-Download **`Strikers-quiet-20261019-install.zip`** from
-[Releases](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases).
-It includes the VPK, matching shaders, generic artwork, source and guides.
-The same files are available individually in this repository.
+The current **`Strikers-quiet-20261019-install.zip`** is attached to an
+unpublished release draft. It is not a public release download yet.
+The matching VPK, shaders, generic artwork, source and guides are available
+individually in this repository. **Code > Download ZIP**, then extracting the
+whole folder, provides the complete repository files.
 
 You need a homebrew-enabled Vita, VitaShell, your own **Wii USA Rev 1
 (`R4QE01`)** game and a legitimately obtained `libshacccg.suprx`.
 That last item is a one-time Vita module, not a desktop program.
 
-On an **Apple Silicon Mac**, use
-[CBOC Vita Installer 0.1.9](https://github.com/CBOC-Vita-Lab/vita-installer/releases):
+For testers with the **Apple Silicon Mac** preview of
+[CBOC Vita Installer 0.1.9](https://github.com/CBOC-Vita-Lab/vita-installer),
+the intended simple route is:
 
 1. Connect your Vita, then select the matching release ZIP or its extracted folder.
 2. Select your own **Wii USA Rev 1 (`R4QE01`)** ISO/RVZ or complete game extraction.
@@ -53,7 +60,7 @@ Already installed? Back up your saves and install only
 `Strikers-quiet-20261019.vpk`; there is no need to recopy unchanged game data.
 Installer 0.1.8 or newer recognizes this package. The executable matches the approved update
 installed on a physical Vita; the full desktop installation still needs its
-own hardware check. This remains a private release, not the public launch.
+own hardware check. The repository is public; release downloads remain drafts.
 Game data and the proprietary shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and
 [Source Record](SOURCE.md) hold the testing and release details.
 

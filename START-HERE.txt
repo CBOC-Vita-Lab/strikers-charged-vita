@@ -1,5 +1,7 @@
 MARIO STRIKERS CHARGED VITA
-Private quiet update: 2026-10-19 / MSCN00003. Do not redistribute this package.
+Quiet preview: 2026-10-19 / MSCN00003. Source/package licensing review and
+full installation testing remain pending. Publication is not third-party
+approval or a grant of additional redistribution rights.
 
 REQUIRED: homebrew-enabled Vita, VitaShell, your own supported disc and
 your legitimately obtained libshacccg.suprx in ur0:data/.
