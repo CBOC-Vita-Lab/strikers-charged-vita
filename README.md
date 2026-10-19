@@ -37,7 +37,7 @@ You need a homebrew-enabled Vita, VitaShell, your own **Wii USA Rev 1
 That last item is a one-time Vita module, not a desktop program.
 
 For **Apple Silicon Mac**, download
-[CBOC Vita Installer 0.1.10](https://github.com/CBOC-Vita-Lab/vita-installer/releases/tag/v0.1.10):
+[CBOC Vita Installer 0.1.11](https://github.com/CBOC-Vita-Lab/vita-installer/releases/tag/v0.1.11):
 
 1. Connect your Vita, then paste this repository's URL or select the release ZIP/folder.
 2. Select your own **Wii USA Rev 1 (`R4QE01`)** ISO/RVZ or complete game extraction.
@@ -45,6 +45,9 @@ For **Apple Silicon Mac**, download
 
 [Desktop Install](DESKTOP-INSTALL.md) has connection and recovery details.
 No separate Python, Dolphin or compiling is needed for that route.
+Version 0.1.11 fixes the earlier Mac app signature problem. It is still
+unnotarized; see [first-launch help](https://github.com/CBOC-Vita-Lab/vita-installer/blob/main/docs/mac-open.md)
+if macOS cannot verify the developer.
 
 Prefer to copy files yourself? [Manual installation](INSTALL.md) covers
 VitaShell, exact folders and backups on any computer. [Game preparation](PREPARE-GAME.md)
