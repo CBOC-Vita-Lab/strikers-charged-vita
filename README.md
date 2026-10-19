@@ -20,25 +20,38 @@ this build.
 
 ## Install
 
-On an **Apple Silicon Mac**, the simplest route uses
-[CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases):
+Download **`Strikers-quiet-20261019-install.zip`** from
+[Releases](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases).
+It includes the VPK, matching shaders, generic artwork, source and guides.
+The same files are available individually in this repository.
+
+You need a homebrew-enabled Vita, VitaShell, your own **Wii USA Rev 1
+(`R4QE01`)** game and a legitimately obtained `libshacccg.suprx`.
+That last item is a one-time Vita module, not a desktop program.
+
+On an **Apple Silicon Mac**, use
+[CBOC Vita Installer 0.1.9](https://github.com/CBOC-Vita-Lab/vita-installer/releases):
 
 1. Connect your Vita, then select the matching release ZIP or its extracted folder.
 2. Select your own **Wii USA Rev 1 (`R4QE01`)** ISO/RVZ or complete game extraction.
 3. Add any missing required file when prompted, choose your artwork, and install.
 
-[Desktop Install](DESKTOP-INSTALL.md) lists the requirements. No separate Python,
-Dolphin or compiling is needed for that route. Windows and Intel Mac users can
-follow [Install](INSTALL.md): install the VPK with VitaShell and copy your own
-game folders. Desktop builds for those platforms are not ready yet.
+[Desktop Install](DESKTOP-INSTALL.md) has connection and recovery details.
+No separate Python, Dolphin or compiling is needed for that route.
+
+Prefer to copy files yourself? [Manual installation](INSTALL.md) covers
+VitaShell, exact folders and backups on any computer. [Game preparation](PREPARE-GAME.md)
+explains disc extraction; [Technical notes](TECHNICAL.md) and [Building](BUILDING.md)
+cover the source. Intel Mac and Windows desktop packages remain validation
+candidates, not accepted player downloads.
 
 [Start Here](START-HERE.txt) is the short checklist. [Install](INSTALL.md)
 has the requirements, folder map and update steps. The VPK already carries
 its startup shaders; no manual `eboot.bin` or shader replacement is needed.
 
-Use `Strikers-quiet-20261019.vpk` or `Strikers-quiet-20261019-install.zip`
-with CBOC Vita Installer 0.1.8 or newer. The complete
-files are also in this repository. The executable matches the approved update
+Already installed? Back up your saves and install only
+`Strikers-quiet-20261019.vpk`; there is no need to recopy unchanged game data.
+Installer 0.1.8 or newer recognizes this package. The executable matches the approved update
 installed on a physical Vita; the full desktop installation still needs its
 own hardware check. This remains a private release, not the public launch.
 Game data and the proprietary shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and

@@ -2,8 +2,9 @@
 
 This package keeps the intro, stadium-preview and movie-audio fixes, with runtime logging disabled.
 Use CBOC Vita Installer **0.1.8 or newer** so it recognizes this release.
-The current desktop preview is for **Apple Silicon Macs only**. For Windows
-or Intel Macs, use the [manual installation guide](INSTALL.md).
+Use the **Apple Silicon Mac 0.1.9 preview** for the current desktop route.
+Intel Mac and Windows packages are still validation candidates. Until their
+interactive checks pass, use the [manual installation guide](INSTALL.md).
 
 Requires a homebrew-enabled Vita, VitaShell, your own **Wii USA Rev 1
 (`R4QE01`)** ISO/RVZ, and `libshacccg.suprx` obtained legitimately. A complete
@@ -36,7 +37,9 @@ Leave room on the computer for an extracted copy of your disc, in addition to
 the ISO/RVZ. Use the Vita space requirement shown by the installer, which includes
 temporary staging and backups.
 The progress display covers the current step, not a guaranteed total time.
-If disconnected, reconnect the same Vita and choose **Resume**.
+If disconnected, reconnect the same Vita and choose **Resume**. If saves or
+settings changed, use the fresh review offered by 0.1.9 rather than repeatedly
+resuming an outdated review. Do not delete the job or restore older saves.
 
 For compatible updates, choose **Update app** to skip disc preparation and keep
 verified game data. It requires the completed install receipt on the same
