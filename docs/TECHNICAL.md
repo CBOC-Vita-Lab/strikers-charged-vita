@@ -17,9 +17,9 @@ Preserve `np-data/` and existing NAND/save files, plus `np-player.txt`.
 The startup shader cache is build-specific. A cache from another renderer
 is not a supported replacement. See [Install](../INSTALL.md) for exact paths.
 
-The lab tools include scripted runs, diagnostics and deployment helpers.
-They are historical developer tools, not ordinary install instructions.
-Host or emulator timing is not physical-Vita performance evidence.
+`native/platform/vita/lab/` holds developer tools for scripted test runs and
+diagnostics. They are not needed to install or play. Desktop or emulator
+timing is not a measure of Vita performance.
 
 ## Runtime Switches
 
@@ -97,4 +97,89 @@ particles fail the alpha test everywhere. While the Mega Strike background is
 up, it keeps one in four faint additive particles at four times the alpha.
 The choice follows the particle's pool slot, so a particle does not flicker.
 Between alpha 12 and 32 the thinning fades out to the original. Simulation,
-emission and timing are unchanged.
+emission and timing are unchanged. Since version 1.1 this thinning applies
+only at the smallest Mega Strike picture size; the low-resolution effects pass
+below does the heavy lifting.
+
+## Version 1.1 Changes
+
+The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
+
+## 2026-10-23: Mega Saves, Touch And Zoom Update
+
+### Gameplay, rendering and controls
+- Faster, sharper Mega Strikes: glowing effect sprites (the Mega Strike haze,
+  item and super-ability glows) are drawn at a quarter of the pixels into a
+  separate image, still hidden behind what is in front of them, and added to
+  the scene in one pass. The scene itself stays at full size. Used in Mega
+  Strikes, and for heavy effects elsewhere when the graphics chip is short.
+  `MSC_FX_LOWRES=0` turns it off. Fully transparent sprites are skipped. The
+  haze thinning of earlier builds now only applies at the smallest Mega Strike
+  picture (it was never reached before: the game draws its sprites through a
+  second path, which now has it as well).
+- 60 fps by default where it holds: Settings > Frame Rate is now AUTO by
+  default (30 FPS is still there). AUTO also watches the graphics chip now,
+  so it does not try 60 in a scene the GPU cannot draw that fast. Mega
+  Strikes stay at 30 with the full-size picture (`MSC_FPS_MEGA=auto` lets
+  them try 60).
+- Less input delay in slow scenes: when the graphics chip needs most of the
+  frame time, only one frame may wait on it instead of two (the change made
+  for Super Mario Galaxy). `MSC_VITA_QUEUE=off|1|2` overrides it.
+- Dynamic resolution: the renderer measures the graphics chip's time every
+  frame and adjusts the picture to stay inside the frame budget (60 or 30).
+  When it is short it first draws the large blur and glow effects at a
+  smaller size, then the scene at 93 % and at most 86 % of each side; menus
+  and matches never go lower. With time to spare it draws the scene larger
+  than the game's own size (up to 1.2 times, 768x544), for a sharper
+  picture. Mega Strike scenes may go down to 50 % if still short, with
+  stronger haze thinning at the bottom. Settings: `MSC_DYNRES=off`,
+  `MSC_DYNRES_MAX=1.0..1.2`, `MSC_DYNRES_MIN=0.75..1.0`,
+  `MSC_MEGA_RENDER=off|WxH` in `np-player.txt`.
+- Sharper picture everywhere: the picture is now scaled to the screen with a
+  light sharpening filter (Settings > Sharpness: SMOOTH, the new default). It
+  sharpens more when the scene is drawn smaller. OFF restores the plain
+  scaling; CRISP and CRISP+ are still there.
+- Mega Save touch aim uses the position sampled for that press.
+- Optional rear-touch aim and Mega stick speed (2x-4x) in LiveArea Settings.
+- Tap anywhere on the title screen to start. A finger already down does not
+  count, and the tap does not press anything in the main menu.
+- Short front-panel taps between reads are no longer lost.
+- Button taps are no longer swallowed by the debug poll or replayed after a
+  system dialog.
+- Options > Visual shows all seven zoom levels: 1-5, or 3-7 from level 4 up.
+- From zoom level 4 up, the CPU judges "on screen" from about the TV-default
+  view, so close cameras no longer make the AI play worse.
+
+### Performance and reliability
+- Shader cache: entries are written whole and replaced when invalid. Compile
+  and link failures are bounded, and a uniform-buffer leak is fixed.
+- Graphics memory recovery waits for the collector instead of sleeping.
+- DXT1 mip chains upload without repeated storage growth.
+- Background threads wait without 500 us polling.
+- Characters hidden during Mega Strikes are not prepared for drawing.
+
+### Diagnostics
+- `MSC_VITA_DISPLAY_BUFFERS=2` (test switch): double buffering, for a console
+  A/B of input latency. [Console tests](docs/CONSOLE-TESTS.md) lists the
+  measurements that decide the next optimisations.
+- vitaGL is built with `-ffile-prefix-map`, so no local paths end up in the
+  executable.
+- Development builds write the log from a background thread, so card writes
+  no longer stall the game or change the timings being measured.
+- Performance recorder: its memory is allocated only when it is turned on, the
+  bank title follows the build, the CRC table is built once, and GPU-call
+  timing is an explicit build switch (`NP_DIAG_GPU=1`).
+- New `tools/diag/perf-report.py` reads the recorder's bank files (display
+  cadence, handover to display, back-end and GPU-call times, tasks) and flags
+  damaged or incomplete banks. A host round-trip test checks it against the
+  real recorder. Guide: `docs/DIAGNOSTICS.md`.
+
+### Repository
+- Stable asset names (`Strikers-Charged-Vita.vpk`, `-install.zip`), so
+  "latest" download links keep working.
+- Developer docs moved to `docs/`, and a reproducible repack tool was added
+  (`tools/repack-release.py`).
+- Release-metadata tests, run with the host tests in GitHub Actions.
+- Developer files moved out of the top folder: `tools/build-deps.py`,
+  `tools/check-files.py`, `docs/RELEASE.json`, `docs/SOURCE-MANIFEST.json`,
+  `docs/CHECK-DOWNLOAD.md` and `store/artwork.json`.

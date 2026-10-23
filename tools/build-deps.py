@@ -2,7 +2,7 @@
 """Fetch pinned dependency source and build the native player's Vita libraries.
 
 SPDX-License-Identifier: MIT
-Copyright (c) 2026 CBOC-Vita contributors. See CHECK-FILES-LICENSE.txt.
+Copyright (c) 2026 CBOC-Vita contributors. See licenses/CBOC-tools-MIT.txt.
 """
 
 import argparse
@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def git(directory, *args):

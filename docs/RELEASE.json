@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "releaseId": "strikers-20261023",
+  "releaseId": "strikers-v1.1",
   "date": "2026-10-23",
   "titleId": "MSCN00003",
   "package": {
@@ -36,7 +36,7 @@
   ],
   "verification": {
     "hostTests": "python3 -m unittest discover -s tests; native/platform/sdk make T=host32 check",
-    "emulator": "Vita3K: boot, Strikers 101 Mega Saves lesson played through, Options > Visual zoom slider",
+    "emulator": "Vita3K: boot, Strikers 101 Mega Saves lesson and Options > Visual zoom slider (before the effects and frame-rate changes); desktop harness for the rest",
     "physicalVita": false,
     "desktopInstaller": false
   },

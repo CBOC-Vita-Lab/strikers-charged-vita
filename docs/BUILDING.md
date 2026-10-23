@@ -30,7 +30,7 @@ From the repository root:
 ```sh
 export VITASDK=/opt/vitasdk
 export PATH="$VITASDK/bin:$PATH"
-python3 BUILD-DEPS.py
+python3 tools/build-deps.py
 export VDEPS="$PWD/build/dependencies/prefix"
 export KUBRIDGE="$PWD/build/dependencies/sources/bythos14_kubridge"
 make -C native -j2 TARGET=vita WITH_SDK=1 WITH_GX=1 \
@@ -42,10 +42,10 @@ make -C native -j2 TARGET=vita WITH_SDK=1 WITH_GX=1 \
 
 The `-ffile-prefix-map` options keep your local folder names out of the executable.
 
-`BUILD-DEPS.py` fetches the pinned source, rebuilds five libraries locally and
+`tools/build-deps.py` fetches the pinned source, rebuilds five libraries locally and
 writes `build/dependencies/build-receipt.json`. It does not install anything
 into VitaSDK or reset existing checkouts. To download source without
-compiling, use `python3 BUILD-DEPS.py --fetch-only` on any supported host.
+compiling, use `python3 tools/build-deps.py --fetch-only` on any supported host.
 Rerunning is safe after an interrupted download. Each build recompiles the
 libraries so changed headers or compiler options cannot leave stale objects.
 
@@ -58,7 +58,7 @@ The recipe builds an isolated copy with the recorded GLB options and an
 they are not proof of byte-identical libraries in the installed executable.
 
 Generic package images are included at the paths in
-`native/platform/vita/Makefile.vpk`; [ARTWORK.json](../ARTWORK.json) records them.
+`native/platform/vita/Makefile.vpk`; [artwork.json](../store/artwork.json) records them.
 Personal installed artwork and shader seeds are not committed.
 The build output is `build/native/vita/pkg/np/mscharged-np.vpk`, title ID
 `MSCN00003`. It has no startup shader cache.
@@ -78,7 +78,7 @@ This keeps the startup shader cache (`shadercache/`), LiveArea images and
 options; rebuild it only when those change. The same inputs give the same
 VPK bytes. Then update `cboc-release.json` and `RELEASE.json` (package and
 runtime hashes, plus the old manifest hash in `appUpdateFrom`), and
-regenerate `SHA256SUMS` and `SOURCE-MANIFEST.json`. `tests/test_release_metadata.py`
+regenerate `SHA256SUMS` and `docs/SOURCE-MANIFEST.json`. `tests/test_release_metadata.py`
 checks that they agree.
 
 ## Optional Build Switches

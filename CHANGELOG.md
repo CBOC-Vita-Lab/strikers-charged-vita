@@ -1,146 +1,61 @@
-# Changes
+# What's New
 
-## 2026-10-23: Mega Saves, Touch And Zoom Update
+## Version 1.1 — October 23, 2026
 
-Gameplay and controls:
-- Faster, sharper Mega Strikes: glowing effect sprites (the Mega Strike haze,
-  item and super-ability glows) are drawn at a quarter of the pixels into a
-  separate image, still hidden behind what is in front of them, and added to
-  the scene in one pass. The scene itself stays at full size. Used in Mega
-  Strikes, and for heavy effects elsewhere when the graphics chip is short.
-  `MSC_FX_LOWRES=0` turns it off. Fully transparent sprites are skipped. The
-  haze thinning of earlier builds now only applies at the smallest Mega Strike
-  picture (it was never reached before: the game draws its sprites through a
-  second path, which now has it as well).
-- 60 fps by default where it holds: Settings > Frame Rate is now AUTO by
-  default (30 FPS is still there). AUTO also watches the graphics chip now,
-  so it does not try 60 in a scene the GPU cannot draw that fast. Mega
-  Strikes stay at 30 with the full-size picture (`MSC_FPS_MEGA=auto` lets
-  them try 60).
-- Less input delay in slow scenes: when the graphics chip needs most of the
-  frame time, only one frame may wait on it instead of two (the change made
-  for Super Mario Galaxy). `MSC_VITA_QUEUE=off|1|2` overrides it.
-- Dynamic resolution: the renderer measures the graphics chip's time every
-  frame and adjusts the picture to stay inside the frame budget (60 or 30).
-  When it is short it first draws the large blur and glow effects at a
-  smaller size, then the scene at 93 % and at most 86 % of each side; menus
-  and matches never go lower. With time to spare it draws the scene larger
-  than the game's own size (up to 1.2 times, 768x544), for a sharper
-  picture. Mega Strike scenes may go down to 50 % if still short, with
-  stronger haze thinning at the bottom. Settings: `MSC_DYNRES=off`,
-  `MSC_DYNRES_MAX=1.0..1.2`, `MSC_DYNRES_MIN=0.75..1.0`,
-  `MSC_MEGA_RENDER=off|WxH` in `np-player.txt`.
-- Sharper picture everywhere: the picture is now scaled to the screen with a
-  light sharpening filter (Settings > Sharpness: SMOOTH, the new default). It
-  sharpens more when the scene is drawn smaller. OFF restores the plain
-  scaling; CRISP and CRISP+ are still there.
-- Mega Save touch aim uses the position sampled for that press.
-- Optional rear-touch aim and Mega stick speed (2x-4x) in LiveArea Settings.
-- Tap anywhere on the title screen to start. A finger already down does not
-  count, and the tap does not press anything in the main menu.
-- Short front-panel taps between reads are no longer lost.
-- Button taps are no longer swallowed by the debug poll or replayed after a
-  system dialog.
-- Options > Visual shows all seven zoom levels: 1-5, or 3-7 from level 4 up.
-- From zoom level 4 up, the CPU judges "on screen" from about the TV-default
-  view, so close cameras no longer make the AI play worse.
+The performance update.
 
-Performance and reliability:
-- Shader cache: entries are written whole and replaced when invalid. Compile
-  and link failures are bounded, and a uniform-buffer leak is fixed.
-- Graphics memory recovery waits for the collector instead of sleeping.
-- DXT1 mip chains upload without repeated storage growth.
-- Background threads wait without 500 us polling.
-- Characters hidden during Mega Strikes are not prepared for drawing.
+**Smoother play**
+- Matches run at up to 60 fps. The Frame Rate setting is now **AUTO** by
+  default: 60 when the Vita can keep up, a smooth 30 when it can't. Prefer a
+  locked 30? Choose **30 FPS** in Settings.
+- Mega Strikes run at a steady 30 fps at full resolution (about 15 fps
+  before). Their glowing haze is drawn at a lower resolution and blended over
+  the sharp, full-size scene.
+- Stick and touch respond faster in Mega Saves and other heavy scenes.
+- The picture size adapts to the load: effects soften first and the scene
+  only slightly, so the frame rate holds without the game looking rough.
 
-Diagnostics and logging:
-- `MSC_VITA_DISPLAY_BUFFERS=2` (test switch): double buffering, for a console
-  A/B of input latency. [Console tests](docs/CONSOLE-TESTS.md) lists the
-  measurements that decide the next optimisations.
-- vitaGL is built with `-ffile-prefix-map`, so no local paths end up in the
-  executable.
-- Development builds write the log from a background thread, so card writes
-  no longer stall the game or change the timings being measured.
-- Performance recorder: its memory is allocated only when it is turned on, the
-  bank title follows the build, the CRC table is built once, and GPU-call
-  timing is an explicit build switch (`NP_DIAG_GPU=1`).
-- New `tools/diag/perf-report.py` reads the recorder's bank files (display
-  cadence, handover to display, back-end and GPU-call times, tasks) and flags
-  damaged or incomplete banks. A host round-trip test checks it against the
-  real recorder. Guide: `docs/DIAGNOSTICS.md`.
+**Better picture**
+- A light sharpening filter is on by default (Settings > Sharpness: SMOOTH).
+  OFF, CRISP and CRISP+ are still there.
+- When there's time to spare, the game is drawn above native resolution for
+  cleaner edges.
+- New optional **Distant Textures** setting for sharper ground and walls at an
+  angle (experimental, off by default).
 
-Repository:
-- Stable asset names (`Strikers-Charged-Vita.vpk`, `-install.zip`), so
-  "latest" download links keep working.
-- Developer docs moved to `docs/`, and a reproducible repack tool was added
-  (`tools/repack-release.py`).
-- Release-metadata tests, run with the host tests in GitHub Actions.
+**Controls and gameplay**
+- Tap anywhere on the title screen to start.
+- All seven camera zoom levels are on the Options > Visual slider.
+- The CPU plays just as well when your camera is zoomed in close.
+- Quick screen taps are never missed, and button presses are never lost or
+  repeated after a system pop-up.
+- Optional rear-touch aiming and faster Mega Save stick speed in Settings.
 
-## 2026-10-19: LiveArea Settings Update
+**Under the hood**
+- More reliable shader cache and graphics memory recovery.
+- Faster texture uploads and less background CPU use.
 
-- Open Settings from LiveArea while the game is running, then return to play.
-- Save changes for the next launch, or restart only after confirmation.
-- Pause game timing and audio while settings are open.
-- Retain the movie fixes and disabled runtime logging.
-- Include matching source, VPK and ZIP. Desktop setup requires installer 0.1.10+.
+Technical details for developers are in
+[Technical Notes](docs/TECHNICAL.md#version-11-changes).
 
-## 2026-10-19: Quiet Update
+## October 19, 2026 — Settings Update
 
-- Disabled runtime logging, console output and startup diagnostic probes.
-- Kept the intro, stadium-preview and movie-audio fixes, plus normal save I/O.
-- Updated the matching source, VPK, install ZIP and checksums.
-- Requires CBOC Vita Installer 0.1.8 or newer for desktop installation.
+- Open Settings from the LiveArea while the game is running, then jump back
+  into your match.
+- Save changes for next launch, or apply them now with Save and Restart.
+- The game pauses while Settings is open.
 
-## 2026-10-19: Movie Update
+## October 19, 2026 — Movie and Quiet Updates
 
-- Improved intro and stadium-preview pacing while keeping the movie audio.
-- Fixed audio-buffer access during playback and retries after delayed reads.
-- Added regression tests for movie scheduling, audio and decoder-buffer reuse.
-- Included the matching production VPK with generic art and existing shaders.
-  Its executable matches the verified main-app update on a physical Vita.
+- Smoother intro and stadium-preview movies with their audio intact.
+- Faster start-up with no debug output.
 
-## 2026-10-18: Launch Preparation
+## October 18, 2026 — Easier Setup
 
-- Made the desktop installer the main quick-start route, with manual setup
-  still available.
-- Clarified that ZIPs and complete extracted release folders both work.
-- Kept the older private preview clearly separate from the intro/stadium
-  update still undergoing hardware tests.
-- Shortened the project description and clarified the remaining performance work.
+- Simple copy-and-install steps, with Dolphin extraction instructions.
+- Optional one-command game preparation helper.
+- Full source, build instructions and license notices.
 
-## 2026-10-18: Copy-And-Install Setup
+## Version 1.0
 
-- Made the ready-made VPK and copy-folder steps the main install path.
-- Added Dolphin extraction instructions; Python is an optional helper only.
-- Used generic app art and the built-in loading screen instead of personal
-  fan art. Added notices without changing the installed executable or shaders.
-
-## 2026-10-18: Installed Build Preserved
-
-- Kept the installed executable, artwork, loading image and shaders unchanged.
-- Kept source-build validation outputs outside the install bundle.
-- Added missing font and linked-library notices to the source.
-
-## 2026-10-18: Dependency Setup
-
-- Recovered the library-build recipe and pinned its external source inputs.
-- Added `BUILD-DEPS.py` to fetch and build them without changing VitaSDK.
-- Kept the original game, renderer and installed runtime unchanged.
-
-## 2026-10-18: Simpler Setup
-
-- Added one-command game preparation with a verified extractor download,
-  automatic disc checks and no replacement of existing output folders.
-- Shortened the quick start and moved detailed release notes out of the main flow.
-- Included preparation tools, source and linked guides in the local bundle.
-
-## 2026-10-18: Source And Documentation
-
-- Added the recovered `a8d4ad6` native source, renderer and patched vitaGL files.
-- Added build provenance, dependency gaps, technical notes and license texts.
-- Kept the simple VPK-plus-own-data install path and backup instructions.
-- No runtime rebuild, console install, public release or visibility change.
-
-The selected build includes the camera/control, startup, skinning and audio
-changes summarized in [README](README.md). See [Known Issues](KNOWN-ISSUES.md)
-for the remaining hardware checks.
+- First public release of the native PS Vita port.

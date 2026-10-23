@@ -29,7 +29,7 @@ def main():
     files = tracked()
     manifest = {"date": date, "scope": "Source of the release in RELEASE.json (native/, renderer/, dependencies/)",
                 "files": [{"path": p, "sha256": sha(p)} for p in files if p.startswith(SOURCE_DIRS)]}
-    (ROOT / "SOURCE-MANIFEST.json").write_text(json.dumps(manifest, indent=1) + "\n")
+    (ROOT / "docs/SOURCE-MANIFEST.json").write_text(json.dumps(manifest, indent=1) + "\n")
     digests = {p: sha(p) for p in files}   # after SOURCE-MANIFEST.json was rewritten: SHA256SUMS covers it too
     (ROOT / "SHA256SUMS").write_text("".join(f"{digests[p]}  {p}\n" for p in files))
     print(f"SHA256SUMS: {len(files)} files; SOURCE-MANIFEST.json: {len(manifest['files'])} files")

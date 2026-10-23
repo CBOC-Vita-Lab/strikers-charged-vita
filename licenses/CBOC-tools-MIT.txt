@@ -20,6 +20,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-This license covers CHECK-FILES.py, PREPARE-GAME.py, BUILD-DEPS.py, their
+This license covers tools/check-files.py, PREPARE-GAME.py, tools/build-deps.py, their
 tests and tests/test_release_resources.py only, not the port, games or dependencies. External tools and libraries
 retain their upstream licenses.

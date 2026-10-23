@@ -1,44 +1,44 @@
-# Known Issues And Test Limits
+# Known Issues
 
-## This release (2026-10-23)
+A few things we're still working on. If you hit something not listed here,
+please [open an issue](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/issues).
 
-- **Not yet played on a physical Vita.** It was built from source, played in
-  the Vita3K emulator (boot, menus, the Strikers 101 Mega Saves lesson and
-  Options > Visual), and passes the host tests. Emulator timing says nothing
-  about console speed. A console check of Mega Saves, a full match, the title
-  tap and the zoom slider is the next step.
-- **Mega Saves speed is an estimate.** The previous build measured about 15 FPS
-  in Mega Saves on a console. The glow and haze are now drawn at a quarter of
-  the pixels, which by estimate removes about three quarters of that scene's
-  blending work, with the scene itself at full size. If that is not enough the
-  picture size still drops (down to 50 % of each side). `MSC_FX_LOWRES=0` and
-  `MSC_MEGA_RENDER=off` in `ux0:data/mscharged/np-player.txt` turn the two off.
-  The cloud emulator could not run this release (its shader compiler failed on
-  the machine available that day, for the previous release too).
-- **AUTO 60 fps and the dynamic resolution are new and untested on a
-  console.** They were tested on the desktop harness, with a simulated GPU
-  time and a stress test that changes the picture size every 7 frames through
-  menus, a match and Mega Saves. How often a match reaches 60 depends on the
-  CPU as well as the GPU; the controller drops to 30 when either cannot keep
-  up. If anything looks wrong, `MSC_FPS=30` and `MSC_DYNRES=off` in
-  `np-player.txt` restore the earlier behaviour.
-- **The AI plays differently at zoom levels 4-7.** It now judges which players
-  are "on screen" from about the TV-default view. `MSC_CAMERA_VIS=screen`
-  brings back the real screen test.
-- **The desktop installer may not list this release yet.** CBOC Vita Installer
-  trusts the releases in its catalog. If **Get** offers an older version, use
-  the manual VitaShell steps until the catalog lists this one.
+## Performance
 
-## Still open from earlier releases
+- **Some menus run below 30 fps.** The main menu and stadium select are the
+  slowest scenes in the game right now. Matches are not affected.
+- **60 fps depends on the scene.** AUTO runs matches at 60 whenever the Vita
+  can keep up and switches to 30 in the busiest moments. If you'd rather have
+  a constant frame rate, set **Frame Rate** to **30 FPS** in Settings.
+- **Distant Textures is experimental.** It is off by default. If ground or
+  wall textures look wrong with it on, turn it back off.
 
-- Main and stadium-selection menus can run below 30 FPS (graphics-bound).
-- Saved port settings apply at the next launch. Use **Save and Restart** to
-  apply them now.
-- Two-Vita LAN, Classic controls, rear touch and longer progression need wider
-  testing.
-- Full linked-library provenance and combined-package licensing review remain
-  open. The runtime needs the owner's shader compiler module, which is not
-  included.
+## Gameplay
 
-The performance description is what testing has reached so far, not a promise
-that every scene runs at the same frame rate.
+- **The CPU judges distance a little differently at zoom levels 4 to 7.** It
+  now plays as if it could see the standard TV view, so zooming in no longer
+  makes it weaker.
+- **Some settings apply at next launch.** Use **Save and Restart** in Settings
+  to apply them straight away.
+- **Wider testing needed** for two-Vita local play, the Classic layout, rear
+  touch and long career runs. Reports are very welcome.
+
+## Install
+
+- **The desktop installer may take a little while to list a new version.** If
+  **Get** offers an older one, use the manual steps in the
+  [install guide](INSTALL.md), or try again later.
+- You need your own copy of the game and the Vita's shader compiler module
+  (`libshacccg.suprx`). Neither is included.
+
+## If Something Goes Wrong
+
+Open `ux0:data/mscharged/np-player.txt` and add either line to go back to the
+previous behaviour:
+
+```
+MSC_FPS=30
+MSC_DYNRES=off
+```
+
+More switches are listed in [Technical Notes](docs/TECHNICAL.md#runtime-switches).

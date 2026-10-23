@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-SCRIPT = Path(__file__).resolve().parents[1] / "BUILD-DEPS.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "tools/build-deps.py"
 
 
 def git(root, *args):
@@ -124,7 +124,7 @@ class DependencyTests(unittest.TestCase):
                 mock.patch.object(self.module.platform, "system", return_value="Linux"), \
                 mock.patch.object(self.module, "ensure_checkout"), \
                 mock.patch.dict(self.module.os.environ, {"VITASDK": str(sdk)}), \
-                mock.patch.object(self.module.sys, "argv", ["BUILD-DEPS.py"]):
+                mock.patch.object(self.module.sys, "argv", ["build-deps.py"]):
             self.assertEqual(self.module.main(), 0)
         return (project / "build/dependencies/prefix/lib/libvitaGL.a").read_text()
 

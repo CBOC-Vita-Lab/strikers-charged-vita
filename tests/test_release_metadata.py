@@ -16,7 +16,7 @@ def sha(data):
 class ReleaseMetadataTests(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((ROOT / "cboc-release.json").read_text())
-        self.release = json.loads((ROOT / "RELEASE.json").read_text())
+        self.release = json.loads((ROOT / "docs/RELEASE.json").read_text())
 
     def test_manifests_agree(self):
         self.assertEqual(self.release["package"], self.manifest["package"])
@@ -61,7 +61,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertEqual(sha((ROOT / path).read_bytes()), digest)
 
     def test_source_manifest_matches_tree(self):
-        inventory = json.loads((ROOT / "SOURCE-MANIFEST.json").read_text())
+        inventory = json.loads((ROOT / "docs/SOURCE-MANIFEST.json").read_text())
         for item in inventory["files"]:
             with self.subTest(path=item["path"]):
                 self.assertEqual(sha((ROOT / item["path"]).read_bytes()), item["sha256"])

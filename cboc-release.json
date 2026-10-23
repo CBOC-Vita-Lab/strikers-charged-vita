@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "releaseId": "strikers-20261023",
+  "releaseId": "strikers-v1.1",
   "titleId": "MSCN00003",
   "displayName": "Mario Strikers Charged",
-  "version": "20261023-mega1",
+  "version": "1.1",
   "minInstallerVersion": "0.1.0",
   "visibility": "public",
   "releaseState": "ready",

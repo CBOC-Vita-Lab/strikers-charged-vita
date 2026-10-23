@@ -18,7 +18,7 @@ Use `Strikers-Charged-Vita.vpk`, application ID `MSCN00003`.
 
 ## Installation
 
-1. Download [the VPK](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita.vpk), or extract the [complete install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita-install.zip) for the VPK plus guides and source. **Do not unzip the VPK.** [Download checks](CHECK-DOWNLOAD.md) are optional.
+1. Download [the VPK](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita.vpk), or extract the [complete install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita-install.zip) for the VPK plus guides and source. **Do not unzip the VPK.** [Download checks](docs/CHECK-DOWNLOAD.md) are optional.
 2. Prepare your own game's complete `sys/` and `files/` folders. If you only have an ISO/RVZ, follow [Dolphin's extraction steps](PREPARE-GAME.md#dolphin-no-python-needed). It is used only for extraction, not gameplay. Already extracted? Skip this step.
 3. Use one of the transfer methods below. Copy both folders into `ux0:data/mscharged/game/`, and copy `Strikers-Charged-Vita.vpk` into `ux0:VPK/`. Create missing folders. Do not copy the ISO/RVZ itself or the whole repository into `ux0:app/`.
 4. Check for `ur0:data/libshacccg.suprx` in VitaShell. If it is missing, copy your legitimately obtained file there. **USB/card drives expose `ux0:`, not `ur0:`:** stage the file in `ux0:VPK/`, end the transfer, then use VitaShell's **Triangle > Copy**, open `ur0:data/`, and **Triangle > Paste**. Do not replace an existing working copy.

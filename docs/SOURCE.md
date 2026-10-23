@@ -1,6 +1,6 @@
 # Source Record
 
-## Release `strikers-20261023`
+## Version 1.1 (`strikers-v1.1`)
 
 | Item | Value |
 | --- | --- |
@@ -16,19 +16,21 @@ The executable was built from this tree with the command in
 `tools/repack-release.py` from the previous release's VPK, so the startup
 shader cache, LiveArea images and `param.sfo` are byte-identical to
 `strikers-settings-20261019`. Only `eboot.bin` and `licenses/` come from the
-new build. [RELEASE.json](../RELEASE.json) lists the members that were carried
+new build. [RELEASE.json](RELEASE.json) lists the members that were carried
 over.
 
 The source is the previous release plus the performance-test line developed on
 18-23 Oct (shader cache, allocation recovery, input, diagnostics), the Mega
-Saves, title-touch, zoom-slider and AI-visibility changes, and the build-time
-switch for the GPU-call diagnostics. The commit history shows each step.
-[SOURCE-MANIFEST.json](../SOURCE-MANIFEST.json) lists every source file with
+Saves, title-touch, zoom-slider and AI-visibility changes, dynamic resolution,
+low-resolution effects, the AUTO frame rate, the adaptive GPU queue and the
+build-time switch for the GPU-call diagnostics. The commit history shows each step.
+[SOURCE-MANIFEST.json](SOURCE-MANIFEST.json) lists every source file with
 its hash.
 
 Verification for this release: host tests (`tests/` and the SDK unit tests),
-and Vita3K runs of start-up, menus, the Strikers 101 Mega Saves lesson and
-Options > Visual. It has **not** been run on a physical Vita yet; see
+Vita3K runs of start-up, menus, the Strikers 101 Mega Saves lesson and
+Options > Visual, and desktop-harness runs of menus, a match and Mega Saves for
+the rendering and frame-rate changes. It has **not** been run on a physical Vita yet; see
 [Known Issues](../KNOWN-ISSUES.md).
 
 ## Previous release `strikers-settings-20261019`

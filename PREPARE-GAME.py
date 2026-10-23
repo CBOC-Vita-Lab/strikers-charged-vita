@@ -2,7 +2,7 @@
 """Prepare an owner's supported disc locally; never connect to or change a Vita.
 
 SPDX-License-Identifier: MIT
-Copyright (c) 2026 CBOC-Vita contributors. See CHECK-FILES-LICENSE.txt.
+Copyright (c) 2026 CBOC-Vita contributors. See licenses/CBOC-tools-MIT.txt.
 """
 
 import argparse

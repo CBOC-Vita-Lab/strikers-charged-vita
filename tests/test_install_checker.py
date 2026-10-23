@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 
-CHECKER = Path(__file__).resolve().parents[1] / "CHECK-FILES.py"
+CHECKER = Path(__file__).resolve().parents[1] / "tools/check-files.py"
 
 
 class InstallCheckerTests(unittest.TestCase):
