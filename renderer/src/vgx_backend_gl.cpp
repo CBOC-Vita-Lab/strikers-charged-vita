@@ -181,6 +181,9 @@ struct Tex {
 };
 
 int g_fixedW = 0, g_fixedH = 0; // 0 = follow the EFB size
+int g_userFixedW = 0;            // MSC_VITA_RENDER / the host's fixed size (Init): the Mega Strike resolution below then stays off
+std::atomic<int> g_megaStep{0};     // 0 off, else 1 + the Mega Strike resolution's step (VgxMegaStep)
+std::atomic<uint32_t> g_megaHint{0}; // set by the game while a Mega Strike scene is drawn (VgxMegaSceneHint)
 int g_rtW = 0, g_rtH = 0;
 int g_efbW = 640, g_efbH = 528;
 GLuint g_efbFbo = 0, g_efbColor = 0, g_efbDepthRb = 0, g_efbDepthTex = 0;
@@ -2509,6 +2512,7 @@ bool Init(int renderWidth, int renderHeight) {
     }
     g_fixedW = renderWidth;
     g_fixedH = renderHeight;
+    g_userFixedW = renderWidth;
     const char* ext = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
     const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
     g_hasDepth24 = ext && std::strstr(ext, "GL_OES_depth24");
@@ -2610,6 +2614,83 @@ void RtTimedDraw(const CmdBuf& buf, const DrawRec& dr) {
     else { ++C.rtSampleDraws; C.rtSampleDrawUs += dt; ++g_rtDrawTimers[2]; g_rtDrawTimers[3] += dt; }
 }
 
+// Mega Strike resolution. A Mega Strike (and its Mega Save) covers the screen in about 40 layers of additive particles,
+// so the GPU's blending, not the game, sets that scene's frame rate: about 66 ms a frame at the full 640x448 on a
+// console. While the game reports that scene (VgxMegaSceneHint, every frame it draws the Mega background), the main
+// render target drops to a smaller internal size, scaled to the screen at present as MSC_VITA_RENDER is. It starts at
+// 70 % of each side (49 % of the pixels) and, if the frames still come slower than 30 per second, steps down to 58 %
+// and then 50 % (25 % of the pixels) until that scene ends; the next one starts at 70 % again. 20 frames after the
+// last hint the full size returns. The size is changed between frames only (never in an interpolated replay).
+// MSC_MEGA_RENDER=off disables it, =WxH uses one fixed size, =auto (default). Not used when MSC_VITA_RENDER is set.
+namespace {
+struct MegaRes {
+    bool on = false;
+    int quiet = 0, step = 0, frames = 0;
+    double windowStart = 0.0;
+} g_mega;
+int MegaConfig(int* fw, int* fh) {
+    static int mode = -2, w = 0, h = 0; // -1 off, 0 auto, 1 fixed
+    if (mode == -2) {
+        mode = 0;
+        if (const char* e = std::getenv("MSC_MEGA_RENDER"); e && *e) {
+            if (std::strcmp(e, "off") == 0 || std::strcmp(e, "0") == 0) mode = -1;
+            else if (std::sscanf(e, "%dx%d", &w, &h) == 2 && w >= 160 && h >= 120 && w <= 960 && h <= 544) mode = 1;
+        }
+        VGX_LOG("Mega Strike resolution: %s\n", mode < 0 ? "off" : mode == 1 ? "fixed" : "auto");
+    }
+    *fw = w;
+    *fh = h;
+    return mode;
+}
+void MegaResolution() {
+    if (g_userFixedW) return;
+    int fw = 0, fh = 0;
+    const int mode = MegaConfig(&fw, &fh);
+    if (mode < 0) return;
+    static const float kScale[] = {0.70f, 0.58f, 0.50f};
+    const bool hint = g_megaHint.exchange(0, std::memory_order_relaxed) != 0;
+    const double now = Now();
+    if (hint) {
+        g_mega.quiet = 0;
+        if (!g_mega.on) { g_mega.on = true; g_mega.step = 0; g_mega.frames = -10; g_mega.windowStart = now; }
+    } else if (g_mega.on && ++g_mega.quiet > 20) {
+        g_mega.on = false;
+    }
+    if (g_mega.on && mode == 0) {
+        // 20-frame windows (the first 10 frames after a change are not measured: the new size's first frames)
+        if (++g_mega.frames == 0) g_mega.windowStart = now;
+        else if (g_mega.frames >= 20) {
+            const double avgMs = (now - g_mega.windowStart) / g_mega.frames; // (Now() is in ms)
+            if (avgMs > 34.5 && g_mega.step + 1 < static_cast<int>(sizeof kScale / sizeof kScale[0])) {
+                ++g_mega.step;
+                g_mega.frames = -10;
+                VGX_LOG("Mega Strike resolution: %.1f ms a frame, down to %d %%\n", avgMs, static_cast<int>(kScale[g_mega.step] * 100.0f + 0.5f));
+            } else {
+                g_mega.frames = 0;
+                g_mega.windowStart = now;
+            }
+        }
+    }
+    int w = 0, h = 0;
+    if (g_mega.on) {
+        if (mode == 1) { w = fw; h = fh; }
+        else {
+            w = (static_cast<int>(static_cast<float>(g_efbW) * kScale[g_mega.step] + 0.5f) + 7) & ~7;
+            h = (static_cast<int>(static_cast<float>(g_efbH) * kScale[g_mega.step] + 0.5f) + 7) & ~7;
+            if (w > g_efbW) w = g_efbW;
+            if (h > g_efbH) h = g_efbH;
+        }
+    }
+    g_megaStep.store(g_mega.on ? g_mega.step + 1 : 0, std::memory_order_relaxed);
+    if (w == g_fixedW && h == g_fixedH) return;
+    g_fixedW = w;
+    g_fixedH = h;
+    CreateTarget();
+    g_rsValid = false;
+    VGX_LOG("Mega Strike resolution: render target %dx%d\n", g_rtW, g_rtH);
+}
+} // namespace
+
 void Execute(const CmdBuf& buf) { ExecuteEx(buf, ExecOpts{}); }
 
 void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
@@ -2644,6 +2725,7 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
     // first draw sets its whole layout, constants included.
     S.attrConstSet = 0;
     S.layoutVbo = ~0u;
+    if (!replay) MegaResolution();
     BindFbo(g_efbFbo);
     if (!replay || opts.restream) UploadStream(buf, opts.vtx ? opts.vtx : buf.vtx.data(), !replay);
     if (prof) g_profStream += Now() - tFrame;
@@ -2942,3 +3024,9 @@ namespace vgx::host {
 bool CreateContext() { return true; }
 }
 #endif
+
+// The game's Mega Strike hint (see MegaResolution): called on the game thread every frame the Mega background is drawn.
+extern "C" void VgxMegaSceneHint(int on) {
+    if (on) vgx::backend::g_megaHint.store(1, std::memory_order_relaxed);
+}
+extern "C" int VgxMegaStep(void) { return vgx::backend::g_megaStep.load(std::memory_order_relaxed); }

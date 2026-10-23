@@ -10,6 +10,7 @@ scene twice: once without the line and once with it.
 
 | Question | Scene | Switch | What it tells us |
 | --- | --- | --- | --- |
+| Does Mega Saves hold 30 fps? | Strikers 101 > Mega Saves | default, then `MSC_MEGA_RENDER=off` | The default should hold 30. With `off` it shows the old speed. If the default looks too soft, try `MSC_MEGA_RENDER=512x352` |
 | Is Mega Saves still limited by blending? | Strikers 101 > Mega Saves | `MSC_FX_THIN=2` | If it is faster than the default, thin more. If not, the remaining cost is elsewhere |
 | How much does the picture size cost? | Mega Saves, main menu, stadium select | `MSC_VITA_RENDER=480x336` | A big gain means fill rate (pixels). Little change means geometry or render-pass switches |
 | Can input feel quicker? | Mega Saves, a match | `MSC_VITA_DISPLAY_BUFFERS=2` | One frame fewer waits in the display queue. Check that the frame rate holds |

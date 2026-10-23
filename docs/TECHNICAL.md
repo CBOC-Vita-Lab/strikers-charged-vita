@@ -30,6 +30,8 @@ Save ones; add the others by hand. These are the switches added for the
 | Line | Effect |
 | --- | --- |
 | `MSC_FX_THIN=0` | Draw Mega Strike haze particles as the original did (no thinning) |
+| `MSC_MEGA_RENDER=off` | Keep the full internal size during Mega Strike scenes (default `auto`: 70 %, then 58 % and 50 % of each side while frames are slower than 30 fps) |
+| `MSC_MEGA_RENDER=WxH` | One fixed internal size during Mega Strike scenes, e.g. `448x320` (160x120 to 960x544). Ignored when `MSC_VITA_RENDER` is set |
 | `MSC_FX_THIN=2` | Stronger thinning (up to alpha 24, fading out by 48), for console A/B tests |
 | `MSC_FX_ZERO=0` | Also rasterise fully transparent particles |
 | `MSC_TOUCH_LATCH=0` | Do not keep front-panel taps that fall between two reads |

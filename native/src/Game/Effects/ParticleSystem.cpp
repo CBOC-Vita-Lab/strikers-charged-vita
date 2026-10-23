@@ -24,6 +24,10 @@
 #include "Game/Render/MegastrikeBackgroundOverlay.h"
 #include <stdint.h>
 #include <stdlib.h>
+
+#ifdef NP_NATIVE
+extern "C" int VgxMegaStep(void) __attribute__((weak)); // renderer (vgx_backend_gl.cpp)
+#endif
 #endif
 
 struct TextureFrame
@@ -998,7 +1002,10 @@ int ParticleSystem::RenderAllParticles(GLView* view)
             // MSC_FX_THIN=0 turns 2 off, MSC_FX_THIN=0 together with MSC_FX_ZERO=0 restores the original submission.
             // MSC_FX_THIN=2: stronger, for console A/B tests: full thinning up to alpha 24, fading out by alpha 48.
             static const int kThin = [] { const char* e = getenv("MSC_FX_THIN"); return !e || !*e ? 1 : e[0] == '0' ? 0 : e[0] == '2' ? 2 : 1; }();
-            const unsigned int kFull = kThin == 2 ? 24u : 12u, kSpan = kThin == 2 ? 24u : 20u;
+            // (Default 1 becomes 2 while the renderer's Mega Strike resolution is at its last step, i.e. the frames are still
+            // slower than 30 per second at half size: VgxMegaStep in vgx_backend_gl.cpp.)
+            const int thinLevel = kThin == 1 && VgxMegaStep && VgxMegaStep() >= 3 ? 2 : kThin;
+            const unsigned int kFull = thinLevel == 2 ? 24u : 12u, kSpan = thinLevel == 2 ? 24u : 20u;
             static const bool kZero = [] { const char* e = getenv("MSC_FX_ZERO"); return !(e && e[0] == '0'); }();
             const bool thinHere = kThin != 0 && gMegastrikeBackgroundOverlay.mActive && !sUseWhiteParticleTexture
                 && m_pTemplate->m_eBlend == EfBlend_Additive;

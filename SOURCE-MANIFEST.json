@@ -10852,7 +10852,7 @@
   },
   {
    "path": "native/src/Game/Effects/ParticleSystem.cpp",
-   "sha256": "054badd2f6bfd82f47a343fbdc91de855727013fe82de2ebc63d409f68838a1f"
+   "sha256": "96b6e233f37e476ad664a0bff49ac2af62ef8319951b9d5cc554c4351ca496a5"
   },
   {
    "path": "native/src/Game/Effects/PhotoFlashEffect.cpp",
@@ -12196,7 +12196,7 @@
   },
   {
    "path": "native/src/Game/Task/GameRenderTask.cpp",
-   "sha256": "ce22409e38ecfd937525cd9b4bf0398a8444a2dc9797fce02f335ec9dc89e4e0"
+   "sha256": "35b5aa415e759026d5afcfbf5f626b37dde3d954dd32cbc4669261ae6483fa6e"
   },
   {
    "path": "native/src/Game/Task/LoadingTask.cpp",
@@ -15952,7 +15952,7 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "6297050b08fadce047f618e8db12d21e6eea048fafcaa72704db38f6c3b4afb1"
+   "sha256": "c1140eafa42551a58ae4df8be49640821cf4658c4c6aa8e9551a1be1715ce451"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",

@@ -6,6 +6,11 @@ Gameplay and controls:
 - Faster Mega Saves: zero-alpha effect sprites are skipped, and faint additive
   haze is drawn one in four at four times the strength during Mega Strikes.
   `MSC_FX_THIN=0` and `MSC_FX_ZERO=0` in `np-player.txt` restore the old drawing.
+- Mega Strike scenes (Mega Saves included) render at a smaller internal size,
+  scaled to the screen: 70 % of each side at first, stepping down to 58 % and
+  then 50 % (with stronger haze thinning) if frames still take longer than a
+  30 fps frame. Full size returns when the scene ends. `MSC_MEGA_RENDER=off`
+  in `np-player.txt` turns this off; `MSC_MEGA_RENDER=WxH` fixes one size.
 - Mega Save touch aim uses the position sampled for that press.
 - Optional rear-touch aim and Mega stick speed (2x-4x) in LiveArea Settings.
 - Tap anywhere on the title screen to start. A finger already down does not

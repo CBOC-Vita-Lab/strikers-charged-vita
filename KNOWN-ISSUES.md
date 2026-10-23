@@ -8,9 +8,14 @@
   about console speed. A console check of Mega Saves, a full match, the title
   tap and the zoom slider is the next step.
 - **Mega Saves speed is an estimate.** The previous build measured about 15 FPS
-  in Mega Saves on a console. The new effect drawing should remove roughly half
-  of that scene's blending work. If the haze looks wrong, set `MSC_FX_THIN=0`
-  in `ux0:data/mscharged/np-player.txt`.
+  in Mega Saves on a console. Two changes target 30: the effect drawing removes
+  roughly half of that scene's blending work, and the scene renders at a lower
+  internal size (49 % of the pixels, down to 25 % if it is still below 30 fps).
+  Mega Strike scenes are therefore a little softer than the rest of the match.
+  `MSC_MEGA_RENDER=off` restores full size and `MSC_FX_THIN=0` the original
+  haze, both in `ux0:data/mscharged/np-player.txt`. The resolution change has
+  not been run in the emulator: the cloud emulator's shader compiler failed on
+  the host available that day, for this and the previous release alike.
 - **The AI plays differently at zoom levels 4-7.** It now judges which players
   are "on screen" from about the TV-default view. `MSC_CAMERA_VIS=screen`
   brings back the real screen test.
