@@ -4,7 +4,7 @@ Mario Strikers Charged Vita
 
 # Version
 
-strikers-settings-20261019 (public preview)
+1.0 (public preview)
 
 Title ID: `MSCN00003`. The existing SFO app version is `01.00`.
 
@@ -48,17 +48,17 @@ Native Mario Strikers Charged port for PS Vita; requires the owner's Wii game da
 
 # Download Link
 
-https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/download/strikers-settings-20261019/Strikers-settings-20261019.vpk
+https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/MarioStrikersCharged.vpk
 
 VPK SHA-256: `43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a`
 
 # Release Link
 
-https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/tag/strikers-settings-20261019
+https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/tag/v1.0
 
 # Sourcecode Link (Optional)
 
-https://github.com/CBOC-Vita-Lab/strikers-charged-vita/tree/strikers-settings-20261019
+https://github.com/CBOC-Vita-Lab/strikers-charged-vita/tree/v1.0
 
 # Data Files Link (Optional)
 

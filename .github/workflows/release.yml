@@ -1,0 +1,44 @@
+name: Release
+
+# Publishes a release when CHANGELOG.md gets a new "## x.y" section at the top.
+# Assets keep the same names every time, so ".../releases/latest/download/..."
+# links always point at the newest version.
+on:
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the version
+        id: v
+        run: |
+          ver=$(grep -m1 -E '^## [0-9]+(\.[0-9]+)+\s*$' CHANGELOG.md | sed -E 's/^## +//; s/\s+$//')
+          test -n "$ver" || { echo "no version heading"; exit 1; }
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          awk -v h="## $ver" 'found && /^## /{exit} found{print} $0==h{found=1}' CHANGELOG.md > notes.md
+          if gh release view "v$ver" >/dev/null 2>&1; then echo "exists=1" >> "$GITHUB_OUTPUT"; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Build the downloads
+        if: steps.v.outputs.exists != '1'
+        run: |
+          mkdir dist
+          cp MarioStrikersCharged.vpk dist/
+          git archive --format=zip --prefix=MarioStrikersCharged/ -o dist/MarioStrikersCharged.zip HEAD
+          (cd dist && sha256sum MarioStrikersCharged.vpk MarioStrikersCharged.zip > SHA256SUMS.txt)
+      - name: Publish
+        if: steps.v.outputs.exists != '1'
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" dist/* \
+            --title "Mario Strikers Charged ${{ steps.v.outputs.version }}" \
+            --notes-file notes.md --target "$GITHUB_SHA" --latest
+        env:
+          GH_TOKEN: ${{ github.token }}

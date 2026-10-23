@@ -1,7 +1,7 @@
 # Store Listing
 
 This directory holds the VitaDB submission for the existing
-`strikers-settings-20261019` public preview. It is not a new game build.
+version 1.0 public preview. It is not a new game build.
 
 ## Submission
 

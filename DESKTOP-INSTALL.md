@@ -14,7 +14,7 @@ no FTP client.
    Vita on your Wi-Fi by itself. (USB mode or the Vita's memory card in a card
    reader works too, and is faster.)
 3. Click **Get** next to Mario Strikers Charged, or drop
-   `Strikers-settings-20261019-install.zip` / this repository's folder onto the
+   `MarioStrikersCharged.zip` / this repository's folder onto the
    window.
 4. Choose your own game: a Wii USA Rev 1 (`R4QE01`) ISO, RVZ or WBFS, or a
    folder extracted with Dolphin. It checks it's the right disc and revision.

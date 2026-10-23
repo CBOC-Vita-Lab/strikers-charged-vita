@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "releaseId": "strikers-settings-20261019",
+  "releaseId": "1.0",
   "titleId": "MSCN00003",
   "displayName": "Mario Strikers Charged",
-  "version": "a8d4ad6-movie1-quiet1-settings1",
+  "version": "1.0",
   "minInstallerVersion": "0.1.0",
   "visibility": "public",
   "releaseState": "ready",
   "recipeId": "strikers",
   "package": {
-    "path": "Strikers-settings-20261019.vpk",
+    "path": "MarioStrikersCharged.vpk",
     "sha256": "43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a",
     "runtimeSha256": "0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4"
   },

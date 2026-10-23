@@ -1,12 +1,17 @@
 # Changes
 
-## 2026-10-19: LiveArea Settings Update
+## 1.0
+
+Public preview, 19 October 2026.
 
 - Open Settings from LiveArea while the game is running, then return to play.
 - Save changes for the next launch, or restart only after confirmation.
 - Pause game timing and audio while settings are open.
-- Retain the movie fixes and disabled runtime logging.
-- Include matching source, VPK and ZIP. Desktop setup requires installer 0.1.10+.
+- Smoother intro and stadium-preview movies with their audio kept.
+- No runtime logging.
+
+Downloads: `MarioStrikersCharged.vpk` (the game) and `MarioStrikersCharged.zip`
+(the game with guides and source). Easy install: [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases/latest).
 
 ## 2026-10-19: Quiet Update
 
