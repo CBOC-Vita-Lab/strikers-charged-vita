@@ -15956,7 +15956,7 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "4f8d771bf6c470b91d7deee452ee7c47531ec21955d578e40709e7c570352f51"
+   "sha256": "839d243cc59d98d447a5104ea3df6d26e4d4732a2a3a3d9c748773b89bfa577a"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",
@@ -16308,7 +16308,7 @@
   },
   {
    "path": "renderer/vita/vgx_host_vita.cpp",
-   "sha256": "65b3ba28674b3bb7e5212160438e7e33fb385a4bc292639254c1e2bde0c3a7a7"
+   "sha256": "b7a9b35424d31d5047238bb6aab6879db2bf891ab27ba90ada1bb46d4eaf3596"
   },
   {
    "path": "renderer/vita/vgx_listmerge.h",

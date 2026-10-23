@@ -10,6 +10,10 @@ please [open an issue](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/is
 - **60 fps depends on the scene.** AUTO runs matches at 60 whenever the Vita
   can keep up and switches to 30 in the busiest moments. If you'd rather have
   a constant frame rate, set **Frame Rate** to **30 FPS** in Settings.
+- **Sharpening and the lighter Mega Strike glow need the Vita's shader
+  compiler while the game runs.** On some consoles it refuses to build new
+  shaders; the game then shows the plain picture and draws the glow at full
+  size, as version 1.0 did. Everything else works the same.
 - **Distant Textures is experimental.** It is off by default. If ground or
   wall textures look wrong with it on, turn it back off.
 

@@ -135,6 +135,9 @@
 #include <algorithm>
 #include <vector>
 
+// The renderer's dynamic resolution checks the free video memory before it draws a larger picture (vgx_backend_gl.cpp).
+extern "C" int vgx_vram_free_kib(void) { return static_cast<int>(vglMemFree(VGL_MEM_VRAM) / 1024); }
+
 // Multiplayer (platform layer, vita_multiplayer.cpp): the system NetCheck dialog of the ad hoc connection is
 // drawn by vitaGL's swap, which must be told that a CommonDialog is on screen. Weak: absent in an older platform
 // snapshot (then every swap is a plain one).

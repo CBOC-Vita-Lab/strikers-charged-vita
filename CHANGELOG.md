@@ -32,6 +32,9 @@ The performance update.
 - Optional rear-touch aiming and faster Mega Save stick speed in Settings.
 
 **Under the hood**
+- Fixed a crash when starting a match after the picture size had changed a
+  few times: unused graphics buffers are now freed, and the game only draws a
+  larger picture when there is graphics memory to spare.
 - More reliable shader cache and graphics memory recovery.
 - Faster texture uploads and less background CPU use.
 

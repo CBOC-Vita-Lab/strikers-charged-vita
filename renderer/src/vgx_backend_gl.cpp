@@ -54,7 +54,8 @@
 #include <atomic>
 #include "vgx_cmd.h"
 namespace vgx::rec { double TakePlayerIdleMs(); bool TakePipeWaitMs(double* playerSlotWaitMs, double* backEndIdleMs); }
-extern "C" int NpFpsDisplayInterval(void) __attribute__((weak)); // the game's frame-rate policy (np/fps.h): vblanks per picture, 0 = none (DYNRES's budget)
+extern "C" int NpFpsDisplayInterval(void) __attribute__((weak));
+extern "C" int vgx_vram_free_kib(void) __attribute__((weak)); // the host's free video memory in KiB (Vita: vitaGL's VRAM pool), -1 unknown // the game's frame-rate policy (np/fps.h): vblanks per picture, 0 = none (DYNRES's budget)
 #ifdef __VGX_VITA__
 extern "C" void vgx_vita_log_glb_stats(void); // vita/vgx_host_vita.cpp (a no-op line when vitaGL is not the GLB build)
 #endif
@@ -243,8 +244,10 @@ struct PoolFbo {
     GLuint depthTex = 0, depthRb = 0; // made on demand (passes)
     GLuint attached = 0;              // the colour texture attached at the moment
     uint32_t uses = 0;                // this frame
+    uint32_t lastPresent = 0;         // g_poolPresents when it was last used (TrimPool)
 };
 std::vector<PoolFbo> g_pool;
+uint32_t g_poolPresents = 0;      // presents so far (TrimPool's clock)
 uint32_t g_fboMaxUses = 8;
 // The usage hint of the display-list cache's static vertex and index buffers.
 // MSC_VGX_STATIC_USAGE=dynamic (the Vita host's default; "static" elsewhere): on vitaGL the
@@ -1639,9 +1642,14 @@ PicProg* EnsurePictureProgram(int mode) {
         fs += "  vec2 uv = clamp(v_uv, u_lim.xy, u_lim.zw);\n";
     fs += "  vec4 c = texture2D(u_src, uv);\n";
     if (mode == PIC_UNSHARP || mode == PIC_SMOOTH)
-        fs += "  vec4 b = texture2D(u_src, clamp(uv + vec2(u_size.z, 0.0), u_lim.xy, u_lim.zw)) + texture2D(u_src, clamp(uv - vec2(u_size.z, 0.0), u_lim.xy, u_lim.zw))\n"
-              "         + texture2D(u_src, clamp(uv + vec2(0.0, u_size.w), u_lim.xy, u_lim.zw)) + texture2D(u_src, clamp(uv - vec2(0.0, u_size.w), u_lim.xy, u_lim.zw));\n"
-              "  c = c + (c - b * 0.25) * u_p.z;\n";
+        // (1.1: one sample per statement. The console's shader compiler stopped with "fatal internal error" on the nested
+        // single-expression form, so the sharpening was never on there.)
+        fs += "  vec2 dx = vec2(u_size.z, 0.0);\n  vec2 dy = vec2(0.0, u_size.w);\n"
+              "  vec2 u1 = clamp(uv + dx, u_lim.xy, u_lim.zw);\n  vec2 u2 = clamp(uv - dx, u_lim.xy, u_lim.zw);\n"
+              "  vec2 u3 = clamp(uv + dy, u_lim.xy, u_lim.zw);\n  vec2 u4 = clamp(uv - dy, u_lim.xy, u_lim.zw);\n"
+              "  vec4 s1 = texture2D(u_src, u1);\n  vec4 s2 = texture2D(u_src, u2);\n  vec4 s3 = texture2D(u_src, u3);\n  vec4 s4 = texture2D(u_src, u4);\n"
+              "  vec3 b = (s1.rgb + s2.rgb + s3.rgb + s4.rgb) * 0.25;\n"
+              "  c.rgb = c.rgb + (c.rgb - b) * u_p.z;\n";
     fs += "  gl_FragColor = vec4(c.rgb, 1.0);\n}\n";
     const GLuint v = Compile(GL_VERTEX_SHADER, vs, "picture vertex"), f = Compile(GL_FRAGMENT_SHADER, fs.c_str(), "picture fragment");
     if (!v || !f) {
@@ -1909,6 +1917,7 @@ int AcquireFbo(int w, int h, GLuint tex, bool wantDepth) {
         VGX_LOG("framebuffer object %dx%d created (%u pooled)\n", w, h, static_cast<unsigned>(g_pool.size()));
     }
     PoolFbo& f = g_pool[idx];
+    f.lastPresent = g_poolPresents;
     BindFbo(f.fbo);
     if (!tex) {
         if (!f.color) {
@@ -1941,6 +1950,38 @@ int AcquireFbo(int w, int h, GLuint tex, bool wantDepth) {
         }
     }
     return idx;
+}
+
+// 1.1 (console crash, 23 Oct): every pass size the dynamic resolution ever used kept its framebuffer object, colour and depth
+// textures in the pool for the rest of the session, so a session that changed levels filled the video memory, and a target made
+// with no memory left crashed the GPU set-up. At each present, objects not used for 60 presents are deleted (vitaGL frees their
+// memory once the GPU is done with them). Nothing holds a pool index across a present.
+void TrimPool() {
+    ++g_poolPresents;
+    size_t kept = 0, freed = 0;
+    for (size_t i = 0; i < g_pool.size(); ++i) {
+        PoolFbo& f = g_pool[i];
+        if (g_poolPresents - f.lastPresent > 60) {
+            if (S.fbo == f.fbo) {
+                G(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+                S.fbo = 0;
+                g_fbDirty = true;
+            }
+            if (g_inUseFbo == f.fbo) g_inUseFbo = ~0u;
+            if (f.color) { const GLuint t = f.color; G(glDeleteTextures(1, &t)); ForgetTex(t); }
+            if (f.depthTex) { const GLuint t = f.depthTex; G(glDeleteTextures(1, &t)); ForgetTex(t); }
+            if (f.depthRb) G(glDeleteRenderbuffers(1, &f.depthRb));
+            G(glDeleteFramebuffers(1, &f.fbo));
+            ++freed;
+            continue;
+        }
+        if (kept != i) g_pool[kept] = f;
+        ++kept;
+    }
+    if (freed) {
+        g_pool.resize(kept);
+        VGX_LOG("framebuffer objects: %u unused for 60 frames deleted, %u pooled\n", static_cast<unsigned>(freed), static_cast<unsigned>(kept));
+    }
 }
 
 // The texture a copy writes to: a render-target texture of w x h. atlas: only rectangles of it are ever written (cells of a
@@ -2998,6 +3039,25 @@ void DynSetLevel(int l, const char* why) {
     ++d.changes;
 }
 
+// 1.1 (console crash, 23 Oct): free video memory, read every 30 frames. A larger picture needs new, larger targets; with the
+// pool nearly full their creation failed and the GPU set-up crashed. Levels above the game's own size need 32 MiB free, any step
+// up 16 MiB, and below 12 MiB a picture larger than the game's own size goes back to it. MSC_DYNRES_VRAM=KiB simulates it.
+int DynVramFreeKib() {
+    static int cached = -1, age = 1000;
+    static const long fake = EnvInt("MSC_DYNRES_VRAM", -1);
+    if (fake >= 0) return static_cast<int>(fake);
+    if (++age >= 30) {
+        age = 0;
+        cached = vgx_vram_free_kib ? vgx_vram_free_kib() : -1;
+    }
+    return cached;
+}
+bool DynRoomFor(int l) {
+    const int kib = DynVramFreeKib();
+    if (kib < 0) return true;
+    return kib >= (l < kDynNative ? 32768 : 16384);
+}
+
 void DynamicResolution() {
     DynRes& d = g_dyn;
     if (!d.inited) DynInit();
@@ -3067,8 +3127,10 @@ void DynamicResolution() {
             }
             if (ms > budget) ++d.over; else d.over = 0;
             if (d.upHold > 45 && d.seq - d.lastDownSeq > 1200) d.upHold = 45;   // stable for a while: tries come at the usual pace again
+            const int vram = DynVramFreeKib();
             if (d.level > floor) DynSetLevel(floor, "past this scene's floor");
             else if (d.level < best) DynSetLevel(best, "above this scene's best level");
+            else if (d.level < kDynNative && vram >= 0 && vram < 12288) DynSetLevel(kDynNative, "video memory is low");
             else if (d.ema > 0.90f * budget || d.over >= 3) {
                 int l = d.level;
                 while (l < floor && pred(l) > 0.82f * budget) ++l;
@@ -3082,7 +3144,7 @@ void DynamicResolution() {
                 } else {
                     d.over = 0;
                 }
-            } else if (d.level > best && pred(d.level - 1) < 0.72f * budget) {
+            } else if (d.level > best && pred(d.level - 1) < 0.72f * budget && DynRoomFor(d.level - 1)) {
                 if (++d.headroom >= d.upHold) {
                     DynSetLevel(d.level - 1, "the GPU has room");
                     d.lastUpSeq = d.seq;
@@ -3345,6 +3407,7 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
         case CMD_COPY_DISP: CopyDisp(buf.copyDisp[c.arg]); break;
         case CMD_PRESENT:
             for (PoolFbo& f : g_pool) f.uses = 0;
+            TrimPool();
             g_stats.programsUsedThisFrame = g_progsThisFrame;
             break;
         case CMD_SET_TARGET:

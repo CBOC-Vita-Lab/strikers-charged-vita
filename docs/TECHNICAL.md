@@ -183,3 +183,19 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
 - Developer files moved out of the top folder: `tools/build-deps.py`,
   `tools/check-files.py`, `docs/RELEASE.json`, `docs/SOURCE-MANIFEST.json`,
   `docs/CHECK-DOWNLOAD.md` and `store/artwork.json`.
+
+### Console fixes after the first hardware test
+- The framebuffer-object pool kept every pass size the dynamic resolution had
+  used, with its colour and depth textures, for the whole session; after a few
+  level changes the video memory ran out and creating a target crashed the GPU
+  set-up (`sceGxmBeginScene`, at the start of a match). Pool objects unused for
+  60 presents are now deleted, and the controller only steps up when vitaGL's
+  VRAM pool has room: 32 MiB free for levels above the game's own size, 16 MiB
+  for any step up, and below 12 MiB a larger picture drops back to native.
+  `MSC_DYNRES_VRAM=KiB` simulates the free memory on the desktop.
+- On the test console every fresh run-time shader compile failed ("fatal
+  internal error", Cg and GLSL alike, at start-up too); only packaged or
+  cached shaders work. The picture shader then falls back to the plain blit and
+  the low-resolution effects pass to full size. The sharpening shader is now
+  written one sample per statement.
+
