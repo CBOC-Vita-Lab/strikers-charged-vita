@@ -3,9 +3,15 @@
 ## 2026-10-23: Mega Saves, Touch And Zoom Update
 
 Gameplay and controls:
-- Faster Mega Saves: zero-alpha effect sprites are skipped, and faint additive
-  haze is drawn one in four at four times the strength during Mega Strikes.
-  `MSC_FX_THIN=0` and `MSC_FX_ZERO=0` in `np-player.txt` restore the old drawing.
+- Faster, sharper Mega Strikes: glowing effect sprites (the Mega Strike haze,
+  item and super-ability glows) are drawn at a quarter of the pixels into a
+  separate image, still hidden behind what is in front of them, and added to
+  the scene in one pass. The scene itself stays at full size. Used in Mega
+  Strikes, and for heavy effects elsewhere when the graphics chip is short.
+  `MSC_FX_LOWRES=0` turns it off. Fully transparent sprites are skipped. The
+  haze thinning of earlier builds now only applies at the smallest Mega Strike
+  picture (it was never reached before: the game draws its sprites through a
+  second path, which now has it as well).
 - 60 fps by default where it holds: Settings > Frame Rate is now AUTO by
   default (30 FPS is still there). AUTO also watches the graphics chip now,
   so it does not try 60 in a scene the GPU cannot draw that fast.
@@ -15,7 +21,7 @@ Gameplay and controls:
   smaller size, then the scene at 93 % and at most 86 % of each side; menus
   and matches never go lower. With time to spare it draws the scene larger
   than the game's own size (up to 1.2 times, 768x544), for a sharper
-  picture. Mega Strike scenes start at 70 % and may go down to 50 %, with
+  picture. Mega Strike scenes may go down to 50 % if still short, with
   stronger haze thinning at the bottom. Settings: `MSC_DYNRES=off`,
   `MSC_DYNRES_MAX=1.0..1.2`, `MSC_DYNRES_MIN=0.75..1.0`,
   `MSC_MEGA_RENDER=off|WxH` in `np-player.txt`.

@@ -29,13 +29,15 @@ Save ones; add the others by hand. These are the switches added for the
 
 | Line | Effect |
 | --- | --- |
-| `MSC_FX_THIN=0` | Draw Mega Strike haze particles as the original did (no thinning) |
+| `MSC_FX_LOWRES=0` | Draw glowing effect sprites at full size (default: Mega Strikes and heavy effects at a quarter of the pixels; `4`: a sixteenth; `always`: every effect, for tests) |
+| `MSC_FX_THIN=0` | Never thin the Mega Strike haze (default: only at the smallest Mega Strike picture; `1`: always in Mega Strikes) |
+| `MSC_VITA_ANISO=3` | Experimental anisotropic filtering of trilinear textures (Settings > Distant Textures). Untested on a console |
 | `MSC_VITA_UPSCALE=off` | Plain scaling to the screen, no sharpening (default `smooth`: bilinear plus a light unsharp mask, amount `MSC_VITA_SHARPEN`, default 0.5, and 0.7-0.8 in Mega Strike scenes). `sharp`, `sharp+` and `linear` remain |
 | `MSC_FPS=30` | A steady 30 fps (Settings > Frame Rate: 30 FPS). The default is `auto`: 60 where every CPU core and the GPU hold it |
 | `MSC_DYNRES=off` | No dynamic resolution: the game's own picture size everywhere (also turns the GPU timers off) |
 | `MSC_DYNRES_MAX=1.0` | Do not draw larger than the game's own size when the GPU has time to spare (default up to 1.2 per side) |
 | `MSC_DYNRES_MIN=0.93` | The smallest picture in menus and matches (default 0.86 per side; 0.75 to 1.0) |
-| `MSC_MEGA_RENDER=off` | Mega Strike scenes use the ordinary floor (default: they start at 70 % and may go to 50 %) |
+| `MSC_MEGA_RENDER=off` | Mega Strike scenes use the ordinary floor (default: they may go down to 50 % if the GPU is still short) |
 | `MSC_MEGA_RENDER=WxH` | One fixed internal size during Mega Strike scenes, e.g. `448x320` (160x120 to 960x544). Ignored when `MSC_VITA_RENDER` is set |
 | `MSC_VITA_RT_TIMERS=0` | GPU timers off (the dynamic resolution then keeps the game's size, apart from the Mega Strike start) |
 | `MSC_FX_THIN=2` | Stronger thinning (up to alpha 24, fading out by 48), for console A/B tests |
@@ -60,7 +62,7 @@ in force (16.7 ms at 60, 33.4 ms at 30):
 | 3 | 1.0 | 1.0 | The game's own size (the start) |
 | 4-5 | 1.0 | 0.75, 0.5 | The first saving: blur and glow chains, full-screen filters |
 | 6-7 | 0.93, 0.86 | 0.5 | The floor of menus and matches |
-| 8-12 | 0.78 to 0.50 | 0.5 | Mega Strike scenes only (they start at 0.70) |
+| 8-12 | 0.78 to 0.50 | 0.5 | Mega Strike scenes only (they start at level 5: the scene at full size, the effect sprites at a quarter of the pixels) |
 
 "Large passes" are offscreen passes of at least an eighth of the frame buffer
 that are not drawn into an atlas. Over 90 % of the budget it jumps straight to
@@ -70,6 +72,14 @@ their picture, scaled, when their size changes, so a change shows no flash.
 the GPU time predicted at the scene's floor: AUTO does not go to 60 when that is
 over 85 % of a refresh, and goes back to 30 when it stays over 97 % for 8 frames.
 The host's sharpening follows the scale (`VgxRenderScale`).
+
+Effect sprites (FX): the game marks its additive sprite meshes (`np/fx.h`;
+`ParticleSystem` and `BuildParticleQuads` in `main.cpp`, the path the game
+actually uses), `glxSend` wraps their draws in an `EXT_FX` record, and the
+back end draws a run of them into a half-size target that starts with the
+scene's depth (a depth-copy pass) and adds it to the frame buffer in one
+full-screen pass. Runs under 400 vertices outside Mega Strikes are drawn as
+before, since a run costs two scene changes and about 1.25 screens of pixels.
 
 On the desktop harness, `MSC_DYNRES_FAKE=a,b` simulates a GPU time and
 `MSC_DYNRES_CYCLE=N` changes the level every N frames (a stress test of the

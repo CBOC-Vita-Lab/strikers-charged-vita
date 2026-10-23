@@ -29,6 +29,8 @@
 #include "shared.h"
 
 uint32_t vgl_rt_flags = 0;
+uint32_t vgl_aniso_min = 0; // utils/gxm_utils.h vglSetTexMinFilter
+void vglSetAnisotropicFilter(uint32_t sceFilter) { vgl_aniso_min = (sceFilter == 2 || sceFilter == 3) ? sceFilter : 0; }
 GLuint vgl_rt_hint_fb = 0;
 uint32_t vgl_rt_hint = 0;
 GLboolean vgl_rt_hint_valid = GL_FALSE;

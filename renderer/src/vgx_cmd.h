@@ -153,6 +153,7 @@ struct DrawRec {
     RenderState rs;
     TexBind tex[8];
     uint32_t skinBlock = kNoBlock; // W5 SKIN: offset of the bone matrices in CmdBuf::uni (kSkinBlockFloats), kNoBlock: not skinned on the GPU
+    uint8_t fx = 0;                // FX: an additive effect sprite draw (EXT_FX), which the back end may draw at a lower resolution
 };
 
 // ----------------------------------------------------------------- shaders

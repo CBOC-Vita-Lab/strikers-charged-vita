@@ -19,9 +19,8 @@ before you install. You need your own game dump. No game data is included.
 
 ## What's New (2026-10-23)
 
-- **Faster Mega Saves.** The Mega Strike save scene draws far fewer invisible
-  or near-invisible effect sprites and renders at a lower internal size that
-  drops further if it falls below 30 fps.
+- **Faster, sharper Mega Strikes.** The glow and haze are drawn at a quarter of
+  the pixels and added to a full-size scene, so the scene stays sharp.
 - **60 fps where it holds.** Frame Rate is AUTO by default: 60 when the CPU and
   the graphics chip can keep up, 30 otherwise.
 - **Dynamic resolution.** The picture size adapts to the graphics chip's load:

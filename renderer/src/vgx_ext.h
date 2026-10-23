@@ -14,12 +14,15 @@
 //                 POSITION index. A slot after the first zero weight, and a bone index >= nBones, do not count (the
 //                 game's CPU loop stops at the first zero weight and only visits bones below nBones).
 //   EXT_SKIN_OFF  []             back to plain vertices
+//   EXT_FX        [on]           (FX, 23 Oct) the draws until [0] are additive effect sprites (the native port's np/fx.h): DrawRec::fx, which
+//                                the back end may draw at a lower resolution (vgx_backend_gl.cpp "FX")
 #pragma once
 #include "vgx_common.h"
 
 namespace vgx {
 
-enum : uint32_t { EXT_TAG = 1, EXT_SKIN = 2, EXT_SKIN_OFF = 3 };
+enum : uint32_t { EXT_TAG = 1, EXT_SKIN = 2, EXT_SKIN_OFF = 3, EXT_FX = 4 };
+extern bool g_fxDraws; // EXT_FX in force (player side)
 constexpr uint32_t kSkinMaxBones = 32;
 
 // Player side (vgx_skin.cpp).

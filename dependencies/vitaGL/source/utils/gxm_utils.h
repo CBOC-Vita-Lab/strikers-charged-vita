@@ -108,8 +108,14 @@ static inline __attribute__((always_inline)) void vglSetTexVMode(SceGxmTexture *
 	SceGxmTextureInternal *tex = (SceGxmTextureInternal *)texture;
 	tex->control_words[0] = ((addrMode << 3) & 0x38) | tex->control_words[0] & 0xFFFFFFC7;
 }
+// (Strikers port, 23 Oct) vglSetAnisotropicFilter: a trilinear texture (minification LINEAR with the mip filter on) is given this
+// minification filter instead (2 or 3: the filter values vitasdk names MIPMAP_LINEAR / MIPMAP_POINT, believed to be the hardware's
+// anisotropic modes; 0: off, the default)
+extern uint32_t vgl_aniso_min;
 static inline __attribute__((always_inline)) void vglSetTexMinFilter(SceGxmTexture *texture, SceGxmTextureFilter minFilter) {
 	SceGxmTextureInternal *tex = (SceGxmTextureInternal *)texture;
+	if (vgl_aniso_min && minFilter == SCE_GXM_TEXTURE_FILTER_LINEAR && (tex->control_words[0] & 0x200))
+		minFilter = (SceGxmTextureFilter)vgl_aniso_min;
 	tex->control_words[0] = ((minFilter << 10) & 0xC00) | tex->control_words[0] & 0xFFFFF3FF;
 }
 static inline __attribute__((always_inline)) void vglSetTexMagFilter(SceGxmTexture *texture, SceGxmTextureFilter magFilter) {
@@ -119,6 +125,13 @@ static inline __attribute__((always_inline)) void vglSetTexMagFilter(SceGxmTextu
 static inline __attribute__((always_inline)) void vglSetTexMipFilter(SceGxmTexture *texture, SceGxmTextureMipFilter mipFilter) {
 	SceGxmTextureInternal *tex = (SceGxmTextureInternal *)texture;
 	tex->control_words[0] = mipFilter & 0x200 | tex->control_words[0] & 0xFFFFFDFF;
+	if (vgl_aniso_min) { // (the order of the two calls varies: a LINEAR minification becomes anisotropic once the mip filter is on, and back)
+		const uint32_t minf = (tex->control_words[0] >> 10) & 3;
+		if ((mipFilter & 0x200) && minf == SCE_GXM_TEXTURE_FILTER_LINEAR)
+			tex->control_words[0] = ((vgl_aniso_min << 10) & 0xC00) | tex->control_words[0] & 0xFFFFF3FF;
+		else if (!(mipFilter & 0x200) && minf == vgl_aniso_min)
+			tex->control_words[0] = ((SCE_GXM_TEXTURE_FILTER_LINEAR << 10) & 0xC00) | tex->control_words[0] & 0xFFFFF3FF;
+	}
 }
 static inline __attribute__((always_inline)) void vglSetTexLodBias(SceGxmTexture *texture, uint32_t bias) {
 	SceGxmTextureInternal *tex = (SceGxmTextureInternal *)texture;

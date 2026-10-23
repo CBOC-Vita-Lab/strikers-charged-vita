@@ -15,7 +15,9 @@ scene twice: once without the line and once with it.
 | Does a match reach 60? | A full match | default (AUTO), then `MSC_FPS=30` | Logging builds print `[fps] auto: 30 -> 60` and `[vgx] dynamic resolution: ... level` lines. If 60 is rare and the reason is a CPU core, the GPU levels cannot help |
 | What do the GPU timers cost? | A match | `MSC_DYNRES=off` | The timers add one notification per render scene. Expect no visible difference |
 | Is the larger picture worth it? | Main menu, a match at 30 | `MSC_DYNRES_MAX=1.0` | The default may draw up to 768x544 when the GPU has room. If that ever costs frames, cap it |
-| Is Mega Saves still limited by blending? | Strikers 101 > Mega Saves | `MSC_FX_THIN=2` | If it is faster than the default, thin more. If not, the remaining cost is elsewhere |
+| What do the low-resolution effects save? | Strikers 101 > Mega Saves | default, then `MSC_FX_LOWRES=0` | The default should be much faster. `MSC_FX_LOWRES=4` saves more if it is still slow |
+| Does the anti-aliasing pay off? | A match, the main menu | Settings > Anti-Aliasing 2X | Smoother edges, small but visible. Keep it only if the frame rate holds |
+| Does anisotropic filtering work? | A match | Settings > Distant Textures SHARP (TEST) | The far half of the pitch should look crisper. If textures look wrong, the filter values are not what we think |
 | How much does the picture size cost? | Mega Saves, main menu, stadium select | `MSC_VITA_RENDER=480x336` | A big gain means fill rate (pixels). Little change means geometry or render-pass switches |
 | Can input feel quicker? | Mega Saves, a match | `MSC_VITA_DISPLAY_BUFFERS=2` | One frame fewer waits in the display queue. Check that the frame rate holds |
 | Is the menu limited by geometry? | Main menu | `MSC_VITA_RENDER=480x336` | The main menu draws about 105,000 triangles per frame (a 3D scene of about 52 draws), then an 8-pass glow chain |

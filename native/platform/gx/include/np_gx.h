@@ -64,6 +64,8 @@ void np_gx_skin_begin(const float* mats, unsigned int nBones, const void* weight
 void np_gx_skin_end(void);
 // Diagnostics (MSC_VGX_TAGCENSUS=1 in the renderer): the draws that follow are counted under (tag, flags) in the per-frame tag census.
 void np_gx_diag_tag(unsigned int tag, unsigned int flags);
+// FX (np/fx.h): the draws between np_gx_fx_lowres(1) and (0) are additive effect sprites the renderer may draw at a lower resolution.
+void np_gx_fx_lowres(unsigned int on);
 
 // What the 3-argument SDK form GXSetArray(attr, base, stride) assumes (default big-endian, as on the console). Only code
 // that has no stream to ask (the SDK's own libraries) uses it.

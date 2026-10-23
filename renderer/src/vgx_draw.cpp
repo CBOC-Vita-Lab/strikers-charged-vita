@@ -1397,6 +1397,7 @@ static DrawRec* NewDrawRec(uint8_t prim, uint32_t layoutMask) {
     rec->skinBlock = (layoutMask & VL_SKIN) ? g_skinBlockOff : kNoBlock;
     rec->rs = cur.rs;
     std::memcpy(rec->tex, cur.tex, sizeof cur.tex);
+    rec->fx = g_fxDraws ? 1 : 0;
     g_lastDraw = static_cast<int>(g_buf.draws.size()) - 1;
     g_buf.cmds.push_back(Cmd{CMD_DRAW, static_cast<uint32_t>(g_lastDraw)});
     ++stats::Cur().drawCalls;
@@ -1516,7 +1517,7 @@ static inline bool SameBlocks(const DrawRec& p, const RenderState& rs) {
 }
 
 static inline bool SameDrawState(const DrawRec& a, const DrawRec& b) { // (uniform-block offsets, render state, texture bindings)
-    if (a.skinBlock != b.skinBlock) return false; // (W5 SKIN)
+    if (a.skinBlock != b.skinBlock || a.fx != b.fx) return false; // (W5 SKIN; FX)
     if (Gxd(GXD_WORDCMP))
         return SameWords(a.ublock, b.ublock, UB_COUNT) && SameWords(&a.rs, &b.rs, sizeof(RenderState) / 4) && SameWords(a.tex, b.tex, sizeof a.tex / 4);
     return std::memcmp(a.ublock, b.ublock, sizeof a.ublock) == 0 && std::memcmp(&a.rs, &b.rs, sizeof(RenderState)) == 0 && std::memcmp(a.tex, b.tex, sizeof a.tex) == 0;
@@ -1849,7 +1850,7 @@ void EmitDraw(uint8_t gxPrim, uint32_t layoutMask, uint32_t count) {
         if (p.vbuf == 0 && p.prim == prim && p.layoutMask == layoutMask && p.vsId == cur.vsId && p.fsId == cur.fsId &&
             p.vtxCount + count <= 0xFFFF && contiguous &&
             p.idxOffset + p.idxCount == g_buf.idx.size() && p.texMask == cur.texMask && SameBlocks(p, cur.rs) &&
-            p.skinBlock == ((layoutMask & VL_SKIN) ? g_skinBlockOff : kNoBlock)) {
+            p.skinBlock == ((layoutMask & VL_SKIN) ? g_skinBlockOff : kNoBlock) && p.fx == (g_fxDraws ? 1 : 0)) {
             rec = &p;
             if (!abs) base = p.vtxCount;
         }

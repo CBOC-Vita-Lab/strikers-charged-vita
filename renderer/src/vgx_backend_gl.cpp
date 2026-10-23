@@ -112,6 +112,7 @@ namespace {
     X(quadClears)     /* clears drawn as a quad (partial colour mask) */                                                             \
     X(copyQuads)      /* EFB / pass -> texture copy draws */                                                                         \
     X(passesScaled)   /* DYNRES: large passes drawn at the reduced pass scale */                                                     \
+    X(fxRuns) X(fxDraws) /* FX: runs of additive effect draws drawn at the lower resolution, and their draws */                        \
     X(draws) X(drawIndices)                                                                                                          \
     X(programUses)    /* glUseProgram */                                                                                             \
     X(uniformCalls) X(uniformBytes) /* glUniform*: all blocks */                                                                     \
@@ -1233,7 +1234,7 @@ bool BlockDiffers(Program& p, int b, const float* src, int n0, int off1, int n1)
 // sampled, render state, vertex buffer and layout, triangle lists, `b`'s indices follow `a`'s); 1: the same state with other indices; 0: no.
 template <class UniVec> int ContinuesDraw(const DrawRec& a, const DrawRec& b, const UniVec& uni) { // (template: GXD made the arena a NoInitAlloc vector)
     if (a.vsId != b.vsId || a.fsId != b.fsId || a.prim != b.prim || a.texMask != b.texMask || a.layoutMask != b.layoutMask || a.vbuf != b.vbuf ||
-        a.vtxOffset != b.vtxOffset || a.vchunk != b.vchunk || a.skinBlock != b.skinBlock)
+        a.vtxOffset != b.vtxOffset || a.vchunk != b.vchunk || a.skinBlock != b.skinBlock || a.fx != b.fx)
         return 0;
     if (std::memcmp(&a.rs, &b.rs, sizeof a.rs) != 0) return 0;
     for (int k = 0; k < UB_COUNT; ++k) { // (the blocks by value: the front end gives every draw its own block ids)
@@ -2008,6 +2009,194 @@ Tex& CopyTexture(uint32_t texId, int w, int h, bool atlas = false) {
     return t;
 }
 
+// FX (23 Oct): additive effect sprites at a lower resolution. The game marks the draws of its additive sprite meshes (DrawRec::fx, from
+// EXT_FX: the native port's np/fx.h): the glow and haze of Mega Strikes, item and super-ability effects, sparks. Additive light adds up in any
+// order, so a run of such draws can be drawn into a target of half the size (a quarter of the pixels; MSC_FX_LOWRES=4: a sixteenth) that
+// starts black and holds the scene's depth (each of its pixels the depth of the EFB pixel under its centre, so the sprites are still
+// hidden behind what is in front of them), and then be added to the scene in one full-screen pass, scaled up. The sprites are soft by
+// nature; what costs on the Vita is their overdraw (a Mega Strike stacks about 40 screens of them), which this divides by four. The run ends
+// at the first command that is not such a draw (a draw of something else, a copy, a pass, the display copy). Only draws that add
+// (blend ADD, destination factor ONE, source ALPHA or ONE), do not write depth and have no destination-alpha second pass, outside the
+// offscreen passes, and only with a depth texture. Used in Mega Strike scenes always, and elsewhere from dynamic-resolution level 4 (the GPU
+// over its budget at the game's own size), each run costing two scene changes and a full-screen pass (worth it only for heavy effects).
+// MSC_FX_LOWRES=0: off; =2 (default): half size; =4: a quarter of each side; =always: in every scene (tests).
+int g_fxDiv = -1;              // 0 off, 2 or 4
+bool g_fxAlways = false;
+bool g_fxBuf = false;          // the buffer being executed draws its FX runs at the lower resolution (decided before its RT scan)
+bool g_fxOpen = false;         // an FX run is being drawn into the FX target
+bool g_fxAlpha = false;        // a draw of the open run writes alpha (the composite then adds alpha as well)
+int g_fxPoolIdx = -1;
+GLuint g_fxDepthProg = 0;
+GLint g_fxDepthRect = -1;
+bool g_fxDepthFailed = false;
+
+int FxDiv() {
+    if (g_fxDiv < 0) {
+        const char* e = std::getenv("MSC_FX_LOWRES");
+        g_fxDiv = 2;
+        if (e && *e) {
+            if (std::strcmp(e, "0") == 0 || std::strcmp(e, "off") == 0) g_fxDiv = 0;
+            else if (std::strcmp(e, "4") == 0) g_fxDiv = 4;
+            else if (std::strcmp(e, "always") == 0) g_fxAlways = true;
+        }
+    }
+    return g_fxDiv;
+}
+bool FxEligible(const DrawRec& dr) {
+    const RenderState& rs = dr.rs;
+    return dr.fx && rs.blend && rs.blendEq == BE_ADD && rs.blendDst == BF_ONE && (rs.blendSrc == BF_SRC_ALPHA || rs.blendSrc == BF_ONE) &&
+           !rs.depthWrite && !rs.dstAlphaPass;
+}
+// Commands that draw nothing and may come inside a run.
+bool FxNeutral(CmdType t) { return t == CMD_TEX_UPLOAD || t == CMD_TEX_FREE || t == CMD_SHADER || t == CMD_BUF_UPLOAD || t == CMD_BUF_FREE; }
+
+bool EnsureFxDepthProgram() {
+    if (g_fxDepthProg) return true;
+    if (g_fxDepthFailed) return false;
+    static const char* vs =
+        "attribute vec4 a_pos;\nuniform vec4 u_rect;\nvarying vec2 v_uv;\n"
+        "void main() { v_uv = u_rect.xy + (a_pos.xy * 0.5 + 0.5) * u_rect.zw; gl_Position = vec4(a_pos.xy, 0.0, 1.0); }\n";
+    // (as the Z-freeze shaders: GLES2 names the output gl_FragDepthEXT; vitaGL's translator knows gl_FragDepth and drops extension lines)
+    static const char* fs =
+        "#ifdef GL_EXT_frag_depth\n#extension GL_EXT_frag_depth : enable\n#define VGX_FRAGDEPTH gl_FragDepthEXT\n#else\n#define VGX_FRAGDEPTH gl_FragDepth\n#endif\n"
+        "precision highp float;\nuniform sampler2D u_src;\nvarying vec2 v_uv;\n"
+        "void main() { VGX_FRAGDEPTH = texture2D(u_src, v_uv).r; gl_FragColor = vec4(0.0); }\n";
+    const GLuint v = Compile(GL_VERTEX_SHADER, vs, "fx depth vertex"), f = Compile(GL_FRAGMENT_SHADER, fs, "fx depth fragment");
+    GLuint p = 0;
+    GLint ok = 0;
+    if (v && f) {
+        p = G(glCreateProgram());
+        if (p && p != 0xFFFFFFFFu) {
+            G(glAttachShader(p, v));
+            G(glAttachShader(p, f));
+            G(glBindAttribLocation(p, AT_POS, "a_pos"));
+            G(glLinkProgram(p));
+            G(glGetProgramiv(p, GL_LINK_STATUS, &ok));
+        } else {
+            p = 0;
+        }
+    }
+    if (v) G(glDeleteShader(v));
+    if (f) G(glDeleteShader(f));
+    if (!ok) {
+        if (p) G(glDeleteProgram(p));
+        g_fxDepthFailed = true;
+        VGX_ERR("FX: the depth program did not build: effects are drawn at full size\n");
+        return false;
+    }
+    g_fxDepthProg = p;
+    UseProgram(p);
+    g_fxDepthRect = G(glGetUniformLocation(p, "u_rect"));
+    G(glUniform1i(glGetUniformLocation(p, "u_src"), 0));
+    return true;
+}
+
+// Before the RT scan of a buffer: which of its draws go to the FX target (g_fxCmd, by command index; empty: none). A run pays two scene changes
+// and about a screen and a quarter of pixels (the depth copy, the composite), so outside Mega Strikes (and MSC_FX_LOWRES=always) only runs of
+// at least kFxMinVerts vertices (100 sprites) use it.
+std::vector<uint8_t> g_fxCmd;
+constexpr uint32_t kFxMinVerts = 400;
+void FxDecide(const CmdBuf& buf, const DrawRec* drawRecs, bool mega, int dynLevel) {
+    g_fxBuf = FxDiv() > 0 && g_hasDepthTex && g_efbDepthTex && !g_fxDepthFailed && (g_fxAlways || mega || dynLevel >= 4);
+    g_fxCmd.clear();
+    if (!g_fxBuf) return;
+    const int n = static_cast<int>(buf.cmds.size());
+    g_fxCmd.assign(static_cast<size_t>(n), 0);
+    bool inPass = g_inPass, any = false;
+    int runStart = -1;
+    uint32_t runVerts = 0;
+    auto close = [&](int end) {
+        if (runStart >= 0 && (g_fxAlways || mega || runVerts >= kFxMinVerts)) {
+            for (int k = runStart; k < end; ++k)
+                if (buf.cmds[static_cast<size_t>(k)].type == CMD_DRAW) g_fxCmd[static_cast<size_t>(k)] = 1;
+            any = true;
+        }
+        runStart = -1;
+        runVerts = 0;
+    };
+    for (int i = 0; i < n; ++i) {
+        const Cmd& c = buf.cmds[static_cast<size_t>(i)];
+        if (c.type == CMD_DRAW && FxEligible(drawRecs[c.arg]) && (runStart >= 0 || !inPass)) {
+            if (runStart < 0) runStart = i;
+            runVerts += drawRecs[c.arg].vtxCount;
+            continue;
+        }
+        if (runStart >= 0 && !FxNeutral(c.type)) close(i);
+        if (c.type == CMD_PASS_BEGIN) inPass = true;   // (as the RT scan: a copy that draws ends a pass, a skipped one when it is the pass's)
+        else if (c.type == CMD_COPY_TEX) {
+            const CopyTexCmd& ct = buf.copyTex[c.arg];
+            if (ct.skip ? ct.fromPass : !ct.srcTex) inPass = false;
+        }
+    }
+    close(n);
+    if (!any) { g_fxBuf = false; g_fxCmd.clear(); }
+}
+inline bool FxCmd(int i) { return g_fxBuf && i >= 0 && static_cast<size_t>(i) < g_fxCmd.size() && g_fxCmd[static_cast<size_t>(i)]; }
+
+void BeginFx() {
+    if (!EnsureFxDepthProgram()) { g_fxBuf = false; return; }
+    const int div = FxDiv();
+    const int w = (g_rtW + div - 1) / div, h = (g_rtH + div - 1) / div;
+    g_fxPoolIdx = AcquireFbo(w, h, 0, true);
+    SetViewport(0, 0, w, h);
+    SetScissor(false);
+    SetColorMask(true, true);
+    SetDepthMask(true);
+    G(glClearColor(0, 0, 0, 0));
+    G(glClearDepthf(1.0f));
+    TouchTarget(OP_PASS_CLEAR);
+    G(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
+    ++C.clears;
+    // the scene's depth: the EFB depth under each pixel's centre (the depth texture is NEAREST)
+    SetColorMask(false, false);
+    SetBlendOff();
+    SetCull(CULL_NONE);
+    SetDepthTest(true, GL_ALWAYS);
+    SetDepthMask(true);
+    UseProgram(g_fxDepthProg);
+    BindTex(0, g_efbDepthTex);
+    G(glUniform4f(g_fxDepthRect, 0.0f, 0.0f, 1.0f, 1.0f));
+    ++C.uniformCalls;
+    g_uniDirtyV = g_uniDirtyF = false;
+    UsePictureQuadLayout();
+    TouchTarget();
+    G(glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+    ++C.copyQuads;
+    // the run's draws: like a pass over the whole EFB at 1/div of the render scale
+    g_pass = g_fxPoolIdx;
+    g_inPass = true;
+    g_passDirectTex = 0;
+    g_passX = g_passY = 0;
+    g_passW = w;
+    g_passH = h;
+    g_psx = static_cast<float>(w) / static_cast<float>(g_efbW);
+    g_psy = static_cast<float>(h) / static_cast<float>(g_efbH);
+    g_rsValid = false;
+    g_fxOpen = true;
+    g_fxAlpha = false;
+    ++C.fxRuns;
+}
+
+void EndFx() {
+    if (!g_fxOpen) return;
+    g_fxOpen = false;
+    const GLuint color = g_pool[static_cast<size_t>(g_fxPoolIdx)].color;
+    g_inPass = false;
+    g_pass = -1;
+    BindFbo(g_efbFbo);
+    SetViewport(0, 0, g_rtW, g_rtH);
+    SetScissor(false);
+    SetDepthTest(false);
+    SetDepthMask(false);
+    SetCull(CULL_NONE);
+    SetColorMask(true, g_fxAlpha);
+    SetBlend(GL_FUNC_ADD, GL_ONE, GL_ONE);
+    static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}, kZero[4] = {0, 0, 0, 0};
+    DrawQuad(color, 0.0f, 0.0f, 1.0f, 1.0f, kIdentity, kZero);
+    ++C.copyQuads;
+    g_rsValid = false;
+}
+
 // CMD_PASS_BEGIN: the draws up to the next copy go to a target of the pass
 // rectangle's size that starts cleared to the values the EFB rectangle held.
 // That includes passes over the whole EFB rectangle: they may use one plane
@@ -2220,6 +2409,7 @@ void RtScan(const CmdBuf& buf, const DrawRec* drawRecs) {
     kill.assign(static_cast<size_t>(n), 0);
     const float sx = static_cast<float>(g_rtW) / static_cast<float>(g_efbW), sy = static_cast<float>(g_rtH) / static_cast<float>(g_efbH);
     bool inPass = g_inPass;
+    bool inFx = false; // FX: a run of effect draws drawn into the FX target (as ExecuteEx: it reads the EFB's depth and ends the EFB scene)
     rt.clearInCopy = false;
     const bool presents = (g_presentHook || g_capture) && !g_hidden;
     for (int i = 0; i < n; ++i) {
@@ -2239,6 +2429,14 @@ void RtScan(const CmdBuf& buf, const DrawRec* drawRecs) {
             } else if (!inPass && (c.type == CMD_DRAW || c.type == CMD_VARIANT || c.type == CMD_COPY_DISP || c.type == CMD_SET_TARGET)) {
                 rt.clearAt = i;
             }
+        }
+        if (g_fxBuf) {
+            const bool fxDraw = FxCmd(i);
+            if (fxDraw) {
+                if (!inFx) { brk[i] = 1; rd[i] = 1; inFx = true; }
+                continue;
+            }
+            if (inFx && !FxNeutral(c.type)) { brk[i] = 1; inFx = false; }
         }
         switch (c.type) {
         case CMD_DRAW:
@@ -2725,6 +2923,8 @@ struct DynRes {
     uint32_t seq = 0, ignoreUntil = 0;
     float ema = -1.0f;
     int over = 0, headroom = 0;
+    int upHold = 45;              // measured frames of room before going up a level; doubled when a level gone up to is left again soon
+    uint32_t lastUpSeq = 0, lastDownSeq = 0;
     int interval = 0;             // NpFpsDisplayInterval of the last decision
     float fakeRing[4] = {};
     uint32_t fakeSeq = 0;
@@ -2819,7 +3019,10 @@ void DynamicResolution() {
     if (megaChanged) {
         if (d.mega) {
             d.normalLevel = d.level;
-            if (d.on && megaLevels && d.level < kDynMegaStart) DynSetLevel(kDynMegaStart, "a Mega Strike began");
+            // With the effects drawn at the lower resolution (FX) the scene itself starts at the game's own size, the large passes at half;
+            // without them (no depth texture, MSC_FX_LOWRES=0) the whole scene starts at 70 % as before.
+            const int start = (FxDiv() > 0 && g_hasDepthTex) ? 5 : kDynMegaStart;
+            if (d.on && megaLevels && d.level < start) DynSetLevel(start, "a Mega Strike began");
             d.frames = -10;
             d.windowStart = Now();
         } else {
@@ -2861,15 +3064,27 @@ void DynamicResolution() {
                 d.over = d.headroom = 0;
             }
             if (ms > budget) ++d.over; else d.over = 0;
+            if (d.upHold > 45 && d.seq - d.lastDownSeq > 1200) d.upHold = 45;   // stable for a while: tries come at the usual pace again
             if (d.level > floor) DynSetLevel(floor, "past this scene's floor");
             else if (d.level < best) DynSetLevel(best, "above this scene's best level");
             else if (d.ema > 0.90f * budget || d.over >= 3) {
                 int l = d.level;
                 while (l < floor && pred(l) > 0.82f * budget) ++l;
-                if (l != d.level) DynSetLevel(l, "the GPU is over its budget");
-                else d.over = 0;
+                if (l == d.level && l < floor && d.over >= 3) ++l;   // over the budget for three frames although predicted to fit: one more
+                if (l != d.level) {
+                    // a level gone up to that does not hold (the model does not know every saving, the effects at the lower resolution
+                    // among them): wait twice as long before the next try, up to 16 times
+                    if (d.lastUpSeq && d.seq - d.lastUpSeq < 180 && d.upHold < 720) d.upHold *= 2;
+                    DynSetLevel(l, "the GPU is over its budget");
+                    d.lastDownSeq = d.seq;
+                } else {
+                    d.over = 0;
+                }
             } else if (d.level > best && pred(d.level - 1) < 0.72f * budget) {
-                if (++d.headroom >= 45) DynSetLevel(d.level - 1, "the GPU has room");
+                if (++d.headroom >= d.upHold) {
+                    DynSetLevel(d.level - 1, "the GPU has room");
+                    d.lastUpSeq = d.seq;
+                }
             } else {
                 d.headroom = 0;
             }
@@ -2964,6 +3179,16 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
     BindFbo(g_efbFbo);
     if (!replay || opts.restream) UploadStream(buf, opts.vtx ? opts.vtx : buf.vtx.data(), !replay);
     if (prof) g_profStream += Now() - tFrame;
+    FxDecide(buf, drawRecs, g_dyn.mega, g_dyn.level);
+    if (static const bool fxDebug = EnvInt("MSC_FX_DEBUG", 0) != 0; fxDebug && !replay) {
+        unsigned flagged = 0, eligible = 0;
+        for (const Cmd& c : buf.cmds)
+            if (c.type == CMD_DRAW && drawRecs[c.arg].fx) { ++flagged; if (FxEligible(drawRecs[c.arg])) ++eligible; else if (flagged < 4) {
+                const RenderState& r = drawRecs[c.arg].rs;
+                std::fprintf(stderr, "[fx] frame %llu not eligible: blend %u eq %u src %u dst %u zwrite %u dstAlpha %u\n", static_cast<unsigned long long>(buf.frame), r.blend, r.blendEq, r.blendSrc, r.blendDst, r.depthWrite, r.dstAlphaPass); } }
+        if (flagged && (buf.frame % 50) == 0)
+            std::fprintf(stderr, "[fx] frame %llu: %u effect draws, %u eligible, buffer uses FX %d\n", static_cast<unsigned long long>(buf.frame), flagged, eligible, g_fxBuf ? 1 : 0);
+    }
     if (RtMode() > 0) {
         // W5 RT: the buffer's EFB depth scan; then the previous buffer's display-copy clear (it begins this frame's main EFB scene)
         RtScan(buf, drawRecs);
@@ -3020,6 +3245,26 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
             g_rt.beforeCmd = true;
             Clear(g_rt.pendingClear, g_rt.pendingRect);
             g_rt.beforeCmd = false;
+        }
+        // FX: a run of additive effect draws goes into the FX target; the first command that is not one of them adds it to the scene
+        if (g_fxBuf || g_fxOpen) {
+            const bool fxDraw = FxCmd(g_rt.cmd);
+            if (g_fxOpen && !fxDraw && !FxNeutral(c.type)) {
+                flushPend();
+                prevDraw = nullptr;
+                EndFx();
+            }
+            if (fxDraw) {
+                if (!g_fxOpen) {
+                    flushPend();
+                    prevDraw = nullptr;
+                    BeginFx();
+                }
+                if (g_fxOpen) {
+                    if (drawRecs[c.arg].rs.alphaWrite) g_fxAlpha = true;
+                    ++C.fxDraws;
+                }
+            }
         }
         // (a replay only draws, copies and clears)
         if (replay && c.type != CMD_DRAW && c.type != CMD_PASS_BEGIN && c.type != CMD_COPY_TEX && c.type != CMD_COPY_DISP && c.type != CMD_PRESENT) continue;
@@ -3137,6 +3382,7 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
         }
     }
     flushPend();
+    if (g_fxOpen) EndFx();
     g_stats.shaderWorkMs += g_sw.ms;
     if(diag)NpDiagEvent(NPD_BACKEND_END,0,buf.latencyTag,buf.frame,g_sw.compiles,g_sw.links,g_evictions,g_evicted);
     if(diag&&NpDiagGpuFrame)NpDiagGpuFrame(0);

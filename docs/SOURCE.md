@@ -6,8 +6,8 @@
 | --- | --- |
 | Package | `Strikers-Charged-Vita.vpk` |
 | Title ID | `MSCN00003` (same app as earlier releases; installs as an update) |
-| Executable SHA-256 | `94aa4e0e1d619341b0134d60ee4fe067af9db616e22bf63358312b20c8597f90` |
-| VPK SHA-256 | `1377aec59144081e1b9c539da13aa13dd778db3c9bad9f7381ef3c4a1d0d20f2` |
+| Executable SHA-256 | `701dc38835894b6da92fac4f624afe8c55724e09e527eab5cf57bb374036465b` |
+| VPK SHA-256 | `0b79435288cbf289c531b87e3e1a027fee992ff4c86e3011d98db53254c5a34b` |
 | Player build flags | `NP_PLAYER=1 NP_LOGGING=0`, ThinLTO `-O2` |
 | Toolchain | VitaSDK GCC 15.2.0, Clang 18.1.3 |
 

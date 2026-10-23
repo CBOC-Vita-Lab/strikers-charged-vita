@@ -108,6 +108,7 @@ void SoftCensusFrame(uint64_t frame) {
 }
 
 // ------------------------------------------------------------------ the records
+bool g_fxDraws = false;
 void PlayExt(uint32_t kind, const uint32_t* w, uint32_t n) {
     switch (kind) {
     case EXT_TAG:
@@ -130,6 +131,7 @@ void PlayExt(uint32_t kind, const uint32_t* w, uint32_t n) {
         break;
     }
     case EXT_SKIN_OFF: g_skin.on = false; break;
+    case EXT_FX: g_fxDraws = n >= 1 && w[0] != 0; break;
     default: break;
     }
 }

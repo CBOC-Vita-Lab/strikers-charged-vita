@@ -1193,6 +1193,14 @@ bool StartGl() {
         return false;
     }
     LogMemory("after vitaGL");
+    // MSC_VITA_ANISO=3|2 (23 Oct, experimental, off by default): trilinear textures (the pitch, the stands, most of the world) get the GPU's
+    // anisotropic minification filter, which keeps surfaces seen at a slant (the far half of the pitch) sharp. vitasdk names the two values
+    // MIPMAP_POINT / MIPMAP_LINEAR; they are believed to be the anisotropic modes (vitaGL's vglSetAnisotropicFilter). Unmeasured on a console:
+    // look at the far half of the pitch with it on and off, and the frame rate.
+    if (const char* e = std::getenv("MSC_VITA_ANISO"); e && (e[0] == '2' || e[0] == '3') && e[1] == 0) {
+        vglSetAnisotropicFilter(static_cast<uint32_t>(e[0] - '0'));
+        std::fprintf(stderr, "[vgx-vita] MSC_VITA_ANISO=%s: trilinear textures use minification filter %s\n", e, e);
+    }
     {
         // A pool that vitaGL could not allocate leaves the budget untouched; say so instead of
         // crashing at its first use (see the note at the pool sizes above).

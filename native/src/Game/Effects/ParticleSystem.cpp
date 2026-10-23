@@ -24,6 +24,10 @@
 #include "Game/Render/MegastrikeBackgroundOverlay.h"
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
+#ifdef NP_NATIVE
+#include "np/fx.h"
+#endif
 
 #ifdef NP_NATIVE
 extern "C" int VgxMegaStep(void) __attribute__((weak)); // renderer (vgx_backend_gl.cpp)
@@ -758,6 +762,59 @@ void ParticleSystem::ClearParticles()
     }
 }
 
+#ifdef NP_NATIVE
+// NP (Mega Saves fill rate, 23 Oct): the Mega Strike save scene draws ~40 screens of overlapping blended particle quads per frame (Codex's
+// render census); the largest additive layer is ~78 big quads at vertex alpha 0..11/255 and alone covers ~28 screens. The Vita GPU is
+// fill-bound there. Two render-only changes, no simulation/emission/RNG change (particles are still updated and kept):
+//  1. A particle whose colour alpha is 0 fails the alpha test (ref 0) on every pixel: its quad is written collapsed to one point (zero area,
+//     no fragments). Lossless, everywhere.
+//  2. While the Mega Strike background is up, faint additive particles (alpha <= 12) are thinned: one in four (chosen by pool slot, so
+//     stable for the particle's life) is drawn with four times the alpha, the others are collapsed; from alpha 12 to 32 this fades out to the
+//     original. Additive light adds up, so the expected brightness is the same; the dominant haze layer (alpha 0..11) costs about a quarter.
+// Both renderers of the sprites use it: this file's mesh path and the game's own fast path (main.cpp BuildParticleQuads, the one the game
+// installs, ParticleSystem::m_Callback). MSC_FX_THIN=0: never thin (MSC_FX_ZERO=0 as well restores the original submission); =1: always in
+// Mega Strikes; =2: stronger (full thinning up to alpha 24, fading out by alpha 48), also what 1 becomes at the smallest Mega Strike picture.
+NpFxThin NpFxThinFor(const EffectsTemplate* tmpl, bool whiteTexture)
+{
+    // -1 (default, since the effects are drawn at a lower resolution, FX): thinning only while the renderer has a Mega Strike at its smallest
+    // picture (VgxMegaStep >= 3). It is not free to look at: the alpha test drops the faintest sprites (alpha 1..3), and four times their
+    // alpha lets some of them through, so the haze comes out brighter and grainier.
+    static const int kThin = [] { const char* e = getenv("MSC_FX_THIN"); return !e || !*e ? -1 : e[0] == '0' ? 0 : e[0] == '2' ? 2 : 1; }();
+    static const bool kZero = [] { const char* e = getenv("MSC_FX_ZERO"); return !(e && e[0] == '0'); }();
+    const bool smallest = VgxMegaStep && VgxMegaStep() >= 3;
+    const int level = kThin < 0 ? (smallest ? 1 : 0) : (kThin == 1 && smallest ? 2 : kThin);
+    NpFxThin t;
+    t.zero = kZero;
+    t.thin = level != 0 && gMegastrikeBackgroundOverlay.mActive && !whiteTexture && tmpl->m_eBlend == EfBlend_Additive;
+    t.full = level == 2 ? 24u : 12u;
+    t.span = level == 2 ? 24u : 20u;
+    return t;
+}
+
+bool NpFxThinParticle(const NpFxThin& t, const Particle* pPart, ParticleReturn* ret)
+{
+    bool collapse = t.zero && ret->c.c[3] == 0;
+    if (!collapse && t.thin && ret->c.c[3] < t.full + t.span)
+    {
+        // one in four is kept (pool slot hash: stable for the particle's life); between alpha full and full + span the thinning fades out
+        // linearly so nothing pops as a particle fades: kept a*(4 - 3s), others a*s, s = (a - full) / span clamped to 0..1; the expected
+        // sum stays a.
+        const unsigned int a = ret->c.c[3];
+        const unsigned int sk = a <= t.full ? 0u : a - t.full;   // s * span
+        const uint32_t slot = (uint32_t)((uintptr_t)pPart >> 4) * 2654435761u;
+        unsigned int out;
+        if ((slot >> 28) % 4u == 0)
+            out = (a * (4u * t.span - 3u * sk) + t.span / 2u) / t.span;
+        else
+            out = (a * sk + t.span / 2u) / t.span;
+        if (out > 255u) out = 255u;
+        ret->c.c[3] = (unsigned char)out;
+        collapse = out == 0;
+    }
+    return collapse;
+}
+#endif
+
 int ParticleSystem::RenderAllParticles(GLView* view)
 {
     static int _tris[6] = { 0, 1, 2, 0, 2, 3 };
@@ -1001,14 +1058,7 @@ int ParticleSystem::RenderAllParticles(GLView* view)
             //     expected brightness is the same; the dominant haze layer (alpha 0..11) costs about a quarter of the fill.
             // MSC_FX_THIN=0 turns 2 off, MSC_FX_THIN=0 together with MSC_FX_ZERO=0 restores the original submission.
             // MSC_FX_THIN=2: stronger, for console A/B tests: full thinning up to alpha 24, fading out by alpha 48.
-            static const int kThin = [] { const char* e = getenv("MSC_FX_THIN"); return !e || !*e ? 1 : e[0] == '0' ? 0 : e[0] == '2' ? 2 : 1; }();
-            // (Default 1 becomes 2 while the renderer's Mega Strike resolution is at its last step, i.e. the frames are still
-            // slower than 30 per second at half size: VgxMegaStep in vgx_backend_gl.cpp.)
-            const int thinLevel = kThin == 1 && VgxMegaStep && VgxMegaStep() >= 3 ? 2 : kThin;
-            const unsigned int kFull = thinLevel == 2 ? 24u : 12u, kSpan = thinLevel == 2 ? 24u : 20u;
-            static const bool kZero = [] { const char* e = getenv("MSC_FX_ZERO"); return !(e && e[0] == '0'); }();
-            const bool thinHere = kThin != 0 && gMegastrikeBackgroundOverlay.mActive && !sUseWhiteParticleTexture
-                && m_pTemplate->m_eBlend == EfBlend_Additive;
+            const NpFxThin thin = NpFxThinFor(m_pTemplate, sUseWhiteParticleTexture);
 #endif
             nlDLListIterator<Particle*> iterator;
             iterator = m_Particles.Begin();
@@ -1020,24 +1070,7 @@ int ParticleSystem::RenderAllParticles(GLView* view)
                 int i;
 #ifdef NP_NATIVE
                 {
-                    bool collapse = kZero && ret.c.c[3] == 0;
-                    if (!collapse && thinHere && ret.c.c[3] < kFull + kSpan)
-                    {
-                        // one in four is kept (pool slot hash: stable for the particle's life); between alpha kFull and
-                        // kFull + kSpan the thinning fades out linearly so nothing pops as a particle fades: kept a*(4 - 3s),
-                        // others a*s, s = (a - kFull) / kSpan clamped to 0..1; the expected sum stays a.
-                        const unsigned int a = ret.c.c[3];
-                        const unsigned int s20 = a <= kFull ? 0u : a - kFull;   // s * kSpan
-                        const uint32_t slot = (uint32_t)((uintptr_t)pPart >> 4) * 2654435761u;
-                        unsigned int out;
-                        if ((slot >> 28) % 4u == 0)
-                            out = (a * (4u * kSpan - 3u * s20) + kSpan / 2u) / kSpan;
-                        else
-                            out = (a * s20 + kSpan / 2u) / kSpan;
-                        if (out > 255u) out = 255u;
-                        ret.c.c[3] = (unsigned char)out;
-                        collapse = out == 0;
-                    }
+                    const bool collapse = NpFxThinParticle(thin, pPart, &ret);
                     if (collapse)
                     {
                         const int n = bQuads ? 4 : 6;
@@ -1096,7 +1129,15 @@ int ParticleSystem::RenderAllParticles(GLView* view)
             }
 
             if (mesh.End())
+            {
+#ifdef NP_NATIVE
+                // (Vita port, FX: np/fx.h) an additive sprite mesh may be drawn at a lower resolution by the renderer and added to the
+                // scene in one pass (additive light adds up in any order): the packet is marked for glxSend
+                if (sUseWhiteParticleTexture || m_pTemplate->m_eBlend == EfBlend_Additive)
+                    NpFxMarkPacket(mesh.GetModel()->packets);
+#endif
                 view->AttachModel(mesh.GetModel(), m_uLayer);
+            }
             else
                 tDebugPrintManager::Print(DC_RENDER,
                     "couldn't end mesh built by sprites\n");
