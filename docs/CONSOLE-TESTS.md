@@ -10,6 +10,7 @@ scene twice: once without the line and once with it.
 
 | Question | Scene | Switch | What it tells us |
 | --- | --- | --- | --- |
+| What does the sharpening cost? | A match and the main menu | default, then `MSC_VITA_UPSCALE=off` | Expect well under 1 fps difference. If it costs more, make OFF the default again |
 | Does Mega Saves hold 30 fps? | Strikers 101 > Mega Saves | default, then `MSC_MEGA_RENDER=off` | The default should hold 30. With `off` it shows the old speed. If the default looks too soft, try `MSC_MEGA_RENDER=512x352` |
 | Is Mega Saves still limited by blending? | Strikers 101 > Mega Saves | `MSC_FX_THIN=2` | If it is faster than the default, thin more. If not, the remaining cost is elsewhere |
 | How much does the picture size cost? | Mega Saves, main menu, stadium select | `MSC_VITA_RENDER=480x336` | A big gain means fill rate (pixels). Little change means geometry or render-pass switches |

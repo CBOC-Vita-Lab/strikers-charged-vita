@@ -64,14 +64,16 @@
 //                            match), scaled to the screen at present. 480x272 or 640x362 if
 //                            the GPU ever becomes the limit; 960x544 for a sharper picture
 //                            (costs video memory and fill rate: see RenderSize() below)
-//   MSC_VITA_UPSCALE=off|linear|sharp|sharp+
+//   MSC_VITA_UPSCALE=smooth|off|linear|sharp|sharp+
 //                            how the internal picture is scaled to the screen at present (LOOK,
-//                            wave 5): off = glBlitFramebuffer (default; no extra shader), linear =
-//                            the same through a shader, sharp = "sharp bilinear" (one fetch per
-//                            pixel), sharp+ = sharp plus an unsharp mask (five fetches). Needs the
+//                            wave 5): smooth = bilinear plus an unsharp mask (default since 23 Oct;
+//                            five fetches per screen pixel), off = glBlitFramebuffer (no shader),
+//                            linear = the blit through a shader, sharp = "sharp bilinear" (one
+//                            fetch per pixel), sharp+ = sharp plus an unsharp mask. Needs the
 //                            picture shader (first use compiles it: libshacccg, or a shader cache
-//                            seed that has it).
-//   MSC_VITA_SHARPEN=0.35    the unsharp mask's amount for sharp+ (0.2 to 0.6)
+//                            seed that has it); without it the blit is used.
+//   MSC_VITA_SHARPEN=0.5     the unsharp mask's amount (smooth 0.5, sharp+ 0.35; 0.2 to 0.8). Unset,
+//                            smooth uses 0.7 / 0.8 in Mega Strike scenes (drawn smaller)
 //   MSC_VITA_MSAA=0|2|4      multisampling of every render target (vglInit's last argument; the
 //                            depth buffers grow 2x / 4x, and with STORE_DEPTH_STENCIL the tile
 //                            load / store traffic with them): see StartGl
@@ -158,6 +160,8 @@ extern "C" unsigned vglStrikersShaderCacheCaps(void) __attribute__((weak));
 // W5 RT: the input-delay record (np include/np/latency.h, platform/compat/np_latency.cpp) and the VI thread's last vblank (np np_plat_vita.cpp)
 extern "C" uint64_t NpLatTakeSendTag(void) __attribute__((weak));
 #include "../src/vgx_perf_diag.h"
+
+extern "C" int VgxMegaStep(void); // vgx_backend_gl.cpp: 0, or 1 + the Mega Strike resolution step
 extern "C" void NpLatDecoded(uint64_t tag) __attribute__((weak));
 extern "C" void NpLatPresented(uint64_t tag) __attribute__((weak));
 extern "C" void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo) __attribute__((weak));
@@ -222,8 +226,9 @@ char g_startError[512] = "";
 
 // ---- present state. The flags are set by the game thread (debug controls).
 std::atomic<bool> g_flipY{false}, g_stretch{false}, g_showConsole{false};
-int g_upscaleMode = 0;       // vgx::backend::PictureMode; 0 = glBlitFramebuffer
-float g_sharpen = 0.35f;     // MSC_VITA_SHARPEN
+int g_upscaleMode = 4;       // vgx::backend::PictureMode; 0 = glBlitFramebuffer, 4 = PIC_SMOOTH (default)
+bool g_sharpenSet = false;   // MSC_VITA_SHARPEN given: Mega Strike scenes keep it too
+float g_sharpen = 0.5f;      // MSC_VITA_SHARPEN (default for smooth; sharp+ was tuned at 0.35)
 uint64_t g_presented = 0;       // render thread
 unsigned long long g_nativeFrames = 0;   // vgxn_end_frame calls (native build; unused otherwise)
 uint64_t g_lastPresentUs = 0;
@@ -1161,14 +1166,15 @@ bool StartGl() {
     }
     if (const char* e = std::getenv("MSC_VITA_UPSCALE"); e && *e) {
         const int mode = vgx::backend::PictureModeFromString(e);
-        if (mode < 0) std::fprintf(stderr, "[vgx-vita] MSC_VITA_UPSCALE=%s ignored (off, linear, sharp, sharp+)\n", e);
+        if (mode < 0) std::fprintf(stderr, "[vgx-vita] MSC_VITA_UPSCALE=%s ignored (off, linear, sharp, sharp+, smooth)\n", e);
         else g_upscaleMode = mode;
+        if (mode == 3) g_sharpen = 0.35f;
     }
-    if (const char* e = std::getenv("MSC_VITA_SHARPEN"); e && *e) g_sharpen = static_cast<float>(std::atof(e));
+    if (const char* e = std::getenv("MSC_VITA_SHARPEN"); e && *e) { g_sharpen = static_cast<float>(std::atof(e)); g_sharpenSet = true; }
     if (g_sharpen < 0.0f) g_sharpen = 0.0f;
     if (g_sharpen > 1.5f) g_sharpen = 1.5f;
     std::fprintf(stderr, "[vgx-vita] picture to the screen: %s%s\n",
-                 g_upscaleMode == 0 ? "glBlitFramebuffer (MSC_VITA_UPSCALE=off)" : (g_upscaleMode == 1 ? "linear, through the picture shader" : (g_upscaleMode == 2 ? "sharp bilinear" : "sharp bilinear + unsharp mask")),
+                 g_upscaleMode == 0 ? "glBlitFramebuffer (MSC_VITA_UPSCALE=off)" : (g_upscaleMode == 1 ? "linear, through the picture shader" : (g_upscaleMode == 2 ? "sharp bilinear" : (g_upscaleMode == 3 ? "sharp bilinear + unsharp mask" : "bilinear + unsharp mask (smooth)"))),
                  g_upscaleMode >= 3 ? (" amount " + std::to_string(g_sharpen)).c_str() : "");
     // MSC_VITA_DISPLAY_BUFFERS=2 (23 Oct, console A/B only): double instead of vitaGL's triple buffering. One frame fewer can
     // wait in the display queue, so a GPU-bound scene shows each frame about one frame time sooner (input feels quicker), at the
@@ -1613,7 +1619,13 @@ void PresentDisplayCopy(unsigned efb, int x, int y, int w, int h) {
         // LOOK: the back end's picture shader (vgx_backend_gl.cpp DrawPicture). It binds the display itself, and the
         // back end trusts nothing it cached afterwards (CopyDisp). If it did not build (a console without the shader
         // compiler: the owner's has libshacccg, a clean one does not) the picture is blitted as before, for good.
-        if (!vgx::backend::DrawPicture(0, x, y, w, h, dx0, 0, dx1 - dx0, kScreenH, g_upscaleMode, g_sharpen, !g_flipY.load(std::memory_order_relaxed))) {
+        // Mega Strike scenes are drawn smaller (MegaResolution in vgx_backend_gl.cpp): the smooth filter sharpens more there.
+        float amount = g_sharpen;
+        if (g_upscaleMode == 4 && !g_sharpenSet) {
+            const int megaStep = VgxMegaStep();
+            if (megaStep > 0) amount = megaStep >= 2 ? 0.8f : 0.7f;
+        }
+        if (!vgx::backend::DrawPicture(0, x, y, w, h, dx0, 0, dx1 - dx0, kScreenH, g_upscaleMode, amount, !g_flipY.load(std::memory_order_relaxed))) {
             std::fprintf(stderr, "[vgx-vita] picture shader unavailable: MSC_VITA_UPSCALE off\n");
             g_upscaleMode = 0;
             glBlitFramebuffer(x, sy0, x + w, sy1, dx0, 0, dx1, kScreenH, GL_COLOR_BUFFER_BIT, GL_LINEAR);

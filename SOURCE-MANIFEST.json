@@ -7456,7 +7456,7 @@
   },
   {
    "path": "native/platform/vita/src/np_settings.cpp",
-   "sha256": "8cb6c24304c475ade9332fbf4ab12fea3fe00af3aedcce793fa138cf19071eba"
+   "sha256": "0a931cd7d4818410ef9b21097b752afb977cc3d603baaed152154a1c50a82cfe"
   },
   {
    "path": "native/platform/vita/src/np_settings.h",
@@ -7596,7 +7596,7 @@
   },
   {
    "path": "native/platform/vita/tests/test_settings.cpp",
-   "sha256": "50464b7627d12ff314cf713e68ca56ec42dee810c0122bef34e488e93cf42ed0"
+   "sha256": "20fcee0932068c53c27da2af8e80353836a619ee2c38de31cca22ea2d1524535"
   },
   {
    "path": "native/platform/vita/tests/test_silent_frames.cpp",
@@ -15952,7 +15952,7 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "c1140eafa42551a58ae4df8be49640821cf4658c4c6aa8e9551a1be1715ce451"
+   "sha256": "b7f2119b9c31d78d7168361bc1423fbab68ad9fff949b6023e21449ecba77230"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",
@@ -15968,7 +15968,7 @@
   },
   {
    "path": "renderer/src/vgx_cmd.h",
-   "sha256": "1826b3074b30acbafb9dd5bac3e8cf62b4eebaea21438a0657e7e24102c5e30f"
+   "sha256": "dddd35f4643259ee494b51da209cb4c4cd46af0067ce440207240da9b605a48e"
   },
   {
    "path": "renderer/src/vgx_common.h",
@@ -16304,7 +16304,7 @@
   },
   {
    "path": "renderer/vita/vgx_host_vita.cpp",
-   "sha256": "e3aa5a7410280cdeaa15ea6f0d12f3b05335bebfaac19f703d8a97d5dbe7aac4"
+   "sha256": "76f8155679b3daf14f102c17ad23189a08a234865ab5654fe3253a03e7209336"
   },
   {
    "path": "renderer/vita/vgx_listmerge.h",

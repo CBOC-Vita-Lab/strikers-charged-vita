@@ -5,8 +5,8 @@
   "titleId": "MSCN00003",
   "package": {
     "path": "Strikers-Charged-Vita.vpk",
-    "sha256": "82fa2335cb25bc49c9635afa9f09cf55222b304bdcdfb2e70c3baf358c5088b9",
-    "runtimeSha256": "a73891018da148de542ea8f38417275e6447904e8a2436b0494d04ce08b84a20"
+    "sha256": "26f49d143de39e4008387d7e16cf56fd22b1979108a6456445564176ec227483",
+    "runtimeSha256": "a38574e34f429015fb2c2e5d874b32f4567a737500fa517d8bda0fa3897a4c05"
   },
   "previousRelease": {
     "releaseId": "strikers-settings-20261019",

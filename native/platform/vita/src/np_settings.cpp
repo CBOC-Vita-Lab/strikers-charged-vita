@@ -48,9 +48,9 @@ constexpr Option kTable[] = {
     // The picture rows of wave 5 LOOK (docs: LOOK.NOTES.md "PICTURE SETTINGS FOR ONE"): in no preset. The keys are read by LOOK's renderer changes (vgx
     // 50e3a62 and later); a build without them ignores the lines, so these rows only take effect in a build that has merged W5LOOK.
     {"SHARPNESS",
-     {"Sharpens the picture when it is scaled up to the screen.", "CRISP+ is stronger. Needs the shader compiler. Not needed at 960x544."},
+     {"Sharpens the picture when it is scaled up to the screen.", "SMOOTH keeps edges soft. CRISP / CRISP+ are blockier. OFF: no sharpening."},
      0, false,
-     {{"OFF", {}}, {"CRISP", {{"MSC_VITA_UPSCALE", "sharp"}}}, {"CRISP+", {{"MSC_VITA_UPSCALE", "sharp+"}, {"MSC_VITA_SHARPEN", "0.35"}}}}},
+     {{"SMOOTH", {}}, {"OFF", {{"MSC_VITA_UPSCALE", "off"}}}, {"CRISP", {{"MSC_VITA_UPSCALE", "sharp"}}}, {"CRISP+", {{"MSC_VITA_UPSCALE", "sharp+"}, {"MSC_VITA_SHARPEN", "0.35"}}}}},
     {"ANTI-ALIASING",
      {"Smooths jagged edges. Experimental: costs GPU time and memory.", "Not measured yet. Leave it OFF unless you want to try it."},
      0, false,

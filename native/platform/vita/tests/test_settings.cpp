@@ -229,7 +229,7 @@ int main(int argc, char** argv) {
     {
         State s;
         Load(s, "MSC_VITA_UPSCALE=sharp+\r\nMSC_VITA_SHARPEN=0.35\r\n# end\r\n");
-        CHECK(s.choice[Find("SHARPNESS")] == 2);
+        CHECK(s.choice[Find("SHARPNESS")] == 3);
         std::string out;
         CHECK(Serialize(s, out) && Has(out, "# end") && Has(out, "MSC_VITA_UPSCALE=sharp+") && Has(out, "MSC_VITA_SHARPEN=0.35"));
         State t;

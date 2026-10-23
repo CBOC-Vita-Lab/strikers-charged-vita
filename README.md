@@ -22,6 +22,8 @@ before you install. You need your own game dump. No game data is included.
 - **Faster Mega Saves.** The Mega Strike save scene draws far fewer invisible
   or near-invisible effect sprites and renders at a lower internal size that
   drops further if it falls below 30 fps.
+- **Sharper picture.** A light sharpening filter is now on by default when the
+  picture is scaled to the screen (Settings > Sharpness).
 - **Tap anywhere to start** on the title screen.
 - **All seven zoom levels on the Options slider.** It shows levels 1-5, or 3-7
   once you choose level 4 or higher.

@@ -1607,7 +1607,7 @@ struct PicProg {
     bool failed = false;   // compile or link failed (no shader compiler on the console): the host falls back to its blit
     GLint rect = -1, size = -1, lim = -1, p = -1;
 };
-PicProg g_pic[3]; // PIC_LINEAR, PIC_SHARP, PIC_UNSHARP
+PicProg g_pic[4]; // PIC_LINEAR, PIC_SHARP, PIC_UNSHARP, PIC_SMOOTH
 int g_screenW = 0, g_screenH = 0, g_screenMode = 0;
 float g_screenSharpen = 0.35f;
 GLuint g_screenFbo = 0, g_screenTex = 0;
@@ -1622,13 +1622,13 @@ PicProg* EnsurePictureProgram(int mode) {
         "void main() { v_uv = vec2(u_rect.x + (a_pos.x * 0.5 + 0.5) * u_rect.z, u_rect.y + (a_pos.y * 0.5 + 0.5) * u_rect.w); gl_Position = vec4(a_pos.xy, 0.0, 1.0); }\n";
     std::string fs =
         "precision highp float;\nuniform sampler2D u_src;\nuniform vec4 u_size;\nuniform vec4 u_lim;\nuniform vec4 u_p;\nvarying vec2 v_uv;\nvoid main() {\n";
-    if (mode >= PIC_SHARP)
+    if (mode == PIC_SHARP || mode == PIC_UNSHARP)
         fs += "  vec2 t = v_uv * u_size.xy;\n  vec2 fl = floor(t);\n  vec2 cd = (t - fl) - 0.5;\n  vec2 range = 0.5 - 0.5 / u_p.xy;\n"
               "  vec2 g = (cd - clamp(cd, -range, range)) * u_p.xy + 0.5;\n  vec2 uv = clamp((fl + g) * u_size.zw, u_lim.xy, u_lim.zw);\n";
     else
         fs += "  vec2 uv = clamp(v_uv, u_lim.xy, u_lim.zw);\n";
     fs += "  vec4 c = texture2D(u_src, uv);\n";
-    if (mode >= PIC_UNSHARP)
+    if (mode == PIC_UNSHARP || mode == PIC_SMOOTH)
         fs += "  vec4 b = texture2D(u_src, clamp(uv + vec2(u_size.z, 0.0), u_lim.xy, u_lim.zw)) + texture2D(u_src, clamp(uv - vec2(u_size.z, 0.0), u_lim.xy, u_lim.zw))\n"
               "         + texture2D(u_src, clamp(uv + vec2(0.0, u_size.w), u_lim.xy, u_lim.zw)) + texture2D(u_src, clamp(uv - vec2(0.0, u_size.w), u_lim.xy, u_lim.zw));\n"
               "  c = c + (c - b * 0.25) * u_p.z;\n";
@@ -1679,6 +1679,7 @@ int PictureModeFromString(const char* text) {
     if (is("linear") || is("bilinear") || is("1")) return PIC_LINEAR;
     if (is("sharp") || is("2")) return PIC_SHARP;
     if (is("sharp+") || is("unsharp") || is("sharp+unsharp") || is("3")) return PIC_UNSHARP;
+    if (is("smooth") || is("smooth+") || is("4")) return PIC_SMOOTH;
     return -1;
 }
 namespace {
@@ -1706,7 +1707,7 @@ void UsePictureQuadLayout() { // as DrawQuad's: the quad's own position-only buf
 bool DrawPicture(unsigned fbo, int x, int y, int w, int h, int dx, int dy, int dw, int dh, int mode, float sharpen, bool flipY) {
     if (w <= 0 || h <= 0 || dw <= 0 || dh <= 0) return true;
     if (mode < PIC_LINEAR) mode = PIC_LINEAR;
-    if (mode > PIC_UNSHARP) mode = PIC_UNSHARP;
+    if (mode > PIC_SMOOTH) mode = PIC_SMOOTH;
     PicProg* ppp = EnsurePictureProgram(mode);
     if (!ppp) return false;   // nothing of the GL state has been touched yet
     PicProg& pp = *ppp;

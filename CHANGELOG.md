@@ -11,6 +11,10 @@ Gameplay and controls:
   then 50 % (with stronger haze thinning) if frames still take longer than a
   30 fps frame. Full size returns when the scene ends. `MSC_MEGA_RENDER=off`
   in `np-player.txt` turns this off; `MSC_MEGA_RENDER=WxH` fixes one size.
+- Sharper picture everywhere: the picture is now scaled to the screen with a
+  light sharpening filter (Settings > Sharpness: SMOOTH, the new default). It
+  sharpens more in the smaller Mega Strike scenes. OFF restores the plain
+  scaling; CRISP and CRISP+ are still there.
 - Mega Save touch aim uses the position sampled for that press.
 - Optional rear-touch aim and Mega stick speed (2x-4x) in LiveArea Settings.
 - Tap anywhere on the title screen to start. A finger already down does not

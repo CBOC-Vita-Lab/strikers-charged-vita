@@ -392,9 +392,11 @@ void GetDrawTimers(uint64_t out[4]); // MSC_VGX_RTTIME=1, cumulative: draws that
 //               texels is blended over about one screen pixel (the picture is not blurred by a
 //               non-integer scale; one texture fetch per pixel)
 //   PIC_UNSHARP sharp bilinear plus an unsharp mask (four more fetches; amount `sharpen`, 0.2 to 0.6)
-// Hosts read MSC_VITA_UPSCALE=off|linear|sharp|sharp+ (PictureModeFromString; off = 0 = no shader:
+//   PIC_SMOOTH  plain bilinear plus the same unsharp mask (five fetches): edges stay smooth, the
+//               softness of the scale is taken back (the Vita host's default, amount 0.5)
+// Hosts read MSC_VITA_UPSCALE=off|linear|sharp|sharp+|smooth (PictureModeFromString; off = 0 = no shader:
 // the Vita host's glBlitFramebuffer) and MSC_VITA_SHARPEN=<amount>.
-enum PictureMode { PIC_BLIT = 0, PIC_LINEAR = 1, PIC_SHARP = 2, PIC_UNSHARP = 3 };
+enum PictureMode { PIC_BLIT = 0, PIC_LINEAR = 1, PIC_SHARP = 2, PIC_UNSHARP = 3, PIC_SMOOTH = 4 };
 int PictureModeFromString(const char* text);   // -1: not a mode name
 // Draws the display copy rectangle (x, y, w, h in render-target pixels, as in PresentHook) of the EFB into
 // the rectangle (dx, dy, dw, dh) of framebuffer object `fbo` (0: the display). flipY: the picture's top
