@@ -14,7 +14,12 @@ Gameplay and controls:
   second path, which now has it as well).
 - 60 fps by default where it holds: Settings > Frame Rate is now AUTO by
   default (30 FPS is still there). AUTO also watches the graphics chip now,
-  so it does not try 60 in a scene the GPU cannot draw that fast.
+  so it does not try 60 in a scene the GPU cannot draw that fast. Mega
+  Strikes stay at 30 with the full-size picture (`MSC_FPS_MEGA=auto` lets
+  them try 60).
+- Less input delay in slow scenes: when the graphics chip needs most of the
+  frame time, only one frame may wait on it instead of two (the change made
+  for Super Mario Galaxy). `MSC_VITA_QUEUE=off|1|2` overrides it.
 - Dynamic resolution: the renderer measures the graphics chip's time every
   frame and adjusts the picture to stay inside the frame budget (60 or 30).
   When it is short it first draws the large blur and glow effects at a

@@ -23,6 +23,8 @@ void VIWaitForRetrace(void) __attribute__((weak));
 void NpLatLatch(void) __attribute__((weak));
 // The renderer's predicted GPU time per frame at the smallest picture it would use in this scene (vgx_backend_gl.cpp, dynamic resolution); <= 0: unknown
 float VgxGpuMinMs(void) __attribute__((weak));
+// The renderer's Mega Strike scene (vgx_backend_gl.cpp): AUTO keeps those at 30 with the full-size picture (MSC_FPS_MEGA=auto lets them try 60)
+int VgxMegaActive(void) __attribute__((weak));
 }
 
 namespace {
@@ -541,7 +543,9 @@ void NpFpsBeginFrame(float realSeconds, unsigned taskState)
             in.gameBusyMs = (busy > 0 ? busy : 0) * g.costScale;
             in.simMs *= 1.0;
         }
-        const npfps::Decision d = g.ctl->Frame(in);
+        static const bool megaAuto = [] { const char* e = getenv("MSC_FPS_MEGA"); return e && IEqual(e, "auto"); }();
+        const bool hold30 = !megaAuto && &VgxMegaActive != 0 && VgxMegaActive() != 0;
+        const npfps::Decision d = hold30 ? g.ctl->Hold30(now) : g.ctl->Frame(in);
         g.lastPred60 = g.ctl->LastPrediction().max60;
         g.lastPredNow = g.ctl->LastPrediction().maxNow;
         g.lastPredCore = g.ctl->LastPrediction().core;

@@ -512,6 +512,86 @@ const char* ShaderCacheFolder() {
 // Every swap of the display goes through here: a pending dialog operation is processed before the swap, and the
 // swap is told while the dialog is shown.
 // tag: the input-delay record of the frame being swapped (0: a picture that is not a game frame: start-up, progress bar)
+// ---- adaptive GPU queue depth (23 Oct; the Super Mario Galaxy port's thp32 change) -------------------------------------------------------------------------
+// In a scene the GPU cannot finish within the frame budget, every frame queued ahead of the GPU is a frame of input delay that buys nothing (Codex
+// measured ~340 ms from a pad read to the screen in the 15 fps Mega Saves of the 18 Oct build). After each swap the render thread waits until at most
+// `limit` frames are unfinished on the GPU (vitaGL's GPU timers: vglRtSceneProgress counts the scenes ended and the scenes seen completed). The limit
+// adapts: 1 while the mean GPU time of the last 24 frames is at least 78 % of the frame budget (16.7 ms at 60, 33.4 ms at 30), 2 again at or below
+// 60 %. With 1 the CPU still builds the next frame while the GPU draws the current one, so the frame rate holds (Galaxy: the slow plaza went from
+// 124 to 62 ms median delay, frame rate unchanged). MSC_VITA_QUEUE=auto (default) | 1 | 2 | off; nothing without the GPU timers.
+struct GpuQueue {
+    int mode = -1;               // -1 unread, 0 off, 1 / 2 fixed, 3 auto
+    int limit = 2;
+    uint32_t ring[8] = {};       // scenes ended at each of the last swaps
+    uint32_t swaps = 0;
+    float busy[24] = {};
+    int bi = 0, bn = 0;
+    uint32_t lastGpuSeq = 0;
+    uint64_t waits = 0, waitedUs = 0, changes = 0, timeouts = 0;
+} g_queue;
+void LimitGpuQueue() {
+    GpuQueue& q = g_queue;
+    if (q.mode < 0) {
+        const char* e = std::getenv("MSC_VITA_QUEUE");
+        q.mode = 3;
+        if (e && *e) {
+            if (std::strcmp(e, "off") == 0 || std::strcmp(e, "0") == 0) q.mode = 0;
+            else if (std::strcmp(e, "1") == 0) q.mode = 1;
+            else if (std::strcmp(e, "2") == 0) q.mode = 2;
+        }
+        q.limit = q.mode == 1 ? 1 : 2;
+        std::fprintf(stderr, "[vgx-vita] GPU queue depth: %s (MSC_VITA_QUEUE=auto|1|2|off)\n", q.mode == 0 ? "off" : q.mode == 3 ? "auto (2, 1 in slow scenes)" : (q.mode == 1 ? "1" : "2"));
+    }
+    if (q.mode == 0) return;
+    uint32_t submitted = 0, done = 0;
+    vglRtSceneProgress(&submitted, &done);
+    if (!submitted) return;   // no GPU timers
+    q.ring[q.swaps % 8] = submitted;
+    ++q.swaps;
+    if (q.mode == 3) {
+        vglRtGpuFrame f;
+        const uint32_t seq = vglRtLastGpuFrame(&f);
+        if (seq && seq != q.lastGpuSeq && f.timed) {
+            q.lastGpuSeq = seq;
+            q.busy[q.bi] = static_cast<float>(f.busy_us) * 0.001f;
+            q.bi = (q.bi + 1) % 24;
+            if (q.bn < 24) ++q.bn;
+        }
+        if (q.bn == 24) {
+            float sum = 0;
+            for (float b : q.busy) sum += b;
+            const float mean = sum / 24.0f;
+            const int interval = NpFpsDisplayInterval ? NpFpsDisplayInterval() : 2;
+            const float budget = (interval == 1 ? 1.0f : 2.0f) * 16.683f;
+            int limit = q.limit;
+            if (mean >= 0.78f * budget) limit = 1;
+            else if (mean <= 0.60f * budget) limit = 2;
+            if (limit != q.limit) {
+                ++q.changes;
+                if (q.changes <= 100)
+                    std::fprintf(stderr, "[vgx-vita] GPU queue depth %d -> %d: the GPU takes %.1f ms a frame (budget %.1f ms)\n", q.limit, limit, mean, budget);
+                q.limit = limit;
+            }
+        }
+    }
+    if (q.swaps <= static_cast<uint32_t>(q.limit)) return;
+    // the frame `limit` swaps back must be finished on the GPU
+    const uint32_t target = q.ring[(q.swaps - 1 - static_cast<uint32_t>(q.limit)) % 8];
+    if (static_cast<int32_t>(done - target) >= 0) return;
+    const uint64_t t0 = NowUs();
+    ++q.waits;
+    while (static_cast<int32_t>(done - target) < 0) {
+        if (NowUs() - t0 > 100000) { ++q.timeouts; break; }   // (a stuck watcher must not stop the game)
+        sceKernelDelayThread(200);
+        vglRtSceneProgress(&submitted, &done);
+    }
+    q.waitedUs += NowUs() - t0;
+    if ((q.waits % 1800) == 0)
+        std::fprintf(stderr, "[vgx-vita] GPU queue: depth %d, %llu waits so far (%.2f ms each on average), %llu depth changes, %llu timeouts\n", q.limit,
+                     static_cast<unsigned long long>(q.waits), static_cast<double>(q.waitedUs) / 1000.0 / static_cast<double>(q.waits),
+                     static_cast<unsigned long long>(q.changes), static_cast<unsigned long long>(q.timeouts));
+}
+
 void SwapDisplay(uint64_t latTag = 0) {
     if (np_vita_radio_dialog_render) np_vita_radio_dialog_render();
     {
@@ -527,6 +607,9 @@ void SwapDisplay(uint64_t latTag = 0) {
     }
     if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_SWAP,g_diagFifoGeneration.load()<<16,latTag,(uint32_t)sceDisplayGetVcount(),g_latFifo.head.load(),g_latFifo.tail.load(),0,0);
     vglSwapBuffers(np_vita_radio_dialog_active && np_vita_radio_dialog_active() ? GL_TRUE : GL_FALSE);
+#ifdef VITAGL_RT
+    LimitGpuQueue();
+#endif
     if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_SWAP_END,g_diagFifoGeneration.load()<<16,latTag,(uint32_t)sceDisplayGetVcount(),g_latFifo.head.load(),g_latFifo.tail.load(),0,0);
 }
 

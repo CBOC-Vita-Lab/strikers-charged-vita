@@ -33,6 +33,8 @@ Save ones; add the others by hand. These are the switches added for the
 | `MSC_FX_THIN=0` | Never thin the Mega Strike haze (default: only at the smallest Mega Strike picture; `1`: always in Mega Strikes) |
 | `MSC_VITA_ANISO=3` | Experimental anisotropic filtering of trilinear textures (Settings > Distant Textures). Untested on a console |
 | `MSC_VITA_UPSCALE=off` | Plain scaling to the screen, no sharpening (default `smooth`: bilinear plus a light unsharp mask, amount `MSC_VITA_SHARPEN`, default 0.5, and 0.7-0.8 in Mega Strike scenes). `sharp`, `sharp+` and `linear` remain |
+| `MSC_FPS_MEGA=auto` | Let Mega Strikes try 60 like other scenes (default: they stay at 30 with the full-size picture) |
+| `MSC_VITA_QUEUE=off` | No GPU queue limit (default `auto`: at most 2 unfinished frames on the GPU, 1 while the GPU needs 78 % or more of the frame time) |
 | `MSC_FPS=30` | A steady 30 fps (Settings > Frame Rate: 30 FPS). The default is `auto`: 60 where every CPU core and the GPU hold it |
 | `MSC_DYNRES=off` | No dynamic resolution: the game's own picture size everywhere (also turns the GPU timers off) |
 | `MSC_DYNRES_MAX=1.0` | Do not draw larger than the game's own size when the GPU has time to spare (default up to 1.2 per side) |

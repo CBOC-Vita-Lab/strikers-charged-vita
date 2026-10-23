@@ -19,7 +19,8 @@ scene twice: once without the line and once with it.
 | Does the anti-aliasing pay off? | A match, the main menu | Settings > Anti-Aliasing 2X | Smoother edges, small but visible. Keep it only if the frame rate holds |
 | Does anisotropic filtering work? | A match | Settings > Distant Textures SHARP (TEST) | The far half of the pitch should look crisper. If textures look wrong, the filter values are not what we think |
 | How much does the picture size cost? | Mega Saves, main menu, stadium select | `MSC_VITA_RENDER=480x336` | A big gain means fill rate (pixels). Little change means geometry or render-pass switches |
-| Can input feel quicker? | Mega Saves, a match | `MSC_VITA_DISPLAY_BUFFERS=2` | One frame fewer waits in the display queue. Check that the frame rate holds |
+| Is the touch and stick delay gone in Mega Saves? | Strikers 101 > Mega Saves | default, then `MSC_VITA_QUEUE=off` | The logging build's `[lat]` lines give pad-to-screen delay; `[vgx-vita] GPU queue depth` lines show when the limit drops to 1 |
+| Can input feel quicker still? | Mega Saves, a match | `MSC_VITA_DISPLAY_BUFFERS=2` | One frame fewer waits in the display queue. Check that the frame rate holds |
 | Is the menu limited by geometry? | Main menu | `MSC_VITA_RENDER=480x336` | The main menu draws about 105,000 triangles per frame (a 3D scene of about 52 draws), then an 8-pass glow chain |
 
 What a main-menu frame contains (traced in the emulator with `MSC_VGX_PASSES=<frame>`):

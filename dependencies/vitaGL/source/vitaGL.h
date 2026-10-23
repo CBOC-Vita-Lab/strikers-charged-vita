@@ -1397,6 +1397,7 @@ typedef struct {
 } vglRtStats;
 void vglRtGetStats(vglRtStats *s);
 uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out);
+void vglRtSceneProgress(uint32_t *submitted, uint32_t *done); // scenes ended / seen completed by the GPU watcher (GPU timers on; else 0 / 0)
 void vglSetAnisotropicFilter(uint32_t sceFilter); // 0 off; 2 or 3: the minification filter of trilinear textures (see utils/gxm_utils.h) // the newest finished GPU frame; returns frames finished so far (0: none)
 
 #ifdef __cplusplus

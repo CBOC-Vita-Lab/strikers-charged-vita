@@ -278,6 +278,19 @@ public:
         return d;
     }
 
+    // A scene that is to stay at 30 (23 Oct: Mega Strikes, drawn at full size rather than smaller at 60): 30 now, no evidence while held,
+    // and the ordinary cool-down after it before 60 is tried again.
+    Decision Hold30(double now) {
+        Decision d;
+        d.policy = kPolicy30;
+        d.switched = cur_ != kPolicy30;
+        d.reason = "a scene that stays at 30 (a Mega Strike: full-size picture)";
+        if (d.switched) Go(kPolicy30, now);
+        ResetEvidence();
+        if (cooldownUntil_ < now + cfg_.coolBase) cooldownUntil_ = now + cfg_.coolBase;
+        return d;
+    }
+
     // The margin for going up now (the build's own UP_MARGIN, lowered by the failed tries).
     double Margin() const {
         double m = cfg_.upMargin - cfg_.penaltyStep * penalty_;

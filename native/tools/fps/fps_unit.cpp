@@ -291,6 +291,22 @@ int main() {
         for (int i = 0; i < 12; ++i) s.Step(heavy);
         check(s.ctl.Current() == kPolicy30 && s.downs.size() == d0 + 1, "a GPU report over the budget for 8 frames sends it down");
     }
+    // 16. a held scene (Mega Strike) goes to 30 at once, stays there while held, and 60 comes back after the cool-down
+    {
+        Sim s;
+        const Scene light = {4.0, 0.0, 6.0, 6.0, 1.5, 7, 10.0, 10.0};
+        s.Run(light, 5.0);
+        const bool at60 = s.ctl.Current() == kPolicy60;
+        const Decision d = s.ctl.Hold30(s.now);
+        bool stayed = d.switched && s.ctl.Current() == kPolicy30;
+        for (int i = 0; i < 150; ++i) { s.ctl.Hold30(s.now); s.now += 2 * R; if (s.ctl.Current() != kPolicy30) stayed = false; }
+        const double releasedAt = s.now;
+        const size_t ups0 = s.ups.size();
+        s.Run(light, 10.0);
+        const double back = s.ups.size() > ups0 ? s.ups.back() - releasedAt : -1.0;
+        snprintf(buf, sizeof buf, "(60 again %.1f s after the hold)", back);
+        check(at60 && stayed && back >= 1.0 && back < 6.0, "a held scene stays at 30, and 60 returns after it", buf);
+    }
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

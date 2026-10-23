@@ -282,6 +282,13 @@ void vglRtSetup(uint32_t flags, int watcher_priority, int watcher_affinity) {
 	}
 }
 
+// Scenes ended so far and scenes the GPU watcher has seen completed (VGL_RT_GPU_TIMERS): a frame whose last scene was number n is finished on
+// the GPU when done >= n (the Strikers port's adaptive queue depth waits for that). 0 / 0 without the timers.
+void vglRtSceneProgress(uint32_t *submitted, uint32_t *done) {
+	*submitted = rt_slots ? rt_produced : 0;
+	*done = rt_slots ? rt_consumed : 0;
+}
+
 // The newest frame the GPU watcher has finished (VGL_RT_GPU_TIMERS): 0 when there is none yet, else the count of frames finished so far
 // (the caller sees a new frame when it grows). Cheap: one record, no copy of the rings (the renderer's resolution governor reads it per frame).
 uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out) {

@@ -2936,6 +2936,7 @@ struct DynRes {
 GpuTimeFn g_gpuTime = nullptr;
 std::atomic<float> g_dynScale{1.0f};
 std::atomic<float> g_gpuMinMs{0.0f};
+std::atomic<int> g_megaActive{0};    // a Mega Strike scene is on (VgxMegaActive: the frame-rate controller keeps it at 30)
 std::atomic<int> g_megaStep{0};      // 0 off, else 1 + how far a Mega Strike went down (VgxMegaStep: the particle thinning)
 std::atomic<uint32_t> g_megaHint{0}; // set by the game while a Mega Strike scene is drawn (VgxMegaSceneHint)
 
@@ -3013,6 +3014,7 @@ void DynamicResolution() {
         d.mega = false;
         megaChanged = true;
     }
+    g_megaActive.store(d.mega ? 1 : 0, std::memory_order_relaxed);
     const bool megaLevels = d.mega && d.megaMode == 0;
     const int floor = !d.on ? kDynNative : (megaLevels ? kDynLast : d.floorLevel);
     const int best = (!d.on || d.mega) ? kDynNative : d.minLevel;
@@ -3515,3 +3517,4 @@ extern "C" int VgxMegaStep(void) { return vgx::backend::g_megaStep.load(std::mem
 // frame-rate controller, np_fps_ctl.h; 0: not known)
 extern "C" float VgxRenderScale(void) { return vgx::backend::RenderScale(); }
 extern "C" float VgxGpuMinMs(void) { return vgx::backend::g_gpuMinMs.load(std::memory_order_relaxed); }
+extern "C" int VgxMegaActive(void) { return vgx::backend::g_megaActive.load(std::memory_order_relaxed); }
