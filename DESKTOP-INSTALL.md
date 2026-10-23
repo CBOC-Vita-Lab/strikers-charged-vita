@@ -25,7 +25,9 @@ no FTP client.
    VitaShell's `ux0:VPK` folder.
 
 Your saves (`np-data/NAND/`) and settings (`np-player.txt`) are never touched.
-Running it again later only sends what changed, so updates take seconds.
+When a new version comes out, open the installer with the Vita connected:
+it shows **Update** next to Mario Strikers Charged. Updating only sends the
+files that changed, so it takes seconds, and your game data is not sent again.
 If the transfer stops, press **Install** again; finished files are skipped.
 
 The game data is about 1.9 GB. Vita Wi-Fi manages about 2–4 MB/s, so USB is
