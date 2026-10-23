@@ -6,14 +6,22 @@ Gameplay and controls:
 - Faster Mega Saves: zero-alpha effect sprites are skipped, and faint additive
   haze is drawn one in four at four times the strength during Mega Strikes.
   `MSC_FX_THIN=0` and `MSC_FX_ZERO=0` in `np-player.txt` restore the old drawing.
-- Mega Strike scenes (Mega Saves included) render at a smaller internal size,
-  scaled to the screen: 70 % of each side at first, stepping down to 58 % and
-  then 50 % (with stronger haze thinning) if frames still take longer than a
-  30 fps frame. Full size returns when the scene ends. `MSC_MEGA_RENDER=off`
-  in `np-player.txt` turns this off; `MSC_MEGA_RENDER=WxH` fixes one size.
+- 60 fps by default where it holds: Settings > Frame Rate is now AUTO by
+  default (30 FPS is still there). AUTO also watches the graphics chip now,
+  so it does not try 60 in a scene the GPU cannot draw that fast.
+- Dynamic resolution: the renderer measures the graphics chip's time every
+  frame and adjusts the picture to stay inside the frame budget (60 or 30).
+  When it is short it first draws the large blur and glow effects at a
+  smaller size, then the scene at 93 % and at most 86 % of each side; menus
+  and matches never go lower. With time to spare it draws the scene larger
+  than the game's own size (up to 1.2 times, 768x544), for a sharper
+  picture. Mega Strike scenes start at 70 % and may go down to 50 %, with
+  stronger haze thinning at the bottom. Settings: `MSC_DYNRES=off`,
+  `MSC_DYNRES_MAX=1.0..1.2`, `MSC_DYNRES_MIN=0.75..1.0`,
+  `MSC_MEGA_RENDER=off|WxH` in `np-player.txt`.
 - Sharper picture everywhere: the picture is now scaled to the screen with a
   light sharpening filter (Settings > Sharpness: SMOOTH, the new default). It
-  sharpens more in the smaller Mega Strike scenes. OFF restores the plain
+  sharpens more when the scene is drawn smaller. OFF restores the plain
   scaling; CRISP and CRISP+ are still there.
 - Mega Save touch aim uses the position sampled for that press.
 - Optional rear-touch aim and Mega stick speed (2x-4x) in LiveArea Settings.

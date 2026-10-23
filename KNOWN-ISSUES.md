@@ -9,13 +9,20 @@
   tap and the zoom slider is the next step.
 - **Mega Saves speed is an estimate.** The previous build measured about 15 FPS
   in Mega Saves on a console. Two changes target 30: the effect drawing removes
-  roughly half of that scene's blending work, and the scene renders at a lower
-  internal size (49 % of the pixels, down to 25 % if it is still below 30 fps).
+  roughly half of that scene's blending work, and the scene renders smaller
+  (from 70 % of each side, down to 50 % if the GPU is still over its budget).
   Mega Strike scenes are therefore a little softer than the rest of the match.
-  `MSC_MEGA_RENDER=off` restores full size and `MSC_FX_THIN=0` the original
-  haze, both in `ux0:data/mscharged/np-player.txt`. The resolution change has
-  not been run in the emulator: the cloud emulator's shader compiler failed on
-  the host available that day, for this and the previous release alike.
+  `MSC_MEGA_RENDER=off` keeps them at the ordinary floor and `MSC_FX_THIN=0`
+  restores the original haze, both in `ux0:data/mscharged/np-player.txt`. The
+  cloud emulator could not run this release (its shader compiler failed on
+  the machine available that day, for the previous release too).
+- **AUTO 60 fps and the dynamic resolution are new and untested on a
+  console.** They were tested on the desktop harness, with a simulated GPU
+  time and a stress test that changes the picture size every 7 frames through
+  menus, a match and Mega Saves. How often a match reaches 60 depends on the
+  CPU as well as the GPU; the controller drops to 30 when either cannot keep
+  up. If anything looks wrong, `MSC_FPS=30` and `MSC_DYNRES=off` in
+  `np-player.txt` restore the earlier behaviour.
 - **The AI plays differently at zoom levels 4-7.** It now judges which players
   are "on screen" from about the TV-default view. `MSC_CAMERA_VIS=screen`
   brings back the real screen test.

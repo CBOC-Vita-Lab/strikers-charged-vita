@@ -68,7 +68,7 @@
   },
   {
    "path": "dependencies/vitaGL/source/rt.c",
-   "sha256": "3d263ac5f0dd483bd082422fda61e805ee97cd524d07e39312d68199e1344d19"
+   "sha256": "1429af475cec0c4c9306f71ae2cb23534dfd42bd1d0a4a9e7b924745be39c3e2"
   },
   {
    "path": "dependencies/vitaGL/source/shaders.h",
@@ -276,7 +276,7 @@
   },
   {
    "path": "dependencies/vitaGL/source/vitaGL.h",
-   "sha256": "21531bf05c5b653ae59764181a11b0caa9f927f241a45d495e06927d6552d123"
+   "sha256": "9d49591248a57520f3ee3da74796c7a5e809541f0f21008686d14ce4f73bead7"
   },
   {
    "path": "native/.gitignore",
@@ -6488,11 +6488,11 @@
   },
   {
    "path": "native/platform/compat/np_fps.cpp",
-   "sha256": "de93495a369992464347b1e4ab3ddce50b488e208eded656dcfbef82705e7b65"
+   "sha256": "c447130132a0c44a645e1d7abe028d5e3493dfe5300736f6ed92df3fe25cec4f"
   },
   {
    "path": "native/platform/compat/np_fps_ctl.h",
-   "sha256": "da6c057f873d6b77d9852f7f933ac3cbca02e528966d196d572de348501ab28d"
+   "sha256": "66579236df8d1afcfc52f2aac9bde7ab395563f25ca014f50f10f844642d2de7"
   },
   {
    "path": "native/platform/compat/np_framepace.cpp",
@@ -7456,7 +7456,7 @@
   },
   {
    "path": "native/platform/vita/src/np_settings.cpp",
-   "sha256": "0a931cd7d4818410ef9b21097b752afb977cc3d603baaed152154a1c50a82cfe"
+   "sha256": "fb87eb62942bb5f1e77fc4fbdc8f82846da47723031e69467dcb3ee8cba686c8"
   },
   {
    "path": "native/platform/vita/src/np_settings.h",
@@ -7552,7 +7552,7 @@
   },
   {
    "path": "native/platform/vita/src/vita_plan.cpp",
-   "sha256": "4c4a28eebc9b1fd33e44ee6635e892c84b879e9553ba382c32b783a65fd038c0"
+   "sha256": "971e80d86744a0bdc15a9bddbbb5c9995879a7ff3ef2765d65c7355042550006"
   },
   {
    "path": "native/platform/vita/src/vita_probe.cpp",
@@ -7596,7 +7596,7 @@
   },
   {
    "path": "native/platform/vita/tests/test_settings.cpp",
-   "sha256": "20fcee0932068c53c27da2af8e80353836a619ee2c38de31cca22ea2d1524535"
+   "sha256": "611301fcb3b4c21c702fb1d5209dee02d91703a414326c3840809896ec2f32cd"
   },
   {
    "path": "native/platform/vita/tests/test_silent_frames.cpp",
@@ -13900,7 +13900,7 @@
   },
   {
    "path": "native/tools/fps/fps_unit.cpp",
-   "sha256": "dfd50c9d9659ac67ff535298fee818d61ac8fb91b6713c34851fc4ab5f8429b0"
+   "sha256": "e759af0ae4f25b299f19f49959e0e5b794ead259c8d7857a793f810d3072f2cf"
   },
   {
    "path": "native/tools/fps/gate_sim.cpp",
@@ -15952,11 +15952,11 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "b7f2119b9c31d78d7168361bc1423fbab68ad9fff949b6023e21449ecba77230"
+   "sha256": "74f79e67defc60ca421698892fe30caf84fa7fc4f4936826aa8678a6517b72ba"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",
-   "sha256": "749553383908a8db4d22765c4759097e8329368048565b11290d5822b05c66a5"
+   "sha256": "6da3774e150b19e89a2aa942bd0dba8d7d7de12b043a4510a5ee1d683b4a62ec"
   },
   {
    "path": "renderer/src/vgx_capture.cpp",
@@ -15968,7 +15968,7 @@
   },
   {
    "path": "renderer/src/vgx_cmd.h",
-   "sha256": "dddd35f4643259ee494b51da209cb4c4cd46af0067ce440207240da9b605a48e"
+   "sha256": "8cbd3773fa8c671f0e6e99ec8387f2cabac2a1e51ff514e73ade83114b052b46"
   },
   {
    "path": "renderer/src/vgx_common.h",
@@ -16304,7 +16304,7 @@
   },
   {
    "path": "renderer/vita/vgx_host_vita.cpp",
-   "sha256": "76f8155679b3daf14f102c17ad23189a08a234865ab5654fe3253a03e7209336"
+   "sha256": "f55aa19250c8b152ce32bcb378169cd001326d20222dc1e1b6330d14ff6264a4"
   },
   {
    "path": "renderer/vita/vgx_listmerge.h",

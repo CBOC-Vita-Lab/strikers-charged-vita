@@ -22,6 +22,11 @@ before you install. You need your own game dump. No game data is included.
 - **Faster Mega Saves.** The Mega Strike save scene draws far fewer invisible
   or near-invisible effect sprites and renders at a lower internal size that
   drops further if it falls below 30 fps.
+- **60 fps where it holds.** Frame Rate is AUTO by default: 60 when the CPU and
+  the graphics chip can keep up, 30 otherwise.
+- **Dynamic resolution.** The picture size adapts to the graphics chip's load:
+  effects first, the scene at most to 86 % in menus and matches, and larger
+  than before when there is time to spare.
 - **Sharper picture.** A light sharpening filter is now on by default when the
   picture is scaled to the screen (Settings > Sharpness).
 - **Tap anywhere to start** on the title screen.

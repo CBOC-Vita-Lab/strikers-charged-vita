@@ -121,7 +121,8 @@ int main(int argc, char** argv) {
         CHECK(Serialize(u, out));
         CHECK(!Has(out, "MSC_PERFORMANCE_MODE=1") && CountLines(out, "MSC_VITA_RENDER") == 0 && Has(out, "MSC_WATCH=1") && CountLines(out, "# ---- ") == 0);
     }
-    // W5 FPS: FRAME RATE is 30 (the build's default, writes nothing) or AUTO (MSC_FPS=auto); PERFORMANCE sets AUTO, DEFAULT and QUALITY keep 30; 60 / unlocked by hand read CUSTOM
+    // W5 FPS: FRAME RATE is AUTO (the build's default, writes nothing) or 30 (MSC_FPS=30); PERFORMANCE and DEFAULT keep AUTO, QUALITY sets 30; the MSC_FPS=auto
+    // line of earlier builds reads AUTO and goes at the next save; 60 / unlocked by hand read CUSTOM
     {
         const int fr = Find("FRAME RATE");
         CHECK(fr >= 0 && ChoiceCount(fr) == 2 && GetOption(fr).defaultChoice == 0 && GetOption(fr).inPreset);
@@ -129,24 +130,29 @@ int main(int argc, char** argv) {
         Load(s, nullptr);
         CHECK(s.choice[fr] == 0);
         std::string out;
-        CHECK(Serialize(s, out) && !Has(out, "MSC_FPS=auto") && CountLines(out, "MSC_FPS") == 0);
+        CHECK(Serialize(s, out) && CountLines(out, "MSC_FPS") == 0);
         Step(s, fr, +1);
         CHECK(s.choice[fr] == 1 && MatchPreset(s) == -1);
-        CHECK(Serialize(s, out) && Has(out, "MSC_FPS=auto") && CountLines(out, "MSC_FPS=") == 1);
+        CHECK(Serialize(s, out) && Has(out, "MSC_FPS=30") && CountLines(out, "MSC_FPS=") == 1);
         State t;
         Load(t, out.c_str());
         CHECK(t.choice[fr] == 1);
-        Step(t, fr, +1);                       // wraps back to 30: the line goes
+        Step(t, fr, +1);                       // wraps back to AUTO: the line goes
         CHECK(t.choice[fr] == 0 && Serialize(t, out) && CountLines(out, "MSC_FPS") == 0);
+        State old;
+        Load(old, "MSC_FPS=auto\nMSC_WATCH=1\n");   // an earlier build's AUTO
+        CHECK(old.choice[fr] == 0 && MatchPreset(old) == PresetIndex("DEFAULT"));
+        SetChoice(old, fr, 0);
+        CHECK(Serialize(old, out) && CountLines(out, "MSC_FPS") == 0 && Has(out, "MSC_WATCH=1"));
         State p;
         Load(p, nullptr);
         ApplyPreset(p, PresetIndex("PERFORMANCE"));
-        CHECK(p.choice[fr] == 1 && Serialize(p, out) && Has(out, "MSC_FPS=auto"));
+        CHECK(p.choice[fr] == 0 && Serialize(p, out) && CountLines(out, "MSC_FPS") == 0);
         State q;
         Load(q, out.c_str());
         CHECK(MatchPreset(q) == PresetIndex("PERFORMANCE"));
         ApplyPreset(q, PresetIndex("QUALITY"));
-        CHECK(q.choice[fr] == 0 && Serialize(q, out) && CountLines(out, "MSC_FPS") == 0);
+        CHECK(q.choice[fr] == 1 && Serialize(q, out) && Has(out, "MSC_FPS=30"));
         State c;
         Load(c, "MSC_FPS=60\n");              // a tester's own value: CUSTOM, kept until the row is changed
         CHECK(c.choice[fr] == -1 && std::strstr(c.custom[fr], "MSC_FPS=60") != nullptr);

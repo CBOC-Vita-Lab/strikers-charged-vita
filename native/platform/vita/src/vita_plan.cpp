@@ -112,6 +112,10 @@ int Apply(const char** names, int maxNames) {
             for (const auto& s : kLab) if (!Has(s[0])) setenv(s[0], s[1], 0);
         } else {
             for (const auto& s : kPlayer) if (!Has(s[0])) setenv(s[0], s[1], 0);
+            // DYNRES (23 Oct): the renderer's dynamic resolution and the frame-rate controller read the GPU time of every frame, so the player build
+            // has the GPU timers on (one notification and one watcher wake-up per scene); MSC_DYNRES=0 or MSC_VITA_RT_TIMERS=0 turns them off.
+            const char* dyn = std::getenv("MSC_DYNRES");
+            if (!Has("MSC_VITA_RT_TIMERS") && !(dyn && (std::strcmp(dyn, "0") == 0 || std::strcmp(dyn, "off") == 0))) setenv("MSC_VITA_RT_TIMERS", "2", 0);
         }
     }
     // W5 RT (docs/wave5-RT.md section 6): the button lag fix. Under the 30 fps cap the frame was held on the game thread until two retraces after

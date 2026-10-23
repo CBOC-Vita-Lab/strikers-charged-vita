@@ -1396,6 +1396,7 @@ typedef struct {
 	vglRtGpuFrame gpu_frames[128];
 } vglRtStats;
 void vglRtGetStats(vglRtStats *s);
+uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out); // the newest finished GPU frame; returns frames finished so far (0: none)
 
 #ifdef __cplusplus
 }

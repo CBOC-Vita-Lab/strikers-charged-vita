@@ -24,6 +24,7 @@ struct Scene {
     double P, M, core1, core2, audio;   // audio: ms per refresh, follows time
     unsigned id;
     double gpu;                         // the GPU's time per frame (0 = none): not on any core's counter
+    double gpuMin;                      // what the renderer reports as its GPU time at the smallest picture (0 = not reported)
 };
 
 struct Sim {
@@ -72,6 +73,7 @@ struct Sim {
         f.cpuMs[1] = s.core1;
         f.cpuMs[2] = s.core2 + s.audio * (interval / R);
         f.timeMs[2] = s.audio * (interval / R);
+        f.gpuMinMs = s.gpuMin;
         const Decision d = ctl.Frame(f);
         if (d.switched) {
             if (d.policy == kPolicy60) ups.push_back(now); else downs.push_back(now);
@@ -266,6 +268,28 @@ int main() {
         const double after = s.ups.empty() ? -1.0 : s.ups.back() - t0;
         snprintf(buf, sizeof buf, "(the next up came %.1f s into the light scene)", after);
         check(s.ctl.Current() == kPolicy60 && after >= 0 && after < 8.0, "a new scene is not held back by the last scene's GPU back-off", buf);
+    }
+    // 14. the renderer reports the GPU (gpuMinMs): a scene whose GPU time at the smallest picture is over the budget is never tried at 60
+    {
+        Sim s;
+        const Scene gpuBound = {4.0, 0.0, 6.0, 6.0, 1.5, 7, 25.0, 22.0};
+        s.Run(gpuBound, 120.0);
+        check(s.ups.empty() && s.ctl.Current() == kPolicy30, "a reported GPU-bound scene is not tried at 60");
+        Sim t;
+        const Scene fits = {4.0, 0.0, 6.0, 6.0, 1.5, 7, 12.0, 12.0};
+        t.Run(fits, 60.0);
+        check(t.ctl.Current() == kPolicy60 && t.ups.size() == 1 && t.downs.empty(), "a reported GPU time that fits keeps 60");
+    }
+    // 15. at 60 the reported GPU time rises over the budget (a heavier moment the picture size cannot absorb): down within the busy-frame count
+    {
+        Sim s;
+        Scene light = {4.0, 0.0, 6.0, 6.0, 1.5, 7, 12.0, 12.0};
+        s.Run(light, 8.0);
+        const size_t d0 = s.downs.size();
+        Scene heavy = light;
+        heavy.gpuMin = 18.0;   // the frame still fits (gpu 12 on the clock), only the report says the GPU is over
+        for (int i = 0; i < 12; ++i) s.Step(heavy);
+        check(s.ctl.Current() == kPolicy30 && s.downs.size() == d0 + 1, "a GPU report over the budget for 8 frames sends it down");
     }
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

@@ -54,6 +54,7 @@
 #include <atomic>
 #include "vgx_cmd.h"
 namespace vgx::rec { double TakePlayerIdleMs(); bool TakePipeWaitMs(double* playerSlotWaitMs, double* backEndIdleMs); }
+extern "C" int NpFpsDisplayInterval(void) __attribute__((weak)); // the game's frame-rate policy (np/fps.h): vblanks per picture, 0 = none (DYNRES's budget)
 #ifdef __VGX_VITA__
 extern "C" void vgx_vita_log_glb_stats(void); // vita/vgx_host_vita.cpp (a no-op line when vitaGL is not the GLB build)
 #endif
@@ -110,6 +111,7 @@ namespace {
     X(clears)         /* glClear */                                                                                                  \
     X(quadClears)     /* clears drawn as a quad (partial colour mask) */                                                             \
     X(copyQuads)      /* EFB / pass -> texture copy draws */                                                                         \
+    X(passesScaled)   /* DYNRES: large passes drawn at the reduced pass scale */                                                     \
     X(draws) X(drawIndices)                                                                                                          \
     X(programUses)    /* glUseProgram */                                                                                             \
     X(uniformCalls) X(uniformBytes) /* glUniform*: all blocks */                                                                     \
@@ -181,9 +183,8 @@ struct Tex {
 };
 
 int g_fixedW = 0, g_fixedH = 0; // 0 = follow the EFB size
-int g_userFixedW = 0;            // MSC_VITA_RENDER / the host's fixed size (Init): the Mega Strike resolution below then stays off
-std::atomic<int> g_megaStep{0};     // 0 off, else 1 + the Mega Strike resolution's step (VgxMegaStep)
-std::atomic<uint32_t> g_megaHint{0}; // set by the game while a Mega Strike scene is drawn (VgxMegaSceneHint)
+int g_userFixedW = 0;            // MSC_VITA_RENDER / the host's fixed size (Init): the dynamic resolution (DYNRES, below) then stays off
+void DynTargetSize(int efbW, int efbH, int* w, int* h); // DYNRES: the render-target size for an EFB size at the level in force
 int g_rtW = 0, g_rtH = 0;
 int g_efbW = 640, g_efbH = 528;
 GLuint g_efbFbo = 0, g_efbColor = 0, g_efbDepthRb = 0, g_efbDepthTex = 0;
@@ -259,6 +260,13 @@ bool g_inPass = false;          // draws currently go to g_pool[g_pass]
 uint32_t g_passDirectTex = 0;   // not 0: the open pass is drawn straight into this copy texture (PassCmd::directTex)
 int g_passX = 0, g_passY = 0;   // what to subtract from EFB pixel coordinates inside the pass (the pass rectangle's origin, less its place in an atlas)
 int g_passW = 0, g_passH = 0;   // size of the pass's render target
+// DYNRES (dynamic resolution, below): large offscreen passes (glow and blur chains, full-screen filters: a pass rectangle of at least an eighth of the
+// EFB, not drawn into an atlas) are drawn at g_passScale of the render scale. g_psx / g_psy: the open pass's scale, EFB pixels to pass pixels
+// (the render scale times g_passScale, or the render scale itself).
+float g_passScale = 1.0f;
+float g_psx = 1.0f, g_psy = 1.0f;
+inline float CurScaleX() { return g_inPass ? g_psx : static_cast<float>(g_rtW) / static_cast<float>(g_efbW); }
+inline float CurScaleY() { return g_inPass ? g_psy : static_cast<float>(g_rtH) / static_cast<float>(g_efbH); }
 
 // ------------------------------------------------------------ cached GL state
 // Nothing below calls GL unless the value changes. Invalidate() after
@@ -702,7 +710,8 @@ void SetupNewTexture(GLenum minMag) { // the texture being edited: no mips, clam
 }
 
 void CreateTarget() {
-    int w = g_fixedW ? g_fixedW : g_efbW, h = g_fixedH ? g_fixedH : g_efbH;
+    int w = 0, h = 0;
+    DynTargetSize(g_efbW, g_efbH, &w, &h);
     if (w == g_rtW && h == g_rtH && g_efbFbo) return;
     g_rtW = w;
     g_rtH = h;
@@ -980,7 +989,7 @@ bool ApplyRenderState(const RenderState& rs) {
     // of GL state behind this function's back clears g_rsValid; a state whose scissor
     // came out empty is never remembered): nothing to do.
     if (g_rsValid && SameStruct(rs, g_rs)) return true;
-    const float sx = static_cast<float>(g_rtW) / static_cast<float>(g_efbW), sy = static_cast<float>(g_rtH) / static_cast<float>(g_efbH);
+    const float sx = CurScaleX(), sy = CurScaleY(); // (inside a pass: the pass's own scale, see BeginPass)
     // Inside an offscreen pass the target is the pass rectangle: same pixels, moved to the origin.
     const int ox = g_inPass ? g_passX : 0, oy = g_inPass ? g_passY : 0;
     const int tw = g_inPass ? g_passW : g_rtW, th = g_inPass ? g_passH : g_rtH;
@@ -1341,7 +1350,7 @@ void Draw(const CmdBuf& buf, const DrawRec& r) {
         float tmp[112];
         const int n = p.nTev * 4 < 112 ? p.nTev * 4 : 112;
         std::memcpy(tmp, u + r.ublock[UB_TEV], static_cast<size_t>(n) * sizeof(float));
-        const float sx = static_cast<float>(g_rtW) / static_cast<float>(g_efbW), sy = static_cast<float>(g_rtH) / static_cast<float>(g_efbH);
+        const float sx = CurScaleX(), sy = CurScaleY();
         const float ox = g_inPass ? static_cast<float>(g_passX) : 0.0f, oy = g_inPass ? static_cast<float>(g_passY) : 0.0f;
         float* pl = tmp + fsSrc->zfVec * 4;
         pl[2] += pl[0] * ox / sx + pl[1] * oy / sy;
@@ -1939,6 +1948,43 @@ int AcquireFbo(int w, int h, GLuint tex, bool wantDepth) {
 // write every texel before anything samples them.
 Tex& CopyTexture(uint32_t texId, int w, int h, bool atlas = false) {
     Tex& t = TexSlotFor(texId);
+    // DYNRES: a copy texture whose size follows the render scale gets a new size when the scale changes. Its picture is kept, scaled: some of
+    // these textures are read before they are written again (a picture kept from an earlier frame, the other cells of an atlas); started
+    // empty, such a texture showed as dark or missing effects for a few frames after every change. MSC_VGX_RESIZE_KEEP=0: start them empty.
+    static const bool keepOnResize = EnvInt("MSC_VGX_RESIZE_KEEP", 1) != 0;
+    if (keepOnResize && t.id && t.renderTarget && t.w && t.h && (t.w != w || t.h != h)) {
+        GLuint fresh = 0;
+        G(glGenTextures(1, &fresh));
+        ++g_stats.textures;
+        BindTexForEdit(fresh);
+        G(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+        SetupNewTexture(GL_LINEAR);
+        AcquireFbo(w, h, fresh, false);
+        SetViewport(0, 0, w, h);
+        SetScissor(false);
+        SetBlendOff();
+        SetDepthTest(false);
+        SetCull(CULL_NONE);
+        SetDepthMask(false);
+        SetColorMask(true, true);
+        g_rsValid = false;
+        static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}, kZero[4] = {0, 0, 0, 0};
+        DrawQuad(t.id, 0.0f, 0.0f, 1.0f, 1.0f, kIdentity, kZero);
+        ++C.copyQuads;
+        const GLuint old = t.id;
+        G(glDeleteTextures(1, &old));
+        ++C.texDeletes;
+        ForgetTex(old);
+        for (PoolFbo& f : g_pool)
+            if (f.attached == old) f.attached = 0; // (GL detached it; the name may be handed out again)
+        t.id = fresh;
+        t.w = static_cast<uint16_t>(w);
+        t.h = static_cast<uint16_t>(h);
+        t.mips = false;
+        t.wrapS = t.wrapT = WRAP_CLAMP;
+        t.minF = t.magF = FILT_LINEAR;
+        return t;
+    }
     if (!t.id) { G(glGenTextures(1, &t.id)); ++g_stats.textures; }
     if (!t.renderTarget || t.w != w || t.h != h) {
         BindTexForEdit(t.id);
@@ -1968,12 +2014,23 @@ Tex& CopyTexture(uint32_t texId, int w, int h, bool atlas = false) {
 // only (the blur chain's last steps write alpha) while another plane of the
 // EFB holds the picture.
 void BeginPass(const PassCmd& p) {
-    const float sx = static_cast<float>(g_rtW) / static_cast<float>(g_efbW), sy = static_cast<float>(g_rtH) / static_cast<float>(g_efbH);
+    float sx = static_cast<float>(g_rtW) / static_cast<float>(g_efbW), sy = static_cast<float>(g_rtH) / static_cast<float>(g_efbH);
+    int limW = g_rtW, limH = g_rtH;
+    // DYNRES: a large pass outside an atlas at the reduced pass scale (its copy and every draw inside it follow g_psx / g_psy)
+    if (g_passScale < 0.999f && !p.atlasTex && static_cast<int64_t>(p.rect.w) * p.rect.h * 8 >= static_cast<int64_t>(g_efbW) * g_efbH) {
+        sx *= g_passScale;
+        sy *= g_passScale;
+        limW = Rnd(g_efbW * sx);
+        limH = Rnd(g_efbH * sy);
+        ++C.passesScaled;
+    }
+    g_psx = sx;
+    g_psy = sy;
     int x0 = Rnd(p.rect.x * sx), y0 = Rnd(p.rect.y * sy), x1 = Rnd((p.rect.x + p.rect.w) * sx), y1 = Rnd((p.rect.y + p.rect.h) * sy);
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
-    if (x1 > g_rtW) x1 = g_rtW;
-    if (y1 > g_rtH) y1 = g_rtH;
+    if (x1 > limW) x1 = limW;
+    if (y1 > limH) y1 = limH;
     g_pass = -1;
     g_inPass = false;
     g_passDirectTex = 0;
@@ -2065,7 +2122,10 @@ void CopyTex(const CopyTexCmd& c) {
         return;
     }
     const float sx = static_cast<float>(g_rtW) / static_cast<float>(g_efbW), sy = static_cast<float>(g_rtH) / static_cast<float>(g_efbH);
-    int w = Rnd(c.dstW * sx), h = Rnd(c.dstH * sy);
+    // DYNRES: the copy that ends a pass drawn at a reduced scale makes its texture at that scale (it is sampled by normalised coordinates);
+    // a copy into an atlas rectangle keeps the atlas at the render scale (the atlas holds other pictures)
+    const bool passScaled = c.fromPass && g_pass >= 0 && g_inPass && !c.dstTexW && (g_psx != sx || g_psy != sy);
+    int w = Rnd(c.dstW * (passScaled ? g_psx : sx)), h = Rnd(c.dstH * (passScaled ? g_psy : sy));
     if (w < 1) w = 1;
     if (h < 1) h = 1;
     // (The pass that this copy ends keeps its object: g_pass still names it while it is sampled.)
@@ -2214,7 +2274,8 @@ void RtScan(const CmdBuf& buf, const DrawRec* drawRecs) {
             break;
         }
         case CMD_SET_TARGET: {
-            const int w = g_fixedW ? g_fixedW : buf.targets[c.arg].efbW, h = g_fixedH ? g_fixedH : buf.targets[c.arg].efbH;
+            int w = 0, h = 0;
+            DynTargetSize(buf.targets[c.arg].efbW, buf.targets[c.arg].efbH, &w, &h);
             if (w != g_rtW || h != g_rtH) { brk[i] = 1; kill[i] = 1; }
             break;
         }
@@ -2615,82 +2676,255 @@ void RtTimedDraw(const CmdBuf& buf, const DrawRec& dr) {
     else { ++C.rtSampleDraws; C.rtSampleDrawUs += dt; ++g_rtDrawTimers[2]; g_rtDrawTimers[3] += dt; }
 }
 
-// Mega Strike resolution. A Mega Strike (and its Mega Save) covers the screen in about 40 layers of additive particles,
-// so the GPU's blending, not the game, sets that scene's frame rate: about 66 ms a frame at the full 640x448 on a
-// console. While the game reports that scene (VgxMegaSceneHint, every frame it draws the Mega background), the main
-// render target drops to a smaller internal size, scaled to the screen at present as MSC_VITA_RENDER is. It starts at
-// 70 % of each side (49 % of the pixels) and, if the frames still come slower than 30 per second, steps down to 58 %
-// and then 50 % (25 % of the pixels) until that scene ends; the next one starts at 70 % again. 20 frames after the
-// last hint the full size returns. The size is changed between frames only (never in an interpolated replay).
-// MSC_MEGA_RENDER=off disables it, =WxH uses one fixed size, =auto (default). Not used when MSC_VITA_RENDER is set.
+// DYNRES: dynamic resolution (23 Oct; replaces the Mega-only resolution of the same day). The renderer measures what the GPU spends on a frame
+// (SetGpuTimeSource: the Vita host reads vitaGL's GPU timers, one fragment notification per scene) and moves along a ladder of picture levels so
+// that a frame keeps inside the display budget of the frame rate in force (NpFpsDisplayInterval: 16.7 ms at 60, 33.4 ms at 30):
+//   levels 0-2   the scene drawn LARGER than the game's own frame buffer (up to 1.2 per side, at most 960x544), only when the GPU has room to spare
+//   level 3      the game's own size (the start)
+//   levels 4-5   the large offscreen passes (glow and blur chains, full-screen filters: soft by nature) at 75 % / 50 % of the scene's scale: the
+//                cheapest saving that is hard to see
+//   levels 6-7   the scene itself at 93 % / 86 % per side: the floor of every ordinary scene (a match, the menus), so a match never looks soft
+//   levels 8-12  Mega Strike scenes only (the game reports them, VgxMegaSceneHint): 78 % down to 50 % per side. A Mega Strike starts at 70 % at once
+//                (its first frames would cost 60+ ms at full size); 20 frames after it the level from before it returns.
+// Down: when the smoothed GPU time passes 90 % of the budget, straight to the best level predicted to fit in 82 % (a level's cost is modelled as a
+// fixed quarter plus three quarters that follow its pixels). Up: one level when the next better one is predicted under 72 % for 45 measured frames.
+// After a change the frames that were already queued are not measured. VgxGpuMinMs tells the frame-rate controller (np_fps_ctl.h) what the GPU
+// would cost at this scene's floor, so it does not try 60 where the GPU cannot hold it. The size changes between frames only (never in an
+// interpolated replay); the host's sharpening follows the scale (VgxRenderScale).
+// MSC_DYNRES=off: the game's own size always (Mega Strikes included, unless MSC_MEGA_RENDER asks); MSC_DYNRES_MAX=1.0..1.2 caps the larger
+// sizes, MSC_DYNRES_MIN=0.75..1.0 the floor of ordinary scenes; MSC_MEGA_RENDER=off keeps Mega Strikes at the ordinary floor, =WxH one fixed
+// size for them. MSC_DYNRES_FAKE=a,b (desktop tests): a GPU time of a + b x the level's relative cost (x4 in Mega Strikes), two frames late.
+// None of it with MSC_VITA_RENDER (a fixed size). Without a GPU time (no timers) only the Mega Strike start and its old 30 fps steps work.
 namespace {
-struct MegaRes {
-    bool on = false;
-    int quiet = 0, step = 0, frames = 0;
-    double windowStart = 0.0;
-} g_mega;
-int MegaConfig(int* fw, int* fh) {
-    static int mode = -2, w = 0, h = 0; // -1 off, 0 auto, 1 fixed
-    if (mode == -2) {
-        mode = 0;
-        if (const char* e = std::getenv("MSC_MEGA_RENDER"); e && *e) {
-            if (std::strcmp(e, "off") == 0 || std::strcmp(e, "0") == 0) mode = -1;
-            else if (std::sscanf(e, "%dx%d", &w, &h) == 2 && w >= 160 && h >= 120 && w <= 960 && h <= 544) mode = 1;
-        }
-        VGX_LOG("Mega Strike resolution: %s\n", mode < 0 ? "off" : mode == 1 ? "fixed" : "auto");
-    }
-    *fw = w;
-    *fh = h;
-    return mode;
+struct DynLevel { float s, p; };
+const DynLevel kDynLevels[] = {{1.20f, 1.0f}, {1.12f, 1.0f}, {1.06f, 1.0f}, {1.00f, 1.0f}, {1.00f, 0.75f}, {1.00f, 0.5f}, {0.93f, 0.5f},
+                               {0.86f, 0.5f}, {0.78f, 0.5f}, {0.70f, 0.5f}, {0.62f, 0.5f}, {0.56f, 0.5f}, {0.50f, 0.5f}};
+const int kDynCount = static_cast<int>(sizeof kDynLevels / sizeof kDynLevels[0]);
+const int kDynNative = 3, kDynFloor = 7, kDynMegaStart = 9, kDynLast = kDynCount - 1;
+float DynCost(int l) {
+    const DynLevel& v = kDynLevels[l];
+    return 0.25f + 0.75f * v.s * v.s * (0.7f + 0.3f * v.p * v.p);
 }
-void MegaResolution() {
-    if (g_userFixedW) return;
-    int fw = 0, fh = 0;
-    const int mode = MegaConfig(&fw, &fh);
-    if (mode < 0) return;
-    static const float kScale[] = {0.70f, 0.58f, 0.50f};
-    const bool hint = g_megaHint.exchange(0, std::memory_order_relaxed) != 0;
-    const double now = Now();
-    if (hint) {
-        g_mega.quiet = 0;
-        if (!g_mega.on) { g_mega.on = true; g_mega.step = 0; g_mega.frames = -10; g_mega.windowStart = now; }
-    } else if (g_mega.on && ++g_mega.quiet > 20) {
-        g_mega.on = false;
+
+struct DynRes {
+    bool inited = false;
+    bool on = true;
+    int megaMode = 0;             // -1 off, 0 auto, 1 fixed (megaW x megaH)
+    int megaW = 0, megaH = 0;
+    int minLevel = 0;             // the best level allowed (MSC_DYNRES_MAX)
+    int floorLevel = kDynFloor;   // ordinary scenes (MSC_DYNRES_MIN)
+    float fakeA = 0, fakeB = 0;
+    bool fake = false;
+    int cycle = 0;                // MSC_DYNRES_CYCLE=N (desktop stress test): the next level every N frames, through all of them
+    int cycleFrames = 0;
+    int level = kDynNative;
+    int normalLevel = kDynNative; // the level before a Mega Strike began
+    bool mega = false;
+    int megaQuiet = 0;
+    // GPU time
+    uint32_t seq = 0, ignoreUntil = 0;
+    float ema = -1.0f;
+    int over = 0, headroom = 0;
+    int interval = 0;             // NpFpsDisplayInterval of the last decision
+    float fakeRing[4] = {};
+    uint32_t fakeSeq = 0;
+    // without a GPU time: the Mega Strike's old steps by frame interval
+    int frames = 0;
+    double windowStart = 0;
+    int changes = 0;
+} g_dyn;
+GpuTimeFn g_gpuTime = nullptr;
+std::atomic<float> g_dynScale{1.0f};
+std::atomic<float> g_gpuMinMs{0.0f};
+std::atomic<int> g_megaStep{0};      // 0 off, else 1 + how far a Mega Strike went down (VgxMegaStep: the particle thinning)
+std::atomic<uint32_t> g_megaHint{0}; // set by the game while a Mega Strike scene is drawn (VgxMegaSceneHint)
+
+void DynInit() {
+    DynRes& d = g_dyn;
+    d.inited = true;
+    if (const char* e = std::getenv("MSC_DYNRES"); e && (std::strcmp(e, "off") == 0 || std::strcmp(e, "0") == 0)) d.on = false;
+    if (const char* e = std::getenv("MSC_MEGA_RENDER"); e && *e) {
+        if (std::strcmp(e, "off") == 0 || std::strcmp(e, "0") == 0) d.megaMode = -1;
+        else if (std::sscanf(e, "%dx%d", &d.megaW, &d.megaH) == 2 && d.megaW >= 160 && d.megaH >= 120 && d.megaW <= 960 && d.megaH <= 544) d.megaMode = 1;
     }
-    if (g_mega.on && mode == 0) {
-        // 20-frame windows (the first 10 frames after a change are not measured: the new size's first frames)
-        if (++g_mega.frames == 0) g_mega.windowStart = now;
-        else if (g_mega.frames >= 20) {
-            const double avgMs = (now - g_mega.windowStart) / g_mega.frames; // (Now() is in ms)
-            if (avgMs > 34.5 && g_mega.step + 1 < static_cast<int>(sizeof kScale / sizeof kScale[0])) {
-                ++g_mega.step;
-                g_mega.frames = -10;
-                VGX_LOG("Mega Strike resolution: %.1f ms a frame, down to %d %%\n", avgMs, static_cast<int>(kScale[g_mega.step] * 100.0f + 0.5f));
+    if (const char* e = std::getenv("MSC_DYNRES_MAX"); e && *e) {
+        const float m = static_cast<float>(std::atof(e));
+        d.minLevel = kDynNative;
+        for (int l = 0; l < kDynNative; ++l)
+            if (kDynLevels[l].s <= m + 0.001f) { d.minLevel = l; break; }
+    }
+    if (const char* e = std::getenv("MSC_DYNRES_MIN"); e && *e) {
+        const float m = static_cast<float>(std::atof(e));
+        d.floorLevel = kDynNative;
+        for (int l = kDynNative; l <= kDynFloor + 2 && l < kDynCount; ++l)
+            if (kDynLevels[l].s >= m - 0.001f) d.floorLevel = l;
+    }
+    if (const char* e = std::getenv("MSC_DYNRES_FAKE"); e && *e) d.fake = std::sscanf(e, "%f,%f", &d.fakeA, &d.fakeB) == 2;
+    if (const char* e = std::getenv("MSC_DYNRES_CYCLE"); e && *e) d.cycle = std::atoi(e);
+    std::fprintf(stderr, "[vgx] dynamic resolution: %s; levels %.2f..%.2f per side in ordinary scenes, Mega Strikes %s; GPU time %s\n", d.on ? "on" : "off (MSC_DYNRES)",
+            kDynLevels[d.floorLevel].s, kDynLevels[d.minLevel].s, d.megaMode < 0 ? "as ordinary scenes" : (d.megaMode == 1 ? "fixed size" : "down to 0.50"),
+            d.fake ? "simulated (MSC_DYNRES_FAKE)" : (g_gpuTime ? "measured" : "not measured"));
+}
+
+// The render-target size for an EFB size at the level in force (CreateTarget, the RT scan's target-change check).
+void DynTargetSize(int efbW, int efbH, int* w, int* h) {
+    if (g_fixedW) { *w = g_fixedW; *h = g_fixedH; return; }   // MSC_VITA_RENDER, or a fixed Mega Strike size
+    const float s = kDynLevels[g_dyn.level].s;
+    if (s > 0.999f && s < 1.001f) { *w = efbW; *h = efbH; return; }
+    int ww = (static_cast<int>(static_cast<float>(efbW) * s + 0.5f) + 7) & ~7, hh = (static_cast<int>(static_cast<float>(efbH) * s + 0.5f) + 7) & ~7;
+    if (ww > 960) ww = 960;
+    if (hh > 544) hh = 544;
+    if (s < 1.0f) {
+        if (ww > efbW) ww = efbW;
+        if (hh > efbH) hh = efbH;
+    }
+    *w = ww < 16 ? 16 : ww;
+    *h = hh < 16 ? 16 : hh;
+}
+
+double DynBudgetMs(int interval) { return (interval >= 2 ? 2.0 : 1.0) * 1001.0 / 60.0; }
+
+void DynSetLevel(int l, const char* why) {
+    DynRes& d = g_dyn;
+    if (l == d.level) return;
+    if (d.ema > 0) d.ema = d.ema * DynCost(l) / DynCost(d.level);   // the expected time at the new level (until it is measured)
+    if (d.changes < 200)   // (the console's log: the level changes of a session, up to 200)
+        std::fprintf(stderr, "[vgx] dynamic resolution: frame %llu level %d -> %d (scale %.2f, passes %.2f): %s; GPU %.1f ms, budget %.1f ms\n",
+                     static_cast<unsigned long long>(g_execFrame), d.level, l, kDynLevels[l].s, kDynLevels[l].p, why, d.ema, DynBudgetMs(d.interval));
+    d.level = l;
+    d.ignoreUntil = d.seq + 3;   // frames already queued at the old size
+    d.over = d.headroom = 0;
+    ++d.changes;
+}
+
+void DynamicResolution() {
+    DynRes& d = g_dyn;
+    if (!d.inited) DynInit();
+    if (g_userFixedW) return;
+    const bool hint = g_megaHint.exchange(0, std::memory_order_relaxed) != 0;
+    const int interval = NpFpsDisplayInterval ? NpFpsDisplayInterval() : 2;
+    const double budget = DynBudgetMs(interval);
+    // the Mega Strike scene
+    bool megaChanged = false;
+    if (hint) {
+        d.megaQuiet = 0;
+        if (!d.mega) { d.mega = true; megaChanged = true; }
+    } else if (d.mega && ++d.megaQuiet > 20) {
+        d.mega = false;
+        megaChanged = true;
+    }
+    const bool megaLevels = d.mega && d.megaMode == 0;
+    const int floor = !d.on ? kDynNative : (megaLevels ? kDynLast : d.floorLevel);
+    const int best = (!d.on || d.mega) ? kDynNative : d.minLevel;
+    if (megaChanged) {
+        if (d.mega) {
+            d.normalLevel = d.level;
+            if (d.on && megaLevels && d.level < kDynMegaStart) DynSetLevel(kDynMegaStart, "a Mega Strike began");
+            d.frames = -10;
+            d.windowStart = Now();
+        } else {
+            int back = d.normalLevel < d.level ? d.normalLevel : d.level;
+            if (back > d.floorLevel) back = d.floorLevel;
+            if (back < d.minLevel) back = d.minLevel;
+            DynSetLevel(back, "the Mega Strike is over");
+        }
+    }
+    // the GPU time of the newest finished frame
+    uint32_t seq = 0;
+    float ms = 0;
+    bool have = false;
+    if (d.fake) {
+        // two frames late, as the console's notifications are
+        d.fakeRing[d.fakeSeq % 4] = d.fakeA + d.fakeB * DynCost(d.level) * (d.mega ? 4.0f : 1.0f);
+        ++d.fakeSeq;
+        if (d.fakeSeq > 2) { seq = d.fakeSeq - 2; ms = d.fakeRing[seq % 4]; have = true; }
+    } else if (g_gpuTime) {
+        have = g_gpuTime(&seq, &ms);
+    }
+    if (d.cycle > 0) {
+        if (++d.cycleFrames >= d.cycle) {
+            d.cycleFrames = 0;
+            DynSetLevel((d.level + 1) % kDynCount, "MSC_DYNRES_CYCLE");
+        }
+    } else if (!d.on) {
+        g_gpuMinMs.store(0.0f, std::memory_order_relaxed);
+    } else if (have && seq != d.seq) {
+        d.seq = seq;
+        if (seq > d.ignoreUntil && ms > 0.05f) {
+            d.ema = d.ema < 0 ? ms : 0.75f * d.ema + 0.25f * ms;
+            const float cur = DynCost(d.level);
+            auto pred = [&](int l) { return d.ema * DynCost(l) / cur; };
+            g_gpuMinMs.store(pred(floor), std::memory_order_relaxed);
+            if (interval != d.interval) {
+                // the frame rate changed: aim for the new budget at once
+                d.interval = interval;
+                d.over = d.headroom = 0;
+            }
+            if (ms > budget) ++d.over; else d.over = 0;
+            if (d.level > floor) DynSetLevel(floor, "past this scene's floor");
+            else if (d.level < best) DynSetLevel(best, "above this scene's best level");
+            else if (d.ema > 0.90f * budget || d.over >= 3) {
+                int l = d.level;
+                while (l < floor && pred(l) > 0.82f * budget) ++l;
+                if (l != d.level) DynSetLevel(l, "the GPU is over its budget");
+                else d.over = 0;
+            } else if (d.level > best && pred(d.level - 1) < 0.72f * budget) {
+                if (++d.headroom >= 45) DynSetLevel(d.level - 1, "the GPU has room");
             } else {
-                g_mega.frames = 0;
-                g_mega.windowStart = now;
+                d.headroom = 0;
             }
         }
-    }
-    int w = 0, h = 0;
-    if (g_mega.on) {
-        if (mode == 1) { w = fw; h = fh; }
-        else {
-            w = (static_cast<int>(static_cast<float>(g_efbW) * kScale[g_mega.step] + 0.5f) + 7) & ~7;
-            h = (static_cast<int>(static_cast<float>(g_efbH) * kScale[g_mega.step] + 0.5f) + 7) & ~7;
-            if (w > g_efbW) w = g_efbW;
-            if (h > g_efbH) h = g_efbH;
+    } else if (!have && d.on && megaLevels) {
+        // no GPU time: the Mega Strike steps down while its frames come slower than 30 per second (20-frame windows)
+        const double now = Now();
+        if (++d.frames == 0) d.windowStart = now;
+        else if (d.frames >= 20) {
+            const double avgMs = (now - d.windowStart) / d.frames;
+            const int next = (avgMs > 34.5) ? (d.level + 2 < kDynLast ? d.level + 2 : kDynLast) : d.level;
+            if (next != d.level) { DynSetLevel(next, "Mega Strike frames slower than 30 per second"); d.frames = -10; }
+            else { d.frames = 0; d.windowStart = now; }
         }
     }
-    g_megaStep.store(g_mega.on ? g_mega.step + 1 : 0, std::memory_order_relaxed);
-    if (w == g_fixedW && h == g_fixedH) return;
-    g_fixedW = w;
-    g_fixedH = h;
+    // a fixed Mega Strike size (MSC_MEGA_RENDER=WxH) replaces the levels for the scene
+    const int fw = (d.mega && d.megaMode == 1) ? d.megaW : 0, fh = (d.mega && d.megaMode == 1) ? d.megaH : 0;
+    const DynLevel& v = kDynLevels[d.level];
+    g_passScale = d.on ? v.p : 1.0f;
+    g_dynScale.store(fw ? static_cast<float>(fw) / static_cast<float>(g_efbW) : v.s, std::memory_order_relaxed);
+    g_megaStep.store(d.mega ? (v.s <= 0.56f ? 3 : (v.s <= 0.62f ? 2 : 1)) : 0, std::memory_order_relaxed);
+    g_fixedW = fw;
+    g_fixedH = fh;
+    int w = 0, h = 0;
+    DynTargetSize(g_efbW, g_efbH, &w, &h);
+    if (w == g_rtW && h == g_rtH) return;
+    // The new target starts with the old one's picture, scaled: a frame begins on what the previous frame's display copy left in the EFB (its
+    // clear colour and alpha, or the picture), and the game's effects read it (a target that started black made the whole scene of the first
+    // frame at the new size dark). Depth starts cleared (1.0, what the display copy's clear leaves in practice).
+    const GLuint oldColor = g_efbColor;
+    if (oldColor && g_efbFbo) G(glGenTextures(1, &g_efbColor));
     CreateTarget();
+    if (oldColor && g_efbFbo && oldColor != g_efbColor) {
+        BindFbo(g_efbFbo);
+        SetViewport(0, 0, g_rtW, g_rtH);
+        SetScissor(false);
+        SetBlendOff();
+        SetDepthTest(false);
+        SetCull(CULL_NONE);
+        SetDepthMask(false);
+        SetColorMask(true, true);
+        static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}, kZero[4] = {0, 0, 0, 0};
+        DrawQuad(oldColor, 0.0f, 0.0f, 1.0f, 1.0f, kIdentity, kZero);
+        ++C.copyQuads;
+        GLuint dead = oldColor;
+        G(glDeleteTextures(1, &dead));
+        ++C.texDeletes;
+        ForgetTex(dead);
+    }
     g_rsValid = false;
-    VGX_LOG("Mega Strike resolution: render target %dx%d\n", g_rtW, g_rtH);
 }
 } // namespace
+
+void SetGpuTimeSource(GpuTimeFn fn) { g_gpuTime = fn; }
+float RenderScale() { return g_dynScale.load(std::memory_order_relaxed); }
 
 void Execute(const CmdBuf& buf) { ExecuteEx(buf, ExecOpts{}); }
 
@@ -2726,7 +2960,7 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
     // first draw sets its whole layout, constants included.
     S.attrConstSet = 0;
     S.layoutVbo = ~0u;
-    if (!replay) MegaResolution();
+    if (!replay) DynamicResolution();
     BindFbo(g_efbFbo);
     if (!replay || opts.restream) UploadStream(buf, opts.vtx ? opts.vtx : buf.vtx.data(), !replay);
     if (prof) g_profStream += Now() - tFrame;
@@ -3031,3 +3265,7 @@ extern "C" void VgxMegaSceneHint(int on) {
     if (on) vgx::backend::g_megaHint.store(1, std::memory_order_relaxed);
 }
 extern "C" int VgxMegaStep(void) { return vgx::backend::g_megaStep.load(std::memory_order_relaxed); }
+// DYNRES: the render scale in force (the host's sharpening follows it) and the GPU time per frame predicted at this scene's smallest picture (the
+// frame-rate controller, np_fps_ctl.h; 0: not known)
+extern "C" float VgxRenderScale(void) { return vgx::backend::RenderScale(); }
+extern "C" float VgxGpuMinMs(void) { return vgx::backend::g_gpuMinMs.load(std::memory_order_relaxed); }

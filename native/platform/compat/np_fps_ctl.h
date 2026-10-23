@@ -12,6 +12,10 @@
 //              frames; or when the frames of the last SLOW_FRAMES lasted more than SLOW_MEAN refreshes on average (the limit is then not on a
 //              CPU core: the GPU, whose time the per-core counters do not see; a wait for a peer's input ends in 30 as well, which is harmless).
 //              A miss is a frame of more than 1.5 refreshes while a core was busy (a wait for a peer's input is not a miss).
+//   the GPU (23 Oct): when the renderer reports gpuMinMs (its predicted GPU time per frame at the smallest picture it would use in this scene,
+//              vgx_backend_gl.cpp, measured by vitaGL's GPU timers), going up also needs that under the margin, and it goes down when it stayed
+//              above DOWN_BUSY of a refresh for BUSY_FRAMES frames: a scene the GPU cannot draw 60 times a second is not tried, instead of being
+//              found out by the sustained-slowness rule after a few slow seconds.
 //   no flip-flop: the cool-down after a down is COOL_BASE seconds, doubled for every down in the last 60 s; a down inside the probation
 //              (the prediction was too optimistic) also lowers the margin for going up (PENALTY_STEP per such down, up to 3, forgotten
 //              after 120 s of stable 60). So a scene that does not hold 60 is tried a few times and then left at 30.
@@ -70,6 +74,7 @@ struct FrameIn {
     double gameBusyMs;     // without a probe: the game thread's busy time (interval minus waits), the only figure there is
     bool locked;           // the game forced its own 30 fps cut-scene lock in that frame
     unsigned scene;        // scene identity (task state): a change starts a new evidence window
+    double gpuMinMs;       // the renderer's predicted GPU ms per frame at its smallest picture for this scene; <= 0: not known (the rule is off)
 };
 
 struct Prediction {
@@ -102,6 +107,7 @@ public:
         missPos_ = 0;
         missCount_ = 0;
         busyHigh_ = 0;
+        gpuHigh_ = 0;
         nDowns_ = 0;
         stepCost_ = 0.0;
         switches_ = 0;
@@ -183,6 +189,7 @@ public:
             if (stall || !p.valid) { ResetEvidence(); return d; }
             const double margin = Margin();
             if (p.max60 > margin * Rms) { ResetEvidence(); return d; }
+            if (f.gpuMinMs > 0 && f.gpuMinMs > margin * Rms) { ResetEvidence(); return d; }   // the GPU would not hold a refresh even at its smallest picture
             if (goodSince_ < 0) { goodSince_ = f.now; goodFrames_ = 0; }
             ++goodFrames_;
             if (f.now - goodSince_ >= cfg_.upHold && goodFrames_ >= cfg_.upFrames && f.now >= cooldownUntil_) {
@@ -197,6 +204,7 @@ public:
                 slowPos_ = slowCount_ = 0;
                 slowSum_ = 0.0;
                 busyHigh_ = 0;
+                gpuHigh_ = 0;
                 if (stableSince_ < 0) stableSince_ = f.now;
             }
             return d;
@@ -219,11 +227,13 @@ public:
             if (miss) ++missCount_;
             missPos_ = (missPos_ + 1) % cfg_.missWindow;
             if (p.valid && p.maxNow > cfg_.downBusy * Rms) ++busyHigh_; else busyHigh_ = 0;
+            if (f.gpuMinMs > 0 && f.gpuMinMs > cfg_.downBusy * Rms) ++gpuHigh_; else gpuHigh_ = 0;
             const char* why = 0;
             bool failedTry = false, slowTry = false;
             if (miss && f.now - upAt_ < cfg_.probation) { why = "a frame missed its refresh right after going up"; failedTry = true; }
             else if (missCount_ >= cfg_.missLimit) why = "too many frames missed their refresh";
             else if (busyHigh_ >= cfg_.busyFrames) { why = "the busiest core stayed over the budget"; failedTry = f.now - upAt_ < 10.0; }
+            else if (gpuHigh_ >= cfg_.busyFrames) { why = "the GPU stayed over the budget even at the smallest picture"; failedTry = f.now - upAt_ < 10.0; }
             // the sustained-slowness rule: the window of the last frames
             {
                 const int w = cfg_.slowFrames < kMaxWindow ? cfg_.slowFrames : kMaxWindow;
@@ -290,7 +300,7 @@ private:
     int penalty_;
     double stableSince_;
     unsigned char miss_[kMaxWindow];
-    int missPos_, missCount_, busyHigh_;
+    int missPos_, missCount_, busyHigh_, gpuHigh_;
     int settle_;
     double slowRing_[kMaxWindow];
     int slowPos_, slowCount_;

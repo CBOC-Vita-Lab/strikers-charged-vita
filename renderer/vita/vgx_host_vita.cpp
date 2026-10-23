@@ -161,7 +161,7 @@ extern "C" unsigned vglStrikersShaderCacheCaps(void) __attribute__((weak));
 extern "C" uint64_t NpLatTakeSendTag(void) __attribute__((weak));
 #include "../src/vgx_perf_diag.h"
 
-extern "C" int VgxMegaStep(void); // vgx_backend_gl.cpp: 0, or 1 + the Mega Strike resolution step
+extern "C" float VgxRenderScale(void); // vgx_backend_gl.cpp (DYNRES): the scene's render scale in force
 extern "C" void NpLatDecoded(uint64_t tag) __attribute__((weak));
 extern "C" void NpLatPresented(uint64_t tag) __attribute__((weak));
 extern "C" void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo) __attribute__((weak));
@@ -1500,6 +1500,17 @@ void StartRt() {
                          "(MSC_VGX_RT, MSC_VITA_RT_AUTO, MSC_VITA_RT_TIMERS, MSC_VGX_RTTIME, MSC_VITA_RT_LOG)\n",
                  hints > 0 ? "on" : "off", autoNoLoad > 0 ? "on" : "off", (g_rtNow.flags & VGL_RT_CPU_TIMERS) ? "on" : "off", (g_rtNow.flags & VGL_RT_GPU_TIMERS) ? "on" : "off", core,
                  EnvL("MSC_VGX_RTTIME", 0) > 0 ? "on" : "off", g_rtNow.clock_cost_us, g_rtLogEvery);
+    // DYNRES: the renderer's dynamic resolution reads the GPU time of every frame (the player build turns the GPU timers on for it: vita_plan.cpp)
+    if (g_rtNow.flags & VGL_RT_GPU_TIMERS) {
+        vgx::backend::SetGpuTimeSource([](uint32_t* seq, float* ms) -> bool {
+            vglRtGpuFrame f;
+            const uint32_t n = vglRtLastGpuFrame(&f);
+            if (!n || !f.timed) return false;
+            *seq = n;
+            *ms = static_cast<float>(f.busy_us) * 0.001f;
+            return true;
+        });
+    }
 }
 void LogRt() {
     if (g_rtLogEvery <= 0 || g_presented % static_cast<unsigned long long>(g_rtLogEvery) != 0) return;
@@ -1619,11 +1630,13 @@ void PresentDisplayCopy(unsigned efb, int x, int y, int w, int h) {
         // LOOK: the back end's picture shader (vgx_backend_gl.cpp DrawPicture). It binds the display itself, and the
         // back end trusts nothing it cached afterwards (CopyDisp). If it did not build (a console without the shader
         // compiler: the owner's has libshacccg, a clean one does not) the picture is blitted as before, for good.
-        // Mega Strike scenes are drawn smaller (MegaResolution in vgx_backend_gl.cpp): the smooth filter sharpens more there.
+        // The dynamic resolution (DYNRES in vgx_backend_gl.cpp) may draw the scene smaller: the smooth filter sharpens more the smaller it is
+        // (0.5 at the game's own size, 0.59 at 86 % per side, 0.68 at 70 %, 0.8 at 50 %), and a little less when the scene is drawn larger.
         float amount = g_sharpen;
         if (g_upscaleMode == 4 && !g_sharpenSet) {
-            const int megaStep = VgxMegaStep();
-            if (megaStep > 0) amount = megaStep >= 2 ? 0.8f : 0.7f;
+            const float s = VgxRenderScale();
+            if (s < 0.99f) amount = std::min(0.8f, g_sharpen + (1.0f - s) * 0.6f);
+            else if (s > 1.01f) amount = 0.4f;
         }
         if (!vgx::backend::DrawPicture(0, x, y, w, h, dx0, 0, dx1 - dx0, kScreenH, g_upscaleMode, amount, !g_flipY.load(std::memory_order_relaxed))) {
             std::fprintf(stderr, "[vgx-vita] picture shader unavailable: MSC_VITA_UPSCALE off\n");

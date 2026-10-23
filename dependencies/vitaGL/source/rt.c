@@ -280,6 +280,17 @@ void vglRtSetup(uint32_t flags, int watcher_priority, int watcher_affinity) {
 	}
 }
 
+// The newest frame the GPU watcher has finished (VGL_RT_GPU_TIMERS): 0 when there is none yet, else the count of frames finished so far
+// (the caller sees a new frame when it grows). Cheap: one record, no copy of the rings (the renderer's resolution governor reads it per frame).
+uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out) {
+	const uint32_t h = rt_gpu_frame_head;
+	if (!h)
+		return 0;
+	__sync_synchronize();
+	*out = rt_gpu_frames[(h - 1) % RT_FRAMES];
+	return h;
+}
+
 void vglRtGetStats(vglRtStats *s) {
 	s->version = 1;
 	s->flags = vgl_rt_flags;

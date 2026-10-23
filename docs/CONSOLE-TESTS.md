@@ -12,6 +12,9 @@ scene twice: once without the line and once with it.
 | --- | --- | --- | --- |
 | What does the sharpening cost? | A match and the main menu | default, then `MSC_VITA_UPSCALE=off` | Expect well under 1 fps difference. If it costs more, make OFF the default again |
 | Does Mega Saves hold 30 fps? | Strikers 101 > Mega Saves | default, then `MSC_MEGA_RENDER=off` | The default should hold 30. With `off` it shows the old speed. If the default looks too soft, try `MSC_MEGA_RENDER=512x352` |
+| Does a match reach 60? | A full match | default (AUTO), then `MSC_FPS=30` | Logging builds print `[fps] auto: 30 -> 60` and `[vgx] dynamic resolution: ... level` lines. If 60 is rare and the reason is a CPU core, the GPU levels cannot help |
+| What do the GPU timers cost? | A match | `MSC_DYNRES=off` | The timers add one notification per render scene. Expect no visible difference |
+| Is the larger picture worth it? | Main menu, a match at 30 | `MSC_DYNRES_MAX=1.0` | The default may draw up to 768x544 when the GPU has room. If that ever costs frames, cap it |
 | Is Mega Saves still limited by blending? | Strikers 101 > Mega Saves | `MSC_FX_THIN=2` | If it is faster than the default, thin more. If not, the remaining cost is elsewhere |
 | How much does the picture size cost? | Mega Saves, main menu, stadium select | `MSC_VITA_RENDER=480x336` | A big gain means fill rate (pixels). Little change means geometry or render-pass switches |
 | Can input feel quicker? | Mega Saves, a match | `MSC_VITA_DISPLAY_BUFFERS=2` | One frame fewer waits in the display queue. Check that the frame rate holds |

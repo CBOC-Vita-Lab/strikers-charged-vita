@@ -379,6 +379,11 @@ void SetPresentHook(PresentHook hook);
 enum : unsigned { kHintNoLoad = 1u, kHintNoStore = 2u };
 using SceneHintHook = void (*)(unsigned framebuffer, unsigned hints);
 void SetSceneHintHook(SceneHintHook hook);
+// DYNRES (vgx_backend_gl.cpp "dynamic resolution"): the host's GPU time of the newest finished frame. Returns false when there is none; seq grows
+// by one per finished frame (a new value), ms is what the GPU was busy for it.
+typedef bool (*GpuTimeFn)(uint32_t* seq, float* ms);
+void SetGpuTimeSource(GpuTimeFn fn);
+float RenderScale(); // the scene's render scale in force (1: the game's own size)
 // W5 RT: a cheap microsecond clock for the draw timers (MSC_VGX_RTTIME=1; default: std::chrono::steady_clock).
 using MicroClock = uint32_t (*)();
 void SetMicroClock(MicroClock clock);

@@ -21,6 +21,8 @@ double NpFpsPlatformThreadClockMs(void) __attribute__((weak));
 unsigned long VIGetRetraceCount(void) __attribute__((weak));
 void VIWaitForRetrace(void) __attribute__((weak));
 void NpLatLatch(void) __attribute__((weak));
+// The renderer's predicted GPU time per frame at the smallest picture it would use in this scene (vgx_backend_gl.cpp, dynamic resolution); <= 0: unknown
+float VgxGpuMinMs(void) __attribute__((weak));
 }
 
 namespace {
@@ -31,9 +33,14 @@ using npfps::kPolicy30;
 using npfps::kPolicy60;
 using npfps::kPolicyUnlocked;
 
-// The mode the build starts in when MSC_FPS is not set. 0 game, 1 = 30, 2 = 60, 3 = unlocked, 4 = auto. Change here (and the settings row's default
-// choice in platform/vita/src/np_settings.cpp) when the console has measured and the default moves to auto.
+// The mode the build starts in when MSC_FPS is not set. 0 game, 1 = 30, 2 = 60, 3 = unlocked, 4 = auto. The Vita starts in auto (23 Oct: 60 where
+// every CPU core and the GPU hold it, the renderer's picture size helping within limits; the settings row's default in platform/vita/src/np_settings.cpp
+// matches); host builds keep 30, which their deterministic runs and tests assume.
+#if defined(__vita__)
+const int kDefaultMode = 4;
+#else
 const int kDefaultMode = 1;
+#endif
 
 enum { kModeGame = 0, kMode30 = 1, kMode60 = 2, kModeUnlocked = 3, kModeAuto = 4 };
 
@@ -482,6 +489,7 @@ void NpFpsBeginFrame(float realSeconds, unsigned taskState)
         in.steps = g.simSteps;
         in.simMs = g.simMsAcc;
         in.gameCore = 0;
+        in.gpuMinMs = (&VgxGpuMinMs != 0) ? (double)VgxGpuMinMs() : 0.0;
         if (g_model.on)
         {
             in.costsValid = g.haveModel;
