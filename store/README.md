@@ -22,8 +22,8 @@ executable checksum identify the specific version.
 The store download is the VPK, not the complete installation ZIP. **CBOC Vita
 Installer is optional.** Players still need their own Wii USA Rev 1 (`R4QE01`)
 files and `libshacccg.suprx`. [Manual Install](../INSTALL.md) covers setup from
-Windows, Mac or Linux using VitaShell. The [optional desktop helper](../DESKTOP-INSTALL.md)
-automates setup on Apple Silicon Mac. Ordinary updates replace the VPK and keep
+Windows, Mac or Linux using VitaShell. The [optional CBOC Vita Installer](../DESKTOP-INSTALL.md)
+automates setup on Mac, Windows or Linux. Ordinary updates replace the VPK and keep
 game data, saves and settings. No computer is needed while playing.
 
 ## Media

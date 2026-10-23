@@ -33,11 +33,10 @@ compiling is needed for that route. The Python helper is optional.
 Already have the complete sys/ and files/ folders? Skip extraction.
 The VPK includes the playback fixes; no extra movie conversion is required.
 
-OPTIONAL AUTOMATED SETUP
-CBOC Vita Installer 0.1.11 can prepare and transfer files for you. Only this
-helper's current public download is Apple Silicon Mac-only, not manual setup.
-See DESKTOP-INSTALL.md. It installs the same VPK and does not need a separate
-Python or Dolphin installation. The helper is not needed to launch the game.
+EASY INSTALL (OPTIONAL)
+CBOC Vita Installer (Mac, Windows or Linux) copies and installs everything for
+you: github.com/CBOC-Vita-Lab/vita-installer/releases/latest
+See DESKTOP-INSTALL.md. It installs the same VPK and keeps your saves.
 
 ALREADY INSTALLED?
 Back up ux0:data/mscharged/ first. Install only the matching new player VPK.

@@ -49,18 +49,13 @@ the shader-module copy step. [Start Here](START-HERE.txt) is the short checklist
 The VPK includes the player, startup shaders and default artwork; no separate
 `eboot.bin`, shader-cache replacement or desktop installer is needed.
 
-## Optional Desktop App
+## Easy Install (Optional)
 
-[CBOC Vita Installer 0.1.11](https://github.com/CBOC-Vita-Lab/vita-installer/releases/tag/v0.1.11)
-automates preparation and transfer. **Only this helper's current download is
-Apple Silicon Mac-only, not the game's manual setup.**
-
-Open the app, connect the Vita, paste this repo's URL (or select its ZIP/folder),
-choose your own game and any missing required files, then install.
-No separate Python or Dolphin installation is needed for this route.
-[Desktop guide](DESKTOP-INSTALL.md) / [Mac first-launch help](https://github.com/CBOC-Vita-Lab/vita-installer/blob/main/docs/mac-open.md).
-The app is not Apple-notarized. Intel Mac and Windows app builds remain under
-validation; use the manual guide instead. Both routes install the same VPK.
+[CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases/latest)
+does the copying and installing for you, on Mac (macOS 10.13+), Windows (7+) or
+Linux. Open it, press SELECT in VitaShell, click **Get** next to Mario Strikers
+Charged, choose your own disc (ISO, RVZ, WBFS or an extracted folder) and click
+**Install**. Saves and settings are kept. [Easy install guide](DESKTOP-INSTALL.md).
 
 ## Already Installed?
 

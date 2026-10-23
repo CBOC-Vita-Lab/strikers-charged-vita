@@ -107,7 +107,7 @@ See [Known Issues](KNOWN-ISSUES.md) for build-specific notes.
 
 ## Optional Automated Setup
 
-The [desktop helper](DESKTOP-INSTALL.md) combines extraction, checks and transfer.
-Its current public build is for Apple Silicon Mac only; that restriction does
-not apply to the manual method above. No additional movie/image conversion is
-required by this Strikers package; its current playback fixes are in the VPK.
+[CBOC Vita Installer](DESKTOP-INSTALL.md) does extraction, checks, transfer and
+installation for you on Mac, Windows or Linux. No additional movie/image
+conversion is required by this Strikers package; its current playback fixes
+are in the VPK.
