@@ -136,7 +136,11 @@
 #include <vector>
 
 // The renderer's dynamic resolution checks the free video memory before it draws a larger picture (vgx_backend_gl.cpp).
-extern "C" int vgx_vram_free_kib(void) { return static_cast<int>(vglMemFree(VGL_MEM_VRAM) / 1024); }
+// (vitaGL puts a GPU allocation in VRAM first and then falls back to its RAM pool: both count.)
+extern "C" int vgx_vram_free_kib(void) { return static_cast<int>((vglMemFree(VGL_MEM_VRAM) + vglMemFree(VGL_MEM_RAM)) / 1024); }
+// The texture bound to the active unit got its memory (vitaGL is built with SKIP_ERROR_HANDLING: a failed allocation is silent and
+// a framebuffer object with that texture attached crashes the next scene).
+extern "C" int vgx_tex_has_storage(void) { return vglGetTexDataPointer(GL_TEXTURE_2D) != nullptr ? 1 : 0; }
 
 // Multiplayer (platform layer, vita_multiplayer.cpp): the system NetCheck dialog of the ad hoc connection is
 // drawn by vitaGL's swap, which must be told that a CommonDialog is on screen. Weak: absent in an older platform

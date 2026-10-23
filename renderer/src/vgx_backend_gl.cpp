@@ -55,7 +55,11 @@
 #include "vgx_cmd.h"
 namespace vgx::rec { double TakePlayerIdleMs(); bool TakePipeWaitMs(double* playerSlotWaitMs, double* backEndIdleMs); }
 extern "C" int NpFpsDisplayInterval(void) __attribute__((weak));
-extern "C" int vgx_vram_free_kib(void) __attribute__((weak)); // the host's free video memory in KiB (Vita: vitaGL's VRAM pool), -1 unknown // the game's frame-rate policy (np/fps.h): vblanks per picture, 0 = none (DYNRES's budget)
+extern "C" int vgx_vram_free_kib(void) __attribute__((weak)); // the host's free GPU memory in KiB (Vita: vitaGL's VRAM + RAM pools), -1 unknown
+extern "C" int vgx_tex_has_storage(void) __attribute__((weak)); // the texture bound on unit 0 got its memory (Vita: vitaGL gives no error)
+#ifdef __VGX_VITA__
+extern "C" int vglStrikersBindFramebufferDepth(unsigned int fb) __attribute__((weak)); // patched vitaGL: a framebuffer's depth as the bound texture
+#endif // the game's frame-rate policy (np/fps.h): vblanks per picture, 0 = none (DYNRES's budget)
 #ifdef __VGX_VITA__
 extern "C" void vgx_vita_log_glb_stats(void); // vita/vgx_host_vita.cpp (a no-op line when vitaGL is not the GLB build)
 #endif
@@ -713,18 +717,24 @@ void SetupNewTexture(GLenum minMag) { // the texture being edited: no mips, clam
     C.texParams += 4;
 }
 
-void CreateTarget() {
+extern "C" int vgx_tex_has_storage(void) __attribute__((weak));
+// false: no memory for the new colour target (the console reports no error); nothing was attached, g_rtW/g_rtH are unchanged.
+bool CreateTarget() {
     int w = 0, h = 0;
     DynTargetSize(g_efbW, g_efbH, &w, &h);
-    if (w == g_rtW && h == g_rtH && g_efbFbo) return;
-    g_rtW = w;
-    g_rtH = h;
+    if (w == g_rtW && h == g_rtH && g_efbFbo) return true;
     if (!g_efbFbo) {
         G(glGenFramebuffers(1, &g_efbFbo));
         G(glGenTextures(1, &g_efbColor));
     }
     BindTexForEdit(g_efbColor);
     G(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+    if (vgx_tex_has_storage && !vgx_tex_has_storage()) {
+        VGX_ERR("no GPU memory for a %dx%d render target: the size stays %dx%d\n", w, h, g_rtW, g_rtH);
+        return false;
+    }
+    g_rtW = w;
+    g_rtH = h;
     SetupNewTexture(GL_LINEAR);
     BindFbo(g_efbFbo);
     AttachColor(g_efbColor);
@@ -754,6 +764,7 @@ void CreateTarget() {
     ++C.clears;
     VGX_LOG("render target %dx%d for EFB %dx%d (depth %s)\n", w, h, g_efbW, g_efbH,
             g_hasDepthTex ? "texture" : (g_hasDepth24 ? "24-bit rb" : "16-bit rb"));
+    return true;
 }
 
 // In front of g_programs: the program last asked for in each of 64 classes (entries of an
@@ -1414,8 +1425,26 @@ Tex& TexSlotFor(uint32_t id) {
     return g_tex[id];
 }
 
+// A texture about to be deleted is detached from every pooled framebuffer object first: vitaGL only frees a texture that no
+// framebuffer holds (one left attached stays allocated until that object is trimmed), and a reused name of the same size would
+// otherwise be taken for "already attached" by AcquireFbo while vitaGL has dropped it (a NULL colour surface at the next scene).
+void DetachFromPool(GLuint name) {
+    const GLuint prev = S.fbo;
+    bool moved = false;
+    for (PoolFbo& f : g_pool)
+        if (f.attached == name) {
+            BindFbo(f.fbo);
+            AttachColor(0);
+            f.attached = 0;
+            moved = true;
+        }
+    if (moved && prev != ~0u) BindFbo(prev);
+}
+bool BoundTexHasStorage() { return !vgx_tex_has_storage || vgx_tex_has_storage() != 0; }
+
 void DeleteTex(Tex& t) {
     if (!t.id) return;
+    DetachFromPool(t.id);
     G(glDeleteTextures(1, &t.id));
     ++C.texDeletes;
     ForgetTex(t.id);
@@ -1956,12 +1985,16 @@ int AcquireFbo(int w, int h, GLuint tex, bool wantDepth) {
 // textures in the pool for the rest of the session, so a session that changed levels filled the video memory, and a target made
 // with no memory left crashed the GPU set-up. At each present, objects not used for 60 presents are deleted (vitaGL frees their
 // memory once the GPU is done with them). Nothing holds a pool index across a present.
+uint32_t g_poolFastTrim = 0;   // presents left in which objects unused for 2 presents are deleted (after a target size change)
 void TrimPool() {
     ++g_poolPresents;
+    if (g_pass >= 0 || g_inPass) return;   // (an index into the pool is in use: never compact under it)
+    const uint32_t age = g_poolFastTrim ? 2u : 60u;
+    if (g_poolFastTrim) --g_poolFastTrim;
     size_t kept = 0, freed = 0;
     for (size_t i = 0; i < g_pool.size(); ++i) {
         PoolFbo& f = g_pool[i];
-        if (g_poolPresents - f.lastPresent > 60) {
+        if (g_poolPresents - f.lastPresent > age) {
             if (S.fbo == f.fbo) {
                 G(glBindFramebuffer(GL_FRAMEBUFFER, 0));
                 S.fbo = 0;
@@ -1980,7 +2013,7 @@ void TrimPool() {
     }
     if (freed) {
         g_pool.resize(kept);
-        VGX_LOG_N(40, "framebuffer objects: %u unused for 60 frames deleted, %u pooled\n", static_cast<unsigned>(freed), static_cast<unsigned>(kept));
+        VGX_LOG_N(40, "framebuffer objects: %u unused for %u frames deleted, %u pooled\n", static_cast<unsigned>(freed), static_cast<unsigned>(age), static_cast<unsigned>(kept));
     }
 }
 
@@ -1994,12 +2027,18 @@ Tex& CopyTexture(uint32_t texId, int w, int h, bool atlas = false) {
     // these textures are read before they are written again (a picture kept from an earlier frame, the other cells of an atlas); started
     // empty, such a texture showed as dark or missing effects for a few frames after every change. MSC_VGX_RESIZE_KEEP=0: start them empty.
     static const bool keepOnResize = EnvInt("MSC_VGX_RESIZE_KEEP", 1) != 0;
-    if (keepOnResize && t.id && t.renderTarget && t.w && t.h && (t.w != w || t.h != h)) {
+    if (keepOnResize && t.id && t.renderTarget && t.w && t.h && (t.w != w || t.h != h) && (EnsureCopyProgram(), g_copyProg != 0)) {
         GLuint fresh = 0;
         G(glGenTextures(1, &fresh));
         ++g_stats.textures;
         BindTexForEdit(fresh);
         G(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+        if (!BoundTexHasStorage()) {   // no memory for the second copy: give up the picture, respecify in place below
+            G(glDeleteTextures(1, &fresh));
+            ForgetTex(fresh);
+            VGX_LOG_N(8, "copy texture %dx%d: no memory to keep its picture over the size change\n", w, h);
+            goto respecify;
+        }
         SetupNewTexture(GL_LINEAR);
         AcquireFbo(w, h, fresh, false);
         SetViewport(0, 0, w, h);
@@ -2014,11 +2053,10 @@ Tex& CopyTexture(uint32_t texId, int w, int h, bool atlas = false) {
         DrawQuad(t.id, 0.0f, 0.0f, 1.0f, 1.0f, kIdentity, kZero);
         ++C.copyQuads;
         const GLuint old = t.id;
+        DetachFromPool(old);
         G(glDeleteTextures(1, &old));
         ++C.texDeletes;
         ForgetTex(old);
-        for (PoolFbo& f : g_pool)
-            if (f.attached == old) f.attached = 0; // (GL detached it; the name may be handed out again)
         t.id = fresh;
         t.w = static_cast<uint16_t>(w);
         t.h = static_cast<uint16_t>(h);
@@ -2027,6 +2065,7 @@ Tex& CopyTexture(uint32_t texId, int w, int h, bool atlas = false) {
         t.minF = t.magF = FILT_LINEAR;
         return t;
     }
+respecify:
     if (!t.id) { G(glGenTextures(1, &t.id)); ++g_stats.textures; }
     if (!t.renderTarget || t.w != w || t.h != h) {
         BindTexForEdit(t.id);
@@ -2070,6 +2109,17 @@ int g_fxPoolIdx = -1;
 GLuint g_fxDepthProg = 0;
 GLint g_fxDepthRect = -1;
 bool g_fxDepthFailed = false;
+#ifdef __VGX_VITA__
+GLuint g_fxDepthSrc = 0;       // (console) a texture name that shows the EFB's depth buffer (vglStrikersBindFramebufferDepth)
+#endif
+// The scene's depth can be read: a depth texture (desktop GL), or the console's depth buffer through the patched vitaGL. vitaGL has no
+// GL_OES_depth_texture and attaches colour only, so without the second the effects were never drawn at the lower resolution there.
+bool FxDepthAvailable() {
+#ifdef __VGX_VITA__
+    if (vglStrikersBindFramebufferDepth && EnvInt("MSC_FX_VITA_DEPTH", 1) != 0) return true;
+#endif
+    return g_hasDepthTex && g_efbDepthTex;
+}
 
 int FxDiv() {
     if (g_fxDiv < 0) {
@@ -2138,7 +2188,7 @@ bool EnsureFxDepthProgram() {
 std::vector<uint8_t> g_fxCmd;
 constexpr uint32_t kFxMinVerts = 400;
 void FxDecide(const CmdBuf& buf, const DrawRec* drawRecs, bool mega, int dynLevel) {
-    g_fxBuf = FxDiv() > 0 && g_hasDepthTex && g_efbDepthTex && !g_fxDepthFailed && (g_fxAlways || mega || dynLevel >= 4);
+    g_fxBuf = FxDiv() > 0 && FxDepthAvailable() && !g_fxDepthFailed && (g_fxAlways || mega || dynLevel >= 4);
     g_fxCmd.clear();
     if (!g_fxBuf) return;
     const int n = static_cast<int>(buf.cmds.size());
@@ -2176,6 +2226,24 @@ inline bool FxCmd(int i) { return g_fxBuf && i >= 0 && static_cast<size_t>(i) < 
 
 void BeginFx() {
     if (!EnsureFxDepthProgram()) { g_fxBuf = false; return; }
+    // the depth source and the part of it the picture covers (u: the console's depth buffer rows are 32-pixel aligned)
+    GLuint depthTex = g_efbDepthTex;
+    float depthU = 1.0f;
+    if (!(g_hasDepthTex && g_efbDepthTex)) {
+#ifdef __VGX_VITA__
+        if (!g_fxDepthSrc) G(glGenTextures(1, &g_fxDepthSrc));
+        BindTexForEdit(g_fxDepthSrc);
+        const int aligned = vglStrikersBindFramebufferDepth ? vglStrikersBindFramebufferDepth(g_efbFbo) : 0;
+        if (aligned <= 0) { g_fxBuf = false; return; }   // (no depth buffer yet: this run is drawn as before)
+        G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+        G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+        depthTex = g_fxDepthSrc;
+        depthU = static_cast<float>(g_rtW) / static_cast<float>(aligned);
+#else
+        g_fxBuf = false;
+        return;
+#endif
+    }
     const int div = FxDiv();
     const int w = (g_rtW + div - 1) / div, h = (g_rtH + div - 1) / div;
     g_fxPoolIdx = AcquireFbo(w, h, 0, true);
@@ -2195,8 +2263,8 @@ void BeginFx() {
     SetDepthTest(true, GL_ALWAYS);
     SetDepthMask(true);
     UseProgram(g_fxDepthProg);
-    BindTex(0, g_efbDepthTex);
-    G(glUniform4f(g_fxDepthRect, 0.0f, 0.0f, 1.0f, 1.0f));
+    BindTex(0, depthTex);
+    G(glUniform4f(g_fxDepthRect, 0.0f, 0.0f, depthU, 1.0f));
     ++C.uniformCalls;
     g_uniDirtyV = g_uniDirtyF = false;
     UsePictureQuadLayout();
@@ -2224,6 +2292,7 @@ void EndFx() {
     const GLuint color = g_pool[static_cast<size_t>(g_fxPoolIdx)].color;
     g_inPass = false;
     g_pass = -1;
+    g_fxPoolIdx = -1;
     BindFbo(g_efbFbo);
     SetViewport(0, 0, g_rtW, g_rtH);
     SetScissor(false);
@@ -3024,11 +3093,32 @@ void DynTargetSize(int efbW, int efbH, int* w, int* h) {
     *h = hh < 16 ? 16 : hh;
 }
 
-double DynBudgetMs(int interval) { return (interval >= 2 ? 2.0 : 1.0) * 1001.0 / 60.0; }
+double DynBudgetMs(int interval) { return (interval == 1 ? 1.0 : 2.0) * 1001.0 / 60.0; }   // (0: no policy yet, unlocked: the 30 budget)
 
-void DynSetLevel(int l, const char* why) {
+int DynVramFreeKib(bool fresh = false);
+// 1.1 (console review): a level that changes the EFB size allocates a new colour target, vitaGL's depth buffer and render target for
+// it, and new pass objects, while the old ones are only freed later (the collector, TrimPool). So a size change waits 20 presents
+// after the previous one (a Mega Strike stepping down every few frames had four sizes alive at once), needs the free GPU memory for
+// the new targets plus 8 MiB, and is followed by a quick trim of the pool. `force`: the Mega Strike's begin and end (one each).
+uint32_t g_lastResize = 0;
+bool DynSetLevel(int l, const char* why, bool force = false) {
     DynRes& d = g_dyn;
-    if (l == d.level) return;
+    if (l == d.level) return false;
+    {
+        const float s0 = kDynLevels[d.level].s, s1 = kDynLevels[l].s;
+        if (std::fabs(s0 - s1) > 0.001f && !g_fixedW) {
+            if (!force && g_poolPresents - g_lastResize < 20) return false;
+            const int kib = DynVramFreeKib(true);
+            const long w = static_cast<long>(g_efbW * s1) + 32, h = static_cast<long>(g_efbH * s1) + 32;
+            const long needKib = w * h * 4 * 2 / 1024 + 8192;   // colour + depth, and room for the pass objects
+            if (kib >= 0 && kib < needKib && s1 >= s0) {
+                VGX_LOG_N(20, "dynamic resolution: level %d -> %d skipped: %d KiB of GPU memory free, %ld needed\n", d.level, l, kib, needKib);
+                return false;
+            }
+            g_lastResize = g_poolPresents;
+            g_poolFastTrim = 3;
+        }
+    }
     if (d.ema > 0) d.ema = d.ema * DynCost(l) / DynCost(d.level);   // the expected time at the new level (until it is measured)
     if (d.changes < 200)   // (the console's log: the level changes of a session, up to 200)
         std::fprintf(stderr, "[vgx] dynamic resolution: frame %llu level %d -> %d (scale %.2f, passes %.2f): %s; GPU %.1f ms, budget %.1f ms\n",
@@ -3037,23 +3127,24 @@ void DynSetLevel(int l, const char* why) {
     d.ignoreUntil = d.seq + 3;   // frames already queued at the old size
     d.over = d.headroom = 0;
     ++d.changes;
+    return true;
 }
 
 // 1.1 (console crash, 23 Oct): free video memory, read every 30 frames. A larger picture needs new, larger targets; with the
 // pool nearly full their creation failed and the GPU set-up crashed. Levels above the game's own size need 32 MiB free, any step
 // up 16 MiB, and below 12 MiB a picture larger than the game's own size goes back to it. MSC_DYNRES_VRAM=KiB simulates it.
-int DynVramFreeKib() {
+int DynVramFreeKib(bool fresh) {
     static int cached = -1, age = 1000;
     static const long fake = EnvInt("MSC_DYNRES_VRAM", -1);
     if (fake >= 0) return static_cast<int>(fake);
-    if (++age >= 30) {
+    if (++age >= 30 || fresh) {
         age = 0;
         cached = vgx_vram_free_kib ? vgx_vram_free_kib() : -1;
     }
     return cached;
 }
 bool DynRoomFor(int l) {
-    const int kib = DynVramFreeKib();
+    const int kib = DynVramFreeKib(true);
     if (kib < 0) return true;
     return kib >= (l < kDynNative ? 32768 : 16384);
 }
@@ -3061,8 +3152,14 @@ bool DynRoomFor(int l) {
 void DynamicResolution() {
     DynRes& d = g_dyn;
     if (!d.inited) DynInit();
-    if (g_userFixedW) return;
     const bool hint = g_megaHint.exchange(0, std::memory_order_relaxed) != 0;
+    const int prevLevel = d.level, prevFixedW = g_fixedW, prevFixedH = g_fixedH;
+    if (g_userFixedW) {   // (a fixed size: no levels, but Mega Strikes are still held at 30)
+        if (hint) { d.megaQuiet = 0; d.mega = true; }
+        else if (d.mega && ++d.megaQuiet > 20) d.mega = false;
+        g_megaActive.store(d.mega ? 1 : 0, std::memory_order_relaxed);
+        return;
+    }
     const int interval = NpFpsDisplayInterval ? NpFpsDisplayInterval() : 2;
     const double budget = DynBudgetMs(interval);
     // the Mega Strike scene
@@ -3083,15 +3180,15 @@ void DynamicResolution() {
             d.normalLevel = d.level;
             // With the effects drawn at the lower resolution (FX) the scene itself starts at the game's own size, the large passes at half;
             // without them (no depth texture, MSC_FX_LOWRES=0) the whole scene starts at 70 % as before.
-            const int start = (FxDiv() > 0 && g_hasDepthTex) ? 5 : kDynMegaStart;
-            if (d.on && megaLevels && d.level < start) DynSetLevel(start, "a Mega Strike began");
+            const int start = (FxDiv() > 0 && FxDepthAvailable()) ? 5 : kDynMegaStart;
+            if (d.on && megaLevels && d.level < start) DynSetLevel(start, "a Mega Strike began", true);
             d.frames = -10;
             d.windowStart = Now();
         } else {
             int back = d.normalLevel < d.level ? d.normalLevel : d.level;
             if (back > d.floorLevel) back = d.floorLevel;
             if (back < d.minLevel) back = d.minLevel;
-            DynSetLevel(back, "the Mega Strike is over");
+            DynSetLevel(back, "the Mega Strike is over", true);
         }
     }
     // the GPU time of the newest finished frame
@@ -3130,7 +3227,13 @@ void DynamicResolution() {
             const int vram = DynVramFreeKib();
             if (d.level > floor) DynSetLevel(floor, "past this scene's floor");
             else if (d.level < best) DynSetLevel(best, "above this scene's best level");
-            else if (d.level < kDynNative && vram >= 0 && vram < 12288) DynSetLevel(kDynNative, "video memory is low");
+            else if (d.level < kDynNative && vram >= 0 && vram < 12288) {
+                if (DynSetLevel(kDynNative, "video memory is low", true)) {
+                    // (as a level that did not hold: the next try up waits twice as long)
+                    d.lastDownSeq = d.seq;
+                    if (d.upHold < 720) d.upHold *= 2;
+                }
+            }
             else if (d.ema > 0.90f * budget || d.over >= 3) {
                 int l = d.level;
                 while (l < floor && pred(l) > 0.82f * budget) ++l;
@@ -3139,15 +3242,13 @@ void DynamicResolution() {
                     // a level gone up to that does not hold (the model does not know every saving, the effects at the lower resolution
                     // among them): wait twice as long before the next try, up to 16 times
                     if (d.lastUpSeq && d.seq - d.lastUpSeq < 180 && d.upHold < 720) d.upHold *= 2;
-                    DynSetLevel(l, "the GPU is over its budget");
-                    d.lastDownSeq = d.seq;
+                    if (DynSetLevel(l, "the GPU is over its budget")) d.lastDownSeq = d.seq;
                 } else {
                     d.over = 0;
                 }
             } else if (d.level > best && pred(d.level - 1) < 0.72f * budget && DynRoomFor(d.level - 1)) {
                 if (++d.headroom >= d.upHold) {
-                    DynSetLevel(d.level - 1, "the GPU has room");
-                    d.lastUpSeq = d.seq;
+                    if (DynSetLevel(d.level - 1, "the GPU has room")) d.lastUpSeq = d.seq;
                 }
             } else {
                 d.headroom = 0;
@@ -3180,7 +3281,22 @@ void DynamicResolution() {
     // frame at the new size dark). Depth starts cleared (1.0, what the display copy's clear leaves in practice).
     const GLuint oldColor = g_efbColor;
     if (oldColor && g_efbFbo) G(glGenTextures(1, &g_efbColor));
-    CreateTarget();
+    if (!CreateTarget()) {
+        // no memory for the new size: keep the old target and go back to the level of its size
+        if (oldColor && g_efbColor != oldColor) {
+            GLuint dead = g_efbColor;
+            G(glDeleteTextures(1, &dead));
+            ForgetTex(dead);
+            g_efbColor = oldColor;
+        }
+        d.level = prevLevel;
+        d.ignoreUntil = d.seq + 3;
+        g_passScale = d.on ? kDynLevels[prevLevel].p : 1.0f;
+        g_dynScale.store(kDynLevels[prevLevel].s, std::memory_order_relaxed);
+        g_fixedW = prevFixedW;
+        g_fixedH = prevFixedH;
+        return;
+    }
     if (oldColor && g_efbFbo && oldColor != g_efbColor) {
         BindFbo(g_efbFbo);
         SetViewport(0, 0, g_rtW, g_rtH);

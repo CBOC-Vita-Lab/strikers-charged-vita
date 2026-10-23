@@ -44,7 +44,7 @@
   },
   {
    "path": "dependencies/vitaGL/source/framebuffers.c",
-   "sha256": "66194d5bcaca29f6c6e19d764c920235f695465e750041420f229822fa2d392a"
+   "sha256": "1a52b5065f2969ac56be68ed376089f3ae944815f6708f7e746dce83ca550050"
   },
   {
    "path": "dependencies/vitaGL/source/get_info.c",
@@ -276,7 +276,7 @@
   },
   {
    "path": "dependencies/vitaGL/source/vitaGL.h",
-   "sha256": "9c495ea81c6f717b63d75025c9a1357f8c658d3e37823bcbc5952940071fe715"
+   "sha256": "5c37e0176b6b25f601ed7b9f82ddcb9ed6c881840085d8df524eff702296dbf6"
   },
   {
    "path": "native/.gitignore",
@@ -15956,7 +15956,7 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "c198d4a2d1f0324fce43f88657637f86e8cef99c4ee6528cf2e3a07ac8dff996"
+   "sha256": "37c1e0c9cb80725232e37216d92e968400e30bb3f09c68d703523174dac198eb"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",
@@ -16308,7 +16308,7 @@
   },
   {
    "path": "renderer/vita/vgx_host_vita.cpp",
-   "sha256": "b7a9b35424d31d5047238bb6aab6879db2bf891ab27ba90ada1bb46d4eaf3596"
+   "sha256": "9ec4107f0c7d580997d18a0b4e9379f405e4b6703d65894a05775bef02bf1743"
   },
   {
    "path": "renderer/vita/vgx_listmerge.h",

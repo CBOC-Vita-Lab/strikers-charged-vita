@@ -1302,6 +1302,7 @@ GLboolean vglSwapResolution(int width, int height);
 
 // Loads the depth buffer of the currently bound renderbuffer into the currently bound GL texture.
 void vglTexImageDepthBuffer(GLenum target);
+int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
 
 // Makes vitaGL use cached memory instead of uncached memory for its internal memory pools. Must be called before vglInit*.
 void vglUseCachedMem(GLboolean use);

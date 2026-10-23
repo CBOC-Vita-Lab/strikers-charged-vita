@@ -202,3 +202,21 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
   low-resolution effects to full size. The size now goes in as the source
   length. The sharpening shader is also written one sample per statement.
 
+- The lighter effects never ran on the console: vitaGL has no depth textures
+  (no `GL_OES_depth_texture`, colour attachments only), so the effects pass
+  had no scene depth and stayed off, and Mega Strikes started at 70 % size.
+  The patched vitaGL now has `vglStrikersBindFramebufferDepth`, which shows a
+  framebuffer's stored depth buffer (linear DF32M, rows aligned to 32 samples)
+  as the bound texture; the effects pass reads the EFB's depth through it.
+  `MSC_FX_VITA_DEPTH=0` turns that path off.
+- Size changes are spaced at least 20 frames apart (the start and end of a
+  Mega Strike excepted), need the free GPU memory for the new targets plus
+  8 MiB (vitaGL's VRAM and RAM pools together), and are followed by a quick
+  trim of the framebuffer pool. If the console still cannot allocate the new
+  render target, the old one is kept and the level goes back.
+- Copy textures that keep their picture over a size change fall back to the
+  plain resize when there is no memory for a second copy. Deleted textures are
+  detached from pooled framebuffer objects first, so vitaGL frees them at once.
+- The pool is never compacted while a pass is open; a frame-rate interval of
+  0 (no policy yet) uses the 30 fps budget; with a fixed render size
+  (`MSC_VITA_RENDER`) Mega Strikes are still held at 30.
