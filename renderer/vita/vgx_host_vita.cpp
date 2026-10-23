@@ -154,8 +154,10 @@ extern "C" void vglSetShaderSeedPath(const char* path) __attribute__((weak));
 #endif
 // W5 BOOT: the in-memory shader pack (np platform/vita/vitagl/0004-boot-shader-pack.patch). Weak: null without the patch (any vitaGL build).
 extern "C" void vglSetShaderPackLookup(const void* (*fn)(int fragment, uint64_t hash, uint32_t* size)) __attribute__((weak));
+extern "C" unsigned vglStrikersShaderCacheCaps(void) __attribute__((weak));
 // W5 RT: the input-delay record (np include/np/latency.h, platform/compat/np_latency.cpp) and the VI thread's last vblank (np np_plat_vita.cpp)
 extern "C" uint64_t NpLatTakeSendTag(void) __attribute__((weak));
+#include "../src/vgx_perf_diag.h"
 extern "C" void NpLatDecoded(uint64_t tag) __attribute__((weak));
 extern "C" void NpLatPresented(uint64_t tag) __attribute__((weak));
 extern "C" void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo) __attribute__((weak));
@@ -313,6 +315,7 @@ struct LatFifo {
     uint64_t tag[32] = {};
     std::atomic<uint32_t> head{0}, tail{0};
 } g_latFifo;
+std::atomic<uint32_t> g_diagFifoGeneration{0};
 // The renderer's frame number -> input-delay tag (written by the thread that sends the frame, read by the back end at its display copy).
 struct LatMap { uint64_t frame = 0, tag = 0; };
 LatMap g_latMap[256];
@@ -339,6 +342,7 @@ struct DisplayGate {
 } g_gate;
 
 void GateDisplay() {
+    uint64_t diagTag=0;
     DisplayGate& g = g_gate;
     if (g.enabled < 0) {
         const char* e = std::getenv("MSC_VITA_DISPLAY_GATE");
@@ -375,6 +379,7 @@ void GateDisplay() {
         const uint32_t t = g_latFifo.tail.load(std::memory_order_relaxed);
         if (t != g_latFifo.head.load(std::memory_order_acquire)) {
             const uint64_t tag = g_latFifo.tag[t % 32];
+            diagTag=tag;
             g_latFifo.tail.store(t + 1, std::memory_order_release);
             if (tag && NpLatShown) {
                 uint32_t v = 0;
@@ -386,6 +391,7 @@ void GateDisplay() {
             }
         }
     }
+    if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_GATE,interval|(g_diagFifoGeneration.load()<<16),diagTag,shown,g.total,g.waited,g.late,0);
     if (g.winTotal >= g.every) {
         g.every = 600;
         std::fprintf(stderr, "[vgx-vita] display: interval %d vblank(s), the last %llu pictures were shown for 0/1/2/3/4+ vblanks: %llu/%llu/%llu/%llu/%llu (all so far %llu: %llu/%llu/%llu/%llu/%llu; "
@@ -405,6 +411,14 @@ void GateDisplay() {
 // put the text console on screen while the renderer keeps the display, and
 // (W5 FPS) to hold the picture until the vblank it is due at.
 void DisplayCallback(void* framebuffer) {
+    if(NpDiagActive&&NpDiagActive()){
+        const uint32_t tail=g_latFifo.tail.load(std::memory_order_relaxed),head=g_latFifo.head.load(std::memory_order_acquire);
+        const uint64_t tag=tail!=head?g_latFifo.tag[tail%32]:0;
+        static bool empty=false;
+        if(tail==head&&!empty){++g_diagFifoGeneration;NpDiagEvent(NPD_FIFO_ERROR,2,0,head,tail,0,0,0);}
+        empty=tail==head;
+        NpDiagEvent(NPD_CALLBACK,g_diagFifoGeneration.load()<<16,tag,(uintptr_t)framebuffer,(uint32_t)sceDisplayGetVcount(),head,tail,0);
+    }
     if (BootCompose(framebuffer)) {
         // (the loading screen: nothing else goes on top)
     } else if (g_showConsole.load(std::memory_order_relaxed)) {
@@ -464,6 +478,15 @@ void PresentDisplayCopy(unsigned efb, int x, int y, int w, int h);
 void StartRt();
 #endif
 
+bool CacheWriterOwnsBuckets() {
+    static const bool owns = [] {
+        auto caps = vglStrikersShaderCacheCaps;
+        __asm__("" : "+r"(caps));
+        return caps && caps() == 1u;
+    }();
+    return owns;
+}
+
 // ux0:data/mscharged/shadercache/<8 hex digits>: the folder vitaGL keeps compiled shaders in.
 // A package whose key differs starts with an empty folder (the old one is left behind; it is
 // some hundred small files and can be deleted by hand).
@@ -476,6 +499,8 @@ const char* ShaderCacheFolder() {
     for (const char* c = id; *c; ++c) h = (h ^ static_cast<uint8_t>(*c)) * 16777619u;
     std::snprintf(path, sizeof(path), "%s/%08x", kShaderCacheDir, static_cast<unsigned>(h));
     std::fprintf(stderr, "[vgx-vita] compiled-shader cache: %s (key of: %s)\n", path, id);
+    std::fprintf(stderr, "[vgx-vita] shader cache buckets: %s\n", CacheWriterOwnsBuckets()
+        ? "library-managed (host bucket counters inactive)" : "legacy host workaround");
     return path;
 }
 
@@ -489,9 +514,15 @@ void SwapDisplay(uint64_t latTag = 0) {
         if (h - g_latFifo.tail.load(std::memory_order_acquire) < 32) {
             g_latFifo.tag[h % 32] = latTag;
             g_latFifo.head.store(h + 1, std::memory_order_release);
+        }else{
+            if(NpDiagActive&&NpDiagActive()){
+                ++g_diagFifoGeneration;NpDiagEvent(NPD_FIFO_ERROR,1,latTag,h,g_latFifo.tail.load(),0,0,0);
+            }
         }
     }
+    if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_SWAP,g_diagFifoGeneration.load()<<16,latTag,(uint32_t)sceDisplayGetVcount(),g_latFifo.head.load(),g_latFifo.tail.load(),0,0);
     vglSwapBuffers(np_vita_radio_dialog_active && np_vita_radio_dialog_active() ? GL_TRUE : GL_FALSE);
+    if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_SWAP_END,g_diagFifoGeneration.load()<<16,latTag,(uint32_t)sceDisplayGetVcount(),g_latFifo.head.load(),g_latFifo.tail.load(),0,0);
 }
 
 
@@ -594,13 +625,14 @@ void CopyTree(const char* from, const char* to, int depth, bool fresh, SeedCopyS
     }
     sceIoDclose(dir);
 }
-// <cache>/v2/v/00 (and f/00): with the first of them present vitaGL does not create its 512
+// Older libraries: with <cache>/v2/v/00 present vitaGL does not create its 512
 // bucket folders at start-up (source/vgl.c: a failed mkdir of ".../v/00" means "they are all
 // there"). Every bucket a shader needs is made by vgxvita_glShaderSource instead.
 void MakeFirstBuckets(const char* folder, SeedCopyStats& st) {
     static const char* const kParts[] = {"", "/v", "/v/00", "/f", "/f/00"};
     const uint64_t t0 = NowUs();
     for (const char* part : kParts) {
+        if (CacheWriterOwnsBuckets() && std::strstr(part, "/00")) continue;
         char path[320];
         if (std::snprintf(path, sizeof(path), "%s/%s%s", folder, kVglCacheVersionDir, part) >= static_cast<int>(sizeof(path))) return;
         if (sceIoMkdir(path, 0777) >= 0) ++st.folders;
@@ -1582,7 +1614,7 @@ void PresentDisplayCopy(unsigned efb, int x, int y, int w, int h) {
     } else {
         glBlitFramebuffer(x, sy0, x + w, sy1, dx0, 0, dx1, kScreenH, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     }
-    const uint64_t latTag = LatTagOf(vgx::backend::ExecutingFrame());
+    const uint64_t latTag = NpDiagEnabled&&NpDiagEnabled()?vgx::backend::ExecutingLatencyTag():LatTagOf(vgx::backend::ExecutingFrame());
     if (latTag && NpLatPresented) NpLatPresented(latTag);
     SwapDisplay(latTag);
     // Back to what the back end had: it clears the EFB next.
@@ -1730,6 +1762,25 @@ namespace {
 GLenum g_depthFunc = GL_LESS;   // GL's initial values
 bool g_depthTestOn = false;
 } // namespace
+extern "C" uint64_t NpDiagDisplayTrace(unsigned stage, uint64_t token, void* framebuffer, uint32_t interval, int32_t result) {
+    if (!NpDiagActive || !NpDiagEvent || !NpDiagActive() || stage > 5) return 0;
+    if (stage == 0) {
+        constexpr size_t capacity = sizeof(g_latFifo.tag) / sizeof(g_latFifo.tag[0]);
+        static_assert(capacity == 32, "Display FIFO producer and gate use 32 slots");
+        const uint32_t tail = g_latFifo.tail.load(std::memory_order_relaxed);
+        const uint32_t head = g_latFifo.head.load(std::memory_order_acquire);
+        if (head == tail || uint32_t(head - tail) > capacity) return 0;
+        const uint64_t tag = g_latFifo.tag[tail % capacity];
+        if (!tag || tag > UINT32_MAX) return 0;
+        // Peek only. GateDisplay owns consumption; later stages use this copied identity.
+        token = (uint64_t(g_diagFifoGeneration.load()) << 32) | tag;
+    }
+    if (!token) return 0;
+    NpDiagEvent(NPD_LIBRARY_DISPLAY, stage, uint32_t(token), token >> 32,
+                reinterpret_cast<uintptr_t>(framebuffer), uint32_t(sceDisplayGetVcount()), interval, uint32_t(result));
+    return token;
+}
+
 extern "C" void vgxvita_glDepthFunc(GLenum func) {
     g_depthFunc = func;
     glDepthFunc(func);
@@ -1848,7 +1899,9 @@ extern "C" void vgxvita_glGenerateMipmap(GLenum target) {
 // print function renamed to this, see vita/Makefile.vitadeps). The first 400
 // messages are logged in full; after that one in 500, so an error raised by
 // every draw call cannot flood the log.
-// ---- vitaGL's cache folders, made when they are needed
+// ---- Legacy-library fallback: cache folders made when they are needed
+// A library with vglStrikersShaderCacheCaps owns this work on actual cache misses.
+// Its host wrappers forward directly, without duplicate source hashing or seed I/O.
 // vitaGL stores a compiled shader as <cache>/v2/{v,f}/<HH>/<hash>.gxp, hash = XXH3_64bits of
 // the source text as handed to glShaderSource (all strings joined), <HH> = its top byte
 // (source/custom_shaders.c, glCompileShader and glLinkProgram). It never creates <HH> when it
@@ -1879,14 +1932,14 @@ void EnsureBucket(int kind, unsigned bucket) {
 } // namespace
 extern "C" GLuint vgxvita_glCreateShader(GLenum type) {
     const GLuint shader = glCreateShader(type);
-    if (shader < 65536u) {
+    if (!CacheWriterOwnsBuckets() && shader < 65536u) {
         if (g_shaderKind.size() <= shader) g_shaderKind.resize(shader + 64u, 0);
         g_shaderKind[shader] = type == GL_VERTEX_SHADER ? 1 : 2;
     }
     return shader;
 }
 extern "C" void vgxvita_glShaderSource(GLuint shader, GLsizei count, const GLchar* const* string, const GLint* length) {
-    if (shader < g_shaderKind.size() && g_shaderKind[shader] != 0 && count > 0 && string) {
+    if (!CacheWriterOwnsBuckets() && shader < g_shaderKind.size() && g_shaderKind[shader] != 0 && count > 0 && string) {
         uint64_t hash;
         if (count == 1 && !(length && length[0] >= 0)) {
             hash = XXH3_64bits(string[0], std::strlen(string[0]));
@@ -2123,13 +2176,12 @@ void vgxn_end_frame(void) {
     DebugControls();
     const uint64_t latTag = NpLatTakeSendTag ? NpLatTakeSendTag() : 0;   // W5 RT: the input-delay record of this frame (np/latency.h)
     // Returns once the player has read everything this frame refers to in memory; the render thread may still be drawing it.
-    vgx::rec::Present(false);
-    if (latTag) {
-        // (the player has decoded the frame: its command buffer carries the frame number before the current one)
-        const uint64_t f = vgx::CurrentFrame() - 1;
-        g_latMap[f % 256].tag = latTag;
-        g_latMap[f % 256].frame = f;
-        if (NpLatDecoded) NpLatDecoded(latTag);
+    if(NpDiagEnabled&&NpDiagEnabled()){
+        if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_SEND,0,latTag,0,0,0,0,0);
+        vgx::rec::Present(false,latTag);
+    }else{
+        vgx::rec::Present(false);
+        if(latTag){const uint64_t f=vgx::CurrentFrame()-1;g_latMap[f%256].tag=latTag;g_latMap[f%256].frame=f;if(NpLatDecoded)NpLatDecoded(latTag);}
     }
     ++g_nativeFrames;
     if (const unsigned n = DrawEvery(); n > 1) vgx::rec::BackendFlags(false, (g_nativeFrames + 1) % n != 0);   // the flags of the frame that follows

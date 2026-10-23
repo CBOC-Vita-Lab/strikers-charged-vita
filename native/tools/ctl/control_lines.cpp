@@ -207,7 +207,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "usage: control_lines list|script modern|classic [rear=0|1] [touch=0|1]\n");
         return 2;
     }
-    Config cfg;
+    Config cfg{};
     cfg.layout = !strcmp(argv[2], "classic") ? 0 : 1;
     cfg.rear = cfg.layout == 1;
     cfg.touchSave = cfg.touchMeter = cfg.touchShake = cfg.touchPointer = true;

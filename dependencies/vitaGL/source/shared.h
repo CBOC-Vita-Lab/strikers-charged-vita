@@ -904,6 +904,9 @@ extern uint16_t *default_line_strips_idx_ptr; // sceGxm mapped progressive indic
 extern int garbage_collector(unsigned int args, void *arg); // Garbage collector function
 #endif
 extern SceUID gc_mutex[2]; // Garbage collector mutex
+extern int vgl_gc_failed(void);
+extern int vgl_gc_recover(void);
+extern int vgl_gc_retry_pause(void);
 extern GLboolean has_cached_mem; // Flag for whether to use cached memory for mempools or not
 extern uint8_t gxm_display_buffer_count; // Display buffers count
 

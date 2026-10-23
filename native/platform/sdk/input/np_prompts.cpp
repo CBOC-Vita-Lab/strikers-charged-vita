@@ -61,6 +61,7 @@ void MakeRules(const NpControlTable::Config& cfg) {
     if (cfg.rear) AddRule("FLICK NUNCHUK TO TOGGLE POWER-UPS.", "%s/TAP BACK: NEXT POWER-UP.", RoleName(L, kRoleFlick));
     else AddRule("FLICK NUNCHUK TO TOGGLE POWER-UPS.", "%s TO TOGGLE POWER-UPS.", RoleName(L, kRoleFlick));
     AddRule("POINT YOUR Wii REMOTE AT THE SCREEN TO TAKE CONTROL OF THE GOALIE'S HANDS!",
+            cfg.rearSave ? "AIM WITH THE REAR PAD; CROSS OR R TO BLOCK!" :
             cfg.touchSave ? "MOVE THE GOALIE'S HANDS WITH A STICK OR A FINGER!" : "MOVE THE GOALIE'S HANDS WITH A STICK!");
     AddRule("WILL TRIGGER A SOUND IN YOUR Wii REMOTE AND THEN APPEAR IN THE HUD.", "WILL APPEAR IN THE HUD.");
     // the controller checks of the Wii (the Vita's controller and its Nunchuk view are always there)

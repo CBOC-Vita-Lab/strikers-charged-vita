@@ -191,7 +191,8 @@ void QueueCopyDisp(bool clear);
 // run in place); otherwise the buffer goes through SubmitToBackend.
 // `onDecoded` is called between the two, when nothing of the frame is left to
 // be read from guest memory.
-void FrontPresent(bool direct, void (*onDecoded)());
+void FrontPresent(bool direct, void (*onDecoded)(), uint64_t latencyTag = 0);
+void DlCacheDiagnostic(uint64_t tag);
 // When set, a finished frame's command buffer is handed to this function instead of being
 // executed (or submitted) by FrontPresent. It may swap the buffer for an empty one and return
 // before the frame has been drawn (vgx_play.cpp: back end on its own thread).
@@ -236,7 +237,7 @@ void Draw(const FsKey& fs, const VsKey& vs, uint32_t layoutMask, uint32_t verts)
 void VertexFormat(int attr, int type, const VtxAttrFmt& f);
 void Note(const char* what); // one-off feature flag, e.g. "indirect"
 void ShaderCreated(bool fragment, uint64_t frame);
-void FrameEnd(uint64_t frame);
+void FrameEnd(uint64_t frame,uint64_t tag=0);
 void CloseFrameLog();
 void Dump(const char* path);
 // Per-frame counters (one CSV line per presented frame, MSC_VGX_FRAMESTATS=<file>).

@@ -1447,8 +1447,15 @@ void Goalie::CleanupMegaStrikeOverlay()
     PopDefensivePlayOverlay();
 }
 
+#ifdef NP_NATIVE
+#include "np/touch_diag.h"
+#endif
+
 void Goalie::QueueMegaStrikeSave(int nCurTarget, float fScore)
 {
+#ifdef NP_NATIVE
+    if (NpDiagEnabled()) NpDiagEvent(NPD_SAVE,mnSubstate,NpDiagFrame(),NpDiagStepId(),NpDiagUsedPoll(),nCurTarget,NpDiagFloats(fScore,0),0);
+#endif
     muMegaReadyToSave++;
     mMegaBallState[nCurTarget] = 2;
     mfMegaCatchScore[nCurTarget] = fScore;
@@ -1515,6 +1522,12 @@ inline void Goalie::HideMegaStrikeBall()
 
 void Goalie::ActionMegaStrike(float deltaTime)
 {
+#ifdef NP_NATIVE
+    if (NpDiagEnabled()) {
+        if(mnSubstate<=9)NpDiagMega();
+        NpDiagEvent(NPD_KEEPER,mnSubstate,NpDiagFrame(),NpDiagStepId(),NpDiagFloats(deltaTime,mfWaitTime),mMegaCatchAttempts,mMegaMachine,NpDiagFloats(gMegaBallPointer.mX,gMegaBallPointer.mY));
+    }
+#endif
     if (mnSubstate == 10)
     {
         if (!g_pGame->mbCaptainShotToScoreOn)
@@ -1566,6 +1579,12 @@ void Goalie::ActionMegaStrike(float deltaTime)
     if (mMegaMachine == g_pNetworkSessionBase->GetLocalMachineId())
         isLocal = true;
 
+#ifdef NP_NATIVE
+    const bool diagLocalHuman = NpDiagEnabled() && isLocal && !noWiiController && input && input->m_pMyUser
+        && !gNetworkInputRecording->mPlaybackReady
+        && static_cast<NetworkPeerChannel*>(input->m_pMyUser)->GetLocalChannelPad() != 0;
+    if (NpDiagEnabled()) NpDiagMegaPhase(m_pTeam->m_nSide, diagLocalHuman, mnSubstate);
+#endif
     switch (mnSubstate)
     {
     case 0:
@@ -1638,6 +1657,13 @@ void Goalie::ActionMegaStrike(float deltaTime)
                 {
                     if (pad->PlatJustPressed(27, true))
                     {
+#ifdef NP_NATIVE
+                        if (NpDiagEnabled()) NpDiagEvent(NPD_POINTER_BEFORE,mnSubstate,NpDiagFrame(),NpDiagUsedPoll(),NpDiagStepId(),NpDiagFloats(pointer->GetX(),pointer->GetY()),0,0);
+#endif
+                        RefreshLocalMegaBallPointerForPress(pad);
+#ifdef NP_NATIVE
+                        if (NpDiagEnabled()) NpDiagEvent(NPD_ATTEMPT,mnSubstate,NpDiagFrame(),NpDiagUsedPoll(),NpDiagStepId(),NpDiagFloats(pointer->GetX(),pointer->GetY()),mMegaCatchAttempts,0);
+#endif
                         MegaBallIndicator* target = GetMegaBallTargetIndicator(0);
                         if (TestMegaBallIndicatorCollision(target, 0) > 0.0f)
                         {
@@ -1794,6 +1820,13 @@ void Goalie::ActionMegaStrike(float deltaTime)
             {
                 if (mMegaCatchAttempts < maxCatches && pad->PlatJustPressed(27, true))
                 {
+#ifdef NP_NATIVE
+                    if (NpDiagEnabled()) NpDiagEvent(NPD_POINTER_BEFORE,mnSubstate,NpDiagFrame(),NpDiagUsedPoll(),NpDiagStepId(),NpDiagFloats(pointer->GetX(),pointer->GetY()),mMegaCatchAttempts,0);
+#endif
+                    RefreshLocalMegaBallPointerForPress(pad);
+#ifdef NP_NATIVE
+                    if (NpDiagEnabled()) NpDiagEvent(NPD_ATTEMPT,mnSubstate,NpDiagFrame(),NpDiagUsedPoll(),NpDiagStepId(),NpDiagFloats(pointer->GetX(),pointer->GetY()),mMegaCatchAttempts,0);
+#endif
                     float angle = pointer->mAngle;
                     float scale = pointer->mScale;
                     float y = pointer->GetY();
@@ -1983,6 +2016,9 @@ void Goalie::ActionMegaStrike(float deltaTime)
             }
         }
     }
+#ifdef NP_NATIVE
+    if (NpDiagEnabled()) NpDiagMegaPhase(m_pTeam->m_nSide, diagLocalHuman, mnSubstate);
+#endif
 }
 
 void Goalie::MoveDirectionCB(

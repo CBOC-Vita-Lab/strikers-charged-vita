@@ -146,7 +146,8 @@ int main()
     // levels 6 and 7 (17 Oct): accepted, and the on-screen window widens only past level 5
     setenv("MSC_CAMERA_ZOOM_DEFAULT", "7", 1);
     CHECK(NpCameraZoomDefaultLevel() == 7);
-    CHECK(NpCameraVisibilityWindow(1.0f) == 0.95f && NpCameraVisibilityWindow(0.5f) == 0.95f);
+    CHECK(NpCameraVisibilityWindow(0.5f) == 0.95f && NpCameraVisibilityWindow(0.25f) == 0.95f && NpCameraVisibilityWindow(0.0f) == 0.95f);
+    CHECK(NpCameraVisibilityWindow(0.75f) > 1.0f && NpCameraVisibilityWindow(1.0f) > NpCameraVisibilityWindow(0.75f));   // 23 Oct: TV-default view
     CHECK(NpCameraVisibilityWindow(1.25f) > 1.1f && NpCameraVisibilityWindow(1.5f) > NpCameraVisibilityWindow(1.25f));
     setenv("MSC_CAMERA_ZOOM_DEFAULT", "4", 1);
 

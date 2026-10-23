@@ -114,7 +114,9 @@ int frame_purge_idx = 0; // Index for currently populatable purge list
 int frame_elem_purge_idx = 0; // Index for currently populatable purge list element
 int frame_rt_purge_idx = 0; // Index for currently populatable purge list rendertarget
 static int frame_purge_clean_idx = 1;
-SceUID gc_mutex[2];
+SceUID gc_mutex[2] = {-1, -1};
+#include <psp2/kernel/error.h>
+#include "utils/gc_recovery.h"
 static int gc_thread_priority = 0x10000100;
 static int gc_thread_affinity = 0;
 static uint8_t gxm_display_rt_size = 1; // Number of scenes per frame to use for the display rendertarget
@@ -242,10 +244,30 @@ static void shader_patcher_host_free_cb(void *user_data, void *mem) {
 }
 
 // sceDisplay callback
+extern uint64_t NpDiagDisplayTrace(unsigned stage, uint64_t token, void *framebuffer,
+                                 uint32_t interval, int32_t result)
+#if defined(__APPLE__)
+    __attribute__((weak_import));
+#else
+    __attribute__((weak));
+#endif
+
+static void display_trace(unsigned stage, uint64_t token, void *framebuffer, uint32_t interval, int result) {
+	if (token && NpDiagDisplayTrace)
+		NpDiagDisplayTrace(stage, token, framebuffer, interval, result);
+}
+
+static void display_wait(uint32_t interval, uint64_t token, void *framebuffer) {
+	display_trace(3, token, framebuffer, interval, 0);
+	const int result = sceDisplayWaitVblankStartMulti(interval);
+	display_trace(4, token, framebuffer, interval, result);
+}
+
 static void display_queue_callback(const void *callbackData) {
 	// Populating sceDisplay framebuffer parameters
 	SceDisplayFrameBuf display_fb;
 	const struct display_queue_callback_data *cb_data = callbackData;
+	const uint64_t trace_token = NpDiagDisplayTrace ? NpDiagDisplayTrace(0, 0, cb_data->addr, 0, 0) : 0;
 	vgl_memset(&display_fb, 0, sizeof(SceDisplayFrameBuf));
 	display_fb.size = sizeof(SceDisplayFrameBuf);
 	display_fb.base = cb_data->addr;
@@ -263,11 +285,14 @@ static void display_queue_callback(const void *callbackData) {
 		vgl_display_cb(cb_data->addr);
 
 	// Setting sceDisplay framebuffer
-	sceDisplaySetFrameBuf(&display_fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
+	display_trace(1, trace_token, cb_data->addr, 0, 0);
+	const int display_result = sceDisplaySetFrameBuf(&display_fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
+	display_trace(2, trace_token, cb_data->addr, 0, display_result);
 
 	// Performing VSync if enabled
 	if (vsync_interval)
-		sceDisplayWaitVblankStartMulti(vsync_interval);
+		display_wait(vsync_interval, trace_token, cb_data->addr);
+	display_trace(5, trace_token, cb_data->addr, 0, 0);
 }
 
 // Garbage collector
@@ -279,7 +304,11 @@ int garbage_collector(unsigned int args, void *arg) {
 #ifndef HAVE_SINGLE_THREADED_GC
 	for (;;) {
 		// Waiting for garbage collection request
-		sceKernelWaitSema(gc_mutex[0], 1, NULL);
+		int wait_result = sceKernelWaitSema(gc_mutex[0], 1, NULL);
+		if (wait_result < 0) {
+			gc_failure("worker wait", wait_result);
+			break;
+		}
 #endif
 		// Purging all elements marked for deletion
 		for (int i = 0; i < FRAME_PURGE_LIST_SIZE; i++) {
@@ -301,7 +330,7 @@ int garbage_collector(unsigned int args, void *arg) {
 		frame_elem_purge_idx = 0;
 		frame_rt_purge_idx = 0;
 #ifndef HAVE_SINGLE_THREADED_GC
-		sceKernelSignalSema(gc_mutex[1], 1);
+		gc_publish_completion();
 	}
 #ifndef HAVE_PTHREAD
 	return sceKernelExitDeleteThread(0);
@@ -358,13 +387,18 @@ void init_gxm(void) {
 	// Initializing garbage collector
 	gc_mutex[0] = sceKernelCreateSema("vitaGL GC Sema Push", 0, 0, FRAME_PURGE_FREQ, NULL);
 	gc_mutex[1] = sceKernelCreateSema("vitaGL GC Sema Pull", 0, FRAME_PURGE_FREQ, FRAME_PURGE_FREQ, NULL);
+	int gc_start_result = gc_mutex[0] < 0 ? gc_mutex[0] : gc_mutex[1];
+	if (gc_start_result >= 0) {
 #ifdef HAVE_PTRHEAD
-	pthread_create(&gc_thread, NULL, garbage_collector, NULL);
-	pthread_setaffinity_np(gc_thread, 4, &gc_thread_affinity);
+		gc_start_result = -pthread_create(&gc_thread, NULL, garbage_collector, NULL);
+		if (gc_start_result == 0)
+			pthread_setaffinity_np(gc_thread, 4, &gc_thread_affinity);
 #else
-	gc_thread = sceKernelCreateThread("vitaGL Garbage Collector", &garbage_collector, gc_thread_priority, 0x10000, 0, gc_thread_affinity, NULL);
-	sceKernelStartThread(gc_thread, 0, NULL);
+		gc_thread = sceKernelCreateThread("vitaGL Garbage Collector", &garbage_collector, gc_thread_priority, 0x10000, 0, gc_thread_affinity, NULL);
+		gc_start_result = gc_thread < 0 ? gc_thread : sceKernelStartThread(gc_thread, 0, NULL);
 #endif
+	}
+	gc_mark_ready(gc_start_result);
 #endif
 
 	// Checking if the running application is a system one
@@ -1012,8 +1046,7 @@ void vglSwapBuffers(GLboolean has_commondialog) {
 #ifdef HAVE_SINGLE_THREADED_GC
 	garbage_collector(0, NULL);
 #else
-	sceKernelWaitSema(gc_mutex[1], 1, NULL);
-	sceKernelSignalSema(gc_mutex[0], 1);
+	gc_enqueue(NULL);
 #endif
 }
 

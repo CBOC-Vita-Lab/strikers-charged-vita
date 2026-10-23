@@ -1,6 +1,7 @@
 // Feature-usage bookkeeping for the status report: which GX features the game
 // actually exercised and how many shaders each stretch of frames needed.
 #include "vgx_state.h"
+#include "vgx_perf_diag.h"
 
 #include <map>
 #include <set>
@@ -120,7 +121,8 @@ static FILE* f = nullptr;
 void CloseFrameLog() {
     if (f) { std::fclose(f); f = nullptr; }
 }
-void FrameEnd(uint64_t frame) {
+void FrameEnd(uint64_t frame,uint64_t tag) {
+    if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_CACHE,3,tag,g_liveTex,g_liveTexBytes,g_frameTexBytes,g_frameTex.size(),g_allPrograms.size());
     static bool tried = false;
     if (!tried) {
         tried = true;

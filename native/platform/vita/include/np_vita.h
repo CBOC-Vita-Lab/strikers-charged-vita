@@ -58,7 +58,7 @@ typedef struct NpVitaInput {
     uint8_t lx, ly, rx, ry;              /* 0..255, 128 = centre, y grows downwards */
     int touchCount;                      /* front panel, 0 when the panel is off or disabled */
     NpVitaTouchPoint touch[8];
-    int rearCount;                       /* W5 CTL: rear panel (scaled to 960 x 544 like the front), 0 when off (MSC_REAR_TOUCH) */
+    int rearCount;                       /* Rear panel: -1 unavailable, 0 released; coordinates scaled to 960 x 544. */
     NpVitaTouchPoint rear[8];
 } NpVitaInput;
 /* Peeks the controls (never blocks). 0 = no sample (host builds, or the display is owned by a script run). */

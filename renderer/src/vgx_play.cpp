@@ -235,14 +235,16 @@ __attribute__((always_inline)) inline uint32_t PlayOne(const uint32_t* r) { // (
         }
         return 1;
     case R_EXT: PlayExt(aux & 0xFFu, r + 1, aux >> 8); return 1 + (aux >> 8);
-    case R_PRESENT:
+    case R_PRESENT: {
+        const uint64_t tag=aux==1?(static_cast<uint64_t>(r[1])|(static_cast<uint64_t>(r[2])<<32)):0;
         if (g_mode == MODE_THREAD) {
-            FrontPresent(true, &NotifyDecoded);
+            FrontPresent(true, &NotifyDecoded,tag);
             if (!g_async) NotifyExecuted(); // (else the back-end thread does, once it has drawn the frame)
         } else {
-            FrontPresent(false, nullptr);
+            FrontPresent(false, nullptr,tag);
         }
-        return 1;
+        return aux==1?3:1;
+    }
     default:
         VGX_ERR("corrupt record stream: op %u\n", op);
         std::abort();

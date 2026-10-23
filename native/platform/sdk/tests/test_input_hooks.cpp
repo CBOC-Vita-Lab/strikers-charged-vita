@@ -6,10 +6,13 @@
 #include <revolution/wpad.h>
 
 #include <math.h>
+#include <atomic>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "np/np_pad.h"
+#include "np/np_plat.h"
 #include "np/np_sdk.h"
 
 static int g_fail = 0;
@@ -41,9 +44,15 @@ extern "C" int NpHarnessFillPad(NpSdkHarnessPad* p) {
 static int a_calls = 0;
 static int a_mode = 0;   // 1: press "1", hide the pointer, move the cursor to (0.5, -0.25); 2: the same, pointer shown
 static float a_last_dt = 0;
+static int a_last_rear = 0;
+static int a_last_source = 0;
+static bool radio_active = false;
+extern "C" bool np_vita_radio_dialog_active() { return radio_active; }
 extern "C" void NpPadAdjust(NpPadSample* s) {
     a_calls++;
     a_last_dt = s->dt;
+    a_last_rear = s->raw->rear_count;
+    a_last_source = s->raw->source;
     if (a_mode == 1 || a_mode == 2) {
         s->hold |= 0x0200;
         s->pointer_hidden = a_mode == 1;
@@ -59,6 +68,8 @@ struct FakeVitaInput {
     uint8_t lx, ly, rx, ry;
     int touchCount;
     struct { int id; float x, y; } touch[8];
+    int rearCount;
+    struct { int id; float x, y; } rear[8];
 };
 static int v_present = 0;
 static FakeVitaInput v_in;
@@ -76,7 +87,9 @@ static int src(int pad, NpRawPad* out) {
 }
 static void* alloc(u32) { return 0; }
 static BOOL freefn(void*) { return TRUE; }
-static void settle() { OSSleepTicks(OSMillisecondsToTicks(5)); }   // past the 3 ms sample epoch (no video here)
+static std::atomic<uint64_t> test_ns(3001000000ull);
+static uint64_t test_clock() { return test_ns.load(std::memory_order_relaxed); }
+static void settle() { test_ns.fetch_add(5000000ull, std::memory_order_relaxed); }
 
 static float stick_x() {
     WPADFSStatus fs;
@@ -86,6 +99,9 @@ static float stick_x() {
 }
 
 int main() {
+    // This fixture owns sample time; real scheduling must not split a sample.
+    unsetenv("NP_VIRTUAL_TIME");
+    np_time_set_source(test_clock);
     NpSdkConfig cfg;
     NpSdk_ConfigDefaults(&cfg);
     NpSdk_Init(&cfg);
@@ -153,7 +169,9 @@ int main() {
     settle();
     int before = a_calls;
     WPADRead(0, (WPADStatus*)&fs);
+    np_sleep_ns(8000000); // host scheduling must not advance a controlled sample epoch
     KPADRead(0, k, 1);
+    np_sleep_ns(8000000);
     WPADRead(0, (WPADStatus*)&fs);
     CHECK(a_calls == before + 1);
     CHECK((fs.button & 0x0200) != 0);
@@ -171,6 +189,23 @@ int main() {
     KPADRead(0, k, 1);
     CHECK(fabsf(k[0].pos.x - 0.5f) < 1e-5f && fabsf(k[0].pos.y + 0.25f) < 1e-5f);
 
+    // Last nanosecond in a 3 ms epoch is cached; the exact boundary resamples.
+    uint64_t edge = (test_ns.load() / 3000000ull + 2) * 3000000ull;
+    for (int i = 0; i < 2; ++i, edge += 3000000ull) {
+        test_ns.store(edge - 1);
+        before = a_calls;
+        WPADRead(0, (WPADStatus*)&fs);
+        CHECK(a_calls == before + (i == 0 ? 1 : 0));
+        np_sleep_ns(8000000);
+        KPADRead(0, k, 1);
+        CHECK(a_calls == before + (i == 0 ? 1 : 0));
+        test_ns.store(edge);
+        KPADRead(0, k, 1);
+        CHECK(a_calls == before + (i == 0 ? 2 : 1));
+        WPADRead(0, (WPADStatus*)&fs);
+        CHECK(a_calls == before + (i == 0 ? 2 : 1));
+    }
+
     // 7. blocked input: connected but neutral, also under a script
     a_mode = 0;
     h_active = 1; h_pad.buttons = 0x0100; h_pad.stickX = 72;
@@ -178,6 +213,8 @@ int main() {
     settle();
     WPADRead(0, (WPADStatus*)&fs);
     CHECK(fs.err == WPAD_ERR_OK && (fs.button & 0x0800) == 0 && fs.fsStickX == 0);
+    CHECK(a_last_rear == -1);
+    CHECK(a_last_source == NP_RAW_BLOCKED);
     NpSdk_SetInputBlocked(0);
     settle();
     WPADRead(0, (WPADStatus*)&fs);
@@ -198,10 +235,23 @@ int main() {
     WPADRead(0, (WPADStatus*)&fs);
     CHECK((fs.button & 0x0800) != 0 && (fs.button & 0x0200) != 0);   // A, "1"
     CHECK(fs.fsStickX == 100);
+    v_in.rearCount = -1;
+    settle(); WPADRead(0, (WPADStatus*)&fs); CHECK(a_last_rear == -1);
+    CHECK(a_last_source == NP_RAW_LIVE);
+    v_in.rearCount = 0;
+    settle(); WPADRead(0, (WPADStatus*)&fs); CHECK(a_last_rear == 0);
+    v_in.rearCount = 9;
+    settle(); WPADRead(0, (WPADStatus*)&fs); CHECK(a_last_rear == -1);
+    radio_active = true;
+    settle(); WPADRead(0, (WPADStatus*)&fs);
+    CHECK(a_last_source == NP_RAW_BLOCKED && (fs.button & 0x0800) == 0);
+    radio_active = false;
     v_present = 0;   // sample failed: the default (an untouched controller) takes over
     settle();
     WPADRead(0, (WPADStatus*)&fs);
     CHECK(fs.err == WPAD_ERR_OK && (fs.button & 0x0800) == 0);
+    CHECK(a_last_rear == -1);
+    CHECK(a_last_source == NP_RAW_BLOCKED);
 
     printf(g_fail ? "FAILED (%d)\n" : "test_input_hooks: all passed\n", g_fail);
     return g_fail ? 1 : 0;

@@ -269,7 +269,7 @@ std::vector<Button> CollectButtons(float& px, float& py, const SceneStack& scene
 }
 } // namespace
 
-void SampleState(State& s, std::vector<Button>* buttonsOut, float* ptr) {
+void SampleCoreState(State& s) {
     const uintptr_t sceneMgr = Opaque(&np_sceneMgr) ? reinterpret_cast<uintptr_t>(np_sceneMgr) : 0;
     const uintptr_t overlayMgr = Opaque(&np_overlayMgr) ? reinterpret_cast<uintptr_t>(np_overlayMgr) : 0;
     s.scene = ReadStack(sceneMgr);
@@ -306,6 +306,10 @@ void SampleState(State& s, std::vector<Button>* buttonsOut, float* ptr) {
     s.ballOwner = ball ? RP(ball + 0xC8) : 0;
     const uintptr_t input = Opaque(&np_feInput) ? reinterpret_cast<uintptr_t>(np_feInput) : 0;
     s.inputLock = input ? R32(input + 0x24) : 0;
+}
+
+void SampleState(State& s, std::vector<Button>* buttonsOut, float* ptr) {
+    SampleCoreState(s);
     float px = 0, py = 0;
     std::vector<Button> buttons = CollectButtons(px, py, s.scene);
     s.nButtons = static_cast<int>(buttons.size());

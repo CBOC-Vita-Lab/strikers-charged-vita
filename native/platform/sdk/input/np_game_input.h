@@ -65,14 +65,15 @@ enum class Mode { None, Save, Meter, Shake };
 // Applies the minigame controls to one sample of the emulated remote of `chan` (channel 0 only; others and
 // untagged samples are left alone): touch -> A / B holds, the Mega Save pointer, the R-button punch. Returns true
 // when the sample was touched by a minigame.
-bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint32_t epoch, uint32_t nowMs);
+bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint32_t epoch, uint32_t nowMs, bool menu = false);
 // Capture side: the local pad is in the gate of a Mega Save (the engine must keep the Wii controller for the keeper)?
 // `det` = the channel's apply-side DetInput (&NetworkPeerChannel::mInput).
 bool PreserveWii(const DetInput* det, int channel);
 // A shakedown swipe happened (the defender "shakes"): returns once per swipe, then false until the next one.
 bool ConsumeShake(const DetInput* det);
 // Mega Save: the right stick aims instead of the left one while it is deflected.
-void SelectSavePointerAxes(int chan, float rightX, float rightY, float* x, float* y);
+// Returns whether the current local keeper owns aiming, even when both sticks rest.
+bool SelectSavePointerAxes(int chan, float rightX, float rightY, float* x, float* y);
 Mode CurrentMode(int chan);
 // A touch position (panel pixels) as a pointer position (KPAD space, -1..1, +y down) over the picture's rectangle.
 void PanelToCursor(float px, float py, float out[2]);

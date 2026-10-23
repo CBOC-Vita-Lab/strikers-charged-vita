@@ -21,6 +21,7 @@
 // Counters: per frame in the CSV (dlHit, dlBuild, dlRehash, dlBypass), totals in vgx_stats.txt.
 #include "vgx_guestmem.h"
 #include "vgx_state.h"
+#include "vgx_perf_diag.h"
 #include "vgx_ext.h"
 
 #define XXH_INLINE_ALL
@@ -392,6 +393,7 @@ void Free(Entry* e) {
 
 // Drops entries that were not used for a long time (called once in a while).
 void Sweep(uint64_t frame) {
+    const uint64_t begin=NpDiagActive&&NpDiagActive()?NpDiagNow():0;
     for (auto it = g_map.begin(); it != g_map.end();) {
         Entry** link = &it->second.head;
         while (*link) {
@@ -411,6 +413,7 @@ void Sweep(uint64_t frame) {
         if (it->second.until + kRetainFrames < frame) it = g_bypass.erase(it);
         else ++it;
     }
+    if(begin)NpDiagEvent(NPD_GEOMETRY,1,frame,begin,NpDiagNow(),g_ctr.evicted,g_map.size(),g_bypass.size());
 }
 
 void FreeAll(ListInfo& li) {
@@ -443,6 +446,10 @@ bool StaticBufferData(uint32_t bufId, const uint8_t*& vtx, const uint16_t*& idx)
     vtx = g_bufOwner[bufId]->verts.data();
     idx = g_bufOwner[bufId]->idx.data();
     return true;
+}
+
+void DlCacheDiagnostic(uint64_t tag){
+    if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_GEOMETRY,0,tag,g_ctr.liveBytes,g_ctr.staticBytes,g_ctr.staticBufs,g_ctr.evicted,g_map.size());
 }
 
 void DlCacheReport(FILE* f) {

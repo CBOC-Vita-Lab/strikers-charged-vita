@@ -1415,9 +1415,11 @@ void cGame::SendPlayerVisibility()
             for (int j = 0; j < 5; j++)
             {
 #ifdef NP_NATIVE
-                // NP (17 Oct, np/camzoom.h): at zoom levels 6 and 7 the test reaches past the screen's edge, about as far as level 5 shows,
-                // so the CPU team plays as at level 5; up to level 5 the window is the game's 0.95 and this is fn_8001E184 itself.
-                const float window = NpCameraVisibilityWindow(GameInfoManager::Instance()->mUserInfo.mVisualOptions.mCameraZoomLevel);
+                // NP (np/camzoom.h, NpCameraVisibilityWindow): from zoom level 4 up the test reaches past the screen's edge, about as far as
+                // retail's TV default (level 3) shows, so the CPU team plays as the game was tuned; up to level 3 this is fn_8001E184 itself.
+                const VisualSettings& vis = GameInfoManager::Instance()->mUserInfo.mVisualOptions;
+                const float window = vis.mIsAutoZoomCamera ? NpCameraVisibilityWindow(vis.mCameraZoomLevel)
+                                                           : NpCameraVisibilityWindowFixed(vis.mCameraZoomLevel);
                 cPlayer* const player = pTeam->GetPlayer(j);
                 if (window <= 0.95f ? player->fn_8001E184()
                                     : (fabsf(player->m_v3ScreenPosition.x) <= window && fabsf(player->m_v3ScreenPosition.y) <= window

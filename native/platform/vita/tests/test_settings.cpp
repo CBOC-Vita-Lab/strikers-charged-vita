@@ -65,6 +65,28 @@ static bool Ppm(const char* path, const uint32_t* px) {
 }
 
 int main(int argc, char** argv) {
+    {
+        const int aim = Find("MEGA SAVE AIM"), speed = Find("MEGA SAVE SPEED");
+        CHECK(aim >= 0 && speed >= 0);
+        if (aim >= 0 && speed >= 0) {
+            State s;
+            Load(s, "# retained\nMSC_WATCH=1\nMSC_REAR_TOUCH=0\n");
+            CHECK(s.choice[aim] == 0 && s.choice[speed] == 0);
+            SetChoice(s, aim, 1); SetChoice(s, speed, 2);
+            std::string out;
+            CHECK(Serialize(s, out) && Has(out, "MSC_MEGA_AIM=rear") && Has(out, "MSC_MEGA_POINTER_SPEED=3"));
+            CHECK(Has(out, "MSC_REAR_TOUCH=0") && Has(out, "# retained") && Has(out, "MSC_WATCH=1"));
+            State t; Load(t, out.c_str());
+            CHECK(t.choice[aim] == 1 && t.choice[speed] == 2);
+            ApplyPreset(t, PresetIndex("DEFAULT"));
+            CHECK(t.choice[aim] == 1 && t.choice[speed] == 2);
+            Load(t, "MSC_MEGA_AIM=custom\nMSC_MEGA_POINTER_SPEED=3junk\n");
+            CHECK(t.choice[aim] == -1 && t.choice[speed] == -1);
+            CHECK(Serialize(t, out) && Has(out, "MSC_MEGA_AIM=custom") && Has(out, "MSC_MEGA_POINTER_SPEED=3junk"));
+            SetChoice(t, aim, 0); SetChoice(t, speed, 0);
+            CHECK(Serialize(t, out) && CountLines(out, "MSC_MEGA_AIM=") == 0 && CountLines(out, "MSC_MEGA_POINTER_SPEED=") == 0);
+        }
+    }
     // no file: everything is the build's default; that is the DEFAULT preset; nothing is written
     {
         State s;
@@ -332,6 +354,19 @@ int main(int argc, char** argv) {
                 Load(c, "MSC_CONTROLS=classic\n");
                 DrawControls(buffer.data(), c);
                 std::snprintf(path, sizeof path, "%s/controls-classic.ppm", argv[1]);
+                CHECK(Ppm(path, buffer.data()));
+            }
+            {
+                State rear;
+                Load(rear, "MSC_MEGA_AIM=rear\nMSC_MEGA_POINTER_SPEED=3\n");
+                Draw(buffer.data(), rear, Find("MEGA SAVE AIM") + 1, "", false, true);
+                std::snprintf(path, sizeof path, "%s/settings-mega-aim.ppm", argv[1]);
+                CHECK(Ppm(path, buffer.data()));
+                Draw(buffer.data(), rear, Find("MEGA SAVE SPEED") + 1, "", false, true);
+                std::snprintf(path, sizeof path, "%s/settings-mega-speed.ppm", argv[1]);
+                CHECK(Ppm(path, buffer.data()));
+                DrawControls(buffer.data(), rear);
+                std::snprintf(path, sizeof path, "%s/controls-rear.ppm", argv[1]);
                 CHECK(Ppm(path, buffer.data()));
             }
             ApplyPreset(q, PresetIndex("QUALITY"));

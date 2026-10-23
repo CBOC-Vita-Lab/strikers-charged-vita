@@ -253,7 +253,7 @@ void Ext(uint32_t kind, const uint32_t* words, uint32_t n);
 // Ends the frame. Returns when the player has consumed every record of the
 // frame (so guest memory the frame referred to may change again); with
 // `waitExecuted` also when the back end has drawn it.
-void Present(bool waitExecuted);
+void Present(bool waitExecuted, uint64_t latencyTag = 0);
 // immediate mode
 void ImmBegin(uint8_t prim, int fmt, uint32_t count);
 void ImmEnd();

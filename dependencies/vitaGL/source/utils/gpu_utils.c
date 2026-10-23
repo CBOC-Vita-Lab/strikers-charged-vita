@@ -153,55 +153,52 @@ static inline __attribute__((always_inline)) uint32_t vgl_cache_old_textures(siz
 #endif
 
 int unsafe_allocator_counter = 0;
-void *gpu_alloc_mapped_aligned_unsafe_for_cpu(size_t alignment, size_t size) {
+static void *gpu_alloc_mapped_aligned_recover(size_t alignment, size_t size, GLboolean for_gpu) {
+	if (vgl_gc_failed()) return NULL;
 	// Performing a garbage collection cycle prior to attempting to allocate the memory again
 	unsafe_allocator_counter++;
 	if (unsafe_allocator_counter == 1) {
-		glFinish();
+		if (for_gpu) {
+			// glFinish can recursively allocate the depth surface being recovered.
+			sceGxmFinish(gxm_context);
+		} else {
+			glFinish();
+		}
 	}
+	// A nested depth allocation may have failed through the void glFinish call.
+	if (vgl_gc_failed()) return NULL;
+	int collected = 1;
 #if defined(HAVE_SINGLE_THREADED_GC) && !defined(HAVE_PTHREAD)
 	garbage_collector(0, NULL);
 #else
-	sceKernelWaitSema(gc_mutex[1], 1, NULL);
-	sceKernelSignalSema(gc_mutex[0], 1);
-	sceKernelDelayThread(1000000);
+	collected = vgl_gc_recover();
+	if (!collected) return NULL;
 #endif
 
 	// Allocating requested memblock
-	void *res = gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
+	if (vgl_gc_failed()) return NULL;
+	void *res = for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size)
+	                   : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
 
 	// Iterating for as many as possible max pending garbage collector cycles
 	if (!res && unsafe_allocator_counter < FRAME_PURGE_FREQ) {
-		res = gpu_alloc_mapped_aligned_unsafe_for_cpu(alignment, size);
+		res = gpu_alloc_mapped_aligned_recover(alignment, size, for_gpu);
 	}
 
+	// Inspect all retired buckets promptly. If none suffices, retain the legacy
+	// waiting opportunities for other threads to release shared-heap memory.
+	if (!res && collected == 2 && vgl_gc_retry_pause())
+		res = for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size)
+		              : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
 	return res;
 }
 
+void *gpu_alloc_mapped_aligned_unsafe_for_cpu(size_t alignment, size_t size) {
+	return gpu_alloc_mapped_aligned_recover(alignment, size, GL_FALSE);
+}
+
 void *gpu_alloc_mapped_aligned_unsafe_for_gpu(size_t alignment, size_t size) {
-	// Performing a garbage collection cycle prior to attempting to allocate the memory again
-	unsafe_allocator_counter++;
-	if (unsafe_allocator_counter == 1) {
-		// Ideally we'd want glFinish here, but this would cause a circular dependency if the allocation failing is related to a depthstencil surface allocation
-		sceGxmFinish(gxm_context);
-	}
-#if defined(HAVE_SINGLE_THREADED_GC) && !defined(HAVE_PTHREAD)
-	garbage_collector(0, NULL);
-#else
-	sceKernelWaitSema(gc_mutex[1], 1, NULL);
-	sceKernelSignalSema(gc_mutex[0], 1);
-	sceKernelDelayThread(1000000);
-#endif
-
-	// Allocating requested memblock
-	void *res = gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size);
-
-	// Iterating for as many as possible max pending garbage collector cycles
-	if (!res && unsafe_allocator_counter < FRAME_PURGE_FREQ) {
-		res = gpu_alloc_mapped_aligned_unsafe_for_gpu(alignment, size);
-	}
-
-	return res;
+	return gpu_alloc_mapped_aligned_recover(alignment, size, GL_TRUE);
 }
 
 void *gpu_alloc_mapped_aligned_for_cpu(size_t alignment, size_t size) {

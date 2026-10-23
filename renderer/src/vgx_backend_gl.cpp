@@ -1,3 +1,4 @@
+#include "vgx_perf_diag.h"
 // OpenGL ES 2.0 back end. Executes CmdBufs; knows nothing about GX registers
 // or guest memory. Only ES 2.0 core calls are used (plus OES_depth24 /
 // OES_depth_texture / EXT_texture_compression_s3tc when the driver offers
@@ -163,6 +164,8 @@ struct Program {
     uint32_t blendKey = ~0u, layout = ~0u; // of its last draw (see BlendKey)
     uint32_t layoutNeed = 0;               // vertex-layout bits (VL_*) of the attributes the vertex shader declares
     bool ok = false;
+    uint8_t failures = 0;
+    uint64_t retryAfter = 0;
     // W5 SKIN: the bone matrices of a GPU-skinning shader (u_bone, DrawRec::skinBlock), the block last given, and (MSC_VGX_UNIDUP) its values
     GLint bone = -1, nBone = 0;
     uint32_t appliedSkin = kNoBlock;
@@ -638,6 +641,7 @@ void SimulateCompile(const char* text) {
 
 GLuint Compile(GLenum type, const char* text, const char* what) {
     const GLuint s = G(glCreateShader(type));
+    if (!s || s == 0xFFFFFFFFu) return 0;
     const char* parts[2] = {"#version 100\n", text};
     G(glShaderSource(s, 2, parts, nullptr));
     G(glCompileShader(s));
@@ -648,11 +652,42 @@ GLuint Compile(GLenum type, const char* text, const char* what) {
     GLint ok = 0;
     G(glGetShaderiv(s, GL_COMPILE_STATUS, &ok));
     if (!ok) {
-        char log[2048];
+        char log[2048] = {};
         glGetShaderInfoLog(s, sizeof log, nullptr, log);
         VGX_ERR("%s shader compile failed:\n%s\n---- source ----\n%s\n", what, log, text);
+        G(glDeleteShader(s));
+        return 0;
     }
     return s;
+}
+
+struct ShaderAttempt { unsigned count = 0; uint64_t retryAfter = 0; };
+std::vector<ShaderAttempt> g_vsAttempts, g_fsAttempts;
+uint64_t g_shaderRetryFrame = ~0ull;
+
+GLuint CompileShaderSlot(const ShaderSource& source, bool initial) {
+    auto& ids = source.fragment ? g_fs : g_vs;
+    auto& sources = source.fragment ? g_fsSrc : g_vsSrc;
+    auto& attempts = source.fragment ? g_fsAttempts : g_vsAttempts;
+    const size_t index = source.id;
+    if (ids.size() <= index) ids.resize(index + 1, 0);
+    if (sources.size() <= index) sources.resize(index + 1, nullptr);
+    if (attempts.size() <= index) attempts.resize(index + 1);
+    sources[index] = &source;
+    if (ids[index]) return ids[index];
+    ShaderAttempt& attempt = attempts[index];
+    if (attempt.count >= 4 || g_serial < attempt.retryAfter) return 0;
+    // Initial catalogue compilation is unchanged. Recovery is shared by all
+    // pairs using this shader, with at most one recovery compile per frame.
+    if (!initial || attempt.count) {
+        if (g_shaderRetryFrame == g_serial) return 0;
+        g_shaderRetryFrame = g_serial;
+    }
+    ++attempt.count;
+    ids[index] = Compile(source.fragment ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER,
+                         source.text.c_str(), source.fragment ? "fragment" : "vertex");
+    if (!ids[index]) attempt.retryAfter = g_serial + (60ull << (attempt.count - 1));
+    return ids[index];
 }
 
 void SetupNewTexture(GLenum minMag) { // the texture being edited: no mips, clamped
@@ -709,6 +744,7 @@ void CreateTarget() {
 // unordered_map do not move; EvictPrograms empties this when it deletes any).
 struct ProgramFront { uint32_t key; Program* p; };
 ProgramFront g_programFront[64] = {};
+uint64_t g_programRetryFrame = ~0ull;
 
 // W5 SEED (after Galaxy 98a0d5e). vitaGL has room for 1,024 linked programs and its
 // glCreateProgram does not fail gracefully when they are used up (custom_shaders.c: the slot
@@ -734,7 +770,7 @@ size_t ProgramLimit() {
 }
 bool WarmRoom(uint16_t vsId, uint16_t fsId) {
     const size_t limit = ProgramLimit();
-    if (!limit || g_programs.size() < limit) return true;
+    if (!limit || g_stats.programs < limit) return true;
     return g_programs.find((static_cast<uint32_t>(vsId) << 16) | fsId) != g_programs.end();
 }
 // Deletes up to `want` programs, the ones longest without a draw, none that a draw used less than `minAge` frames ago.
@@ -742,7 +778,7 @@ size_t DeletePrograms(size_t want, uint64_t minAge) {
     static std::vector<std::pair<uint64_t, uint32_t>> old; // (last frame used, key)
     old.clear();
     for (const auto& kv : g_programs)
-        if (kv.second.usedSerial + minAge <= g_serial && kv.second.usedSerial != g_serial) old.emplace_back(kv.second.usedSerial, kv.first);
+        if (kv.second.ok && kv.second.usedSerial + minAge <= g_serial && kv.second.usedSerial != g_serial) old.emplace_back(kv.second.usedSerial, kv.first);
     if (old.empty()) return 0;
     std::sort(old.begin(), old.end());
     size_t n = 0;
@@ -762,35 +798,59 @@ size_t DeletePrograms(size_t want, uint64_t minAge) {
 }
 void EvictPrograms() {
     const size_t limit = ProgramLimit();
-    if (!limit || g_programs.size() <= limit) return;
-    const size_t want = g_programs.size() - (limit > 100 ? limit - 100 : 0);
+    if (!limit || g_stats.programs <= limit) return;
+    const size_t want = g_stats.programs - (limit > 100 ? limit - 100 : 0);
     const size_t n = DeletePrograms(want, 601);
-    if (n) VGX_LOG("%u programs deleted (unused for 600 frames or more); %u linked now\n", static_cast<unsigned>(n), static_cast<unsigned>(g_programs.size()));
+    if (n) VGX_LOG("%u programs deleted (unused for 600 frames or more); %u linked now\n", static_cast<unsigned>(n), static_cast<unsigned>(g_stats.programs));
 }
 
 Program& GetProgram(uint16_t vsId, uint16_t fsId) {
     const uint32_t key = (static_cast<uint32_t>(vsId) << 16) | fsId;
     auto& fr = g_programFront[(vsId * 7u + fsId) & 63u];
-    if (fr.p && fr.key == key) return *fr.p;
+    if (fr.p && fr.key == key && fr.p->ok) return *fr.p;
     auto it = g_programs.find(key);
+    uint8_t failures = 0;
     if (it != g_programs.end()) {
-        fr.key = key;
-        fr.p = &it->second;
-        return it->second;
+        if (it->second.ok || it->second.failures >= 4 || g_serial < it->second.retryAfter || g_programRetryFrame == g_serial) {
+            fr.key = key;
+            fr.p = &it->second;
+            return it->second;
+        }
+        failures = it->second.failures;
     }
     Program p;
-    if (vsId < g_vs.size() && fsId < g_fs.size() && g_vs[vsId] && g_fs[fsId]) {
+    p.failures = failures;
+    auto store = [&]() -> Program& {
+        if (it != g_programs.end()) {
+            it->second = std::move(p);
+            return it->second;
+        }
+        return g_programs.emplace(key, std::move(p)).first->second;
+    };
+    auto failed = [&](bool linkAttempt = true) -> Program& {
+        p.usedSerial = g_serial;
+        if (linkAttempt) ++p.failures;
+        p.retryAfter = g_serial + (linkAttempt ? (60ull << (p.failures - 1)) : 1);
+        return store();
+    };
+    if (vsId < g_vsSrc.size() && fsId < g_fsSrc.size() && g_vsSrc[vsId] && g_fsSrc[fsId]) {
+        if (vsId >= g_vs.size() || !g_vs[vsId]) CompileShaderSlot(*g_vsSrc[vsId], false);
+        if (fsId >= g_fs.size() || !g_fs[fsId]) CompileShaderSlot(*g_fsSrc[fsId], false);
+    }
+    if (vsId < g_vs.size() && fsId < g_fs.size() && vsId < g_vsSrc.size() && fsId < g_fsSrc.size() &&
+        g_vs[vsId] && g_fs[fsId] && g_vsSrc[vsId] && g_fsSrc[fsId]) {
+        if (it != g_programs.end()) g_programRetryFrame = g_serial;
         p.id = G(glCreateProgram());
-        if (p.id == 0xFFFFFFFFu) {
+        if (!p.id || p.id == 0xFFFFFFFFu) {
             // vitaGL's table is full (MSC_VGX_MAXPROGRAMS is 0 or above 1,024, or a hundred programs were
             // made within 600 frames): free the hundred longest without a draw, none used this frame, and ask again.
             const size_t n = DeletePrograms(100, 1);
             static bool said = false;
-            if (!said || n) { said = true; VGX_LOG("no free program slot: %u programs deleted, %u linked now\n", static_cast<unsigned>(n), static_cast<unsigned>(g_programs.size())); }
+            if (!said || n) { said = true; VGX_LOG("no free program slot: %u programs deleted, %u linked now\n", static_cast<unsigned>(n), static_cast<unsigned>(g_stats.programs)); }
             p.id = G(glCreateProgram());
-            if (p.id == 0xFFFFFFFFu) {
+            if (!p.id || p.id == 0xFFFFFFFFu) {
                 p.id = 0; // no program for this pair: its draws are skipped (!ok), as for a pair without shaders
-                return g_programs.emplace(key, p).first->second;
+                return failed();
             }
         }
         G(glAttachShader(p.id, g_vs[vsId]));
@@ -817,10 +877,12 @@ Program& GetProgram(uint16_t vsId, uint16_t fsId) {
         GLint ok = 0;
         G(glGetProgramiv(p.id, GL_LINK_STATUS, &ok));
         if (!ok) {
-            char log[2048];
+            char log[2048] = {};
             glGetProgramInfoLog(p.id, sizeof log, nullptr, log);
             VGX_ERR("program link failed (vs %u, fs %u):\n%s\n---- vs ----\n%s\n---- fs ----\n%s\n", vsId, fsId, log,
                     g_vsSrc[vsId]->text.c_str(), g_fsSrc[fsId]->text.c_str());
+            G(glDeleteProgram(p.id));
+            p.id = 0;
         } else {
             p.ok = true;
             UseProgram(p.id);
@@ -874,9 +936,12 @@ Program& GetProgram(uint16_t vsId, uint16_t fsId) {
             }
 #endif
         }
-        ++g_stats.programs;
+        if (p.ok) ++g_stats.programs;
+        if (!p.ok) return failed();
+    } else {
+        return failed(false);
     }
-    return g_programs.emplace(key, p).first->second;
+    return store();
 }
 
 GLenum MapBlend(uint8_t f) {
@@ -1021,6 +1086,7 @@ void SetLayout(GLuint vbo, uint32_t layoutMask, uint32_t base) {
 std::unordered_set<uint32_t> g_fragVariants; // vsId << 22 ^ fsId << 12 ^ blend key (the patcher also keys on the vertex shader the fragment program links to)
 std::unordered_set<uint32_t> g_vtxVariants;  // vsId << 12 | layout mask
 inline void NoteVariant(Program& p, uint16_t vsId, uint16_t fsId, uint32_t layoutMask, uint32_t blendKey) {
+    static const bool census = EnvInt("MSC_VGX_PROF", 0) != 0 || std::getenv("MSC_VGX_GLSTATS") != nullptr;
     if (p.usedSerial != g_serial) { p.usedSerial = g_serial; ++g_progsThisFrame; }
     if (p.layoutNeed & ~layoutMask) {
         ++C.constAttrDraws;
@@ -1031,11 +1097,11 @@ inline void NoteVariant(Program& p, uint16_t vsId, uint16_t fsId, uint32_t layou
     if (p.blendKey != blendKey) {
         if (p.blendKey != ~0u) ++C.fragSwitches;
         p.blendKey = blendKey;
-        if (g_fragVariants.insert((static_cast<uint32_t>(vsId) << 22) ^ (static_cast<uint32_t>(fsId) << 12) ^ blendKey).second) ++C.fragVariants;
+        if (census && g_fragVariants.insert((static_cast<uint32_t>(vsId) << 22) ^ (static_cast<uint32_t>(fsId) << 12) ^ blendKey).second) ++C.fragVariants;
     }
     if (p.layout != layoutMask) {
         p.layout = layoutMask;
-        if (g_vtxVariants.insert((static_cast<uint32_t>(vsId) << 13) | layoutMask).second) ++C.vtxVariants;
+        if (census && g_vtxVariants.insert((static_cast<uint32_t>(vsId) << 13) | layoutMask).second) ++C.vtxVariants;
     }
 }
 
@@ -1388,8 +1454,20 @@ void Upload(const TexUpload& up) {
     G(glPixelStorei(GL_UNPACK_ALIGNMENT, 1));
 #endif
     uint32_t w = up.width, h = up.height;
+    bool reserveMipChain = false;
+#if defined(__VGX_VITA__)
+    // vitaGL grows compressed storage to the highest supplied level. Upload it
+    // after level zero so intermediate levels reuse that allocation.
+    if (up.format == TF_DXT1 && g_hasS3tc && !up.genMips && up.levels.size() > 2 && up.levels.size() < 32 &&
+        w && h && !(w & (w - 1)) && !(h & (h - 1))) {
+        const size_t last = up.levels.size() - 1;
+        reserveMipChain = (w >> last) >= 4 && (h >> last) >= 4;
+    }
+#endif
     std::vector<uint8_t> tmp;
-    for (size_t l = 0; l < up.levels.size(); ++l) {
+    for (size_t i = 0; i < up.levels.size(); ++i) {
+        const size_t l = reserveMipChain ? (i == 1 ? up.levels.size() - 1 : i > 1 ? i - 1 : 0) : i;
+        if (reserveMipChain) { w = up.width >> l; h = up.height >> l; }
         const std::vector<uint8_t>& lv = up.levels[l];
         if (up.format == TF_DXT1 && g_hasS3tc) {
             G(glCompressedTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(l), GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, static_cast<GLsizei>(w),
@@ -1439,6 +1517,10 @@ void Upload(const TexUpload& up) {
 
 void EnsureCopyProgram() {
     if (g_copyProg) return;
+    static unsigned failures = 0;
+    static uint64_t retryAfter = 0;
+    if (failures >= 4 || g_serial < retryAfter) return;
+    retryAfter = g_serial + (60ull << failures++);
     static const char* vs =
         "attribute vec4 a_pos;\nuniform vec4 u_rect;\nvarying vec2 v_uv;\n"
         "void main() { v_uv = u_rect.xy + (a_pos.xy * 0.5 + 0.5) * u_rect.zw; gl_Position = vec4(a_pos.xy, 0.0, 1.0); }\n";
@@ -1446,22 +1528,38 @@ void EnsureCopyProgram() {
         "precision mediump float;\nuniform sampler2D u_src;\nuniform mat4 u_mat;\nuniform vec4 u_add;\nvarying vec2 v_uv;\n"
         "void main() { gl_FragColor = u_mat * texture2D(u_src, v_uv) + u_add; }\n";
     const GLuint v = Compile(GL_VERTEX_SHADER, vs, "copy vertex"), f = Compile(GL_FRAGMENT_SHADER, fs, "copy fragment");
+    if (!v || !f) {
+        if (v) G(glDeleteShader(v));
+        if (f) G(glDeleteShader(f));
+        return;
+    }
     g_copyProg = G(glCreateProgram());
+    if (!g_copyProg || g_copyProg == 0xFFFFFFFFu) {
+        g_copyProg = 0;
+        G(glDeleteShader(v)); G(glDeleteShader(f));
+        return;
+    }
     G(glAttachShader(g_copyProg, v));
     G(glAttachShader(g_copyProg, f));
     G(glBindAttribLocation(g_copyProg, AT_POS, "a_pos"));
     G(glLinkProgram(g_copyProg));
+    G(glDeleteShader(v)); G(glDeleteShader(f));
+    GLint ok = 0;
+    G(glGetProgramiv(g_copyProg, GL_LINK_STATUS, &ok));
+    if (!ok) { G(glDeleteProgram(g_copyProg)); g_copyProg = 0; return; }
     UseProgram(g_copyProg);
     g_copyRect = G(glGetUniformLocation(g_copyProg, "u_rect"));
     g_copyMat = G(glGetUniformLocation(g_copyProg, "u_mat"));
     g_copyAdd = G(glGetUniformLocation(g_copyProg, "u_add"));
     G(glUniform1i(glGetUniformLocation(g_copyProg, "u_src"), 0));
+    failures = 0;
 }
 
 // Draws the copy program's quad over the whole viewport: out = m * texel + add.
 // Raster state (target, viewport, scissor, masks) is the caller's.
 void DrawQuad(GLuint srcTex, float rx, float ry, float rw, float rh, const float* m16, const float* add4) {
     EnsureCopyProgram();
+    if (!g_copyProg) return;
     UseProgram(g_copyProg);
     BindTex(0, srcTex);
     G(glUniform4f(g_copyRect, rx, ry, rw, rh));
@@ -1533,7 +1631,18 @@ PicProg* EnsurePictureProgram(int mode) {
               "  c = c + (c - b * 0.25) * u_p.z;\n";
     fs += "  gl_FragColor = vec4(c.rgb, 1.0);\n}\n";
     const GLuint v = Compile(GL_VERTEX_SHADER, vs, "picture vertex"), f = Compile(GL_FRAGMENT_SHADER, fs.c_str(), "picture fragment");
+    if (!v || !f) {
+        if (v) G(glDeleteShader(v));
+        if (f) G(glDeleteShader(f));
+        pp.failed = true;
+        return nullptr;
+    }
     pp.prog = G(glCreateProgram());
+    if (!pp.prog || pp.prog == 0xFFFFFFFFu) {
+        pp.prog = 0; pp.failed = true;
+        G(glDeleteShader(v)); G(glDeleteShader(f));
+        return nullptr;
+    }
     G(glAttachShader(pp.prog, v));
     G(glAttachShader(pp.prog, f));
     G(glBindAttribLocation(pp.prog, AT_POS, "a_pos"));
@@ -1542,6 +1651,7 @@ PicProg* EnsurePictureProgram(int mode) {
     G(glGetShaderiv(v, GL_COMPILE_STATUS, &vok));
     G(glGetShaderiv(f, GL_COMPILE_STATUS, &fok));
     G(glGetProgramiv(pp.prog, GL_LINK_STATUS, &lok));
+    G(glDeleteShader(v)); G(glDeleteShader(f));
     if (!vok || !fok || !lok) {
         VGX_ERR("picture shader (mode %d) unavailable: the present falls back to the plain blit\n", mode);
         G(glDeleteProgram(pp.prog));
@@ -2481,6 +2591,7 @@ double ClockCostMs() {
 // other draw are timed with the host's microsecond clock (SetMicroClock).
 uint64_t g_rtDrawTimers[4] = {}; // cumulative: first draws, their us, sampled draws, their us
 uint64_t g_execFrame = 0;        // CmdBuf::frame of the buffer being executed (ExecutingFrame)
+uint64_t g_execLatencyTag = 0;
 void RtTimedDraw(const CmdBuf& buf, const DrawRec& dr) {
     if (g_rt.timeDraws <= 0) {
         Draw(buf, dr);
@@ -2504,6 +2615,10 @@ void Execute(const CmdBuf& buf) { ExecuteEx(buf, ExecOpts{}); }
 void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
     g_hidden = opts.hidden;
     g_execFrame = buf.frame;
+    g_execLatencyTag=buf.latencyTag;
+    const bool diag=NpDiagActive&&NpDiagActive();
+    if(diag&&NpDiagGpuFrame)NpDiagGpuFrame(buf.latencyTag);
+    if(diag)NpDiagEvent(NPD_BACKEND,opts.replay?1:0,buf.latencyTag,buf.frame,buf.draws.size(),buf.uploads.size(),buf.copyTex.size(),NpDiagInts(g_efbW,g_efbH));
     g_dbgExecCmd.store(0xFFFFFFF0u, std::memory_order_relaxed); // (before the stream upload)
     const DrawRec* const drawRecs = opts.draws ? opts.draws : buf.draws.data();
     const bool replay = opts.replay;
@@ -2569,6 +2684,8 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
         g_rt.cmd = static_cast<int>(&c - buf.cmds.data());
         g_dbgExecCmd.store((static_cast<uint32_t>(c.type) << 24) | (dbgIdx++ & 0xFFFFFFu), std::memory_order_relaxed);
         const double t0 = profCmd ? Now() : 0.0;
+        const bool diagCommand=diag&&(c.type==CMD_COPY_TEX||c.type==CMD_COPY_DISP||c.type==CMD_TEX_UPLOAD||c.type==CMD_SHADER||c.type==CMD_PROGRAM||c.type==CMD_SET_TARGET||c.type==CMD_PASS_BEGIN);
+        const uint64_t diagBegin=diagCommand?NpDiagNow():0;
         const uint32_t swUnits = g_sw.total ? (c.type == CMD_SHADER ? 10u : (c.type == CMD_PROGRAM ? 2u : (c.type == CMD_VARIANT ? 1u : 0u))) : 0u;
         const double swT0 = swUnits ? NowMs() : 0.0;
         if (c.type != CMD_DRAW) {
@@ -2623,11 +2740,7 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
             break;
         case CMD_SHADER: {
             const ShaderSource* s = buf.shaders[c.arg];
-            auto& ids = s->fragment ? g_fs : g_vs;
-            auto& srcs = s->fragment ? g_fsSrc : g_vsSrc;
-            if (ids.size() <= s->id) { ids.resize(s->id + 1, 0); srcs.resize(s->id + 1, nullptr); }
-            ids[s->id] = Compile(s->fragment ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER, s->text.c_str(), s->fragment ? "fragment" : "vertex");
-            srcs[s->id] = s;
+            CompileShaderSlot(*s, true);
             if (s->fragment) ++g_stats.fragmentShaders; else ++g_stats.vertexShaders;
             break;
         }
@@ -2694,6 +2807,11 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
                 }
             }
         }
+        if(diagCommand){
+            uint64_t detail=0;
+            if(c.type==CMD_COPY_TEX){const auto& t=buf.copyTex[c.arg];detail=NpDiagInts(t.dstW,t.dstH);}
+            NpDiagEvent(NPD_COMMAND,c.type,buf.latencyTag,diagBegin,NpDiagNow(),c.arg,detail,NpDiagInts(g_efbW,g_efbH));
+        }
         if (profCmd) {
             if (profMode == 1 && (c.type == CMD_COPY_TEX || c.type == CMD_COPY_DISP)) glFinish(); // charge deferred rasterisation here
             g_prof[c.type] += Now() - t0;
@@ -2703,6 +2821,8 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
     }
     flushPend();
     g_stats.shaderWorkMs += g_sw.ms;
+    if(diag)NpDiagEvent(NPD_BACKEND_END,0,buf.latencyTag,buf.frame,g_sw.compiles,g_sw.links,g_evictions,g_evicted);
+    if(diag&&NpDiagGpuFrame)NpDiagGpuFrame(0);
     // One line for every frame whose shader work would have been seen as a hitch (always
     // printed: on the console this is the record of what start-up and first use cost).
     if (g_sw.ms >= 100.0 || g_sw.compiles >= 8)
@@ -2802,6 +2922,7 @@ void SetSceneHintHook(SceneHintHook hook) { g_hintHook = hook; }
 void SetMicroClock(MicroClock clock) { g_microClock = clock; }
 void GetDrawTimers(uint64_t out[4]) { for (int i = 0; i < 4; ++i) out[i] = g_rtDrawTimers[i]; }
 uint64_t ExecutingFrame() { return g_execFrame; }
+uint64_t ExecutingLatencyTag() { return g_execLatencyTag; }
 void SetProgressDisplay(unsigned framebuffer, int width, int height, ProgressShowHook show) {
     g_dispFbo = framebuffer;
     g_dispW = width;

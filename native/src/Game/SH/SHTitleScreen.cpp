@@ -33,6 +33,35 @@
 #include "Game/SharedStaticStorage.h"
 #include "Game/main.h"
 
+#ifdef NP_NATIVE
+// platform/sdk/input/np_game_input.cpp: new front-panel contacts (tap anywhere on the title to start). Weak: absent in host tools.
+extern "C" unsigned int NpFrontTouchStarts(void) __attribute__((weak));
+extern "C" int NpFrontTouchPressAllowed(void) __attribute__((weak));
+extern "C" void NpFrontTouchHoldOffUntilRelease(void) __attribute__((weak));
+namespace {
+bool sTitleTapBaselineSet = false;
+unsigned int sTitleTapBaseline = 0;
+// A contact that started after the title became ready (pointer buttons set up, no demo/movie started). The first call of a title
+// only takes the baseline, so a finger held from before never counts.
+bool NpTitleTapped()
+{
+    if (!NpFrontTouchStarts || !NpFrontTouchPressAllowed || !NpFrontTouchPressAllowed())
+        return false;
+    const unsigned int now = NpFrontTouchStarts();
+    if (!sTitleTapBaselineSet)
+    {
+        sTitleTapBaselineSet = true;
+        sTitleTapBaseline = now;
+        return false;
+    }
+    if (now == sTitleTapBaseline)
+        return false;
+    sTitleTapBaseline = now;
+    return true;
+}
+} // namespace
+#endif
+
 static bool sTitleDimmingTimeSet;
 
 extern const int gTitleUnlockInputSequence[10] = {
@@ -75,6 +104,9 @@ TitleScene::TitleScene(ScreenMovement movement)
 
 TitleScene::~TitleScene()
 {
+#ifdef NP_NATIVE
+    sTitleTapBaselineSet = false;
+#endif
 }
 
 void TitleScene::SceneCreated()
@@ -203,10 +235,21 @@ void TitleScene::Update(float dt)
         }
 
         pointer->SetActiveSlide("A", true, false);
+#ifdef NP_NATIVE
+        // tap anywhere: the same press as A (one per new contact), then the finger may not press in the next menu until lifted
+        const bool tapped = NpTitleTapped();
+        if (g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0) || tapped)
+        {
+            if (tapped && NpFrontTouchHoldOffUntilRelease)
+                NpFrontTouchHoldOffUntilRelease();
+            OnControllerPointerPress(pad, 0);
+        }
+#else
         if (g_pFEInput->JustPressed((eFEINPUT_PAD)pad, 0x1E, true, 0))
         {
             OnControllerPointerPress(pad, 0);
         }
+#endif
 
         bool acceptedInput = false;
         for (int input = 0; input < 6; ++input)

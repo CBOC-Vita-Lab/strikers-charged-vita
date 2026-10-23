@@ -1,5 +1,7 @@
 // np_latency.cpp (W5 RT): pad read -> refresh that shows the frame. See include/np/latency.h.
 #include "np/latency.h"
+#include "np/touch_diag.h"
+#pragma weak NpDiagSnapshot
 
 #include <algorithm>
 #include <atomic>
@@ -95,6 +97,7 @@ void Complete(Rec* r) {
 extern "C" {
 
 void NpLatPadUse(uint64_t rawReadNs, int chan) {
+    if (NpDiagEnabled()) return;
     if (chan != 0 || !On()) return;
     if (!g_havePad) {
         g_havePad = true;
@@ -103,6 +106,7 @@ void NpLatPadUse(uint64_t rawReadNs, int chan) {
 }
 
 void NpLatLatch(void) {
+    if (NpDiagEnabled()) { if(NpDiagSnapshot)NpDiagSnapshot(); NpDiagLatch(); return; }
     if (!On()) return;
     const uint64_t tag = ++g_seq;
     Rec* r = Get(tag);
@@ -116,17 +120,23 @@ void NpLatLatch(void) {
     }
 }
 
-uint64_t NpLatTakeSendTag(void) { return g_sendTag.exchange(0, std::memory_order_acq_rel); }
+uint64_t NpLatTakeSendTag(void) {
+    if (NpDiagEnabled()) return NpDiagTake();
+    return g_sendTag.exchange(0, std::memory_order_acq_rel);
+}
 
 void NpLatDecoded(uint64_t tag) {
+    if (NpDiagEnabled()) { NpDiagEvent(NPD_DECODE,0,tag,0,0,0,0,0); return; }
     if (Rec* r = Get(tag)) r->t[kDecoded] = Now();
 }
 
 void NpLatPresented(uint64_t tag) {
+    if (NpDiagEnabled()) return;
     if (Rec* r = Get(tag)) r->t[kPresented] = Now();
 }
 
 void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo) {
+    if (NpDiagEnabled()) return;
     Rec* r = Get(tag);
     if (!r) return;
     const uint64_t now = Now();
@@ -140,6 +150,7 @@ void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo) {
 }
 
 void NpLatTakeWindow(uint32_t* n, uint32_t* p50Us, uint32_t* p95Us) {
+    if (NpDiagEnabled()) { *n=*p50Us=*p95Us=0; return; }
     std::lock_guard<std::mutex> lk(g_mtx);
     *n = static_cast<uint32_t>(g_win.size());
     Pct(g_win, *p50Us, *p95Us);

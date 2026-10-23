@@ -208,6 +208,8 @@ enum : uint32_t {
 void Map(const Raw& raw, NpPadState& status);
 // Reads the console's controls. False when no sample is available.
 bool Read(Raw& raw);
+bool ReadDebug(Raw& raw);   // passive observer (renderer debug chords): does not consume the game's tap history
+void InvalidateTapHistory();
 // Last state Map() produced, for the console status line.
 void LastState(uint16_t* buttons, int* stickX, int* stickY);
 } // namespace VitaInput

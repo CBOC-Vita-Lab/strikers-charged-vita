@@ -298,6 +298,14 @@ void DrawableCharacter::Render(cCharacter& source)
         return;
     }
 
+    if (spRenderOnlyThisCharacter != 0
+        && spRenderOnlyThisCharacter != &source
+        && !sbRenderOpposingGoalieToo)
+    {
+        source.fn_8001C574();
+        return;
+    }
+
     bool renderShockModel = false;
     if (useShockModel
         || (g_bForceShockModel != 0 && source.fn_8001C534(1)))

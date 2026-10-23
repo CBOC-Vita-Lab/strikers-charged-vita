@@ -88,15 +88,35 @@ extern "C" int NpCameraZoomDefaultLevel(void)
     return (NP_CAMERA_ZOOM_DEFAULT >= 1 && NP_CAMERA_ZOOM_DEFAULT <= kMaxLevel) ? NP_CAMERA_ZOOM_DEFAULT : kTvDefaultLevel;
 }
 
-// Levels 6 and 7 (see np/camzoom.h): the on-screen test of the players machine 0 sends to the simulation keeps about what level 5 would see,
-// so the closer picture does not change how the CPU team plays (it reads "on screen" for passes, power-ups, marking). Level 6: the window
-// reaches 1.175 x the screen, level 7: 1.35 x (the camera is about that much closer in open play). MSC_CAMERA_VIS=screen: the real screen.
+// The players' on-screen flags machine 0 sends to the simulation (cGame::SendPlayerVisibility): the CPU reads "on screen" for passes,
+// power-ups and marking, so a closer camera than the game was tuned for leaves the CPU fewer players to work with (the maintainer, 23 Oct: "AI
+// getting dumber out of frame"). From level 4 up (the Vita's default is 5; 6 and 7 are ours) the test window is widened to about what
+// retail's TV default, level 3, shows in open play: the camera distance there is 35.0 m (z 1.0), at level L 20 + 15 z(L) m with
+// z = 0.05 + 0.95 (1.5 - L) under Auto Zoom (L = option value, (level - 1) / 4), so the window is 0.95 x 35 / (20 + 15 z):
+// level 4 1.06, level 5 1.19, level 6 1.37, level 7 1.60 (screen half-widths). Levels 1..3 keep the game's own test (0.95).
+// (Before 23 Oct only 6 and 7 were widened, to about level 5.) MSC_CAMERA_VIS=screen: the real screen at every level.
 extern "C" float NpCameraVisibilityWindow(float zoomLevel)
 {
     static const bool screenOnly = [] { const char* e = getenv("MSC_CAMERA_VIS"); return e && strcmp(e, "screen") == 0; }();
-    if (zoomLevel <= 1.0f || screenOnly) return 0.95f;
-    const float extra = zoomLevel > 1.5f ? 0.5f : zoomLevel - 1.0f;
-    return 0.95f * (1.0f + 1.4f * extra);
+    if (zoomLevel <= 0.5f || screenOnly) return 0.95f;
+    const float L = zoomLevel > 1.5f ? 1.5f : zoomLevel;
+    float z = 0.05f + 0.95f * (1.5f - L);
+    if (z > 1.0f) z = 1.0f;
+    const float window = 0.95f * 35.0f / (20.0f + 15.0f * z);
+    return window < 0.95f ? 0.95f : window;
+}
+
+// The same with Auto Zoom off: the camera stays at z = 0.05 + 0.95 (1 - L) (level 4 24.3 m, level 5 20.8 m), so the window is wider still.
+extern "C" float NpCameraVisibilityWindowFixed(float zoomLevel)
+{
+    static const bool screenOnly = [] { const char* e = getenv("MSC_CAMERA_VIS"); return e && strcmp(e, "screen") == 0; }();
+    if (zoomLevel <= 0.5f || screenOnly) return 0.95f;   // levels 1..3: the game's own test, as retail
+    const float L = zoomLevel > 1.5f ? 1.5f : zoomLevel;
+    float z = 0.05f + 0.95f * (1.0f - L);
+    // (levels 6/7: z below 0.05, past the near camera along the same line, GameplayCam.cpp: 17.2 / 13.6 m)
+    const float d = 20.0f + 15.0f * z;
+    const float window = 0.95f * 35.0f / (d < 10.0f ? 10.0f : d);
+    return window < 0.95f ? 0.95f : window;
 }
 
 extern "C" void NpCameraZoomNewSettings(bool* autoZoom, float* zoomLevel)

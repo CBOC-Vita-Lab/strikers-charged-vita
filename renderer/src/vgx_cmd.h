@@ -325,12 +325,14 @@ struct CmdBuf {
     std::vector<uint32_t> vtxChunks;
     std::vector<VariantCmd> variants;
     uint64_t frame = 0; // presented-frame number this buffer belongs to (diagnostics)
+    uint64_t latencyTag = 0; // immutable identity delivered before decoder/backend execution
 
     bool empty() const { return cmds.empty(); }
     void clear() {
         cmds.clear(); draws.clear(); uploads.clear(); shaders.clear(); copyTex.clear();
         copyDisp.clear(); targets.clear(); bufUploads.clear(); passes.clear(); vtx.clear(); idx.clear(); uni.clear();
         vtxChunks.clear(); variants.clear();
+        latencyTag = 0;
     }
 };
 
@@ -381,6 +383,7 @@ void SetSceneHintHook(SceneHintHook hook);
 using MicroClock = uint32_t (*)();
 void SetMicroClock(MicroClock clock);
 uint64_t ExecutingFrame(); // W5 RT: CmdBuf::frame of the buffer being executed (the present hook's frame)
+uint64_t ExecutingLatencyTag();
 void GetDrawTimers(uint64_t out[4]); // MSC_VGX_RTTIME=1, cumulative: draws that began a scene, their microseconds, sampled other draws (every 32nd), theirs
 // Picture scaling at present (LOOK, wave 5). A host that shows the picture itself can scale the
 // display copy to the screen with a shader of the back end instead of a framebuffer blit:

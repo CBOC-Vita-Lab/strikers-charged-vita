@@ -6,6 +6,7 @@
 #include "Game/TweakRegistry.h"
 #include "Game/AI/AiUtil.h"
 #include "Game/NetworkSession.h"
+#include "Game/NetworkInputRecording.h"
 #include "Game/SharedStaticStorage.h"
 #include "NL/gl/glDraw2.h"
 #include "NL/gl/glState.h"
@@ -572,13 +573,11 @@ static inline void UpdatePointerTween(
     }
 }
 
-void UpdateAndRenderMegaBallPointer(float fDeltaT)
+static DPDData* GetMegaBallPointerData(cGlobalPad* pController)
 {
     DPDData* pData;
-    unsigned int nClosest;
     PadBackend* pPlatform;
     int nClassID; // declared up front: the gotos below must not jump over its initialisation
-    cGlobalPad* pController = gMegaBallController;
     if (pController == 0)
     {
         goto no_controller_data;
@@ -607,18 +606,18 @@ no_controller_data:
     pData = 0;
 
 have_controller_data:
-    if (pData != 0)
-    {
-        MegaBallIndicator* pPointer = &gMegaBallPointer;
-        UpdateStateTweens(*pPointer, fDeltaT);
+    return pData;
+}
 
+static int ProjectMegaBallPointer(DPDData* pData, float& fX, float& fY, u16& nAngle)
+{
+        unsigned int nClosest;
         nlVector2 v2Position;
-        u16 nAngle;
         int nStatus = pData->GetPosition(&v2Position, &nAngle);
-        float fX = -gMegaBallPointerXScale * v2Position.x + 320.0f;
+        fX = -gMegaBallPointerXScale * v2Position.x + 320.0f;
         fX = nlMaxEquals(fX, 30.0f);
         fX = nlMinEquals(fX, 610.0f);
-        float fY = -gMegaBallPointerYScale * v2Position.y + 240.0f;
+        fY = -gMegaBallPointerYScale * v2Position.y + 240.0f;
         fY = nlMaxEquals(fY, 30.0f);
         fY = nlMinEquals(fY, 450.0f);
         if (gMegaBallPointerMagnetism || lbl_806E15C4)
@@ -675,7 +674,7 @@ have_controller_data:
                 pDistance++;
             }
 
-            if (fBestDistance < fRadiusSquared)
+            if (fBestDistance > 0.0f && fBestDistance < fRadiusSquared)
             {
                 float fSecondRadius = gMegaBallPointerMagnetRadius;
                 float fSecondDistance = fSecondRadius * fSecondRadius;
@@ -721,6 +720,42 @@ have_controller_data:
             }
         }
 
+        return nStatus;
+}
+
+bool RefreshLocalMegaBallPointerForPress(cGlobalPad* owner)
+{
+    // Recording/playback and network sessions retain their existing input timing.
+    if (owner == 0 || owner != gMegaBallController
+        || g_pNetworkSession == 0 || gNetworkInputRecording == 0
+        || g_pNetworkSession->IsLiveNetworkGame()
+        || gNetworkInputRecording->mRecordingEnabled || gNetworkInputRecording->mRecording
+        || gNetworkInputRecording->mPlaybackEnabled || gNetworkInputRecording->mPlaybackReady)
+    {
+        return false;
+    }
+    DPDData* data = GetMegaBallPointerData(owner);
+    if (data == 0)
+        return false;
+    float x, y;
+    u16 angle;
+    ProjectMegaBallPointer(data, x, y, angle);
+    gMegaBallPointer.mX = x;
+    gMegaBallPointer.mY = y;
+    gMegaBallPointer.mAngle = 0.0000958738f * (float)angle;
+    return true;
+}
+
+void UpdateAndRenderMegaBallPointer(float fDeltaT)
+{
+    DPDData* pData = GetMegaBallPointerData(gMegaBallController);
+    if (pData != 0)
+    {
+        MegaBallIndicator* pPointer = &gMegaBallPointer;
+        UpdateStateTweens(*pPointer, fDeltaT);
+        float fX, fY;
+        u16 nAngle;
+        int nStatus = ProjectMegaBallPointer(pData, fX, fY, nAngle);
         pPointer->mX = fX;
         pPointer->mY = fY;
         u16 nPointerAngle = nAngle;

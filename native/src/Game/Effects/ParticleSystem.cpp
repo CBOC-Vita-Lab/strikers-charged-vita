@@ -20,6 +20,11 @@
 #include "NL/nlMemory.h"
 #include "NL/nlString.h"
 #include "NL/platvmath.h"
+#ifdef NP_NATIVE
+#include "Game/Render/MegastrikeBackgroundOverlay.h"
+#include <stdint.h>
+#include <stdlib.h>
+#endif
 
 struct TextureFrame
 {
@@ -979,6 +984,25 @@ int ParticleSystem::RenderAllParticles(GLView* view)
         if (began)
         {
             pCoord = m_pTemplate->IsLocalSpace() ? pCoord : 0;
+#ifdef NP_NATIVE
+            // NP (Mega Saves fill rate, 23 Oct): the Mega Strike save scene draws ~40 screens of overlapping blended
+            // particle quads per frame (Codex's render census); the largest additive layer is ~78 big quads at vertex
+            // alpha 0..11/255 and alone covers ~28 screens. The Vita GPU is fill-bound there (~15 fps, 66 ms queued per
+            // frame). Two render-only changes, no simulation/emission/RNG change (particles are still updated and kept):
+            //  1. A particle whose colour alpha is 0 fails the alpha test (ref 0) on every pixel: its quad is written
+            //     collapsed to one point (zero area, no fragments). Lossless, everywhere.
+            //  2. While the Mega Strike background is up, faint additive particles (alpha <= 12) are thinned: one in four
+            //     (chosen by pool slot, so stable for the particle's life) is drawn with four times the alpha, the others
+            //     are collapsed; from alpha 12 to 32 this fades out to the original. Additive light adds up, so the
+            //     expected brightness is the same; the dominant haze layer (alpha 0..11) costs about a quarter of the fill.
+            // MSC_FX_THIN=0 turns 2 off, MSC_FX_THIN=0 together with MSC_FX_ZERO=0 restores the original submission.
+            // MSC_FX_THIN=2: stronger, for console A/B tests: full thinning up to alpha 24, fading out by alpha 48.
+            static const int kThin = [] { const char* e = getenv("MSC_FX_THIN"); return !e || !*e ? 1 : e[0] == '0' ? 0 : e[0] == '2' ? 2 : 1; }();
+            const unsigned int kFull = kThin == 2 ? 24u : 12u, kSpan = kThin == 2 ? 24u : 20u;
+            static const bool kZero = [] { const char* e = getenv("MSC_FX_ZERO"); return !(e && e[0] == '0'); }();
+            const bool thinHere = kThin != 0 && gMegastrikeBackgroundOverlay.mActive && !sUseWhiteParticleTexture
+                && m_pTemplate->m_eBlend == EfBlend_Additive;
+#endif
             nlDLListIterator<Particle*> iterator;
             iterator = m_Particles.Begin();
             while (iterator.hasNext())
@@ -987,6 +1011,40 @@ int ParticleSystem::RenderAllParticles(GLView* view)
                 UpdateParticle(&ret, pPart, m_pTemplate, viewRight,
                     viewUp, pCoord);
                 int i;
+#ifdef NP_NATIVE
+                {
+                    bool collapse = kZero && ret.c.c[3] == 0;
+                    if (!collapse && thinHere && ret.c.c[3] < kFull + kSpan)
+                    {
+                        // one in four is kept (pool slot hash: stable for the particle's life); between alpha kFull and
+                        // kFull + kSpan the thinning fades out linearly so nothing pops as a particle fades: kept a*(4 - 3s),
+                        // others a*s, s = (a - kFull) / kSpan clamped to 0..1; the expected sum stays a.
+                        const unsigned int a = ret.c.c[3];
+                        const unsigned int s20 = a <= kFull ? 0u : a - kFull;   // s * kSpan
+                        const uint32_t slot = (uint32_t)((uintptr_t)pPart >> 4) * 2654435761u;
+                        unsigned int out;
+                        if ((slot >> 28) % 4u == 0)
+                            out = (a * (4u * kSpan - 3u * s20) + kSpan / 2u) / kSpan;
+                        else
+                            out = (a * s20 + kSpan / 2u) / kSpan;
+                        if (out > 255u) out = 255u;
+                        ret.c.c[3] = (unsigned char)out;
+                        collapse = out == 0;
+                    }
+                    if (collapse)
+                    {
+                        const int n = bQuads ? 4 : 6;
+                        for (i = 0; i < n; i++)
+                        {
+                            mesh.Texcoord(ret.texcoord[0]);
+                            mesh.Colour(ret.c);
+                            mesh.Vertex(ret.position[0]);
+                        }
+                        iterator.Step();
+                        continue;
+                    }
+                }
+#endif
                 if (bQuads)
                 {
                     for (i = 0; i < 4; i++)

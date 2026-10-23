@@ -34,6 +34,8 @@
 #include <string.h>
 
 #include "platform/sdk/input/np_game_input.h"
+#include "platform/sdk/input/np_controls.h"
+#include "np/touch_diag.h"
 
 extern float gMegaBallPointerXScale;
 extern float gMegaBallPointerYScale;
@@ -212,7 +214,8 @@ bool project_save_pointer(float x, float y, float scaleX, float scaleY, float* p
 
 class State {
 public:
-    Output Update(const Gate& gate, uint32_t epoch, uint32_t nowMs, const Frame& frame, const Viewport& viewport, bool blocked) {
+    Output Update(const Gate& gate, uint32_t epoch, uint32_t nowMs, const Frame& frame, const Viewport& viewport, bool blocked,
+                  bool clampDrag = false) {
         // Revocation must win even if WPAD and KPAD read the same sample.
         if (blocked || gate.mode == Mode::None || !valid(frame, viewport)) {
             Reset();
@@ -237,8 +240,8 @@ public:
         for (unsigned i = 0; i < frame.count; ++i) {
             if (active_ ? frame.points[i].id == id_ : (!point || frame.points[i].id < point->id)) point = &frame.points[i];
         }
-        if (!point || point->x < viewport.x || point->x > viewport.x + viewport.width || point->y < viewport.y ||
-            point->y > viewport.y + viewport.height) {
+        if (!point || ((!clampDrag || !active_) && (point->x < viewport.x || point->x > viewport.x + viewport.width ||
+            point->y < viewport.y || point->y > viewport.y + viewport.height))) {
             armed_ = active_ = false;
             return output_;
         }
@@ -261,6 +264,10 @@ public:
             output_.pointer = gate.mode == Mode::Save;
             output_.x = 2.0f * (point->x - viewport.x) / viewport.width - 1.0f;
             output_.y = 2.0f * (point->y - viewport.y) / viewport.height - 1.0f;
+            if (clampDrag) {
+                output_.x = fmaxf(-1.0f, fminf(1.0f, output_.x));
+                output_.y = fmaxf(-1.0f, fminf(1.0f, output_.y));
+            }
             if (viewport.flipY) output_.y = -output_.y;
         }
         return output_;
@@ -295,6 +302,8 @@ struct Channel {
     float scaleX = 0, scaleY = 0;
     bool shakeConsumed = false;
     bool shoulderArmed = false, shoulderOutput = false;
+    bool crossArmed = false, haveRearSample = false;
+    uint32_t lastRearMs = 0;
 };
 Channel s_touch[4];
 Viewport g_viewport;   // the part of the 960 x 544 panel the picture covers (the whole panel by default)
@@ -362,12 +371,16 @@ extern "C" void NpTouchSetViewport(float x, float y, float width, float height, 
 
 namespace NpTouch {
 
-bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint32_t epoch, uint32_t nowMs) {
+bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint32_t epoch, uint32_t nowMs, bool menu) {
     // Real HID remotes never contain the synthetic GameCube tag. The Vita owns only physical channel zero; no touch may
     // leak to another or a disconnected pad.
     const bool emulated = chan == 0 && ((*hold & 0x80u) != 0) && (((*hold >> 5) & 3u) == (uint32_t)chan);
     if (chan < 0 || chan >= 4) return false;
     Channel& t = s_touch[chan];
+    if (raw.source == NP_RAW_BLOCKED && NpControls::RearSaveEnabled()) {
+        t = Channel();
+        return false;
+    }
     if (!emulated) {
         t = Channel();
         trace(chan, Gate(), Output());
@@ -390,28 +403,55 @@ bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint3
             return false;
         }
     }
+    const bool rear = t.gate.mode == Mode::Save && raw.source == NP_RAW_LIVE && NpControls::RearSaveEnabled() &&
+                      NpControls::PhysicalMegaControlsAllowed();
+    if (rear && menu) {
+        t = Channel();
+        return false;
+    }
+    if (rear && t.haveRearSample && nowMs - t.lastRearMs > 1000u) {
+        t.state.Reset();
+        t.shoulderArmed = t.shoulderOutput = t.crossArmed = false;
+    }
+    t.haveRearSample = rear;
+    t.lastRearMs = nowMs;
     Frame frame;
+    Viewport viewport = g_viewport;
     const bool panel = touch_enabled() && mode_touch_enabled(t.gate.mode);
-    if (panel) {
+    if (rear) {
+        // A grip or unavailable sample cannot arm a new gesture. An acquired finger may slide to an edge.
+        frame.valid = raw.rear_count >= 0 && raw.rear_count <= 1;
+        frame.count = raw.rear_count == 1 ? 1 : 0;
+        if (frame.count) frame.points[0] = {(unsigned)raw.rear[0].id, raw.rear[0].x, raw.rear[0].y};
+        viewport.x = 40; viewport.y = 30; viewport.width = 880; viewport.height = 484;
+    } else if (panel) {
         frame.valid = true;
         frame.count = raw.touch_count > 8 ? 8 : (raw.touch_count < 0 ? 0 : (unsigned)raw.touch_count);
         for (unsigned i = 0; i < frame.count; ++i) frame.points[i] = {(unsigned)raw.touch[i].id, raw.touch[i].x, raw.touch[i].y};
     }
     const bool shoulderHeld = (raw.buttons & NP_BTN_R) != 0;
-    t.output = t.state.Update(t.gate, epoch, nowMs, frame, g_viewport, false);
+    t.output = t.state.Update(t.gate, epoch, nowMs, frame, viewport, false, rear);
+    if (rear) t.output.hold = false;
     // R as the save-only punch: it counts only after it was released once during this minigame (a button already held
     // when the save began is not a punch).
     const Gate& a = t.shoulderGate;
     const Gate& b = t.gate;
     if (b.mode != Mode::Save || !a.SameOwner(b)) {
         t.shoulderArmed = t.shoulderOutput = false;
+        t.crossArmed = false;
         t.shoulderGate = b;
     }
     if (b.mode == Mode::Save) {
+        if (rear) {
+            if (!(raw.buttons & NP_BTN_CROSS)) t.crossArmed = true;
+            if (!t.crossArmed) *hold &= ~NPW_A;
+        }
         if (!shoulderHeld) t.shoulderArmed = true;
         t.shoulderOutput = shoulderHeld && t.shoulderArmed;
     }
     trace(chan, t.gate, t.output);
+    if(NpDiagActive())NpDiagEvent(NPD_GESTURE,(unsigned)t.gate.mode|(t.output.hold?16u:0u)|(t.output.pointer?32u:0u)|(rear?64u:0u)|(rear&&!frame.valid?128u:0u),
+        NpDiagFrame(),NpDiagUsedPoll(),epoch,NpDiagStepId(),frame.count,NpDiagFloats(t.output.x,t.output.y));
 
     // compose the hold: the finger holds A (Save, or the meter on the pass button) or B (the other meter button)
     if (t.output.hold) {
@@ -446,13 +486,14 @@ bool ConsumeShake(const DetInput* det) {
     return true;
 }
 
-void SelectSavePointerAxes(int chan, float rightX, float rightY, float* x, float* y) {
-    if (chan != 0) return;
-    if (query_gate(0).mode != Mode::Save) return;
+bool SelectSavePointerAxes(int chan, float rightX, float rightY, float* x, float* y) {
+    if (chan != 0) return false;
+    if (query_gate(0).mode != Mode::Save) return false;
     if (isfinite(rightX) && isfinite(rightY) && (fabsf(rightX) >= 0.2f || fabsf(rightY) >= 0.2f)) {
         *x = rightX;
         *y = rightY;
     }
+    return true;
 }
 
 void PanelToCursor(float px, float py, float out[2]) {
@@ -469,3 +510,5 @@ Mode CurrentMode(int chan) {
 }
 
 }  // namespace NpTouch
+
+extern "C" int NpDiagInputMode(){return (int)NpTouch::CurrentMode(0);}

@@ -95,6 +95,7 @@ unsigned RearPad::Update(const RearPoint* points, int count, uint32_t nowMs) {
 
 // ---- MODERN ------------------------------------------------------------------------------------------------------------------
 void Mapper::Reset() { *this = Mapper(); }
+void Mapper::ClearRearPulses() { rightPulse_ = rightGap_ = leftPulse_ = leftGap_ = 0; }
 
 uint16_t Mapper::Map(uint32_t v, int* rearRight, int* rearLeft, const Context& ctx) {
     const uint32_t pressed = v & ~prev_;

@@ -103,9 +103,18 @@ constexpr Option kTable[] = {
      0, false,
      {{"ON", {}}, {"OFF", {{"NP_TOUCH_POINTER", "0"}}}}},
     {"TOUCH MEGA SAVE",
-     {"Mega Save: the finger aims and blocks where it touches.", "OFF: aim with either stick, block with Cross or R."},
+     {"Enable the selected Mega Save touch aiming mode.", "OFF: aim with either stick, block with Cross or R."},
      0, false,
      {{"ON", {}}, {"OFF", {{"MSC_TOUCH_SAVE", "0"}}}}},
+    {"MEGA SAVE AIM",
+     {"FRONT: touch to aim and block. REAR: one finger aims, Cross or R blocks.", "Rear aim needs a fresh contact; lift all fingers after a grip or pause."},
+     0, false,
+     {{"FRONT TOUCH", {}}, {"REAR + CROSS", {{"MSC_MEGA_AIM", "rear"}}}}},
+    {"MEGA SAVE SPEED",
+     {"Boosts Mega Save stick speed up to 4x; never reduces your existing speed.", "ORIGINAL keeps POINTER SPEED. Touch position is unchanged."},
+     0, false,
+     {{"ORIGINAL", {}}, {"2x", {{"MSC_MEGA_POINTER_SPEED", "2"}}},
+      {"3x", {{"MSC_MEGA_POINTER_SPEED", "3"}}}, {"4x", {{"MSC_MEGA_POINTER_SPEED", "4"}}}}},
     {"TOUCH MEGA STRIKE",
      {"Your Mega Strike: hold a finger on the screen to stop the meter.", "OFF: the shoot button does it."},
      0, false,
@@ -501,6 +510,9 @@ NpControlTable::Config ControlsConfig(const State& s) {
         return o < 0 || s.choice[o] != 1;
     };
     c.touchSave = on("TOUCH MEGA SAVE");
+    const int aimRow = OptionIndex("MEGA SAVE AIM");
+    c.rearSave = c.touchSave && aimRow >= 0 && s.choice[aimRow] == 1;
+    c.touchSave = c.touchSave && !c.rearSave;
     c.touchMeter = on("TOUCH MEGA STRIKE");
     c.touchShake = on("TOUCH SHAKEDOWN");
     c.touchPointer = on("TOUCH POINTER");

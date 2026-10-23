@@ -12,6 +12,11 @@
 // the equality of their outputs separates "the program was reordered" from "two threads ran it".
 #include "np_framesend.h"
 #include "np_time.h"
+#include "../../../include/np/touch_diag.h"
+#pragma weak NpDiagActive
+#pragma weak NpDiagNow
+#pragma weak NpDiagFrame
+#pragma weak NpDiagEvent
 
 #include <atomic>
 #include <cerrno>
@@ -231,6 +236,9 @@ inline void WriteFpscr(uint32_t) {}
 uint32_t g_forkFpscr = 0;   // read by the game thread at the fork, applied by the worker at the start of the job
 
 void RunJob(NpFsJobFn fn, void* arg) {
+    const bool diag=NpDiagActive&&NpDiagActive();
+    const uint64_t diagStart=diag?NpDiagNow():0;
+    const uint64_t diagFrame=diag?NpDiagFrame()-1:0;
     const int was = t_onWorker;
     t_onWorker = 1;
     if (was) WriteFpscr(g_forkFpscr);   // (thread mode: only the worker thread has t_onWorker set before a job starts)   // a job runs under the worker's rules wherever it runs (the gates do not join, the heap hooks count)
@@ -240,6 +248,7 @@ void RunJob(NpFsJobFn fn, void* arg) {
     g.workerBusySeconds += NpRealSeconds() - t0;
     Mark(0x30000004);
     t_onWorker = was;
+    if(diag)NpDiagEvent(NPD_FRAME_SEND,g.mode,diagFrame,diagStart,NpDiagNow(),0,0,0);
 }
 
 #if defined(__linux__) && !defined(__vita__)
@@ -481,6 +490,8 @@ void NpFsFork(NpFsJobFn fn, void* arg) {
 
 void NpFsJoin(void) {
     if (!g.pending) return;
+    const bool diag=NpDiagActive&&NpDiagActive();
+    const uint64_t diagStart=diag?NpDiagNow():0;
     if (g.mode == NP_FS_THREAD) {
         Mark(0x30000005);
         if (!g.done.TryWait()) {
@@ -500,6 +511,7 @@ void NpFsJoin(void) {
         RunJob(g.job, g.arg);   // serial mode: the job runs here
     }
     g.pending = false;
+    if(diag)NpDiagEvent(NPD_FRAME_JOIN,g.mode,NpDiagFrame(),diagStart,NpDiagNow(),g.nDeferred,g.nCalls,g.nWrites);
     __atomic_store_n(&NpFsBusy, 0, __ATOMIC_RELEASE);
     ++g.joins;
     Mark(0x30000002);

@@ -22,6 +22,12 @@
 
 #include "np/np_pad.h"
 #include "np_internal.h"
+#include "../../../include/np/touch_diag.h"
+#pragma weak NpDiagEvent
+#pragma weak NpDiagActive
+#pragma weak NpDiagFrame
+#pragma weak NpDiagPollId
+#pragma weak NpDiagUsePoll
 
 // The nav-script harness (platform/harness, weak: absent in builds without it). Its pad is in GameCube terms
 // (np_harness.h: NpPadState, same layout); it replaces the controller of channel 0 while a script presses something.
@@ -56,6 +62,7 @@ struct NpSdkVitaInput {
 extern "C" int NpVitaReadInput(NpSdkVitaInput* out) __attribute__((weak));
 // The game-aware layer (platform/sdk/input, weak, see np_sdk.h).
 extern "C" void NpPadAdjust(NpPadSample* sample) __attribute__((weak));
+extern "C" bool np_vita_radio_dialog_active(void) __attribute__((weak));
 extern "C" void NpLatPadUse(uint64_t rawReadNs, int chan) __attribute__((weak));   // W5 RT (np/latency.h): the input-delay record of the frame
 
 namespace {
@@ -193,6 +200,7 @@ void apply_harness(NpRawPad* raw) {
 bool read_raw(int pad, NpRawPad* out) {
     memset(out, 0, sizeof(*out));
     out->lx = out->ly = out->rx = out->ry = 128;
+    out->rear_count = -1;
     bool present;
     NpSdkVitaInput vi;
     if (!g_source && pad == 0 && NpVitaReadInput && NpVitaReadInput(&vi)) {
@@ -204,7 +212,7 @@ bool read_raw(int pad, NpRawPad* out) {
             out->touch[i].x = vi.touch[i].x;
             out->touch[i].y = vi.touch[i].y;
         }
-        out->rear_count = vi.rearCount > NP_MAX_TOUCH ? NP_MAX_TOUCH : vi.rearCount < 0 ? 0 : vi.rearCount;
+        out->rear_count = vi.rearCount < 0 || vi.rearCount > NP_MAX_TOUCH ? -1 : vi.rearCount;
         for (int i = 0; i < out->rear_count; ++i) {
             out->rear[i].id = vi.rear[i].id;
             out->rear[i].x = vi.rear[i].x;
@@ -212,6 +220,7 @@ bool read_raw(int pad, NpRawPad* out) {
         }
         present = true;
     } else if (!g_source) {
+        if (pad == 0 && NpVitaReadInput) out->source = NP_RAW_BLOCKED;
         // No platform source installed (a plain host run): player 1 has a controller lying untouched, so the game
         // gets past its "connect a Wii Remote" screens; NP_PAD_PRESENT=0 turns that off.
         static int present_default = -1;
@@ -224,12 +233,13 @@ bool read_raw(int pad, NpRawPad* out) {
         present = g_source(pad, out) != 0;
     }
     if (present && pad == 0) apply_harness(out);
-    if (present && g_blocked) {
+    if (present && (g_blocked || (np_vita_radio_dialog_active && np_vita_radio_dialog_active()))) {
         // the platform owns the display: connected, but neutral
         out->buttons = 0;
         out->lx = out->ly = out->rx = out->ry = 128;
         out->touch_count = 0;
-        out->rear_count = 0;
+        out->rear_count = -1;
+        out->source = NP_RAW_BLOCKED;
     }
     return present;
 }
@@ -267,6 +277,7 @@ struct Chan {
     uint64_t cache_epoch;
     bool cache_valid;
     bool cache_have;
+    uint64_t diag_poll,diag_cache_frame;
     Emu cache;
 };
 Chan g_chan[WPAD_MAX_CONTROLLERS];
@@ -324,7 +335,10 @@ bool emu_sample(int chan, Emu* out) {
     Chan& c = g_chan[chan];
     uint64_t now = np_time_ns();
     const uint64_t epoch = sample_epoch(now);
+    const bool diag=NpDiagActive&&NpDiagActive()&&chan==0;
     if (c.cache_valid && c.cache_epoch == epoch) {
+        if(diag){NpDiagUsePoll(c.diag_poll);const uint64_t f=NpDiagFrame();
+            if(c.diag_cache_frame!=f){c.diag_cache_frame=f;NpDiagEvent(NPD_SAMPLE,1,f,epoch,c.diag_poll,NpDiagInts(c.cache.hold,c.cache.raw.source),NpDiagFloats(c.cache.pointer[0],c.cache.pointer[1]),c.cache_ns);}}
         if (NpLatPadUse) NpLatPadUse(c.cache_ns, chan);
         *out = c.cache;
         return c.cache_have;
@@ -333,6 +347,7 @@ bool emu_sample(int chan, Emu* out) {
     memset(&e, 0, sizeof(e));
     NpRawPad raw;
     e.present = read_raw(chan, &raw);
+    if(diag){c.diag_poll=raw.source==0?NpDiagPollId():0;NpDiagUsePoll(c.diag_poll);}
     c.cache_valid = true;
     c.cache_epoch = epoch;
     c.cache_ns = now;
@@ -398,6 +413,7 @@ bool emu_sample(int chan, Emu* out) {
     e.nacc[1] = -1.0f;
     c.cache_have = true;
     c.cache = e;
+    if(diag)NpDiagEvent(NPD_SAMPLE,0,NpDiagFrame(),epoch,c.diag_poll,NpDiagInts(e.hold,raw.source),NpDiagFloats(e.pointer[0],e.pointer[1]),now);
     *out = e;
     return true;
 }
