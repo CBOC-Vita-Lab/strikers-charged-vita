@@ -20,7 +20,7 @@
   },
   {
    "path": "dependencies/vitaGL/source/custom_shaders.c",
-   "sha256": "f31f80aa8a3b153cb8fe36325732afec525afe441341c821e77ad1aa30792fef"
+   "sha256": "484f1708061fb78e875734f5f0f0fa2618af50e3afcc12e426d327c9d1bc05b5"
   },
   {
    "path": "dependencies/vitaGL/source/debug.c",

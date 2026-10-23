@@ -193,9 +193,12 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
   VRAM pool has room: 32 MiB free for levels above the game's own size, 16 MiB
   for any step up, and below 12 MiB a larger picture drops back to native.
   `MSC_DYNRES_VRAM=KiB` simulates the free memory on the desktop.
-- On the test console every fresh run-time shader compile failed ("fatal
-  internal error", Cg and GLSL alike, at start-up too); only packaged or
-  cached shaders work. The picture shader then falls back to the plain blit and
-  the low-resolution effects pass to full size. The sharpening shader is now
-  written one sample per statement.
+- Every fresh run-time shader compile failed on the console ("fatal internal
+  error on line -1", Cg and GLSL alike). The shader-cache hardening in the
+  patched vitaGL (`custom_shaders.c`, `compile_shader`) passed vitaShaRK a
+  size of 0, and vitaShaRK reads that argument as the length of the source
+  text, so the compiler saw an empty file. Only packaged or cached shaders
+  worked, so the sharpening fell back to the plain picture and the
+  low-resolution effects to full size. The size now goes in as the source
+  length. The sharpening shader is also written one sample per statement.
 

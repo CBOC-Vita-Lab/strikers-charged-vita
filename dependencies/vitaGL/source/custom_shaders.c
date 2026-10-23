@@ -830,6 +830,9 @@ static inline __attribute__((always_inline)) void compile_shader(shader *s, GLbo
 	if (s->prog || !s->source)
 		return;
 	shader candidate = {0};
+	// vitaShaRK reads *size as the length of the source text and writes the program's size back into it: it must go in as the
+	// source length (a zero here gave the compiler an empty file, "fatal internal error on line -1", for every fresh compile).
+	candidate.size = (uint32_t)strlen((const char *)s->source);
 	// The compiler owns its output. Do not publish it or clobber the source length.
 	const SceGxmProgram *output = shark_compile_shader_extended((const char *)s->source, &candidate.size, s->type == GL_FRAGMENT_SHADER ? SHARK_FRAGMENT_SHADER : SHARK_VERTEX_SHADER, compiler_opts, compiler_fastmath, compiler_fastprecision, compiler_fastint);
 	if (output && candidate.size) {

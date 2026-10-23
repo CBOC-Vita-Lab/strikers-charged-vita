@@ -35,6 +35,9 @@ The performance update.
 - Fixed a crash when starting a match after the picture size had changed a
   few times: unused graphics buffers are now freed, and the game only draws a
   larger picture when there is graphics memory to spare.
+- Fixed new graphics effects never being built on the console (a fault in
+  the shader cache code), which kept the sharpening and the lighter Mega
+  Strike glow from switching on.
 - More reliable shader cache and graphics memory recovery.
 - Faster texture uploads and less background CPU use.
 
