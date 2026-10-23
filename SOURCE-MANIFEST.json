@@ -3543,6 +3543,10 @@
    "sha256": "c7fc3455120799206c47350be76e3b817f937f961d642e69d34b2366daf2ebe9"
   },
   {
+   "path": "native/include/np/fx.h",
+   "sha256": "820aeb1af556652c1a318f720c3ea7748bd60347aa439e0052923cfe3cb99dec"
+  },
+  {
    "path": "native/include/np/gamefixes.h",
    "sha256": "135cf0ab217751bf5dffb3b158d5fdcf4328cb9362ef8b3e40542813712898b2"
   },
