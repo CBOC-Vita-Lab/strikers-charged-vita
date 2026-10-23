@@ -3021,6 +3021,7 @@ struct DynRes {
     int megaW = 0, megaH = 0;
     int minLevel = 0;             // the best level allowed (MSC_DYNRES_MAX)
     int floorLevel = kDynFloor;   // ordinary scenes (MSC_DYNRES_MIN)
+    int floor60 = kDynFloor + 1;  // ordinary scenes while the game runs at 60 (0.78; MSC_DYNRES_MIN60, or MSC_DYNRES_MIN for both)
     float fakeA = 0, fakeB = 0;
     bool fake = false;
     int cycle = 0;                // MSC_DYNRES_CYCLE=N (desktop stress test): the next level every N frames, through all of them
@@ -3064,12 +3065,19 @@ void DynInit() {
         for (int l = 0; l < kDynNative; ++l)
             if (kDynLevels[l].s <= m + 0.001f) { d.minLevel = l; break; }
     }
+    if (const char* e = std::getenv("MSC_DYNRES_MIN60"); e && *e) {
+        const float m = static_cast<float>(std::atof(e));
+        d.floor60 = kDynNative;
+        for (int l = kDynNative; l <= kDynFloor + 2 && l < kDynCount; ++l)
+            if (kDynLevels[l].s >= m - 0.001f) d.floor60 = l;
+    }
     if (const char* e = std::getenv("MSC_DYNRES_MIN"); e && *e) {
         const float m = static_cast<float>(std::atof(e));
         d.floorLevel = kDynNative;
         for (int l = kDynNative; l <= kDynFloor + 2 && l < kDynCount; ++l)
             if (kDynLevels[l].s >= m - 0.001f) d.floorLevel = l;
     }
+    if (std::getenv("MSC_DYNRES_MIN") && !std::getenv("MSC_DYNRES_MIN60")) d.floor60 = d.floorLevel;
     if (const char* e = std::getenv("MSC_DYNRES_FAKE"); e && *e) d.fake = std::sscanf(e, "%f,%f", &d.fakeA, &d.fakeB) == 2;
     if (const char* e = std::getenv("MSC_DYNRES_CYCLE"); e && *e) d.cycle = std::atoi(e);
     std::fprintf(stderr, "[vgx] dynamic resolution: %s; levels %.2f..%.2f per side in ordinary scenes, Mega Strikes %s; GPU time %s\n", d.on ? "on" : "off (MSC_DYNRES)",
@@ -3173,7 +3181,11 @@ void DynamicResolution() {
     }
     g_megaActive.store(d.mega ? 1 : 0, std::memory_order_relaxed);
     const bool megaLevels = d.mega && d.megaMode == 0;
-    const int floor = !d.on ? kDynNative : (megaLevels ? kDynLast : d.floorLevel);
+    // 1.1: at 60 fps ordinary scenes may go one step lower (0.78 per side, sharpened); at 30 they stop at 0.86. The frame-rate
+    // controller is told the GPU time at the 60 floor, so it tries 60 only where that level would fit.
+    const int floor30 = !d.on ? kDynNative : (megaLevels ? kDynLast : d.floorLevel);
+    const int floor60 = !d.on ? kDynNative : (megaLevels ? kDynLast : std::max(d.floorLevel, d.floor60));
+    const int floor = interval == 1 ? floor60 : floor30;
     const int best = (!d.on || d.mega) ? kDynNative : d.minLevel;
     if (megaChanged) {
         if (d.mega) {
@@ -3216,7 +3228,7 @@ void DynamicResolution() {
             d.ema = d.ema < 0 ? ms : 0.75f * d.ema + 0.25f * ms;
             const float cur = DynCost(d.level);
             auto pred = [&](int l) { return d.ema * DynCost(l) / cur; };
-            g_gpuMinMs.store(pred(floor), std::memory_order_relaxed);
+            g_gpuMinMs.store(pred(floor60), std::memory_order_relaxed);
             if (interval != d.interval) {
                 // the frame rate changed: aim for the new budget at once
                 d.interval = interval;
