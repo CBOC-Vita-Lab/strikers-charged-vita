@@ -10,8 +10,8 @@
   "recipeId": "strikers",
   "package": {
     "path": "Strikers-Charged-Vita.vpk",
-    "sha256": "96e681c99109386c600228095aee260444d31f55fc0fd7f56cfa8af52dee76e2",
-    "runtimeSha256": "0af7e7c40ef06e21855718ea850dbafef48a528721d7ed403c86f2933cd0a080"
+    "sha256": "faa901b7ac981caa51a985ccf2a62eb89de901a2ef6b1ec519915b1040e967e1",
+    "runtimeSha256": "2f3ae810d1dcabc6d3dfd3329e5194325086c8ba2eabe0f85e19c219fc599657"
   },
   "requiredInputs": [
     {
