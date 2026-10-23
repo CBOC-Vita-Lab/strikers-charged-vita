@@ -6532,7 +6532,7 @@
   },
   {
    "path": "native/platform/compat/np_touchdiag.cpp",
-   "sha256": "8f70fea073bbf02560313173d913e5b85595eb0ea399d4ef9e7804feb555b266"
+   "sha256": "28cf198e6dc9292d36e2ae345249070046c1a950f773c2ed5bf553fa5ca67947"
   },
   {
    "path": "native/platform/compat/np_unlocks.cpp",
@@ -7540,7 +7540,7 @@
   },
   {
    "path": "native/platform/vita/src/vita_log.cpp",
-   "sha256": "9d7bf9df2ecd7f6d54797cd6c3626bfeb6fa2952e3d62bfff8f6af472378b0a7"
+   "sha256": "54e8e6beaf5c259075d48d35d28f9f8306dea96548b23de69693290bdde19940"
   },
   {
    "path": "native/platform/vita/src/vita_memreport.cpp",

@@ -85,8 +85,8 @@ checks that they agree.
 
 | Make variable | Effect |
 | --- | --- |
-| `NP_LOGGING=1` | Runtime log in `ux0:data/mscharged/log.txt` (development) |
-| `NP_DIAG_GPU=1` | GPU-call timing for the `MSC_TOUCH_DIAG=1` recorder (adds `--wrap=sceGxm*`) |
+| `NP_LOGGING=1` | Runtime log in `ux0:data/mscharged/log.txt` (development; see [Diagnostics](DIAGNOSTICS.md)) |
+| `NP_DIAG_GPU=1` | GPU-call timing for the `MSC_TOUCH_DIAG=1` recorder (adds `--wrap=sceGxm*`; use a clean `BUILD_ROOT`) |
 | `LAB=1` | Lab server and scripted-run support (development only) |
 
 ## Verification

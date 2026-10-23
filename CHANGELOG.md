@@ -25,6 +25,17 @@ Performance and reliability:
 - Background threads wait without 500 us polling.
 - Characters hidden during Mega Strikes are not prepared for drawing.
 
+Diagnostics and logging:
+- Development builds write the log from a background thread, so card writes
+  no longer stall the game or change the timings being measured.
+- Performance recorder: its memory is allocated only when it is turned on, the
+  bank title follows the build, the CRC table is built once, and GPU-call
+  timing is an explicit build switch (`NP_DIAG_GPU=1`).
+- New `tools/diag/perf-report.py` reads the recorder's bank files (display
+  cadence, handover to display, back-end and GPU-call times, tasks) and flags
+  damaged or incomplete banks. A host round-trip test checks it against the
+  real recorder. Guide: `docs/DIAGNOSTICS.md`.
+
 Repository:
 - Stable asset names (`Strikers-Charged-Vita.vpk`, `-install.zip`), so
   "latest" download links keep working.

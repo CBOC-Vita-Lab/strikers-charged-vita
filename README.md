@@ -82,6 +82,7 @@ in the game's own Options > Visual. See [Controls](CONTROLS.md).
 | [Building](docs/BUILDING.md) | Toolchain, pinned dependencies, build and packaging |
 | [Technical notes](docs/TECHNICAL.md) | Source layout, data paths, runtime switches |
 | [Source record](docs/SOURCE.md) | What this release was built from, with hashes |
+| [Diagnostics](docs/DIAGNOSTICS.md) | Log, performance recorder and report tool |
 | [Included files](docs/ASSETS.md) | Package contents and artwork |
 | [Licenses](THIRD_PARTY_NOTICES.md) | Third-party notices |
 

@@ -21,6 +21,11 @@ extern "C" uint64_t np_time_real_ns(void) __attribute__((weak_import));
 extern "C" uint64_t np_time_real_ns(void) __attribute__((weak));
 #endif
 
+#ifdef NP_TITLE_ID
+#define NP_DIAG_TITLE NP_TITLE_ID
+#else
+#define NP_DIAG_TITLE "MSCN00003"
+#endif
 namespace {
 constexpr uint32_t kCapacity=16384, kBanks=4;
 struct Event { uint64_t ns,id,a,b,c,d,e; uint32_t kind,flags; };
@@ -98,8 +103,8 @@ const char* Directory() {
     return "ux0:data/mscharged";
 }
 uint32_t Crc(uint32_t crc,const void* bytes,size_t size) {
-    uint32_t table[256];
-    for(unsigned i=0;i<256;i++){uint32_t v=i;for(unsigned j=0;j<8;j++)v=(v>>1)^((v&1)?0xedb88320u:0);table[i]=v;}
+    static uint32_t table[256];static bool ready=false;   // (built once, not on every call)
+    if(!ready){for(unsigned i=0;i<256;i++){uint32_t v=i;for(unsigned j=0;j<8;j++)v=(v>>1)^((v&1)?0xedb88320u:0);table[i]=v;}ready=true;}
     const auto* p=static_cast<const unsigned char*>(bytes);
     for(size_t i=0;i<size;i++)crc=(crc>>8)^table[(crc^p[i])&255];
     return crc;
@@ -125,7 +130,7 @@ bool Persist(Bank& b) {
     U64(h,40,b.start);U64(h,48,b.stop);
     memcpy(h+56,b.clocks,16);uint32_t clocks[4];Clocks(clocks);memcpy(h+72,clocks,16);
     U32(h,88,1);U32(h,92,b.mode);U32(h,96,b.number);U32(h,100,b.raced);U32(h,104,clockCost);
-    U32(h,108,0x01020304);memcpy(h+112,"MSCN00003",9);U32(h,124,sizeof banks);
+    U32(h,108,0x01020304);{const char* title=NP_DIAG_TITLE;memcpy(h+112,title,strlen(title)<9?strlen(title):9);}U32(h,124,sizeof banks);
     h[121]=Detail().value;h[122]=Detail().coerced;
     char file[256],tmp[264];
     snprintf(file,sizeof file,"%s/perf-%llu-%u-%u.bin",Directory(),(unsigned long long)session,b.number,b.mode);
