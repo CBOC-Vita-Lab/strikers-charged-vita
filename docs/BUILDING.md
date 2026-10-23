@@ -1,9 +1,9 @@
 # Building
 
-For installation, use [Install](INSTALL.md). This page is for developers.
+For installation, use [Install](../INSTALL.md). This page is for developers.
 
-Build the `a8d4ad6` native player plus the movie, quiet-logging and LiveArea settings updates. Dependency
-setup uses fixed revisions rather than whichever upstream versions are newest.
+Build the native player (title `MSCN00003`) from this tree. Dependency setup uses
+fixed revisions rather than whichever upstream versions are newest.
 
 ## Source Layout
 
@@ -36,8 +36,11 @@ export KUBRIDGE="$PWD/build/dependencies/sources/bythos14_kubridge"
 make -C native -j2 TARGET=vita WITH_SDK=1 WITH_GX=1 \
   BUILD_ROOT="$PWD/build/native" GX_VGX="$PWD/renderer" \
   VDEPS="$VDEPS" LTO=thin NP_PLAYER=1 NP_LOGGING=0 \
-  'OPT=-O2 -ffunction-sections -fdata-sections' DEBUG=-g0 vpk
+  "OPT=-O2 -ffunction-sections -fdata-sections -ffile-prefix-map=$PWD=. -ffile-prefix-map=$PWD/build=build" \
+  DEBUG=-g0 vpk
 ```
+
+The `-ffile-prefix-map` options keep your local folder names out of the executable.
 
 `BUILD-DEPS.py` fetches the pinned source, rebuilds five libraries locally and
 writes `build/dependencies/build-receipt.json`. It does not install anything
@@ -55,30 +58,46 @@ The recipe builds an isolated copy with the recorded GLB options and an
 they are not proof of byte-identical libraries in the installed executable.
 
 Generic package images are included at the paths in
-`native/platform/vita/Makefile.vpk`; [ARTWORK.json](ARTWORK.json) records them.
+`native/platform/vita/Makefile.vpk`; [ARTWORK.json](../ARTWORK.json) records them.
 Personal installed artwork and shader seeds are not committed.
-Seeds must match the renderer and vitaGL options.
-The normal output is `build/native/vita/pkg/np/mscharged-np.vpk`, title ID
-`MSCN00003`. This source-build path must pass the verification below before
-its output could be considered for installation. The selected movie-update
-package uses the approved production rebuild, retaining the existing shader
-seeds and generic app graphics. See [Source Record](SOURCE.md) for its hashes;
-a separate build is not automatically byte-identical to that executable.
+The build output is `build/native/vita/pkg/np/mscharged-np.vpk`, title ID
+`MSCN00003`. It has no startup shader cache.
+
+## Packaging A Release
+
+A release VPK is the previous release's package with the new executable and
+notices:
+
+```sh
+python3 tools/repack-release.py Strikers-Charged-Vita-previous.vpk \
+  build/native/vita/pkg/np/mscharged-np.vpk Strikers-Charged-Vita.vpk
+```
+
+This keeps the startup shader cache (`shadercache/`), LiveArea images and
+`param.sfo` byte for byte. The shader cache matches the renderer and vitaGL
+options; rebuild it only when those change. The same inputs give the same
+VPK bytes. Then update `cboc-release.json` and `RELEASE.json` (package and
+runtime hashes, plus the old manifest hash in `appUpdateFrom`), and
+regenerate `SHA256SUMS` and `SOURCE-MANIFEST.json`. `tests/test_release_metadata.py`
+checks that they agree.
+
+## Optional Build Switches
+
+| Make variable | Effect |
+| --- | --- |
+| `NP_LOGGING=1` | Runtime log in `ux0:data/mscharged/log.txt` (development) |
+| `NP_DIAG_GPU=1` | GPU-call timing for the `MSC_TOUCH_DIAG=1` recorder (adds `--wrap=sceGxm*`) |
+| `LAB=1` | Lab server and scripted-run support (development only) |
 
 ## Verification
 
-On 2026-10-18, the five dependency libraries built successfully with this
-helper. That initial baseline rebuild was not selected. On 2026-10-19 the
-approved movie source was built for `MSCN00003`, installed through the guarded
-executable-update procedure and verified by readback. Its exact executable is
-now selected. This does not establish full VPK or desktop-installer acceptance.
-
 Run `python3 -m unittest discover -s tests -v` for the file checker,
-game-preparation and dependency-setup tests. These are host tests, not
-gameplay tests. A release still needs an exact source/dependency
-receipt, license review, fresh install and save-preserving upgrade tests.
-Do not run the old `native/platform/vita/session/` deployment scripts on a
-working console as part of a source build.
+game-preparation, dependency-setup and release-metadata tests, and
+`make -C native/platform/sdk T=host32 check` for the SDK unit tests. GitHub
+Actions runs both on every push. These are host tests, not gameplay tests.
+A release still needs console play, a fresh install and a save-preserving
+upgrade test. Do not run the old `native/platform/vita/session/` deployment
+scripts on a working console as part of a source build.
 
-[Movie tests](tests/movie/README.md) cover the scheduler and real decoder,
+[Movie tests](../tests/movie/README.md) cover the scheduler and real decoder,
 including audio-preserving skips, retries and mixer exclusion.

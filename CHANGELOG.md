@@ -1,5 +1,37 @@
 # Changes
 
+## 2026-10-23: Mega Saves, Touch And Zoom Update
+
+Gameplay and controls:
+- Faster Mega Saves: zero-alpha effect sprites are skipped, and faint additive
+  haze is drawn one in four at four times the strength during Mega Strikes.
+  `MSC_FX_THIN=0` and `MSC_FX_ZERO=0` in `np-player.txt` restore the old drawing.
+- Mega Save touch aim uses the position sampled for that press.
+- Optional rear-touch aim and Mega stick speed (2x-4x) in LiveArea Settings.
+- Tap anywhere on the title screen to start. A finger already down does not
+  count, and the tap does not press anything in the main menu.
+- Short front-panel taps between reads are no longer lost.
+- Button taps are no longer swallowed by the debug poll or replayed after a
+  system dialog.
+- Options > Visual shows all seven zoom levels: 1-5, or 3-7 from level 4 up.
+- From zoom level 4 up, the CPU judges "on screen" from about the TV-default
+  view, so close cameras no longer make the AI play worse.
+
+Performance and reliability:
+- Shader cache: entries are written whole and replaced when invalid. Compile
+  and link failures are bounded, and a uniform-buffer leak is fixed.
+- Graphics memory recovery waits for the collector instead of sleeping.
+- DXT1 mip chains upload without repeated storage growth.
+- Background threads wait without 500 us polling.
+- Characters hidden during Mega Strikes are not prepared for drawing.
+
+Repository:
+- Stable asset names (`Strikers-Charged-Vita.vpk`, `-install.zip`), so
+  "latest" download links keep working.
+- Developer docs moved to `docs/`, and a reproducible repack tool was added
+  (`tools/repack-release.py`).
+- Release-metadata tests, run with the host tests in GitHub Actions.
+
 ## 2026-10-19: LiveArea Settings Update
 
 - Open Settings from LiveArea while the game is running, then return to play.

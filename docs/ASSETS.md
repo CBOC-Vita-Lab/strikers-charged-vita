@@ -1,7 +1,7 @@
 # Included And Required Files
 
 The optional computer-side `PREPARE-GAME.py` helper is included under
-[MIT](CHECK-FILES-LICENSE.txt). It downloads an unmodified, checksum-pinned
+[MIT](../CHECK-FILES-LICENSE.txt). It downloads an unmodified, checksum-pinned
 nodtool directly from its [official release](https://github.com/encounter/nod/releases/tag/v2.0.0-alpha.12).
 The downloaded extractor stays on the user's computer; it is not a game asset.
 The local install bundle includes the reviewed source, preparation tools,
@@ -12,10 +12,10 @@ all linked guides and notices alongside the ready-made VPK.
 The selected VPK contains the quiet player executable with the movie and LiveArea settings fixes,
 byte-for-byte identical to the verified main-app update on a physical Vita.
 Application metadata and matching shader resources are unchanged.
-[RELEASE.json](RELEASE.json) records the package, runtime and source hashes.
+[RELEASE.json](../RELEASE.json) records the package, runtime and source hashes.
 
 The package uses the project's generic icon and LiveArea graphics, recorded
-in [ARTWORK.json](ARTWORK.json), instead of the console's personal fan art.
+in [ARTWORK.json](../ARTWORK.json), instead of the console's personal fan art.
 The optional fan-art background and loading picture are omitted; the same
 executable provides its built-in plain loading screen. Required font and
 library notices are included. The movie, logging and settings changes are recorded

@@ -83,7 +83,7 @@ def main():
         sdk = Path(os.environ.get("VITASDK", "/opt/vitasdk"))
         if not args.fetch_only:
             if platform.system() != "Linux" or any(c.isspace() for c in str(ROOT) + str(sdk)):
-                raise ValueError("Build on Linux in paths without spaces; see BUILDING.md. --fetch-only works on other hosts.")
+                raise ValueError("Build on Linux in paths without spaces; see docs/BUILDING.md. --fetch-only works on other hosts.")
             if not (sdk / "bin/arm-vita-eabi-gcc").is_file():
                 raise ValueError("Set VITASDK to your Linux VitaSDK directory")
         rows = load_lock(ROOT / "dependencies/lock.json")

@@ -1,0 +1,24 @@
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Release, installer-helper and setup tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Install 32-bit build tools
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib clang
+      - name: Wii SDK layer unit tests (host32)
+        run: make -C native/platform/sdk T=host32 B="$PWD/build/sdk-host32" -j2 check
+      - name: Camera zoom unit test
+        run: |
+          cd native
+          clang++ -m32 -std=gnu++17 -DNP_NATIVE=1 -Iinclude -Iplatform/sdk/include \
+            tools/cam/test_camzoom.cpp platform/compat/np_camzoom.cpp -o "$RUNNER_TEMP/camzoom"
+          "$RUNNER_TEMP/camzoom"

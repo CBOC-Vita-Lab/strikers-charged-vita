@@ -29,7 +29,7 @@ read it. Otherwise, it asks for the file and shows any manual copy step.
 It is not included in this download.
 
 1. Open [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases) and connect your Vita.
-2. Paste this repo's URL, or choose `Strikers-settings-20261019-install.zip` from the [matching release](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/tag/strikers-settings-20261019).
+2. Paste this repo's URL, or choose `Strikers-Charged-Vita-install.zip` from the [matching release](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest).
 3. Select your game file. Add the shader compiler only if prompted.
 4. Choose default or custom artwork, then click **Install**.
 

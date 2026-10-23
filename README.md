@@ -1,82 +1,100 @@
-# Mario Strikers Charged Vita
+# Mario Strikers Charged for PS Vita
 
-A native PS Vita port of Mario Strikers Charged, with Vita controls, audio
-and graphics support.
+A native PS Vita port of **Mario Strikers Charged** (Wii, 2007). The game's
+reconstructed C++ source is compiled straight to the Vita's ARM CPU, so there
+is no emulator and no PowerPC recompiler. A purpose-built renderer turns the
+game's Wii graphics calls into vitaGL. Vita controls, touch, audio, saves and
+LiveArea settings are built in.
 
-**The desktop installer is optional.** The game runs on your **PS Vita**.
-You can set it up manually from **Windows, macOS (Intel or Apple Silicon),
-or Linux** using VitaShell. No computer or desktop app is needed while playing.
+> **Fully vibecoded.** This port was written by AI coding agents (Claude,
+> with help from other assistants) working on a real console, and directed and
+> play-tested by a human. Upstream projects keep their credit: see
+> [Credits](CREDITS.md).
 
-**Public preview.** Combined-package licensing and corresponding-source review
-are still pending, as is a complete installation test through the desktop app.
-Publication is not a claim of third-party approval. See
-[Notices](THIRD_PARTY_NOTICES.md) and [Known Issues](KNOWN-ISSUES.md).
+**Public preview.** Most scenes run at about 30 FPS on hardware. Some menus and
+effect-heavy moments are still slower. Read [Known Issues](KNOWN-ISSUES.md)
+before you install. You need your own game dump. No game data is included.
 
-Around 30 FPS is what we've been able to achieve in testing so far, though
-performance varies by scene. There are still bugs to fix and performance
-improvements to make. This build includes the latest intro and stadium-preview
-fixes, including the movie audio-buffer fix. Runtime logging is disabled in
-this build. LiveArea Settings now opens over the running game and lets you
-return without restarting.
+![Gameplay on a PS Vita](store/screenshots/gameplay-vita.png)
 
-## In This Build
+## What's New (2026-10-23)
 
-- Modern Vita controls, a Classic option and Vita button prompts.
-- Seven camera zoom levels, with Auto Zoom and two extra close-up views.
-- GPU skinning, renderer optimizations and a packaged startup shader cache.
-- Recent fixes for startup delays, loading-screen flicker and stadium-preview
-  audio timing.
-- Smoother movie pacing without dropping the audio when a picture is skipped.
-- In-game LiveArea Settings, with a separate confirmation before restarting.
+- **Faster Mega Saves.** The Mega Strike save scene draws far fewer invisible
+  or near-invisible effect sprites, with about the same look.
+- **Tap anywhere to start** on the title screen.
+- **All seven zoom levels on the Options slider.** It shows levels 1-5, or 3-7
+  once you choose level 4 or higher.
+- **Smarter CPU at close zoom.** The AI sees about as much of the pitch as at
+  the original TV camera, even when your view is zoomed in.
+- Quick screen taps are no longer missed, and button taps no longer get lost
+  or replayed.
+- Shader-cache, memory-recovery and texture-upload fixes. Optional rear-touch
+  aim and a faster Mega stick speed are in Settings.
+
+Full list: [Changes](CHANGELOG.md).
 
 ## Install
 
-### Without Our Desktop App
+You need:
 
-**Windows, Mac or Linux. No Python or compiling required.**
+- a homebrew-enabled Vita with VitaShell and about 3 GB free;
+- your own **Wii USA Rev 1 (`R4QE01`)** game dump;
+- a legitimately obtained `libshacccg.suprx` (the Vita's shader compiler module).
 
-You need a homebrew-enabled Vita, VitaShell, about 3 GB free, your own
-**Wii USA Rev 1 (`R4QE01`)** game dump and a legitimately obtained
-`libshacccg.suprx`. The last file is a one-time Vita module, not a PC program.
+Steps:
 
-1. Download [the ready-made VPK](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/download/strikers-settings-20261019/Strikers-settings-20261019.vpk), or the [complete install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/download/strikers-settings-20261019/Strikers-settings-20261019-install.zip) with guides and source. Keep the VPK intact.
-2. [Extract your ISO/RVZ in Dolphin](PREPARE-GAME.md#dolphin-no-python-needed). Already have the complete `sys/` and `files/` folders? Skip extraction. Dolphin is only used to extract files, not to run the game on Vita.
-3. Copy `sys/` and `files/` into `ux0:data/mscharged/game/`, and the VPK to `ux0:VPK/`. Use [USB, FTP or an already configured memory card](INSTALL.md#choose-a-transfer-method).
-4. If missing, place your `libshacccg.suprx` at `ur0:data/libshacccg.suprx`. End the transfer, install the VPK in VitaShell, then launch the Strikers bubble.
+1. Download **[Strikers-Charged-Vita.vpk](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita.vpk)**.
+   For the VPK plus guides, checksums and source, get the
+   [install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita-install.zip) instead.
+2. [Extract your ISO/RVZ with Dolphin](PREPARE-GAME.md#dolphin-no-python-needed)
+   to get the `sys/` and `files/` folders. Dolphin is only used to extract.
+3. Copy `sys/` and `files/` to `ux0:data/mscharged/game/`, and the VPK to
+   `ux0:VPK/` ([transfer methods](INSTALL.md#choose-a-transfer-method)).
+4. If it is missing, put `libshacccg.suprx` at `ur0:data/libshacccg.suprx`.
+   Then install the VPK in VitaShell and launch the bubble.
 
-**[Full manual guide](INSTALL.md)** includes exact folders, transfer steps and
-the shader-module copy step. [Start Here](START-HERE.txt) is the short checklist.
-The VPK includes the player, startup shaders and default artwork; no separate
-`eboot.bin`, shader-cache replacement or desktop installer is needed.
+**Updating?** Install only the new VPK. Your game files, saves and settings in
+`ux0:data/mscharged/` stay as they are. See
+[Update and Back Up](INSTALL.md#update-and-back-up).
 
-## Optional Desktop App
+More detail: [Full install guide](INSTALL.md) · [Short checklist](START-HERE.txt) ·
+[Optional desktop installer](DESKTOP-INSTALL.md) · [Check the download](CHECK-DOWNLOAD.md)
 
-[CBOC Vita Installer 0.1.11](https://github.com/CBOC-Vita-Lab/vita-installer/releases/tag/v0.1.11)
-automates preparation and transfer. **Only this helper's current download is
-Apple Silicon Mac-only, not the game's manual setup.**
+## Playing
 
-Open the app, connect the Vita, paste this repo's URL (or select its ZIP/folder),
-choose your own game and any missing required files, then install.
-No separate Python or Dolphin installation is needed for this route.
-[Desktop guide](DESKTOP-INSTALL.md) / [Mac first-launch help](https://github.com/CBOC-Vita-Lab/vita-installer/blob/main/docs/mac-open.md).
-The app is not Apple-notarized. Intel Mac and Windows app builds remain under
-validation; use the manual guide instead. Both routes install the same VPK.
+The default **Modern** layout:
 
-## Already Installed?
+- Cross passes or switches player.
+- Circle shoots or slide-tackles.
+- Square lobs or big-hits.
+- Triangle uses an item.
 
-Back up your saves and settings, then install only the matching
-`Strikers-settings-20261019.vpk` in VitaShell. Keep your existing game data.
-No desktop app or repeat extraction is needed. See [Update and Back Up](INSTALL.md#update-and-back-up).
+A **Classic** option is also available. Mega Saves can use touch or either
+stick. Open **Settings** from the LiveArea while the game runs to change
+controls, picture and performance options, then return to your match. Saved
+changes apply at the next launch, or choose Save and Restart. Camera zoom is
+in the game's own Options > Visual. See [Controls](CONTROLS.md).
 
-The executable matches the recorded physical-Vita update; a full fresh desktop
-installation still needs its own hardware check. Game data and the proprietary
-shader compiler are not included. [Known Issues](KNOWN-ISSUES.md) and
-[Source Record](SOURCE.md) hold the testing and release details.
+## For Developers
 
-[Controls](CONTROLS.md) | [Building](BUILDING.md) | [Source Record](SOURCE.md)
-| [Technical Notes](TECHNICAL.md) | [Included Files](ASSETS.md)
-| [Licenses](THIRD_PARTY_NOTICES.md) | [Changes](CHANGELOG.md) | [Credits](CREDITS.md)
+| | |
+|---|---|
+| [Building](docs/BUILDING.md) | Toolchain, pinned dependencies, build and packaging |
+| [Technical notes](docs/TECHNICAL.md) | Source layout, data paths, runtime switches |
+| [Source record](docs/SOURCE.md) | What this release was built from, with hashes |
+| [Included files](docs/ASSETS.md) | Package contents and artwork |
+| [Licenses](THIRD_PARTY_NOTICES.md) | Third-party notices |
 
-Upstream contributors retain their credit and rights; see [Credits](CREDITS.md).
+Source layout: `native/` holds the game code, the Wii SDK replacement and the
+Vita platform layer. `renderer/` is the GX→GL renderer, and
+`dependencies/vitaGL/` is the patched vitaGL. Host tests run on every push
+(see `.github/workflows/`).
 
-[Store listing details and screenshots](store/README.md).
+## Status And Thanks
+
+This is an unofficial fan project. It is not affiliated with or endorsed by
+Nintendo or Sony. Mario Strikers Charged is © Nintendo. Built on the
+[mscharged-decomp](https://github.com/yannicksuter/mscharged-decomp)
+decompilation, [vitaGL](https://github.com/Rinnegatamante/vitaGL), VitaSDK and
+others listed in [Credits](CREDITS.md) and the [notices](THIRD_PARTY_NOTICES.md).
+Combined-package licensing review is still pending.
