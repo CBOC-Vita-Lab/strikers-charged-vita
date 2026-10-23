@@ -1980,7 +1980,7 @@ void TrimPool() {
     }
     if (freed) {
         g_pool.resize(kept);
-        VGX_LOG("framebuffer objects: %u unused for 60 frames deleted, %u pooled\n", static_cast<unsigned>(freed), static_cast<unsigned>(kept));
+        VGX_LOG_N(40, "framebuffer objects: %u unused for 60 frames deleted, %u pooled\n", static_cast<unsigned>(freed), static_cast<unsigned>(kept));
     }
 }
 

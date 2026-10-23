@@ -15956,7 +15956,7 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "839d243cc59d98d447a5104ea3df6d26e4d4732a2a3a3d9c748773b89bfa577a"
+   "sha256": "c198d4a2d1f0324fce43f88657637f86e8cef99c4ee6528cf2e3a07ac8dff996"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",
