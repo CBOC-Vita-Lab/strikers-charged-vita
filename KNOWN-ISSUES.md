@@ -25,9 +25,9 @@
 - **The AI plays differently at zoom levels 4-7.** It now judges which players
   are "on screen" from about the TV-default view. `MSC_CAMERA_VIS=screen`
   brings back the real screen test.
-- **The desktop installer (0.1.11) does not know this release yet.** It trusts
-  releases it has listed. Use the manual VitaShell steps until an installer
-  update lists this release.
+- **The desktop installer may not list this release yet.** CBOC Vita Installer
+  trusts the releases in its catalog. If **Get** offers an older version, use
+  the manual VitaShell steps until the catalog lists this one.
 
 ## Still open from earlier releases
 

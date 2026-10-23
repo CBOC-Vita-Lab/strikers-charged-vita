@@ -64,8 +64,16 @@ Steps:
 `ux0:data/mscharged/` stay as they are. See
 [Update and Back Up](INSTALL.md#update-and-back-up).
 
+## Easy Install (Optional)
+
+[CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases/latest)
+does the copying and installing for you, on Mac (macOS 10.13+), Windows (7+) or
+Linux. Open it, press SELECT in VitaShell, click **Get** next to Mario Strikers
+Charged, choose your own disc (ISO, RVZ, WBFS or an extracted folder) and click
+**Install**. Saves and settings are kept. [Easy install guide](DESKTOP-INSTALL.md).
+
 More detail: [Full install guide](INSTALL.md) · [Short checklist](START-HERE.txt) ·
-[Optional desktop installer](DESKTOP-INSTALL.md) · [Check the download](CHECK-DOWNLOAD.md)
+[Check the download](CHECK-DOWNLOAD.md)
 
 ## Playing
 
