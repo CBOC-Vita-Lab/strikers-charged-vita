@@ -1170,6 +1170,13 @@ bool StartGl() {
     std::fprintf(stderr, "[vgx-vita] picture to the screen: %s%s\n",
                  g_upscaleMode == 0 ? "glBlitFramebuffer (MSC_VITA_UPSCALE=off)" : (g_upscaleMode == 1 ? "linear, through the picture shader" : (g_upscaleMode == 2 ? "sharp bilinear" : "sharp bilinear + unsharp mask")),
                  g_upscaleMode >= 3 ? (" amount " + std::to_string(g_sharpen)).c_str() : "");
+    // MSC_VITA_DISPLAY_BUFFERS=2 (23 Oct, console A/B only): double instead of vitaGL's triple buffering. One frame fewer can
+    // wait in the display queue, so a GPU-bound scene shows each frame about one frame time sooner (input feels quicker), at the
+    // risk of a lower frame rate when frame times hover near the 33 ms budget. Unset or 3: vitaGL's default (3).
+    if (const char* e = std::getenv("MSC_VITA_DISPLAY_BUFFERS"); e && (e[0] == '2' || e[0] == '3') && e[1] == '\0') {
+        vglSetDisplayBufferCount(e[0] - '0');
+        std::fprintf(stderr, "[vgx-vita] MSC_VITA_DISPLAY_BUFFERS: %c display buffers\n", e[0]);
+    }
     const GLboolean fellBack = vglInitWithCustomSizes(0, kScreenW, kScreenH, static_cast<int>(ram), static_cast<int>(cdram),
                                                       static_cast<int>(phycont), 0, msaaMode);
     if (fellBack)

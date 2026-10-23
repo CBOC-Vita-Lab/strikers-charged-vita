@@ -79,7 +79,10 @@ report against known timings.
 
 | Line | Effect |
 | --- | --- |
+| `MSC_VITA_DISPLAY_BUFFERS=2` | Double instead of triple buffering (latency A/B; default 3) |
 | `MSC_VITA_RENDER=WxH` | Internal picture size (diagnostic, e.g. `320x224` for a fill-rate A/B) |
 | `MSC_FX_THIN=0/2`, `MSC_FX_ZERO=0` | Mega Strike particle drawing (see [Technical notes](TECHNICAL.md)) |
 
 Emulator timing (Vita3K) is not console performance evidence. Use it for correctness only.
+
+The A/B tests planned for the next optimisations are in [Console tests](CONSOLE-TESTS.md).

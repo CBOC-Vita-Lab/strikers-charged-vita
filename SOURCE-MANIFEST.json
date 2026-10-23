@@ -4,7 +4,7 @@
  "files": [
   {
    "path": "dependencies/Makefile.vitadeps",
-   "sha256": "1749cb3f4e7ad8982acbe68d9695573882520d0c3a58c7808875bfda86e96922"
+   "sha256": "c4f9f21223b3bcdecb0a543cc82b1299d62ebc561b0894238e9882153b572634"
   },
   {
    "path": "dependencies/lock.json",
@@ -16304,7 +16304,7 @@
   },
   {
    "path": "renderer/vita/vgx_host_vita.cpp",
-   "sha256": "86071675f04a27c45f27c9831f9b6ea5ce8936e2c2277a6fd6c6b59e43387d7f"
+   "sha256": "e3aa5a7410280cdeaa15ea6f0d12f3b05335bebfaac19f703d8a97d5dbe7aac4"
   },
   {
    "path": "renderer/vita/vgx_listmerge.h",

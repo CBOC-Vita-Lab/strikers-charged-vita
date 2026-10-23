@@ -26,6 +26,11 @@ Performance and reliability:
 - Characters hidden during Mega Strikes are not prepared for drawing.
 
 Diagnostics and logging:
+- `MSC_VITA_DISPLAY_BUFFERS=2` (test switch): double buffering, for a console
+  A/B of input latency. [Console tests](docs/CONSOLE-TESTS.md) lists the
+  measurements that decide the next optimisations.
+- vitaGL is built with `-ffile-prefix-map`, so no local paths end up in the
+  executable.
 - Development builds write the log from a background thread, so card writes
   no longer stall the game or change the timings being measured.
 - Performance recorder: its memory is allocated only when it is turned on, the
