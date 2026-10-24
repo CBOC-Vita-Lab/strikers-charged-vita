@@ -24,7 +24,7 @@ struct Bank {
     std::unique_ptr<std::atomic<uint32_t>[]> gen;
 };
 Bank g_banks[4];
-int g_numBanks = 0;
+std::atomic<int> g_numBanks{0}; // (1.1: atomic: a bank may be registered while the renderer runs, e.g. the skinning pose pool)
 std::atomic<uint64_t> g_epoch{0}; // bumped by every write notification
 // The last kLogSize write notifications, slot = epoch % kLogSize. A slot's
 // stamp is 0 while it is being written and epoch+1 once complete, so a reader
@@ -38,7 +38,8 @@ struct LogRec {
 LogRec g_log[kLogSize];
 
 inline const Bank* FindBank(const uint8_t* p, uint32_t n) {
-    for (int i = 0; i < g_numBanks; ++i) {
+    const int nb = g_numBanks.load(std::memory_order_acquire);
+    for (int i = 0; i < nb; ++i) {
         const Bank& b = g_banks[i];
         if (p >= b.base && static_cast<uint64_t>(p - b.base) + n <= b.size) return &b;
     }
@@ -66,7 +67,7 @@ uint64_t GuestWriteGeneration(const void* ptr, uint32_t n) {
     return sum; // counters only grow, so the sum changes whenever one of them does
 }
 bool IsGuestRam(const void* ptr, uint32_t n) { return FindBank(static_cast<const uint8_t*>(ptr), n ? n : 1) != nullptr; }
-bool HaveGuestRam() { return g_numBanks != 0; }
+bool HaveGuestRam() { return g_numBanks.load(std::memory_order_relaxed) != 0; }
 uint64_t GuestWriteEpoch() { return g_epoch.load(std::memory_order_acquire); }
 
 bool GuestWritesTouch(uint64_t from, uint64_t to, const HostRange* ranges, int count) {
@@ -90,14 +91,15 @@ bool GuestWritesTouch(uint64_t from, uint64_t to, const HostRange* ranges, int c
 
 namespace hle {
 void RegisterGuestRam(const void* hostBase, uint32_t size) {
-    if (!hostBase || !size || g_numBanks >= 4) return;
-    Bank& b = g_banks[g_numBanks];
+    const int nb = g_numBanks.load(std::memory_order_relaxed);
+    if (!hostBase || !size || nb >= 4) return;
+    Bank& b = g_banks[nb];
     b.base = static_cast<const uint8_t*>(hostBase);
     b.size = size;
     const size_t n = (static_cast<size_t>(size) >> kShift) + 1;
     b.gen.reset(new std::atomic<uint32_t>[n]);
     for (size_t i = 0; i < n; ++i) b.gen[i].store(1, std::memory_order_relaxed);
-    ++g_numBanks; // published last: readers on the render thread start after initialisation
+    g_numBanks.store(nb + 1, std::memory_order_release); // published last (readers acquire it)
 }
 void NotifyGuestWrite(const void* hostPtr, uint32_t size) {
     if (!size) return;

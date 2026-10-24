@@ -57,6 +57,9 @@ The performance update.
 - Faster texture uploads and less background CPU use.
 - The game's 3D models are rebuilt less often after loading screens and
   pauses (improvements shared with the Super Mario Galaxy port).
+- Players' faces in celebrations, replays and cut-scenes are skinned on the
+  graphics chip like the rest of the body, so those scenes give the CPU less
+  to do.
 
 Technical details for developers are in
 [Technical Notes](docs/TECHNICAL.md#version-11-changes).

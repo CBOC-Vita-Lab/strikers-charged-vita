@@ -52,6 +52,7 @@ Save ones; add the others by hand. These are the switches added for the
 | `MSC_VITA_EDGE_AA=0` | No edge smoothing in the SMOOTH picture filter (default 1) |
 | `MSC_HDTEX=0` | Ignore the HD texture pack (`ux0:data/mscharged/hdtex.pack`, when it is there); `MSC_HDTEX_BUDGET=MiB` caps its graphics memory (default 8) |
 | `MSC_VGX_KEEP_TARGETS=0`, `MSC_VGX_KEEP_SIZES=0` | Do not keep the render targets and pass objects of recently used picture sizes |
+| `MSC_SKIN_GPU_MORPH=0` | Skin faces with active expressions on the CPU as before |
 
 ## Dynamic Resolution And Frame Rate
 
@@ -281,3 +282,14 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
   unused for 600 frames are freed past half of that; a typical match uses
   about 2.6 MiB. Sampled with mips, so ordinary play reads the
   original-sized level. `MSC_HDTEX=0` turns it off.
+- Face morphs on the GPU (`ShaderSkinMesh::GpuSkinPacket`): packets with an
+  active morph target were CPU-skinned into a new array every frame, so the
+  renderer also decoded their lists again every frame (about 12 bypassed
+  lists a frame in celebrations and replays). They are now GPU-skinned from a
+  morphed bind pose kept per packet in a pool of its own (outside the game's
+  heaps, which the simulation's layout depends on; registered with the
+  renderer as tracked memory) and remade only when the weights change.
+  ARM instruction counts in replays: renderer thread 8.32 M -> 7.00 M a
+  frame, game thread 5.08 M -> 4.95 M; open play unchanged; pictures equal.
+  `MSC_SKIN_GPU_MORPH=0` restores the CPU path. `MSC_VGX_BYPASSLOG=1` logs
+  why a list is decoded every frame.

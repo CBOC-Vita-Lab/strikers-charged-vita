@@ -467,6 +467,31 @@ void DlCacheReport(FILE* f) {
                  (unsigned long long)g_ctr.promotedSmall, (unsigned long long)g_ctr.staticBufs, g_ctr.staticBytes / 1048576.0);
 }
 
+// MSC_VGX_BYPASSLOG=1 (diagnostic): why a list is decoded every frame. Names what differs between the new binding and the newest variant.
+void BypassNote(const char* why, const uint8_t* list, uint32_t nbytes, const Entry* v) {
+    static const int on = EnvInt("MSC_VGX_BYPASSLOG", 0) ? 1 : 0;
+    if (!on) return;
+    char diff[160] = "";
+    if (v) {
+        size_t n = 0;
+        auto add = [&](const char* t) { n += std::snprintf(diff + n, sizeof diff - n, "%s ", t); };
+        if (std::memcmp(v->vcd, g.vcd, 21) != 0) add("vcd");
+        for (int f = 0; f < 8; ++f)
+            if ((v->fmtMask & (1u << f)) && std::memcmp(v->vat[f], &g.vat[f][9], sizeof v->vat[f]) != 0) { add("vat"); break; }
+        static const char* kNames[12] = {"pos", "nrm", "clr0", "clr1", "tex0", "tex1", "tex2", "tex3", "tex4", "tex5", "tex6", "tex7"};
+        for (int a = 9; a <= 20; ++a)
+            if ((v->idxMask & (1u << a)) && v->arr[a - 9] != g.arrays[a].data) add(kNames[a - 9]);
+        if (v->skin != g_skin.on) add("skin-on");
+        else if (v->skin && (v->skinW != g_skin.weights || v->skinI != g_skin.indices)) add("skin-arrays");
+        if (v->nbytes != nbytes) add("size");
+    }
+    char vd[40];
+    for (int a = 9; a <= 20; ++a) vd[a - 9] = "-dbw"[g.vcd[a] & 3];
+    vd[12] = 0;
+    std::fprintf(stderr, "[bypass] frame %llu list %p %u bytes: %s%s%s (vcd pos..tex7 %s, skin %d)\n", static_cast<unsigned long long>(CurrentFrame()), (const void*)list, nbytes, why,
+                 v ? "; differs: " : "", diff, vd, g_skin.on ? 1 : 0);
+}
+
 void CallList(const uint8_t* list, uint32_t nbytes) {
     Init();
     const uint64_t frame = CurrentFrame();
@@ -565,6 +590,15 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         if (++e->fails >= 3) {
             // Rewritten every time it is drawn (dynamic geometry): hashing and
             // storing it is wasted work. Decode directly for the next two seconds.
+            if (EnvInt("MSC_VGX_BYPASSLOG", 0)) {
+                static const char* kNames[12] = {"pos", "nrm", "clr0", "clr1", "tex0", "tex1", "tex2", "tex3", "tex4", "tex5", "tex6", "tex7"};
+                char w[200];
+                size_t n = std::snprintf(w, sizeof w, "contents rewritten each draw: written %s", tracked && gl != e->genList ? "list " : "");
+                for (int a = 9; a <= 20; ++a)
+                    if ((e->idxMask & (1u << a)) && (!tracked || ga[a - 9] != e->genArr[a - 9]))
+                        n += std::snprintf(w + n, sizeof w - n, "%s@%p+%u ", kNames[a - 9], (const void*)(e->arr[a - 9] + e->lo[a - 9]), e->hi[a - 9] - e->lo[a - 9]);
+                BypassNote(w, list, nbytes, nullptr);
+            }
             SetBypass(BypassFor(list), frame);
             Unlink(li, e);
             if (!li.head) { g_map.erase(list); MapFrontClear(); }
@@ -584,6 +618,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             else if (li.lastNewVariant != frame) li.streak = 1;
             li.lastNewVariant = frame;
             if (li.streak >= 4) {
+                BypassNote("a new binding every frame", list, nbytes, li.head);
                 SetBypass(BypassFor(list), frame);
                 FreeAll(li);
                 g_map.erase(list);
