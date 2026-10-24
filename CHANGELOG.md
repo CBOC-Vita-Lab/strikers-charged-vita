@@ -1,6 +1,6 @@
 # What's New
 
-## Version 1.1 — October 23, 2026
+## Version 1.1 — October 24, 2026
 
 The performance update.
 
@@ -11,7 +11,9 @@ The performance update.
 - Mega Strikes run at a steady 30 fps at full resolution (about 15 fps
   before). Their glowing haze is drawn at a lower resolution and blended over
   the sharp, full-size scene.
-- Stick and touch respond faster in Mega Saves and other heavy scenes.
+- Snappier controls: a third less delay from button to screen, about a
+  tenth of a second in normal play. Stick and touch respond faster in Mega
+  Saves and other heavy scenes too.
 - The picture size adapts to the load: effects soften first and the scene
   only slightly, so the frame rate holds without the game looking rough.
 - Fewer hitches from those size changes: they now happen at the cuts into

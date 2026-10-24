@@ -22,9 +22,11 @@ You'll need your own copy of the game. No game data is included.
 This is the big performance update, and the game feels like a different port
 for it.
 
-- **Up to 60 fps.** Matches now run at 60 frames per second whenever the Vita
-  can keep up, and drop smoothly to 30 when the action gets heavy. You don't
-  have to do anything: it's automatic.
+- **Up to 60 fps.** The game now runs at 60 frames per second whenever the
+  Vita can keep up, and holds a smooth 30 when the action gets heavy. You
+  don't have to do anything: it's automatic.
+- **Snappier controls.** The delay between pressing a button and seeing it on
+  screen is down by a third, to about a tenth of a second in normal play.
 - **Mega Strikes look great and play smoothly.** The glowing haze is drawn at
   a lower resolution and blended over a full-resolution scene, so the players,
   ball and stadium stay sharp while the scene runs at a steady 30 fps.
@@ -37,9 +39,10 @@ for it.
 - **Optional HD characters.** Turn your own game files into sharper faces,
   kits and a sharper ball for Mega Strikes, celebrations and menus, with no
   cost to frame rate. [How](tools/hdtex/README.md).
-- **Resolution that adapts.** In the rare moments when the graphics chip is
-  stretched, the game softens effects first and the scene only slightly, so
-  the frame rate holds without the picture falling apart.
+- **Resolution that adapts.** When the graphics chip is stretched, the game
+  softens effects first and the scene only slightly, so the frame rate holds
+  without the picture falling apart. Changes happen at camera cuts, so you
+  won't feel them mid-play.
 - **Tap anywhere to start** on the title screen.
 - **All seven camera zoom levels** on the Options slider, and the CPU plays
   just as smart when you zoom in close.
@@ -52,9 +55,11 @@ Want the fine print? See the [full list of changes](CHANGELOG.md).
 
 | | |
 |---|---|
-| **Matches** | Aims for 60 fps; settles at a smooth 30 in the busiest moments |
+| **Matches** | A smooth 30 fps in open play, up to 60 when the scene is light |
 | **Mega Strikes and Mega Saves** | Steady 30 fps at full resolution |
-| **Menus** | 30 fps; the main and stadium menus can still dip |
+| **Goal replays and celebrations** | Around 20-25 fps for now |
+| **Menus** | Mostly 30 fps; the main menu and the team and stadium screens run in the low 20s |
+| **Controls** | About a tenth of a second from button to screen in normal play |
 | **Picture** | Native Vita resolution or higher, lightly sharpened |
 | **Saves** | Your saves and settings carry over between updates |
 

@@ -5,8 +5,11 @@ please [open an issue](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/is
 
 ## Performance
 
-- **Some menus run below 30 fps.** The main menu and stadium select are the
-  slowest scenes in the game right now. Matches are not affected.
+- **Some menus run below 30 fps.** The main menu and the team and stadium
+  screens run in the low 20s. Matches are not affected.
+- **Goal replays and celebrations run at around 20-25 fps.** The close-up
+  camera shows far more detail than open play. Gameplay itself is not
+  affected, and we're working on it.
 - **60 fps depends on the scene.** AUTO runs matches at 60 whenever the Vita
   can keep up and switches to 30 in the busiest moments. If you'd rather have
   a constant frame rate, set **Frame Rate** to **30 FPS** in Settings.
