@@ -207,8 +207,10 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
 #endif
 
 #if defined(HAVE_SHADER_CACHE) || defined(HAVE_TEX_CACHE)
-	char titleid[12];
-	sceAppMgrAppParamGetString(0, 12, titleid , 256);
+	char titleid[12] = {0};
+	if (sceAppMgrAppParamGetString(0, 12, titleid, sizeof(titleid)) < 0 || !titleid[0])
+		strcpy(titleid, "UNKNOWN");
+	titleid[sizeof(titleid) - 1] = 0;
 #endif
 #ifdef HAVE_TEX_CACHE
 	sceIoMkdir("ux0:data/vgl_cache", 0777);
@@ -231,23 +233,8 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
 	sceIoMkdir(vgl_shader_cache_path, 0777);
 	sprintf(fname, "%s/v", vgl_shader_cache_path);
 	sceIoMkdir(fname, 0777);
-	char dirname[256];
-	sprintf(dirname, "%s/00", fname);
-	GLboolean skip_creation = sceIoMkdir(dirname, 0777) != 0;
-	if (!skip_creation) {
-		for (int i = 1; i <= 0xFF; i++) {
-			sprintf(dirname, "%s/%02X", fname, i);
-			sceIoMkdir(dirname, 0777);
-		}
-	}
 	sprintf(fname, "%s/f", vgl_shader_cache_path);
 	sceIoMkdir(fname, 0777);
-	if (!skip_creation) {
-		for (int i = 0; i <= 0xFF; i++) {
-			sprintf(dirname, "%s/%02X", fname, i);
-			sceIoMkdir(dirname, 0777);
-		}
-	}
 #endif
 	// Check if framebuffer size is valid
 	GLboolean res_fallback = GL_FALSE;

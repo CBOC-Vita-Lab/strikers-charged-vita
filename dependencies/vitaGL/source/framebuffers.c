@@ -955,6 +955,27 @@ void vglTexImageDepthBuffer(GLenum target) {
 	}
 }
 
+/* Strikers 1.1: the depth buffer of framebuffer `fb` (a glGenFramebuffers name) as the texture bound to the active unit, for a shader
+ * that reads the scene's depth (vitaGL has no depth textures and attaches colour only). The surface is LINEAR DF32M with rows of
+ * VGL_ALIGN(width, SCE_GXM_TILE_SIZEX) samples; the texture is that wide, so a caller maps u to [0, width / returned value].
+ * Returns the row width in samples, or 0 when the framebuffer has no depth buffer yet (before its first scene). The texture only
+ * points at the surface: it is rebound before every use (the surface moves when the framebuffer is resized) and owns no memory. */
+int vglStrikersBindFramebufferDepth(GLuint fb_id) {
+	framebuffer *fb = (framebuffer *)fb_id;
+	if (!fb || !fb->active || !fb->depthbuffer_ptr || !(fb->depthbuffer_state & DEPTHBUFFER_READY) || !fb->depthbuffer_ptr->depthData)
+		return 0;
+	texture_unit *tex_unit = &texture_units[server_texture_unit];
+	texture *tex = &texture_slots[tex_unit->tex_id[0]];
+	if (tex->data)
+		return 0; // (a texture with storage of its own is never repointed)
+	const int row = VGL_ALIGN(fb->width, SCE_GXM_TILE_SIZEX);
+	// (no store-mode change here: it would alter a surface whose scene may still be open; the caller's scene hints store the depth)
+	if (sceGxmTextureInitLinear(&tex->gxm_tex, fb->depthbuffer_ptr->depthData, SCE_GXM_TEXTURE_FORMAT_DF32M, row, fb->height, 0) < 0)
+		return 0;
+	tex->status = TEX_VALID;
+	return row;
+}
+
 GLboolean glIsFramebuffer(GLuint fb) {
 	framebuffer *p = (framebuffer *)fb;
 	return (p && p->active);

@@ -12,4 +12,9 @@ bool HaveGuestRam(); // has the runtime registered its memory banks?
 // Changes whenever any write notification arrives (to detect a write that
 // raced with a decode).
 uint64_t GuestWriteEpoch();
+// Did any write notified between epochs [from, to) overlap one of the ranges?
+// True when it cannot tell (too many writes in between, or the log entry was
+// overwritten meanwhile), so a caller can always treat true as "raced".
+struct HostRange { const void* p; uint32_t n; };
+bool GuestWritesTouch(uint64_t from, uint64_t to, const HostRange* ranges, int count);
 }

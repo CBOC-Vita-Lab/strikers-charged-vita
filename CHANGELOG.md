@@ -1,75 +1,89 @@
-# Changes
+# What's New
 
-## Version 1.0 — October 19, 2026
+## Version 1.1 — October 24, 2026
 
-The first public preview.
+The performance update.
 
-- Open Settings from LiveArea while the game is running, then return to play.
-- Save changes for the next launch, or restart only after confirmation.
-- Pause game timing and audio while settings are open.
-- Smoother intro and stadium-preview movies with their audio kept.
-- No runtime logging.
+**Smoother play**
+- Matches run at up to 60 fps. The Frame Rate setting is now **AUTO** by
+  default: 60 when the Vita can keep up, a smooth 30 when it can't. Prefer a
+  locked 30? Choose **30 FPS** in Settings.
+- Mega Strikes run at a steady 30 fps at full resolution (about 15 fps
+  before). Their glowing haze is drawn at a lower resolution and blended over
+  the sharp, full-size scene.
+- Snappier controls: a third less delay from button to screen, about a
+  tenth of a second in normal play. Stick and touch respond faster in Mega
+  Saves and other heavy scenes too.
+- The picture size adapts to the load: effects soften first and the scene
+  only slightly, so the frame rate holds without the game looking rough.
+- Fewer hitches from those size changes: they now happen at the cuts into
+  and out of a Mega Strike, not a few seconds into play, and a size used
+  recently is switched back to quickly.
 
-Downloads: `Strikers-Charged-Vita.vpk` (the game) and `Strikers-Charged-Vita-install.zip`
-(the game with guides and source). Easy install: [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases/latest).
+**Better picture**
+- A light sharpening filter is on by default (Settings > Sharpness: SMOOTH).
+  OFF, CRISP and CRISP+ are still there.
+- SMOOTH also softens jagged character outlines, at almost no cost.
+- Optional HD characters and ball: sharper faces, kits and ball in close-ups
+  (Mega Strikes, celebrations, menus), made on your computer from your own
+  game files with `tools/hdtex` and copied to `ux0:data/mscharged/hdtex.pack`.
+  In normal play the game draws the same detail as before, so it costs no
+  frame rate.
+- When there's time to spare, the game is drawn above native resolution for
+  cleaner edges.
+- New optional **Distant Textures** setting for sharper ground and walls at an
+  angle (experimental, off by default).
 
-## 2026-10-19: Quiet Update
+**Controls and gameplay**
+- Tap anywhere on the title screen to start.
+- All seven camera zoom levels are on the Options > Visual slider.
+- The CPU plays just as well when your camera is zoomed in close.
+- Quick screen taps are never missed, and button presses are never lost or
+  repeated after a system pop-up.
+- The stick moves the glove three times faster in Mega Saves by default, so
+  you can reach the far side of the goal in time (Settings > Mega Save Speed:
+  3x, 4x, 2x or ORIGINAL). Optional rear-touch aiming is in Settings too.
 
-- Disabled runtime logging, console output and startup diagnostic probes.
-- Kept the intro, stadium-preview and movie-audio fixes, plus normal save I/O.
-- Updated the matching source, VPK, install ZIP and checksums.
-- Requires CBOC Vita Installer 0.1.8 or newer for desktop installation.
+**Under the hood**
+- Fixed a crash when starting a match after the picture size had changed a
+  few times: unused graphics buffers are now freed, and the game only draws a
+  larger picture when there is graphics memory to spare.
+- Mega Strikes no longer drop to a low resolution when that would not make
+  them any faster.
+- More of the game's graphics come prebuilt, so a goal replay no longer stops
+  for a loading bar the first time.
+- Fixed new graphics effects never being built on the console (a fault in
+  the shader cache code), which kept the sharpening and the lighter Mega
+  Strike glow from switching on.
+- More reliable shader cache and graphics memory recovery.
+- Faster texture uploads and less background CPU use.
+- The game's 3D models are rebuilt less often after loading screens and
+  pauses (improvements shared with the Super Mario Galaxy port).
+- Players' faces in celebrations, replays and cut-scenes are skinned on the
+  graphics chip like the rest of the body, so those scenes give the CPU less
+  to do.
 
-## 2026-10-19: Movie Update
+Technical details for developers are in
+[Technical Notes](docs/TECHNICAL.md#version-11-changes).
 
-- Improved intro and stadium-preview pacing while keeping the movie audio.
-- Fixed audio-buffer access during playback and retries after delayed reads.
-- Added regression tests for movie scheduling, audio and decoder-buffer reuse.
-- Included the matching production VPK with generic art and existing shaders.
-  Its executable matches the verified main-app update on a physical Vita.
+## October 19, 2026 — Settings Update
 
-## 2026-10-18: Launch Preparation
+- Open Settings from the LiveArea while the game is running, then jump back
+  into your match.
+- Save changes for next launch, or apply them now with Save and Restart.
+- The game pauses while Settings is open.
 
-- Made the desktop installer the main quick-start route, with manual setup
-  still available.
-- Clarified that ZIPs and complete extracted release folders both work.
-- Kept the older private preview clearly separate from the intro/stadium
-  update still undergoing hardware tests.
-- Shortened the project description and clarified the remaining performance work.
+## October 19, 2026 — Movie and Quiet Updates
 
-## 2026-10-18: Copy-And-Install Setup
+- Smoother intro and stadium-preview movies with their audio intact.
+- Faster start-up with no debug output.
 
-- Made the ready-made VPK and copy-folder steps the main install path.
-- Added Dolphin extraction instructions; Python is an optional helper only.
-- Used generic app art and the built-in loading screen instead of personal
-  fan art. Added notices without changing the installed executable or shaders.
+## October 18, 2026 — Easier Setup
 
-## 2026-10-18: Installed Build Preserved
+- Simple copy-and-install steps, with Dolphin extraction instructions.
+- Optional one-command game preparation helper.
+- Full source, build instructions and license notices.
 
-- Kept the installed executable, artwork, loading image and shaders unchanged.
-- Kept source-build validation outputs outside the install bundle.
-- Added missing font and linked-library notices to the source.
+## Version 1.0
 
-## 2026-10-18: Dependency Setup
-
-- Recovered the library-build recipe and pinned its external source inputs.
-- Added `BUILD-DEPS.py` to fetch and build them without changing VitaSDK.
-- Kept the original game, renderer and installed runtime unchanged.
-
-## 2026-10-18: Simpler Setup
-
-- Added one-command game preparation with a verified extractor download,
-  automatic disc checks and no replacement of existing output folders.
-- Shortened the quick start and moved detailed release notes out of the main flow.
-- Included preparation tools, source and linked guides in the local bundle.
-
-## 2026-10-18: Source And Documentation
-
-- Added the recovered `a8d4ad6` native source, renderer and patched vitaGL files.
-- Added build provenance, dependency gaps, technical notes and license texts.
-- Kept the simple VPK-plus-own-data install path and backup instructions.
-- No runtime rebuild, console install, public release or visibility change.
-
-The selected build includes the camera/control, startup, skinning and audio
-changes summarized in [README](README.md). See [Known Issues](KNOWN-ISSUES.md)
-for the remaining hardware checks.
+- First public release of the native PS Vita port.

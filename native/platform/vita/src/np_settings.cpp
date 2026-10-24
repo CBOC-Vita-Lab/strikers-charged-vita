@@ -31,13 +31,14 @@ constexpr Option kTable[] = {
      {"ON keeps animations at the original speed while the Vita draws at 30 fps.", "Leave it ON. OFF is for finding problems: animations run at half speed."},
      0, true,
      {{"ON", {}}, {"OFF", {{"MSC_FRAME_PACING", "0"}}}}},
-    // W5 FPS (np/docs/wave5-FPS.md): the game's pictures are shown for exactly two refreshes (30 fps) unless AUTO is chosen: AUTO shows 60 while the scene holds it (measured
-    // per frame, with a cool-down so it does not flip) and 30 otherwise. 30 is the build's default and writes nothing. MSC_FPS=60|unlocked exist for testing, set by hand
-    // in np-player.txt (a file with them reads CUSTOM here). A build without W5FPS ignores the key.
+    // W5 FPS (np/docs/wave5-FPS.md): AUTO (the build's default since 23 Oct, writes nothing) shows 60 while the scene holds it on every CPU core and on the GPU (the
+    // renderer lowers the picture size within limits first), and 30 otherwise, with a cool-down so it does not flip. 30 FPS writes MSC_FPS=30: every picture is shown for
+    // exactly two refreshes. MSC_FPS=60|unlocked exist for testing, set by hand in np-player.txt (a file with them reads CUSTOM here). The MSC_FPS=auto line of earlier
+    // builds reads as AUTO (Matches) and is dropped at the next save.
     {"FRAME RATE",
-     {"30 FPS: every picture is shown for exactly two refreshes. The safe choice.", "AUTO: 60 where a scene can hold it, 30 elsewhere. Game speed is the same."},
+     {"AUTO: 60 where a scene can hold it, 30 elsewhere. Game speed is the same.", "30 FPS: every picture is shown for exactly two refreshes. Steady, never 60."},
      0, true,
-     {{"30 FPS", {}}, {"AUTO (30 OR 60)", {{"MSC_FPS", "auto"}}}}},
+     {{"AUTO (30 OR 60)", {}}, {"30 FPS", {{"MSC_FPS", "30"}}}}},
     // PIPE (wave 5, np/docs/wave5-PIPE.md): the player build starts in core plan C with a safety net (ux0:data/mscharged/np-plan.txt steps down to A and then S after a
     // failed start); MSC_PLAN=A|S picks one by hand and switches the net off. A build without W5PIPE ignores the key, so the row only takes effect in a build that has it.
     // (The earlier row wrote MSC_VGX_BACKEND_THREAD and MSC_VITA_CORE_FRAMESEND, which count as explicit settings and bypass PIPE's net.)
@@ -48,9 +49,13 @@ constexpr Option kTable[] = {
     // The picture rows of wave 5 LOOK (docs: LOOK.NOTES.md "PICTURE SETTINGS FOR ONE"): in no preset. The keys are read by LOOK's renderer changes (vgx
     // 50e3a62 and later); a build without them ignores the lines, so these rows only take effect in a build that has merged W5LOOK.
     {"SHARPNESS",
-     {"Sharpens the picture when it is scaled up to the screen.", "CRISP+ is stronger. Needs the shader compiler. Not needed at 960x544."},
+     {"Sharpens the picture when it is scaled up to the screen.", "SMOOTH keeps edges soft. CRISP / CRISP+ are blockier. OFF: no sharpening."},
      0, false,
-     {{"OFF", {}}, {"CRISP", {{"MSC_VITA_UPSCALE", "sharp"}}}, {"CRISP+", {{"MSC_VITA_UPSCALE", "sharp+"}, {"MSC_VITA_SHARPEN", "0.35"}}}}},
+     {{"SMOOTH", {}}, {"OFF", {{"MSC_VITA_UPSCALE", "off"}}}, {"CRISP", {{"MSC_VITA_UPSCALE", "sharp"}}}, {"CRISP+", {{"MSC_VITA_UPSCALE", "sharp+"}, {"MSC_VITA_SHARPEN", "0.35"}}}}},
+    {"DISTANT TEXTURES",
+     {"SHARP keeps the far half of the pitch crisp (anisotropic filtering).", "Experimental: not yet tried on a console. Leave it OFF unless testing."},
+     0, false,
+     {{"OFF", {}}, {"SHARP (TEST)", {{"MSC_VITA_ANISO", "3"}}}}},
     {"ANTI-ALIASING",
      {"Smooths jagged edges. Experimental: costs GPU time and memory.", "Not measured yet. Leave it OFF unless you want to try it."},
      0, false,
@@ -103,9 +108,18 @@ constexpr Option kTable[] = {
      0, false,
      {{"ON", {}}, {"OFF", {{"NP_TOUCH_POINTER", "0"}}}}},
     {"TOUCH MEGA SAVE",
-     {"Mega Save: the finger aims and blocks where it touches.", "OFF: aim with either stick, block with Cross or R."},
+     {"Enable the selected Mega Save touch aiming mode.", "OFF: aim with either stick, block with Cross or R."},
      0, false,
      {{"ON", {}}, {"OFF", {{"MSC_TOUCH_SAVE", "0"}}}}},
+    {"MEGA SAVE AIM",
+     {"FRONT: touch to aim and block. REAR: one finger aims, Cross or R blocks.", "Rear aim needs a fresh contact; lift all fingers after a grip or pause."},
+     0, false,
+     {{"FRONT TOUCH", {}}, {"REAR + CROSS", {{"MSC_MEGA_AIM", "rear"}}}}},
+    {"MEGA SAVE SPEED",
+     {"How fast the stick moves the glove in Mega Saves. 3x (default) reaches", "the far side in time. ORIGINAL keeps POINTER SPEED. Touch is unchanged."},
+     0, false,
+     {{"3x", {}}, {"4x", {{"MSC_MEGA_POINTER_SPEED", "4"}}}, {"2x", {{"MSC_MEGA_POINTER_SPEED", "2"}}},
+      {"ORIGINAL", {{"MSC_MEGA_POINTER_SPEED", "1"}}}}},
     {"TOUCH MEGA STRIKE",
      {"Your Mega Strike: hold a finger on the screen to stop the meter.", "OFF: the shoot button does it."},
      0, false,
@@ -128,9 +142,9 @@ static_assert(kOptionTotal <= kMaxOptions, "raise kMaxOptions");
 
 // The presets (option title, choice index). Placeholders until the wave 5 performance work lands its keys (docs/wave5-ONE.md, "Presets").
 constexpr Preset kPresets[] = {
-    {"PERFORMANCE", {{"RESOLUTION", 2}, {"PERFORMANCE MODE", 1}, {"FRAME PACING", 0}, {"FRAME RATE", 1}, {"CORE PLAN", 0}}},   // smaller picture, no crowd, 60 where it holds
-    {"DEFAULT", {{"RESOLUTION", 0}, {"PERFORMANCE MODE", 0}, {"FRAME PACING", 0}, {"FRAME RATE", 0}, {"CORE PLAN", 0}}},      // (30: until a console has measured AUTO)
-    {"QUALITY", {{"RESOLUTION", 1}, {"PERFORMANCE MODE", 0}, {"FRAME PACING", 0}, {"FRAME RATE", 0}, {"CORE PLAN", 0}}},       // the screen's own size, a steady 30
+    {"PERFORMANCE", {{"RESOLUTION", 2}, {"PERFORMANCE MODE", 1}, {"FRAME PACING", 0}, {"FRAME RATE", 0}, {"CORE PLAN", 0}}},   // smaller picture, no crowd, 60 where it holds
+    {"DEFAULT", {{"RESOLUTION", 0}, {"PERFORMANCE MODE", 0}, {"FRAME PACING", 0}, {"FRAME RATE", 0}, {"CORE PLAN", 0}}},      // AUTO: 60 where it holds
+    {"QUALITY", {{"RESOLUTION", 1}, {"PERFORMANCE MODE", 0}, {"FRAME PACING", 0}, {"FRAME RATE", 1}, {"CORE PLAN", 0}}},       // the screen's own size, a steady 30
 };
 constexpr int kPresetTotal = int(sizeof(kPresets) / sizeof(kPresets[0]));
 
@@ -183,6 +197,7 @@ bool Matches(const std::vector<Line>& vars, const Option& option, const Choice& 
             for (const Assign& b : choice.set)
                 if (b.key && std::strcmp(b.key, a.key) == 0) want = b.value;
             const std::string* have = Lookup(vars, a.key);
+            if (have && !want && std::strcmp(a.key, "MSC_FPS") == 0 && *have == "auto") have = nullptr;   // earlier builds' AUTO line: today's default
             if (want ? !(have && *have == want) : have != nullptr) return false;
         }
     }
@@ -501,6 +516,9 @@ NpControlTable::Config ControlsConfig(const State& s) {
         return o < 0 || s.choice[o] != 1;
     };
     c.touchSave = on("TOUCH MEGA SAVE");
+    const int aimRow = OptionIndex("MEGA SAVE AIM");
+    c.rearSave = c.touchSave && aimRow >= 0 && s.choice[aimRow] == 1;
+    c.touchSave = c.touchSave && !c.rearSave;
     c.touchMeter = on("TOUCH MEGA STRIKE");
     c.touchShake = on("TOUCH SHAKEDOWN");
     c.touchPointer = on("TOUCH POINTER");

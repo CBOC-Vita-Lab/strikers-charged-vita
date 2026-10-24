@@ -17,7 +17,7 @@ Keep file-level notices and the license texts with any permitted copy.
 | DejaVu fonts | Bitstream Vera / DejaVu terms in `licenses/DejaVu.txt`; rasterized Mono and Condensed Bold glyphs are included in the console and button prompts, with Sans Bold used in original project artwork |
 | zlib 1.2.2 | Jean-loup Gailly and Mark Adler; `licenses/zlib.txt`, with original source notices retained |
 | Port-specific additions | Preserved source; no new blanket license is invented by this import |
-| File checker and preparation/build helpers | MIT; `CHECK-FILES-LICENSE.txt` lists the covered scripts and tests |
+| File checker and preparation/build helpers | MIT; `licenses/CBOC-tools-MIT.txt` lists the covered scripts and tests |
 
 The upstream CC0 text and third-party license texts were retrieved from the
 exact imported upstream revision, not copied from an unrelated latest tree.

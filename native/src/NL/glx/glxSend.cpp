@@ -12,6 +12,28 @@
 #include "NL/platvmath.h"
 #ifdef NP_NATIVE
 #include "np/skingpu.h"
+#include "np/fx.h"
+extern "C" void np_gx_fx_lowres(unsigned int on) __attribute__((weak)); // platform/gx (np_gx.h): renderer extension record
+
+// FX (np/fx.h): the marker is the texture binding's spare byte (written 0 everywhere else and never read), together with the program of
+// the sprite meshes (a binding of another program is not looked at).
+static const unsigned char kFxMarker = 0xA5;
+static void* s_fxProgram[2] = {0, 0};   // the sprite programs seen (plain and shadow-lookup)
+extern "C" void NpFxMarkPacket(glModelPacket* packet)
+{
+    if (packet == 0 || packet->materialParameters == 0) return;
+    ((glTextureBinding*)packet->materialParameters)->unknown07 = kFxMarker;   // (both programs' parameters begin with a glTextureBinding)
+    void* prog = packet->materialProgram;
+    if (s_fxProgram[0] == prog || s_fxProgram[1] == prog) return;
+    if (s_fxProgram[0] == 0) s_fxProgram[0] = prog;
+    else if (s_fxProgram[1] == 0) s_fxProgram[1] = prog;
+}
+extern "C" int NpFxPacketMarked(const glModelPacket* packet)
+{
+    const void* prog = packet->materialProgram;
+    return prog != 0 && (prog == s_fxProgram[0] || prog == s_fxProgram[1]) && packet->materialParameters != 0
+        && ((const glTextureBinding*)packet->materialParameters)->unknown07 == kFxMarker;
+}
 #endif
 
 static GXCompare gx_DepthFunc[] = {
@@ -144,7 +166,12 @@ void glx_SendFrame_cb(
                 np_gx_diag_tag(((GLMaterialProgram*)p->materialProgram)->programHash, (p->skinnedVertices != 0 ? 1u : 0u) | (sk != 0 ? 2u : 0u));
             if (sk != 0)
                 np_gx_skin_begin(&sk->mats[0][0], sk->nBones, sk->weights, sk->indices, sk->nVerts);
+            const bool fx = sk == 0 && &np_gx_fx_lowres != 0 && NpFxPacketMarked(p);
+            if (fx)
+                np_gx_fx_lowres(1);
             ((GLMaterialProgram*)p->materialProgram)->Draw(p);
+            if (fx)
+                np_gx_fx_lowres(0);
             if (sk != 0)
                 np_gx_skin_end();
             if (diag)

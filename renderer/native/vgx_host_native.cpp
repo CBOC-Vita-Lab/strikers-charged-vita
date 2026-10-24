@@ -16,6 +16,7 @@
 //                             MSC_VITA_UPSCALE_EXTRA=sharp,sharp+ also writes frame_N_<mode>.png)
 //       MSC_VGX_LOG=1         verbose renderer log
 //       MSC_VGX_STATS=file    feature-usage report
+#include "vgx_hdtex.h"
 #include "vgx_native.h"
 
 #include "vgx_interp.h"
@@ -161,6 +162,7 @@ void InitDump(const char* dirFromConfig) {
     if (const char* d = std::getenv("MSC_VGX_TEXDUMP")) {
         if (*d) { mkdir(d, 0755); SetTextureDumpHook(&DumpTexture); }
     }
+    vgx::hdtex::Install(nullptr);   // 1.1: HD character textures (MSC_HDTEX_PATH, default ./hdtex.pack)
     g_dump.every = static_cast<uint64_t>(EnvInt("MSC_DUMP_FRAMES", 0));
     if (const char* d = std::getenv("MSC_DUMP_DIR")) g_dump.dir = d;
     if (const char* l = std::getenv("MSC_DUMP_LIST")) {

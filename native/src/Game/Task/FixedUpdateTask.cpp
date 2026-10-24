@@ -1,6 +1,9 @@
 #include "Game/Task/GameTaskState.h"
 #include "NL/nlDLListContainer.inl"
 #include "Game/Task/FixedUpdateTask.h"
+#ifdef NP_NATIVE
+#include "np/touch_diag.h"
+#endif
 #include "Game/EventDispatcher.inl"
 #include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
 #ifdef NP_NATIVE
@@ -308,6 +311,10 @@ void FixedUpdateTask::DecrementFrameLock(float fDeltaT)
 void FixedUpdateTask::Run(float dt)
 {
 #ifdef NP_NATIVE
+    if (NpDiagEnabled()) NpDiagEvent(NPD_TASK_DT,0,NpDiagFrame(),NpDiagFloats(dt,nlTaskManager::m_pInstance->mRealTimeDelta),
+        NpDiagFloats(mTimeScale,mAccumulatedDeltaT),mFrame,mSimulationStarted,0);
+#endif
+#ifdef NP_NATIVE
     NpFpsLateWaitRun(0);   // W5 RT (MSC_LATE_WAIT=1, np/fps.h): the 30 fps wait of the previous frame, made now that the pads are about to be read
 #endif
     bool runFixedUpdate = true;
@@ -412,6 +419,9 @@ void FixedUpdateTask::Run(float dt)
     UpdatePlatPad(g_pPlatPadManager);
     g_pPadManager->Update(dt);
     FlickDetection::Update();
+#ifdef NP_NATIVE
+    if(NpDiagActive())NpDiagEvent(NPD_SIM_END,0,NpDiagFrame(),NpDiagFloats(mAccumulatedDeltaT,mSimulationTime),mFrame,NpDiagStepId(),NpDiagUsedPoll(),NpDiagFloats(mTimeScale,g_fFixedUpdateTick));
+#endif
 }
 
 static void AIUpdateTask(float fDeltaT)
@@ -451,6 +461,9 @@ extern "C" void NpDetPhase(int);
 
 void FixedUpdateTask::CallFixedUpdateTasks()
 {
+#ifdef NP_NATIVE
+    if (NpDiagEnabled()) NpDiagStep();
+#endif
 #ifdef NP_NATIVE
     NpDetStepBegin();
 #endif

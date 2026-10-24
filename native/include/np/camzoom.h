@@ -69,6 +69,7 @@ void NpCameraZoomSettingsWritten(bool autoZoom, float zoomLevel);
 int NpCameraTestVisibility(void);
 /* cGame::SendPlayerVisibility: the |x|, |y| limit of the on-screen test for the zoom option's value (0.95, the game's, up to level 5) */
 float NpCameraVisibilityWindow(float zoomLevel);
+float NpCameraVisibilityWindowFixed(float zoomLevel);   /* Auto Zoom off */
 #ifdef __cplusplus
 }
 /* GameplayCam.cpp (game side, needs the game's headers): the MSC_CAMERA_LOG line; called by SetupMatrices with what it hands the renderer */

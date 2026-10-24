@@ -35,8 +35,26 @@ inline void ShaderSkinMesh::CopyMatrices(BoneMapList* node)
     }
 }
 
+#ifdef NP_NATIVE
+// 1.1: the morphed bind pose GpuSkinPacket chose for each packet of the mesh being prepared (0: none), read by PrepareToRender's copy
+// of the packets; the original model's packets are never changed (the copy is the frame's).
+static const unsigned long kMorphedPackets = 64;
+static const nlVector3* sMorphedOf[kMorphedPackets];
+static void NpMorphedPoseOfPacket(unsigned long packetIndex, const nlVector3* pose)
+{
+    if (packetIndex < kMorphedPackets)
+        sMorphedOf[packetIndex] = pose;
+}
+
+#endif
+#ifdef NP_NATIVE
+static void NpMorphPosesRelease(const void* mesh);
+#endif
 ShaderSkinMesh::~ShaderSkinMesh()
 {
+#ifdef NP_NATIVE
+    NpMorphPosesRelease(this);
+#endif
     nlDeleteRing(&boneMaps);
     if (boneMatrices != 0)
     {
@@ -266,6 +284,16 @@ void ShaderSkinMesh::PrepareToRender()
 #ifdef NP_NATIVE
             if (NpSkinGpuOf(pPacket) != 0)
             {
+                const nlVector3* morphed = i < kMorphedPackets ? sMorphedOf[i] : 0;
+                if (morphed != 0)
+                {
+                    // 1.1: GPU-skinned from its morphed bind pose (host order): this frame's copy of the packet gets a position stream on it
+                    unsigned long numStreams = pPacket->numStreams;
+                    glModelStream* pStreams = (glModelStream*)glFrameAlloc(numStreams * sizeof(glModelStream), GLM_Header);
+                    memcpy(pStreams, pPacket->streams, numStreams * sizeof(glModelStream));
+                    glSetModelStream(pStreams, pStreams->index, (void*)morphed, sizeof(nlVector3), 1);
+                    glSetPacketStreams(pPacket, pStreams, numStreams);
+                }
                 continue;   // W5 SKIN: skinned on the GPU, its streams stay the model's bind pose (big-endian, as on the disc)
             }
 #endif
@@ -717,7 +745,18 @@ bool ShaderSkinMesh::PacketHasMorph(unsigned long packetIndex) const
 bool ShaderSkinMesh::GpuSkinPacket(unsigned long packetIndex, glModelPacket* pPacket, PacketSkinData* data, BoneMapList* node)
 {
     const unsigned long nb = data->numBones;
-    if (nb == 0 || nb > 32 || node->m_nBones != nb || PacketHasMorph(packetIndex))
+    // 1.1: packets with an active morph target (faces in close-ups: celebrations, replays, cut-scenes) are GPU-skinned too, from a morphed
+    // bind pose kept per packet and made again only when the morph weights change (MSC_SKIN_GPU_MORPH=0: they are CPU-skinned as before).
+    // Before, each was skinned on the CPU into a new array every frame, and the renderer decoded its list every frame.
+    // MSC_SKIN_GPU_MORPH=ignore (diagnostic only: faces stop moving) skins them from the plain bind pose.
+    static int morphMode = -1;   // 0 off, 1 on, 2 ignore
+    if (morphMode < 0)
+    {
+        const char* e = getenv("MSC_SKIN_GPU_MORPH");
+        morphMode = (e != 0 && strcmp(e, "ignore") == 0) ? 2 : ((e != 0 && e[0] == '0') ? 0 : 1);
+    }
+    const bool morph = morphMode != 2 && PacketHasMorph(packetIndex);
+    if (nb == 0 || nb > 32 || node->m_nBones != nb || (morph && morphMode == 0))
         return false;
     glModelStream* posStream = glFindModelStream(pPacket, 1);
     glModelStream* weightStream = glFindModelStream(pPacket, 5);
@@ -727,6 +766,15 @@ bool ShaderSkinMesh::GpuSkinPacket(unsigned long packetIndex, glModelPacket* pPa
     const float (*pMatrices)[3][4] = *(const float (**)[3][4])glGetMaterialParameterData(pPacket, SkinMatricesHash);
     if (pMatrices == 0)
         return false;
+    const nlVector3* morphed = 0;
+    if (morph)
+    {
+        if (posStream->stride != sizeof(nlVector3) || packetIndex >= kMorphedPackets)
+            return false;   // (a packed position format, or a model with very many packets: CPU-skinned as before)
+        morphed = MorphedBindPose(packetIndex, data->numVertices, (const unsigned char*)posStream->address);
+        if (morphed == 0)
+            return false;
+    }
     NpSkinGpuRec* r = (NpSkinGpuRec*)glFrameAlloc(sizeof(NpSkinGpuRec) + (nb - 1) * sizeof(float[12]), GLM_Header);
     if (r == 0)
         return false;
@@ -740,7 +788,150 @@ bool ShaderSkinMesh::GpuSkinPacket(unsigned long packetIndex, glModelPacket* pPa
     pPacket->skinnedVertices = (unsigned long)r;
     glModelStream* nrmStream = glFindModelStream(pPacket, 2);
     pPacket->skinnedNormals = nrmStream != 0 ? (unsigned long)nrmStream->address : 0;
+    NpMorphedPoseOfPacket(packetIndex, morphed);   // (PrepareToRender gives the frame's copy of the packet a position stream on it)
     return true;
+}
+
+// The bind pose of one packet with this frame's morph deltas added, in host order, kept per (mesh, packet) in game memory: rewritten (and
+// flushed, which tells the renderer) only when the weights changed, so the renderer's cached list stays valid while a face holds still.
+namespace
+{
+struct MorphPose
+{
+    const void* mesh;
+    unsigned long packet;
+    unsigned long numVertices;
+    unsigned long hash;
+    nlVector3* pose;
+};
+const int kMorphPoses = 64;
+MorphPose sMorphPoses[kMorphPoses];
+
+// The poses live in a pool of their own, outside the game's heaps (an allocation there would move the game's own objects, and the
+// simulation depends on its memory layout), registered with the renderer as memory it tracks writes to (DCFlushRange tells it).
+const unsigned long kPosePool = 1u << 20;
+alignas(64) unsigned char sPosePoolMem[kPosePool];   // (static: an allocation would move the host heap, which the simulation's event order follows)
+unsigned char* sPosePool = 0;
+struct PoseBlock { unsigned long off, size; bool used; };
+PoseBlock sPoseBlocks[kMorphPoses];
+int sPoseBlockCount = 0;
+}
+extern "C" void np_gx_register_ram(const void* base, unsigned int size) __attribute__((weak));
+static nlVector3* PoseAlloc(unsigned long bytes)
+{
+    if (sPosePool == 0)
+    {
+        sPosePool = sPosePoolMem;
+        if (np_gx_register_ram != 0)
+            np_gx_register_ram(sPosePool, kPosePool);
+    }
+    bytes = (bytes + 63) & ~63ul;
+    // first fit in the gaps between the blocks (kept in address order)
+    unsigned long at = 0;
+    int i = 0;
+    for (; i < sPoseBlockCount; ++i)
+    {
+        if (sPoseBlocks[i].off - at >= bytes)
+            break;
+        at = sPoseBlocks[i].off + sPoseBlocks[i].size;
+    }
+    if (at + bytes > kPosePool || sPoseBlockCount == kMorphPoses)
+        return 0;
+    for (int j = sPoseBlockCount; j > i; --j)
+        sPoseBlocks[j] = sPoseBlocks[j - 1];
+    sPoseBlocks[i].off = at;
+    sPoseBlocks[i].size = bytes;
+    sPoseBlocks[i].used = true;
+    ++sPoseBlockCount;
+    return (nlVector3*)(sPosePool + at);
+}
+static void PoseFree(nlVector3* p)
+{
+    if (p == 0)
+        return;
+    const unsigned long off = (unsigned long)((unsigned char*)p - sPosePool);
+    for (int i = 0; i < sPoseBlockCount; ++i)
+        if (sPoseBlocks[i].off == off)
+        {
+            for (int j = i; j + 1 < sPoseBlockCount; ++j)
+                sPoseBlocks[j] = sPoseBlocks[j + 1];
+            --sPoseBlockCount;
+            return;
+        }
+}
+
+const nlVector3* ShaderSkinMesh::MorphedBindPose(unsigned long packetIndex, unsigned long numVertices, const unsigned char* bindPose)
+{
+    if (morphBuffer == 0 || numVertices == 0)
+        return 0;
+    unsigned long h = 2166136261u;
+    for (unsigned long m = 0; m < numMorphs; ++m)
+    {
+        float w = GetMorphWeight((int)m);
+        unsigned long bits;
+        memcpy(&bits, &w, 4);
+        h = (h ^ bits) * 16777619u;
+    }
+    h = (h ^ (unsigned long)bindPose) * 16777619u;
+    MorphPose* slot = 0;
+    MorphPose* empty = 0;
+    for (int i = 0; i < kMorphPoses; ++i)
+    {
+        if (sMorphPoses[i].mesh == this && sMorphPoses[i].packet == packetIndex)
+        {
+            slot = &sMorphPoses[i];
+            break;
+        }
+        if (empty == 0 && sMorphPoses[i].mesh == 0)
+            empty = &sMorphPoses[i];
+    }
+    if (slot != 0 && slot->numVertices != numVertices)
+    {
+        PoseFree(slot->pose);
+        slot->mesh = 0;
+        empty = slot;
+        slot = 0;
+    }
+    if (slot == 0)
+    {
+        if (empty == 0)
+            return 0;   // (more morphing packets than slots: CPU-skinned as before)
+        nlVector3* pose = PoseAlloc(numVertices * sizeof(nlVector3));
+        if (pose == 0)
+            return 0;
+        empty->mesh = this;
+        empty->packet = packetIndex;
+        empty->numVertices = numVertices;
+        empty->hash = ~h;
+        empty->pose = pose;
+        slot = empty;
+    }
+    if (slot->hash != h)
+    {
+        CreateMorphBuffer(packetIndex, numVertices);
+        for (unsigned long i = 0; i < numVertices; ++i)
+        {
+            const unsigned char* p = bindPose + i * 12;
+            slot->pose[i].x = npa_rdf32(p) + morphBuffer[i].x;
+            slot->pose[i].y = npa_rdf32(p + 4) + morphBuffer[i].y;
+            slot->pose[i].z = npa_rdf32(p + 8) + morphBuffer[i].z;
+        }
+        DCFlushRange(slot->pose, numVertices * sizeof(nlVector3));
+        slot->hash = h;
+    }
+    return slot->pose;
+}
+
+// (the mesh is gone: its morphed poses go too)
+static void NpMorphPosesRelease(const void* mesh)
+{
+    for (int i = 0; i < kMorphPoses; ++i)
+        if (sMorphPoses[i].mesh == mesh)
+        {
+            PoseFree(sMorphPoses[i].pose);
+            sMorphPoses[i].mesh = 0;
+            sMorphPoses[i].pose = 0;
+        }
 }
 #endif
 
@@ -751,6 +942,8 @@ void ShaderSkinMesh::SoftwareSkinModel(glModel* model)
     BoneMapList* node = nlDLRingGetStart(boneMaps);
     glModelPacket* pPacket = model->packets;
 #ifdef NP_NATIVE
+    for (unsigned long i = 0; i < kMorphedPackets; ++i)
+        sMorphedOf[i] = 0;
     const bool laneOn = NpSkinLaneOn() && numMorphs <= (unsigned long)kSkinMaxMorphs;
     const bool gpuOn = NpSkinGpuOn() != 0;
     const bool diag = NpSkinDiagOn() != 0;

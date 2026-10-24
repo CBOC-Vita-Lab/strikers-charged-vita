@@ -13,6 +13,7 @@
 #include "np_vita_internal.h"
 
 #include <psp2/kernel/sysmem.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/io/stat.h>
 #include <cerrno>
 #include <cstdio>
@@ -137,6 +138,24 @@ int __real_pthread_cond_broadcast(pthread_cond_t*);
 int __wrap_pthread_cond_broadcast(pthread_cond_t* cond) {
     AdoptCond(cond);
     return __real_pthread_cond_broadcast(cond);
+}
+
+// 1b. (23 Oct, from the Galaxy port) VitaSDK's pthread library waits for a semaphore "cancellably" by POLLING: every 500 us it
+//    wakes to look at the thread's cancel flag (pte_osSemaphoreCancellablePend), and every pthread_cond_wait /
+//    std::condition_variable wait goes through it (the renderer's frame hand-over, the audio and loader threads). Nothing in this
+//    program cancels threads (no pthread_cancel), so the wait is a plain blocking one: no wake-ups for nothing on the busy cores,
+//    and a signalled waiter runs at once instead of at the next 500 us tick. Results are pte_osResult values: 0 OK, 2 failure,
+//    3 timeout; the timeout is in milliseconds.
+extern "C" int __wrap_pte_osSemaphoreCancellablePend(SceUID semaphore, unsigned int* timeoutMs) {
+    int result;
+    if (timeoutMs) {
+        SceUInt us = *timeoutMs > 4000000u ? 4000000000u : *timeoutMs * 1000u;
+        result = sceKernelWaitSema(semaphore, 1, &us);
+    } else {
+        result = sceKernelWaitSema(semaphore, 1, nullptr);
+    }
+    if (result >= 0) return 0;
+    return result == static_cast<int>(0x80028005) ? 3 : 2;   // SCE_KERNEL_ERROR_WAIT_TIMEOUT
 }
 
 // 2. remove() does not remove directories. POSIX: remove(path) is unlink for a

@@ -25,6 +25,8 @@
 // / _FRAMESEND = 0, 1 or 2; several digits for a set ("12" = core 1 or 2); "any" for all three.
 // The same file is built for armhf Linux (target `check`): there the roles are only parsed and logged.
 #include "np_vita_internal.h"
+#include "../../../include/np/touch_diag.h"
+#pragma weak NpDiagRegisterThread
 
 #include <cstdio>
 #include <cstdlib>
@@ -108,6 +110,7 @@ int PinCurrentThread(Role role, bool log) {
     int result = 0;
 #if defined(__vita__)
     result = sceKernelChangeThreadCpuAffinityMask(sceKernelGetThreadId(), mask);
+    if(NpDiagRegisterThread)NpDiagRegisterThread((uint32_t)role,(uint32_t)sceKernelGetThreadId());
     // kind: 2 the game, 1 work that follows time (audio output, mixer, helpers), 0 per frame
     if (NpFpsProbeRegisterThread) NpFpsProbeRegisterThread(sceKernelGetThreadId(), role == kGame ? 2 : (role == kAudioOut || role == kHelper) ? 1 : 0);
 #endif

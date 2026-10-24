@@ -254,8 +254,14 @@ static void RecordStreamStat() {
     }
 }
 
-void Present(bool waitExecuted) {
-    Emit0(R_PRESENT);
+void Present(bool waitExecuted, uint64_t latencyTag) {
+    if(latencyTag){
+        uint32_t* r = Reserve(3);
+        r[0] = Hdr(R_PRESENT,1);
+        r[1] = static_cast<uint32_t>(latencyTag);
+        r[2] = static_cast<uint32_t>(latencyTag >> 32);
+        Commit(3);
+    }else Emit0(R_PRESENT);
     static const bool recStat = EnvInt("MSC_VGX_RECSTAT", 0) != 0;
     if (recStat) RecordStreamStat();
     if (g_mode != MODE_THREAD) {

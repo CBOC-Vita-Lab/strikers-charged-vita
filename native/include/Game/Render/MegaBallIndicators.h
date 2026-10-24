@@ -105,6 +105,7 @@ float TestMegaBallIndicatorCollision(
 void DrawMegaBallIndicator(int x, int y, unsigned int textureId,
     float width, float height, float opacity, float angle);
 void SetMegaBallController(cGlobalPad* pController);
+bool RefreshLocalMegaBallPointerForPress(cGlobalPad* owner);
 void UpdateAndRenderMegaBallPointer(float deltaTime);
 void RenderMegaBallIndicators();
 void UpdateMegaBallIndicators(float deltaTime);

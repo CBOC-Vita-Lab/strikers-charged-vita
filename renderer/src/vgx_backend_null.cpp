@@ -73,6 +73,8 @@ const std::vector<uint8_t>& LastDisplayCopy(int& width, int& height) {
 void RequestCapture(bool) {}
 void SetPresentHook(PresentHook) {}
 void SetSceneHintHook(SceneHintHook) {}
+void SetGpuTimeSource(GpuTimeFn) {}
+float RenderScale() { return 1.0f; }
 void SetMicroClock(MicroClock) {}
 uint64_t ExecutingFrame() { return 0; }
 void GetDrawTimers(uint64_t out[4]) { for (int i = 0; i < 4; ++i) out[i] = 0; }

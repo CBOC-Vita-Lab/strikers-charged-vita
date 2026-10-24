@@ -11,12 +11,12 @@ folder and run:
 
 ```powershell
 # Windows
-py -3 CHECK-FILES.py
+py -3 tools\check-files.py
 ```
 
 ```sh
 # macOS or Linux
-python3 CHECK-FILES.py
+python3 tools/check-files.py
 ```
 
 The checker reads local files only. It does not connect to the internet or

@@ -5,9 +5,8 @@
 // copies both into a transcript file; the Vita has neither a terminal nor
 // pipes worth using, so here the two stdio streams are pointed at Write(),
 // which
-//   - appends to ux0:data/mscharged/log.txt (buffered: at most 8 KiB or about
-//     a quarter of a second of output is held back, and every fatal path
-//     flushes), and
+//   - appends to ux0:data/mscharged/log.txt (buffered: about a quarter of a
+//     second of output is held back, and every fatal path flushes), and
 //   - keeps the last lines, wrapped to the console width, for the on-screen
 //     console.
 #include "plat_realclock.h"
@@ -24,6 +23,7 @@
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/threadmgr.h>
 #include <sys/reent.h>
 #else
 #include <fcntl.h>
@@ -35,12 +35,20 @@ namespace VitaLog {
 #if NP_LOGGING
 namespace {
 
-constexpr size_t kBufferSize = 8192;
+// 23 Oct: on the Vita the file is written by a writer thread, not by the thread that logs. A memory-card write takes
+// milliseconds (a line written under the old 250 ms flush, from the present path, was a visible stall in logging builds, and
+// it changed the very timings the log was there to show). The logging thread copies into the buffer and returns; the writer
+// drains it every 250 ms, or at once when 8 KiB are waiting. Fixed buffers, no heap and no condition variable on this path.
+// Fatal paths, Flush(), synchronous mode and the lab's file switches still write on the caller's thread, under the I/O lock,
+// so the order in the file is the order of the writes.
+constexpr size_t kBufferSize = 64 * 1024;
+constexpr size_t kWakeAt = 8192;
 constexpr int kRingLines = 64;
 constexpr unsigned kFlushIntervalMs = 250;
 constexpr long kRotateAtBytes = 2 * 1024 * 1024;
 
-std::mutex g_mutex;
+std::mutex g_mutex;            // the buffer and the display ring
+std::mutex g_io;               // the file (taken after g_mutex, never before it)
 char g_buffer[kBufferSize];
 size_t g_buffered = 0;
 int g_file = -1;
@@ -49,6 +57,10 @@ long long g_startOffset = 0;   // where this process's output begins in it
 bool g_paused = false;
 uint64_t g_lastFlushMs = 0;
 bool g_synchronous = false;
+#if defined(__vita__)
+SceUID g_wake = -1;            // semaphore the writer thread waits on (-1: no writer, writes happen inline)
+char g_out[kBufferSize];       // the writer's copy of the buffer
+#endif
 
 // Ring of wrapped display lines.
 char g_ring[kRingLines][kTailColumns + 1];
@@ -75,14 +87,53 @@ void FileWrite(const char* data, size_t size) {
 #endif
 }
 
+// Writes the buffer now, on this thread (g_mutex held).
 void FlushLocked() {
     if (g_paused) return;   // (the file is closed for a moment; the buffer keeps what it can)
     if (g_buffered != 0) {
+        std::lock_guard<std::mutex> io(g_io);
         FileWrite(g_buffer, g_buffered);
         g_buffered = 0;
     }
     g_lastFlushMs = NowMs();
 }
+
+#if defined(__vita__)
+int WriterThread(SceSize, void*) {
+    for (;;) {
+        SceUInt timeout = kFlushIntervalMs * 1000u;
+        sceKernelWaitSema(g_wake, 1, &timeout);
+        std::unique_lock<std::mutex> lock(g_mutex);
+        if (g_paused || g_file < 0 || g_buffered == 0) continue;
+        std::lock_guard<std::mutex> io(g_io);   // before g_mutex is released: no Flush() can overtake this chunk
+        const size_t n = g_buffered;
+        std::memcpy(g_out, g_buffer, n);
+        g_buffered = 0;
+        g_lastFlushMs = NowMs();
+        lock.unlock();
+        FileWrite(g_out, n);
+    }
+    return 0;
+}
+
+void StartWriter() {
+    if (g_wake >= 0) return;
+    const SceUID sema = sceKernelCreateSema("np_log_wake", 0, 0, 1, nullptr);
+    if (sema < 0) return;
+    // The lowest user priority (191) on any core: it only ever waits for the card.
+    const SceUID thread = sceKernelCreateThread("np_log_writer", WriterThread, 0x10000100 + 31, 16 * 1024, 0, 0, nullptr);
+    if (thread < 0 || sceKernelStartThread(thread, 0, nullptr) < 0) {
+        if (thread >= 0) sceKernelDeleteThread(thread);
+        sceKernelDeleteSema(sema);
+        return;
+    }
+    g_wake = sema;
+}
+
+void WakeWriter() {
+    if (g_wake >= 0) sceKernelSignalSema(g_wake, 1);
+}
+#endif
 
 void EndLineLocked() {
     g_ring[g_ringNext][g_column] = '\0';
@@ -129,6 +180,7 @@ void Open(const char* devicePath, const char* fileName) {
     g_file = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
     std::snprintf(g_path, sizeof(g_path), "%s", path);
     g_startOffset = (sceIoGetstat(path, &st) >= 0) ? static_cast<long long>(st.st_size) : 0;
+    if (g_file >= 0) StartWriter();
 #else
     struct stat st;
     if (::stat(path, &st) == 0 && st.st_size > kRotateAtBytes) {
@@ -155,12 +207,19 @@ void Write(const char* data, size_t size) {
     if (g_file >= 0) {
         if (size >= kBufferSize) {
             FlushLocked();
+            std::lock_guard<std::mutex> io(g_io);
             FileWrite(data, size);
         } else {
-            if (g_buffered + size > kBufferSize) FlushLocked();
+            if (g_buffered + size > kBufferSize) FlushLocked();   // (the writer is behind: write here rather than drop)
             std::memcpy(g_buffer + g_buffered, data, size);
             g_buffered += size;
         }
+#if defined(__vita__)
+        if (g_wake >= 0 && !g_synchronous) {
+            if (g_buffered >= kWakeAt) WakeWriter();
+            return;
+        }
+#endif
         if (g_synchronous || NowMs() - g_lastFlushMs >= kFlushIntervalMs) FlushLocked();
     }
 }
@@ -175,11 +234,18 @@ void Flush() noexcept {
     // Called from fatal paths too: if the lock is held by this very thread
     // (a crash inside Write), give up rather than deadlock.
     if (!g_mutex.try_lock()) return;
-    FlushLocked();
+    if (!g_paused && g_buffered != 0 && g_io.try_lock()) {   // (a crash during the writer's own write: give up)
+        FileWrite(g_buffer, g_buffered);
+        g_buffered = 0;
+        g_io.unlock();
+    }
     g_mutex.unlock();
 }
 
 void FlushIfDue() {
+#if defined(__vita__)
+    if (g_wake >= 0) return;   // the writer thread does it
+#endif
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_buffered != 0 && NowMs() - g_lastFlushMs >= kFlushIntervalMs) FlushLocked();
 }
@@ -213,6 +279,7 @@ bool SwitchFile(const char* newPath, const char* keepOldAs) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_paused = false;
     FlushLocked();
+    std::lock_guard<std::mutex> io(g_io);
     if (g_file >= 0) sceIoClose(g_file);
     g_file = -1;
     if (keepOldAs) {
@@ -251,6 +318,7 @@ void Pause() {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_paused) return;
     FlushLocked();
+    std::lock_guard<std::mutex> io(g_io);
     if (g_file >= 0) sceIoClose(g_file);
     g_file = -1;
     g_paused = true;
@@ -258,7 +326,10 @@ void Pause() {
 void Resume() {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_paused) return;
-    g_file = sceIoOpen(g_path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
+    {
+        std::lock_guard<std::mutex> io(g_io);
+        g_file = sceIoOpen(g_path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
+    }
     g_paused = false;
     FlushLocked();
 }

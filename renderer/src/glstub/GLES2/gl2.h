@@ -74,6 +74,7 @@ static inline GLuint glCreateShader(GLenum) { return ++vgx_stub_name_; }
 static inline GLuint glCreateProgram(void) { return ++vgx_stub_name_; }
 static inline void glShaderSource(GLuint, GLsizei, const GLchar* const*, const GLint*) {}
 static inline void glCompileShader(GLuint) {}
+static inline void glDeleteShader(GLuint) {}
 static inline void glGetShaderiv(GLuint, GLenum, GLint* p) { *p = 1; }
 static inline void glGetShaderInfoLog(GLuint, GLsizei, GLsizei*, GLchar* log) { log[0] = 0; }
 static inline void glAttachShader(GLuint, GLuint) {}

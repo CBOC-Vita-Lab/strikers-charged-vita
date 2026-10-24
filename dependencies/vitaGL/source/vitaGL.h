@@ -1302,6 +1302,7 @@ GLboolean vglSwapResolution(int width, int height);
 
 // Loads the depth buffer of the currently bound renderbuffer into the currently bound GL texture.
 void vglTexImageDepthBuffer(GLenum target);
+int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
 
 // Makes vitaGL use cached memory instead of uncached memory for its internal memory pools. Must be called before vglInit*.
 void vglUseCachedMem(GLboolean use);
@@ -1396,6 +1397,9 @@ typedef struct {
 	vglRtGpuFrame gpu_frames[128];
 } vglRtStats;
 void vglRtGetStats(vglRtStats *s);
+uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out);
+void vglRtSceneProgress(uint32_t *submitted, uint32_t *done); // scenes ended / seen completed by the GPU watcher (GPU timers on; else 0 / 0)
+void vglSetAnisotropicFilter(uint32_t sceFilter); // 0 off; 2 or 3: the minification filter of trilinear textures (see utils/gxm_utils.h) // the newest finished GPU frame; returns frames finished so far (0: none)
 
 #ifdef __cplusplus
 }

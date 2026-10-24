@@ -62,6 +62,28 @@ inline bool RearEnabled(Layout layout) {
     }
     return v < 0 ? layout == kModern : v == 1;
 }
+// These options are separate from the ordinary rear-tap shortcuts.
+inline bool RearSaveEnabled() {
+    static const bool enabled = [] {
+        const char* aim = getenv("MSC_MEGA_AIM");
+        const char* all = getenv("MSC_TOUCH_MINIGAMES");
+        const char* save = getenv("MSC_TOUCH_SAVE");
+        return aim && !strcmp(aim, "rear") && !(all && *all == '0') && !(save && *save == '0');
+    }();
+    return enabled;
+}
+inline float MegaPointerGain() {
+    static const float gain = [] {
+        const char* e = getenv("MSC_MEGA_POINTER_SPEED");
+        // 1.1 (console test): the original speed cannot cross the goal in time with a stick; 3x is the default, =1 the original
+        return e && e[0] >= '1' && e[0] <= '4' && e[1] == '\0' ? float(e[0] - '0') : 3.0f;
+    }();
+    return gain;
+}
+inline bool PhysicalMegaControlsAllowed() {
+    const char* script = getenv("MSC_INPUT_SCRIPT");
+    return !script || !*script;
+}
 const char* LayoutName(Layout layout);
 
 // The GameCube bits of the Vita buttons by position (CLASSIC; the SDK's gc_from_raw).
@@ -144,6 +166,7 @@ public:
     // `rearRight` / `rearLeft`: taps not yet turned into a press (decremented when taken). One call per capture.
     uint16_t Map(uint32_t vita, int* rearRight, int* rearLeft, const Context& ctx);
     void Reset();
+    void ClearRearPulses();
 
 private:
     uint32_t prev_ = 0;

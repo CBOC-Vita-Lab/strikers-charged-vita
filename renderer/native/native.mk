@@ -45,7 +45,7 @@ else
 endif
 LINKCXX ?= $(CXX)
 
-CORE := vgx_api vgx_rec vgx_play vgx_guestmem vgx_dlcache vgx_state vgx_draw vgx_shadergen vgx_texdecode vgx_texcache vgx_stats vgx_interp vgx_present vgx_capture vgx_skin
+CORE := vgx_api vgx_rec vgx_play vgx_guestmem vgx_dlcache vgx_state vgx_draw vgx_shadergen vgx_texdecode vgx_texcache vgx_stats vgx_interp vgx_present vgx_capture vgx_skin vgx_hdtex
 ifeq ($(NBACKEND),null)
   BACK := vgx_backend_null
 else ifeq ($(NBACKEND),glnull)

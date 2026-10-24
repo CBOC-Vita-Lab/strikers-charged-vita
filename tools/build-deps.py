@@ -2,7 +2,7 @@
 """Fetch pinned dependency source and build the native player's Vita libraries.
 
 SPDX-License-Identifier: MIT
-Copyright (c) 2026 CBOC-Vita contributors. See CHECK-FILES-LICENSE.txt.
+Copyright (c) 2026 CBOC-Vita contributors. See licenses/CBOC-tools-MIT.txt.
 """
 
 import argparse
@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def git(directory, *args):
@@ -83,7 +83,7 @@ def main():
         sdk = Path(os.environ.get("VITASDK", "/opt/vitasdk"))
         if not args.fetch_only:
             if platform.system() != "Linux" or any(c.isspace() for c in str(ROOT) + str(sdk)):
-                raise ValueError("Build on Linux in paths without spaces; see BUILDING.md. --fetch-only works on other hosts.")
+                raise ValueError("Build on Linux in paths without spaces; see docs/BUILDING.md. --fetch-only works on other hosts.")
             if not (sdk / "bin/arm-vita-eabi-gcc").is_file():
                 raise ValueError("Set VITASDK to your Linux VitaSDK directory")
         rows = load_lock(ROOT / "dependencies/lock.json")

@@ -128,9 +128,13 @@ NP_VWRAPS := -Wl,--wrap=pthread_create \
              -Wl,--wrap=pthread_cond_signal -Wl,--wrap=pthread_cond_broadcast -Wl,--wrap=remove \
              -Wl,--wrap=sceClibMspaceCreate -Wl,--wrap=sceClibMspaceDestroy -Wl,--wrap=sceClibMspaceMalloc \
              -Wl,--wrap=sceClibMspaceCalloc -Wl,--wrap=sceClibMspaceRealloc -Wl,--wrap=sceClibMspaceMemalign \
-             -Wl,--wrap=sceClibMspaceFree
+             -Wl,--wrap=sceClibMspaceFree -Wl,--wrap=pte_osSemaphoreCancellablePend
 ifeq ($(LAB),1)
 NP_VWRAPS += -Wl,--wrap=sceKernelExitProcess -Wl,--wrap=_exit
+endif
+ifeq ($(NP_DIAG_GPU),1)
+# opt-in GPU-call timing for the MSC_TOUCH_DIAG recorder (platform/compat/np_diag_gpu.cpp)
+NP_VWRAPS += -Wl,--wrap=sceGxmFinish -Wl,--wrap=sceGxmNotificationWait -Wl,--wrap=sceGxmDisplayQueueAddEntry -Wl,--wrap=sceGxmBeginScene -Wl,--wrap=sceGxmEndScene
 endif
 ifeq ($(NP_LOGGING),0)
 NP_VCOMMA := ,

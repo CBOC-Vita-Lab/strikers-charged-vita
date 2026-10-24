@@ -134,6 +134,7 @@ int InputSource(int pad, NpRawPad* out) {
     if (pad != 0 || !out) return 0;                            // one controller: the console's own
     std::memset(out, 0, sizeof(*out));
     out->lx = out->ly = out->rx = out->ry = 128;
+    out->rear_count = -1;
     if (NpHarnessActive() && NpHarnessOwnsPad()) {   // a script plays; logging alone (MSC_WATCH, MSC_FRAME_TIMING) keeps the real pad
         NpPadState st;
         std::memset(&st, 0, sizeof(st));
@@ -150,7 +151,7 @@ int InputSource(int pad, NpRawPad* out) {
         return 1;                                              // a script owns the pad: untouched controller between its commands
     }
     NpVitaInput in;
-    if (!NpVitaReadInput(&in)) return 1;
+    if (!NpVitaReadInput(&in)) { out->source = 3; return 1; } // NP_RAW_BLOCKED, SDK ABI declaration above
     // Suppress only still-held UI buttons. Touch, sticks and unrelated buttons
     // remain live, including a finger resting on the rear panel.
     in.buttons &= ~g_settingsReleaseButtons.fetch_and(in.buttons, std::memory_order_relaxed);
@@ -209,7 +210,7 @@ int VgxBootCompose(void* framebuffer) { return VitaBootScreen::Compose(framebuff
 void VgxBootProgress(int kind, unsigned done, unsigned total) { VitaBootScreen::Progress(kind, done, total); }
 int VgxButtons(unsigned int* buttons) {
     VitaInput::Raw raw;
-    if (!buttons || !VitaInput::Read(raw)) return 0;
+    if (!buttons || !VitaInput::ReadDebug(raw)) return 0;
     *buttons = raw.buttons;
     return 1;
 }

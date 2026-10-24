@@ -65,6 +65,28 @@ static bool Ppm(const char* path, const uint32_t* px) {
 }
 
 int main(int argc, char** argv) {
+    {
+        const int aim = Find("MEGA SAVE AIM"), speed = Find("MEGA SAVE SPEED");
+        CHECK(aim >= 0 && speed >= 0);
+        if (aim >= 0 && speed >= 0) {
+            State s;
+            Load(s, "# retained\nMSC_WATCH=1\nMSC_REAR_TOUCH=0\n");
+            CHECK(s.choice[aim] == 0 && s.choice[speed] == 0);
+            SetChoice(s, aim, 1); SetChoice(s, speed, 2);
+            std::string out;
+            CHECK(Serialize(s, out) && Has(out, "MSC_MEGA_AIM=rear") && Has(out, "MSC_MEGA_POINTER_SPEED=2"));
+            CHECK(Has(out, "MSC_REAR_TOUCH=0") && Has(out, "# retained") && Has(out, "MSC_WATCH=1"));
+            State t; Load(t, out.c_str());
+            CHECK(t.choice[aim] == 1 && t.choice[speed] == 2);
+            ApplyPreset(t, PresetIndex("DEFAULT"));
+            CHECK(t.choice[aim] == 1 && t.choice[speed] == 2);
+            Load(t, "MSC_MEGA_AIM=custom\nMSC_MEGA_POINTER_SPEED=3junk\n");
+            CHECK(t.choice[aim] == -1 && t.choice[speed] == -1);
+            CHECK(Serialize(t, out) && Has(out, "MSC_MEGA_AIM=custom") && Has(out, "MSC_MEGA_POINTER_SPEED=3junk"));
+            SetChoice(t, aim, 0); SetChoice(t, speed, 0);
+            CHECK(Serialize(t, out) && CountLines(out, "MSC_MEGA_AIM=") == 0 && CountLines(out, "MSC_MEGA_POINTER_SPEED=") == 0);
+        }
+    }
     // no file: everything is the build's default; that is the DEFAULT preset; nothing is written
     {
         State s;
@@ -99,7 +121,8 @@ int main(int argc, char** argv) {
         CHECK(Serialize(u, out));
         CHECK(!Has(out, "MSC_PERFORMANCE_MODE=1") && CountLines(out, "MSC_VITA_RENDER") == 0 && Has(out, "MSC_WATCH=1") && CountLines(out, "# ---- ") == 0);
     }
-    // W5 FPS: FRAME RATE is 30 (the build's default, writes nothing) or AUTO (MSC_FPS=auto); PERFORMANCE sets AUTO, DEFAULT and QUALITY keep 30; 60 / unlocked by hand read CUSTOM
+    // W5 FPS: FRAME RATE is AUTO (the build's default, writes nothing) or 30 (MSC_FPS=30); PERFORMANCE and DEFAULT keep AUTO, QUALITY sets 30; the MSC_FPS=auto
+    // line of earlier builds reads AUTO and goes at the next save; 60 / unlocked by hand read CUSTOM
     {
         const int fr = Find("FRAME RATE");
         CHECK(fr >= 0 && ChoiceCount(fr) == 2 && GetOption(fr).defaultChoice == 0 && GetOption(fr).inPreset);
@@ -107,24 +130,29 @@ int main(int argc, char** argv) {
         Load(s, nullptr);
         CHECK(s.choice[fr] == 0);
         std::string out;
-        CHECK(Serialize(s, out) && !Has(out, "MSC_FPS=auto") && CountLines(out, "MSC_FPS") == 0);
+        CHECK(Serialize(s, out) && CountLines(out, "MSC_FPS") == 0);
         Step(s, fr, +1);
         CHECK(s.choice[fr] == 1 && MatchPreset(s) == -1);
-        CHECK(Serialize(s, out) && Has(out, "MSC_FPS=auto") && CountLines(out, "MSC_FPS=") == 1);
+        CHECK(Serialize(s, out) && Has(out, "MSC_FPS=30") && CountLines(out, "MSC_FPS=") == 1);
         State t;
         Load(t, out.c_str());
         CHECK(t.choice[fr] == 1);
-        Step(t, fr, +1);                       // wraps back to 30: the line goes
+        Step(t, fr, +1);                       // wraps back to AUTO: the line goes
         CHECK(t.choice[fr] == 0 && Serialize(t, out) && CountLines(out, "MSC_FPS") == 0);
+        State old;
+        Load(old, "MSC_FPS=auto\nMSC_WATCH=1\n");   // an earlier build's AUTO
+        CHECK(old.choice[fr] == 0 && MatchPreset(old) == PresetIndex("DEFAULT"));
+        SetChoice(old, fr, 0);
+        CHECK(Serialize(old, out) && CountLines(out, "MSC_FPS") == 0 && Has(out, "MSC_WATCH=1"));
         State p;
         Load(p, nullptr);
         ApplyPreset(p, PresetIndex("PERFORMANCE"));
-        CHECK(p.choice[fr] == 1 && Serialize(p, out) && Has(out, "MSC_FPS=auto"));
+        CHECK(p.choice[fr] == 0 && Serialize(p, out) && CountLines(out, "MSC_FPS") == 0);
         State q;
         Load(q, out.c_str());
         CHECK(MatchPreset(q) == PresetIndex("PERFORMANCE"));
         ApplyPreset(q, PresetIndex("QUALITY"));
-        CHECK(q.choice[fr] == 0 && Serialize(q, out) && CountLines(out, "MSC_FPS") == 0);
+        CHECK(q.choice[fr] == 1 && Serialize(q, out) && Has(out, "MSC_FPS=30"));
         State c;
         Load(c, "MSC_FPS=60\n");              // a tester's own value: CUSTOM, kept until the row is changed
         CHECK(c.choice[fr] == -1 && std::strstr(c.custom[fr], "MSC_FPS=60") != nullptr);
@@ -207,7 +235,7 @@ int main(int argc, char** argv) {
     {
         State s;
         Load(s, "MSC_VITA_UPSCALE=sharp+\r\nMSC_VITA_SHARPEN=0.35\r\n# end\r\n");
-        CHECK(s.choice[Find("SHARPNESS")] == 2);
+        CHECK(s.choice[Find("SHARPNESS")] == 3);
         std::string out;
         CHECK(Serialize(s, out) && Has(out, "# end") && Has(out, "MSC_VITA_UPSCALE=sharp+") && Has(out, "MSC_VITA_SHARPEN=0.35"));
         State t;
@@ -332,6 +360,19 @@ int main(int argc, char** argv) {
                 Load(c, "MSC_CONTROLS=classic\n");
                 DrawControls(buffer.data(), c);
                 std::snprintf(path, sizeof path, "%s/controls-classic.ppm", argv[1]);
+                CHECK(Ppm(path, buffer.data()));
+            }
+            {
+                State rear;
+                Load(rear, "MSC_MEGA_AIM=rear\nMSC_MEGA_POINTER_SPEED=4\n");
+                Draw(buffer.data(), rear, Find("MEGA SAVE AIM") + 1, "", false, true);
+                std::snprintf(path, sizeof path, "%s/settings-mega-aim.ppm", argv[1]);
+                CHECK(Ppm(path, buffer.data()));
+                Draw(buffer.data(), rear, Find("MEGA SAVE SPEED") + 1, "", false, true);
+                std::snprintf(path, sizeof path, "%s/settings-mega-speed.ppm", argv[1]);
+                CHECK(Ppm(path, buffer.data()));
+                DrawControls(buffer.data(), rear);
+                std::snprintf(path, sizeof path, "%s/controls-rear.ppm", argv[1]);
                 CHECK(Ppm(path, buffer.data()));
             }
             ApplyPreset(q, PresetIndex("QUALITY"));

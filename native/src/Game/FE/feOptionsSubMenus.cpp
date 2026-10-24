@@ -483,6 +483,96 @@ void OptionsAudioMenuV2::UpdateVolumeLevelText(int setting)
     }
 }
 
+#ifdef NP_NATIVE
+// ---- NP (23 Oct, the maintainer: "levels 6 and 7 should show as options on the slider so they are not hidden") ---------------------------
+// The screen has five level buttons (BUTTON_0..4 of "ZOOM LEVELS", each with its number as a text in every slide). Seven levels
+// are shown as a window of five: levels 1..5 while the chosen level is 1..3, levels 3..7 while it is 4..7 (so 6 and 7 are on screen
+// whenever 5, the Vita's default, is chosen, and every level is one press away from a neighbour). The numbers are rewritten in
+// the buttons' own text instances. If a button's number is not found as text (another layout), the old behaviour stays: buttons
+// 1..5, and level 5's button pressed again steps 5 -> 6 -> 7.
+namespace {
+int sZoomWindow = 0;             // level index (0-based) of the first button
+bool sZoomWindowUsable = false;  // every button's number was found as text
+unsigned short sZoomLabels[5][2];
+
+int NpZoomWindowFor(int levelIndex)
+{
+    return levelIndex >= 3 && NP_CAMERA_ZOOM_MAX_LEVEL > 5 ? NP_CAMERA_ZOOM_MAX_LEVEL - 5 : 0;
+}
+
+// The FE's lists are circular (the list pointer is the last item; FindItemByHashID walks from list->m_next back to it).
+int NpRelabelSlides(TLSlide* slides, const unsigned short* label, int depth);
+int NpRelabelInstances(TLInstance* list, const unsigned short* label, int depth)
+{
+    if (list == 0 || depth >= 8)
+        return 0;
+    int n = 0, guard = 0;
+    TLInstance* inst = list->m_next;
+    for (;;)
+    {
+        if (inst == 0 || ++guard > 256)
+            break;
+        if (inst->m_type == TLAT_TEXT)
+        {
+            TLTextInstance* text = static_cast<TLTextInstance*>(inst);
+            const unsigned short* cur = text->GetString();
+            if (cur != 0 && cur[0] >= '1' && cur[0] <= '9' && cur[1] == 0)
+            {
+                text->SetString(label);
+                ++n;
+            }
+        }
+        if (inst->m_type == TLAT_COMPONENT && inst->m_component != 0)
+            n += NpRelabelSlides(static_cast<TLComponent*>(inst->m_component)->pChildren, label, depth + 1);
+        else
+            n += NpRelabelInstances(inst->pChildren, label, depth + 1);
+        if (inst == list)
+            break;
+        inst = inst->m_next;
+    }
+    return n;
+}
+
+int NpRelabelSlides(TLSlide* slides, const unsigned short* label, int depth)
+{
+    if (slides == 0 || depth >= 8)
+        return 0;
+    int n = 0, guard = 0;
+    TLSlide* slide = slides->m_next;
+    for (;;)
+    {
+        if (slide == 0 || ++guard > 64)
+            break;
+        n += NpRelabelInstances(slide->pChildren, label, depth + 1);
+        if (slide == slides)
+            break;
+        slide = slide->m_next;
+    }
+    return n;
+}
+
+// Writes the numbers window+1 .. window+5 into the five buttons; false if a button has no number text.
+bool NpRelabelZoomButtons(TLComponentInstance* const* buttons, int window)
+{
+    bool all = true;
+    for (int i = 0; i < 5; ++i)
+    {
+        sZoomLabels[i][0] = (unsigned short)('1' + window + i);
+        sZoomLabels[i][1] = 0;
+        if (buttons[i] == 0 || buttons[i]->m_component == 0)
+        {
+            all = false;
+            continue;
+        }
+        const int n = NpRelabelSlides(static_cast<TLComponent*>(buttons[i]->m_component)->pChildren, sZoomLabels[i], 0);
+        if (n == 0)
+            all = false;
+    }
+    return all;
+}
+} // namespace
+#endif
+
 OptionsVisualMenuV2::OptionsVisualMenuV2(int mode)
     : mOverlayMode(mode)
     , mNavigation()
@@ -563,8 +653,15 @@ void OptionsVisualMenuV2::SceneCreated()
     for (int i = 0; i < 4; ++i)
         zoomButton.SetPointerState(POINTER_BUTTON_SELECTED, i);
 #ifdef NP_NATIVE
-    // (levels 6 and 7, np/camzoom.h: the screen has five buttons; level 5's shows them, the text says which)
-    const int shownButton = mSettings[1] > 4 ? 4 : mSettings[1];
+    // (levels 6 and 7, np/camzoom.h: the five buttons show a window of the seven levels, see NpRelabelZoomButtons)
+    sZoomWindow = NpZoomWindowFor(mSettings[1]);
+    sZoomWindowUsable = NpRelabelZoomButtons(mButtons, sZoomWindow);
+    if (!sZoomWindowUsable)
+    {
+        sZoomWindow = 0;
+        NpRelabelZoomButtons(mButtons, 0);
+    }
+    const int shownButton = mSettings[1] - sZoomWindow > 4 ? 4 : mSettings[1] - sZoomWindow;
     mButtons[shownButton]->SetActiveSlide("down", true, false);
     FEPointerButton& button = mButtonComponents[shownButton];
 #else
@@ -758,6 +855,36 @@ void OptionsVisualMenuV2::OnZoomLevelPointerPress(int index, void* context)
 #ifdef NP_NATIVE
     // NP (17 Oct, np/camzoom.h): level 5's button pressed again while it is chosen steps through the closer levels: 5 -> 6 -> 7 -> 5
     // (the option's value 1.0, 1.25, 1.5); the button stays down and the text shows the level.
+    if (sZoomWindowUsable)
+    {
+        const int level = sZoomWindow + item;
+        if (level == mSettings[1] || level < 0 || level >= NP_CAMERA_ZOOM_MAX_LEVEL)
+            return;
+        FEAudio::PlayAnimAudioEvent(0x3021A1EE, 0, 0, 1);
+        const int newWindow = NpZoomWindowFor(level);
+        for (int b = 0; b < 5; ++b)
+        {
+            mButtons[b]->SetActiveSlide("off", true, false);
+            mButtonComponents[b].ResetPointerStates();
+        }
+        if (newWindow != sZoomWindow)
+        {
+            sZoomWindow = newWindow;
+            NpRelabelZoomButtons(mButtons, sZoomWindow);
+        }
+        const int button = level - sZoomWindow;
+        mButtons[button]->SetActiveSlide("down", true, false);
+        for (int i = 0; i < 4; ++i)
+            mButtonComponents[button].SetPointerState(POINTER_BUTTON_SELECTED, i);
+        mSettings[1] = level;
+        GameInfoManager::Instance()->mUserInfo.mVisualOptions.mCameraZoomLevel = level / 4.0;
+        TLTextInstance* levelText = FEFinder<TLTextInstance, 4>::Find(
+            mPresentation->m_currentSlide, "Layer", "visual_options", "SERIES SETTING");
+        unsigned short levelNumber[4];
+        nlSNPrintf(levelNumber, 4, (const unsigned short*)L"%d", mSettings[1] + 1);
+        UpdateZoomLevelText(levelText, levelNumber, g_pLocalization->GetString("OPTIONS_VISUAL_ZOOMLEVEL"));
+        return;
+    }
     if (item == 4 && mSettings[1] >= 4)
     {
         mSettings[1] = mSettings[1] >= NP_CAMERA_ZOOM_MAX_LEVEL - 1 ? 4 : mSettings[1] + 1;

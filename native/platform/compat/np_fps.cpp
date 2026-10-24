@@ -2,6 +2,7 @@
 #include "np/fps.h"
 #include "np_fps_ctl.h"
 
+#include <atomic>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,6 +22,10 @@ double NpFpsPlatformThreadClockMs(void) __attribute__((weak));
 unsigned long VIGetRetraceCount(void) __attribute__((weak));
 void VIWaitForRetrace(void) __attribute__((weak));
 void NpLatLatch(void) __attribute__((weak));
+// The renderer's predicted GPU time per frame at the smallest picture it would use in this scene (vgx_backend_gl.cpp, dynamic resolution); <= 0: unknown
+float VgxGpuMinMs(void) __attribute__((weak));
+// The renderer's Mega Strike scene (vgx_backend_gl.cpp): AUTO keeps those at 30 with the full-size picture (MSC_FPS_MEGA=auto lets them try 60)
+int VgxMegaActive(void) __attribute__((weak));
 }
 
 namespace {
@@ -31,9 +36,14 @@ using npfps::kPolicy30;
 using npfps::kPolicy60;
 using npfps::kPolicyUnlocked;
 
-// The mode the build starts in when MSC_FPS is not set. 0 game, 1 = 30, 2 = 60, 3 = unlocked, 4 = auto. Change here (and the settings row's default
-// choice in platform/vita/src/np_settings.cpp) when the console has measured and the default moves to auto.
+// The mode the build starts in when MSC_FPS is not set. 0 game, 1 = 30, 2 = 60, 3 = unlocked, 4 = auto. The Vita starts in auto (23 Oct: 60 where
+// every CPU core and the GPU hold it, the renderer's picture size helping within limits; the settings row's default in platform/vita/src/np_settings.cpp
+// matches); host builds keep 30, which their deterministic runs and tests assume.
+#if defined(__vita__)
+const int kDefaultMode = 4;
+#else
 const int kDefaultMode = 1;
+#endif
 
 enum { kModeGame = 0, kMode30 = 1, kMode60 = 2, kModeUnlocked = 3, kModeAuto = 4 };
 
@@ -350,6 +360,57 @@ int NpFpsSwapMode(int gameMode)
     }
 }
 
+// ---- 1.1: frames in flight (MSC_LAT_DEPTH) -----------------------------------------------------------------------------------------------------
+// Console test, 23 Oct: a button reached the screen 150-175 ms after it was read at 30 fps. Every stage after the game thread (frame send, decode,
+// back end, GPU, display) is faster than a frame, but the display shows a picture only every second refresh, so each stage's queue filled up and
+// every frame waited about a frame at every hand-off. The game thread now starts the next frame (and reads the pads) only when at most
+// MSC_LAT_DEPTH of its frames are still on their way to the display (default 2; 0 = off). The wait is at most two refreshes per frame and
+// switches itself off when it keeps hitting that limit (a pipeline that cannot go faster), so the frame rate is not lowered.
+namespace {
+int g_fifDepth = -1, g_fifCapHits = 0;
+uint32_t g_fifWaits = 0, g_fifFrames = 0, g_fifVblanks = 0, g_fifPaused = 0, g_fifPauses = 0;
+unsigned long g_fifLastExit = 0;
+bool g_fifHaveExit = false;
+}
+extern "C" uint64_t NpLatHandedOverTag(void) __attribute__((weak));
+extern "C" uint64_t NpLatShownTag(void) __attribute__((weak));
+// (frames are numbered at the hand-over (np_latency.cpp NpLatLatch) and the display reports the newest number it was given: pictures the platform
+// draws itself carry no number and do not count)
+static void FramesInFlightGate()
+{
+    if (g_fifDepth < 0) {
+        const char* e = getenv("MSC_LAT_DEPTH");
+        g_fifDepth = (e && *e) ? atoi(e) : 2;
+        if (g_fifDepth < 0 || g_fifDepth > 8) g_fifDepth = 2;
+        fprintf(stderr, "[fps] frames in flight: at most %d after the hand-over (MSC_LAT_DEPTH; 0 = off)\n", g_fifDepth);
+    }
+    if (g_fifDepth == 0 || !NpLatHandedOverTag || !NpLatShownTag) return;
+    const uint64_t sent = NpLatHandedOverTag();
+    if (NpLatShownTag() == 0 || g_fifCapHits >= 30) return;   // (nothing shown with a number yet; or a pipeline that cannot go faster)
+    // The limit must never cost frames: when a frame took longer than its two refreshes (a heavy moment, the pipeline is the bottleneck and
+    // has no queue to drain), the limit stands aside for 150 frames. (First console run: always waiting cost 5 fps in heavy scenes.)
+    const unsigned long now = VIGetRetraceCount();
+    const bool late = g_fifHaveExit && static_cast<long>(now - g_fifLastExit) > 2;
+    if (late) { if (g_fifPaused == 0) ++g_fifPauses; g_fifPaused = 150; }
+    if (g_fifPaused) { --g_fifPaused; g_fifLastExit = now; g_fifHaveExit = true; return; }
+    ++g_fifFrames;
+    int waited = 0;
+    while (sent > NpLatShownTag() + static_cast<uint64_t>(g_fifDepth) && waited < 1) {
+        VIWaitForRetrace();
+        ++waited;
+    }
+    if (waited) { ++g_fifWaits; g_fifVblanks += static_cast<uint32_t>(waited); }
+    // a gate that keeps waiting its whole limit is measuring a pipeline that cannot go faster: it stops for good (30 frames in a row)
+    if (waited >= 1 && sent > NpLatShownTag() + static_cast<uint64_t>(g_fifDepth)) ++g_fifCapHits; else g_fifCapHits = 0;
+    g_fifLastExit = VIGetRetraceCount();
+    g_fifHaveExit = true;
+    if (g_fifCapHits == 30) fprintf(stderr, "[fps] frames in flight: the display cannot keep up with the limit, the limit is off\n");
+    if (g_fifFrames >= 1800) {
+        fprintf(stderr, "[fps] frames in flight: %u of the last %u frames waited for the display (%u refreshes); stood aside %u times for heavy moments\n", g_fifWaits, g_fifFrames, g_fifVblanks, g_fifPauses);
+        g_fifFrames = g_fifWaits = g_fifVblanks = g_fifPauses = 0;
+    }
+}
+
 void NpFpsSwapWaitBegin(void)
 {
     if (g.policy == kPolicyGame) return;
@@ -482,6 +543,7 @@ void NpFpsBeginFrame(float realSeconds, unsigned taskState)
         in.steps = g.simSteps;
         in.simMs = g.simMsAcc;
         in.gameCore = 0;
+        in.gpuMinMs = (&VgxGpuMinMs != 0) ? (double)VgxGpuMinMs() : 0.0;
         if (g_model.on)
         {
             in.costsValid = g.haveModel;
@@ -533,7 +595,9 @@ void NpFpsBeginFrame(float realSeconds, unsigned taskState)
             in.gameBusyMs = (busy > 0 ? busy : 0) * g.costScale;
             in.simMs *= 1.0;
         }
-        const npfps::Decision d = g.ctl->Frame(in);
+        static const bool megaAuto = [] { const char* e = getenv("MSC_FPS_MEGA"); return e && IEqual(e, "auto"); }();
+        const bool hold30 = !megaAuto && &VgxMegaActive != 0 && VgxMegaActive() != 0;
+        const npfps::Decision d = hold30 ? g.ctl->Hold30(now) : g.ctl->Frame(in);
         g.lastPred60 = g.ctl->LastPrediction().max60;
         g.lastPredNow = g.ctl->LastPrediction().maxNow;
         g.lastPredCore = g.ctl->LastPrediction().core;
@@ -657,6 +721,7 @@ void NpFpsLateWaitAfterSend(void)
     const bool count = g.policy != kPolicyGame;
     const int64_t t0 = NowNs();
     while ((long)(VIGetRetraceCount() - g_late.sendRef) < 0) VIWaitForRetrace();
+    FramesInFlightGate();   // (the next frame's pads are read after this; its cadence is measured from here)
     g_late.anchor = VIGetRetraceCount();
     g_late.anchored = true;
     const int64_t d = NowNs() - t0;

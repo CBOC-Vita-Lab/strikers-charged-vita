@@ -22,6 +22,7 @@
 // already gives +-72. Vita Y grows downwards; the GameCube's grows upwards.
 #include "np_vita.h"
 #include "np_vita_internal.h"
+#include "../../../include/np/touch_diag.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -53,6 +54,12 @@ constexpr float kFullScale = 72.0f;      // what the runtime treats as full defl
 
 uint16_t g_lastButtons = 0;
 int g_lastStickX = 0, g_lastStickY = 0;
+// Codex input follow-up (controller-history.patch, merged 23 Oct): the game's and the passive debug observer's tap histories are
+// separate, so the renderer's debug-chord poll can no longer swallow a gameplay tap.
+uint64_t g_lastTapStamp = 0;
+#if defined(__vita__)
+uint64_t g_debugTapStamp = 0;
+#endif
 
 void MapStick(uint8_t rawX, uint8_t rawY, int8_t& outX, int8_t& outY) {
     const float x = static_cast<float>(rawX) - 128.0f;
@@ -71,6 +78,8 @@ void MapStick(uint8_t rawX, uint8_t rawY, int8_t& outX, int8_t& outY) {
 }
 
 } // namespace
+
+void InvalidateTapHistory() { g_lastTapStamp = 0; }
 
 void Map(const Raw& raw, NpPadState& status) {
     uint16_t buttons = 0;
@@ -104,7 +113,7 @@ void LastState(uint16_t* buttons, int* stickX, int* stickY) {
 }
 
 #if defined(__vita__)
-bool Read(Raw& raw) {
+static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
     static bool configured = false;
     if (!configured) {
         // Analog mode: without it the sticks read as centred. WIDE: the sticks report
@@ -121,30 +130,44 @@ bool Read(Raw& raw) {
     SceCtrlData pads[kBuffers];
     std::memset(pads, 0, sizeof(pads));
     const int want = NpControls::TapLatchEnabled() ? kBuffers : 1;
+    const bool diag=NpDiagActive()!=0;
+    const uint64_t begin=diag?NpDiagNow():0;
     const int got = sceCtrlPeekBufferPositive(0, pads, want);
-    if (got <= 0) return false;
+    const uint64_t end=diag?NpDiagNow():0;
+    if(diag&&got<=0)NpDiagEvent(NPD_CTRL,0,NpDiagPollId(),begin,end,0,NpDiagInts(got,want),0);
+    if (got <= 0) {
+        lastStamp = 0;   // resume newest-only after an interval without input
+        return false;
+    }
     int newest = 0;
     for (int i = 1; i < got && i < kBuffers; ++i)
         if (pads[i].timeStamp > pads[newest].timeStamp) newest = i;
     const SceCtrlData& pad = pads[newest];
-    uint32_t buttons = pad.buttons;
-    if (got > 1) {
-        static uint64_t lastStamp = 0;
-        uint32_t b[kBuffers];
-        uint64_t t[kBuffers];
-        const int n = got < kBuffers ? got : kBuffers;
-        for (int i = 0; i < n; ++i) { b[i] = pads[i].buttons; t[i] = pads[i].timeStamp; }
-        buttons = NpControls::LatchTaps(b, t, n, &lastStamp);
-    }
-    raw.buttons = buttons;
+    if(diag)NpDiagEvent(NPD_CTRL,0,NpDiagPollId(),begin,end,pad.timeStamp,NpDiagInts(got,want),
+        NpDiagInts(pad.buttons,uint32_t(pad.lx)|(uint32_t(pad.ly)<<8)|(uint32_t(pad.rx)<<16)|(uint32_t(pad.ry)<<24)));
+    // every successful read advances the history, a single sample too (otherwise a later tap could be lost or replayed)
+    uint32_t b[kBuffers];
+    uint64_t t[kBuffers];
+    const int n = got < kBuffers ? got : kBuffers;
+    for (int i = 0; i < n; ++i) { b[i] = pads[i].buttons; t[i] = pads[i].timeStamp; }
+    raw.buttons = NpControls::LatchTaps(b, t, n, &lastStamp);
     raw.lx = pad.lx;
     raw.ly = pad.ly;
     raw.rx = pad.rx;
     raw.ry = pad.ry;
     return true;
 }
+
+bool Read(Raw& raw) {
+    if (!ReadWithHistory(raw, g_lastTapStamp)) return false;
+    g_debugTapStamp = g_lastTapStamp;   // game reads drain the observer's history (old settings presses never replay as chords)
+    return true;
+}
+
+bool ReadDebug(Raw& raw) { return ReadWithHistory(raw, g_debugTapStamp); }
 #else
 bool Read(Raw&) { return false; }
+bool ReadDebug(Raw&) { return false; }
 #endif
 
 } // namespace VitaInput
@@ -162,8 +185,15 @@ int NpVitaReadInput(NpVitaInput* out) {
     if (!out) return 0;
     std::memset(out, 0, sizeof(*out));
     out->lx = out->ly = out->rx = out->ry = 128;
-    if (np_vita_radio_dialog_active && np_vita_radio_dialog_active()) return 1;   // neutral pad, no touch, while the dialog shows
+    // A disabled or failed rear read is not evidence that all contacts lifted.
+    out->rearCount = -1;
+    if (np_vita_radio_dialog_active && np_vita_radio_dialog_active()) {
+        VitaInput::InvalidateTapHistory();   // presses released during the dialog are not replayed into the game
+        return 1;   // neutral pad, no touch, while the dialog shows
+    }
     VitaInput::Raw raw;
+    const bool diag=NpDiagActive()!=0;
+    if(diag)NpDiagPollNext();
     if (!VitaInput::Read(raw)) return 0;
     out->buttons = raw.buttons;
     out->lx = raw.lx; out->ly = raw.ly; out->rx = raw.rx; out->ry = raw.ry;
@@ -185,28 +215,67 @@ int NpVitaReadInput(NpVitaInput* out) {
         }
         SceTouchPanelInfo panel{};
         SceTouchData data{};
-        if (started && sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT, &panel) >= 0 && panel.maxDispX > panel.minDispX &&
-            panel.maxDispY > panel.minDispY && sceTouchPeek(SCE_TOUCH_PORT_FRONT, &data, 1) > 0 && data.reportNum <= 8) {
+        const uint64_t begin=diag?NpDiagNow():0;
+        const int panelRc=started?sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT,&panel):-1;
+        const uint64_t panelEnd=diag?NpDiagNow():0;
+        const bool validPanel=started&&panelRc>=0&&panel.maxDispX>panel.minDispX&&panel.maxDispY>panel.minDispY;
+        // Short taps (23 Oct, Codex handoff "front touches wholly between polls can be missed"): the panel keeps a few samples. When
+        // the newest one has no finger but a sample since the previous read had one, that contact is reported for this read, once
+        // (a tap shorter than the game's read interval still lands; the next read reports the lifted panel). MSC_TOUCH_LATCH=0: off.
+        static const bool touchLatch = [] { const char* e = std::getenv("MSC_TOUCH_LATCH"); return !(e && e[0] == '0'); }();
+        static uint64_t lastTouchStamp = 0;
+        constexpr int kTouchBufs = 4;
+        SceTouchData bufs[kTouchBufs];
+        int peekRc = 0;
+        if (validPanel && touchLatch) {
+            std::memset(bufs, 0, sizeof(bufs));
+            peekRc = sceTouchPeek(SCE_TOUCH_PORT_FRONT, bufs, kTouchBufs);
+            if (peekRc > 0) {
+                const int n = peekRc < kTouchBufs ? peekRc : kTouchBufs;
+                int newest = 0;
+                for (int i = 1; i < n; ++i) if (bufs[i].timeStamp > bufs[newest].timeStamp) newest = i;
+                data = bufs[newest];
+                if (data.reportNum == 0 && lastTouchStamp != 0) {
+                    int pick = -1;
+                    for (int i = 0; i < n; ++i)
+                        if (i != newest && bufs[i].timeStamp > lastTouchStamp && bufs[i].reportNum > 0 && bufs[i].reportNum <= 8 &&
+                            (pick < 0 || bufs[i].timeStamp > bufs[pick].timeStamp))
+                            pick = i;
+                    if (pick >= 0) data = bufs[pick];
+                }
+                lastTouchStamp = bufs[newest].timeStamp;
+                peekRc = 1;
+            } else {
+                lastTouchStamp = 0;
+            }
+        } else if (validPanel) {
+            peekRc = sceTouchPeek(SCE_TOUCH_PORT_FRONT, &data, 1);
+        }
+        const uint64_t touchEnd=diag?NpDiagNow():0;
+        if(diag)NpDiagEvent(NPD_POLL,data.reportNum<<8,NpDiagPollId(),begin,panelEnd,touchEnd,data.timeStamp,NpDiagInts(panelRc,peekRc));
+        if (validPanel && peekRc>0 && data.reportNum <= 8) {
             out->touchCount = static_cast<int>(data.reportNum);
             for (int i = 0; i < out->touchCount; ++i) {
                 out->touch[i].id = data.report[i].id;
                 out->touch[i].x = (data.report[i].x - panel.minDispX) * 960.0f / (panel.maxDispX - panel.minDispX);
                 out->touch[i].y = (data.report[i].y - panel.minDispY) * 544.0f / (panel.maxDispY - panel.minDispY);
+                if(diag)NpDiagEvent(NPD_CONTACT,data.report[i].force,NpDiagPollId(),data.report[i].id,NpDiagInts(data.report[i].x,data.report[i].y),NpDiagFloats(out->touch[i].x,out->touch[i].y),NpDiagFrame(),NpDiagStepId());
             }
         }
     }
     // W5 CTL: the rear panel, for the layout's rear taps (np_controls.h RearPad). Read only when it is switched on
     // (MSC_REAR_TOUCH, default on with the MODERN layout) and a person holds the console (not in a scripted run).
-    static const bool rearEnabled = NpControls::RearEnabled(NpControls::ConfiguredLayout());
+    static const bool rearEnabled = NpControls::RearEnabled(NpControls::ConfiguredLayout()) || NpControls::RearSaveEnabled();
     if (rearEnabled && NpVitaTouchAllowed()) {
         static bool rearStarted = false;
         static SceTouchPanelInfo rearPanel{};
         static bool rearPanelOk = false;
         if (!rearStarted) {
             if (sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK, SCE_TOUCH_SAMPLING_STATE_START) >= 0) rearStarted = true;
-            rearPanelOk = rearStarted && sceTouchGetPanelInfo(SCE_TOUCH_PORT_BACK, &rearPanel) >= 0 && rearPanel.maxAaX > rearPanel.minAaX &&
-                          rearPanel.maxAaY > rearPanel.minAaY;
         }
+        if (rearStarted && !rearPanelOk)
+            rearPanelOk = sceTouchGetPanelInfo(SCE_TOUCH_PORT_BACK, &rearPanel) >= 0 && rearPanel.maxAaX > rearPanel.minAaX &&
+                          rearPanel.maxAaY > rearPanel.minAaY;
         // The back panel reports x as seen from the front (the right half under the right hand). MSC_REAR_MIRROR=1 flips it, in case
         // a console shows the halves the other way round (console test list, docs/wave5-CTL.md).
         static const bool mirror = [] {
@@ -214,7 +283,11 @@ int NpVitaReadInput(NpVitaInput* out) {
             return value && value[0] == '1';
         }();
         SceTouchData data{};
-        if (rearPanelOk && sceTouchPeek(SCE_TOUCH_PORT_BACK, &data, 1) > 0 && data.reportNum <= 8) {
+        const uint64_t begin=diag?NpDiagNow():0;
+        const int rearRc=rearPanelOk?sceTouchPeek(SCE_TOUCH_PORT_BACK,&data,1):0;
+        const uint64_t end=diag?NpDiagNow():0;
+        if(diag)NpDiagEvent(NPD_POLL,1,NpDiagPollId(),begin,begin,end,data.timeStamp,NpDiagInts(rearRc,data.reportNum));
+        if (rearPanelOk && rearRc > 0 && data.reportNum <= 8) {
             out->rearCount = static_cast<int>(data.reportNum);
             for (int i = 0; i < out->rearCount; ++i) {
                 out->rear[i].id = data.report[i].id;

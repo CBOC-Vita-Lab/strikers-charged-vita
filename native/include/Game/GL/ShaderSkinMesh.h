@@ -206,6 +206,8 @@ private:
     // W5 SKIN (np/skingpu.h): the packet goes to the GPU (true) or is skinned on the CPU as before (false)
     bool GpuSkinPacket(unsigned long packetIndex, glModelPacket* pPacket, PacketSkinData* data, BoneMapList* node);
     bool PacketHasMorph(unsigned long packetIndex) const;
+    // 1.1: the packet's bind pose plus this frame's morph deltas (host order), kept and remade only when the weights change
+    const nlVector3* MorphedBindPose(unsigned long packetIndex, unsigned long numVertices, const unsigned char* bindPose);
 #endif
 };
 

@@ -84,6 +84,7 @@ uint32_t g_epoch;   // samples so far (the touch gesture state counts them)
 struct CtlChannel {
     NpControls::Layout layout = NpControls::kClassic;
     bool rear = false;
+    bool rearBlocked = false;
     NpControls::RearPad rearPad;
     NpControls::Mapper mapper;
     int rearRight = 0, rearLeft = 0;   // taps waiting for a capture
@@ -123,6 +124,21 @@ enum { kActToggleItem = 22, kActHit = 24, kActSlide = 25, kActDeke = 29 };
 constexpr uint16_t kPadTriggerR = 0x0020;
 
 }  // namespace
+
+// ---- title screen: tap anywhere to start (the maintainer, 23 Oct: "like Galaxy's") ----------------------------------------------------
+// The title (SHTitleScreen.cpp) asks for new front-panel contacts: every live (not scripted) channel-0 sample whose touch count goes
+// from 0 to more counts one contact start. The title takes a baseline when it becomes ready, so a finger held from the intro or the
+// health screen never starts the game; only a new contact does, wherever it lands. After the title used a contact it asks that the
+// finger is not turned into a menu press (the generic pointer block below) until every finger is lifted, so it cannot press a
+// button of the main menu. NP_TOUCH_POINTER=0 (the kill switch of every front-panel press) turns this off too.
+namespace {
+uint32_t g_touchStarts = 0;   // __atomic builtins: <atomic> clashes with the game's placement new
+int g_touchHoldOff = 0;
+int g_prevTouchCount = 0;
+}  // namespace
+extern "C" uint32_t NpFrontTouchStarts(void) { return __atomic_load_n(&g_touchStarts, __ATOMIC_ACQUIRE); }
+extern "C" int NpFrontTouchPressAllowed(void) { return touch_pointer_enabled() ? 1 : 0; }
+extern "C" void NpFrontTouchHoldOffUntilRelease(void) { __atomic_store_n(&g_touchHoldOff, 1, __ATOMIC_RELEASE); }
 
 extern "C" void NpPadAdjust(NpPadSample* s) {
     using namespace NpMenuNav;
@@ -165,6 +181,7 @@ extern "C" void NpPadAdjust(NpPadSample* s) {
     if (nr.page < 0) s->hold |= NPW_MINUS;
 
     float moveX = s->stick[0], moveY = s->stick[1];
+    bool localSave = false;
     if (nr.menu) {
         // Only the real D-pad reaches the game as D-pad here, not the sticks used for navigating.
         s->hold &= ~(NPW_UP | NPW_DOWN | NPW_LEFT | NPW_RIGHT);
@@ -174,10 +191,16 @@ extern "C" void NpPadAdjust(NpPadSample* s) {
         if (navDpad & kRight) s->hold |= NPW_RIGHT;
         moveX = moveY = 0.0f;   // the pointer belongs to navigation
     } else {
-        NpTouch::SelectSavePointerAxes(chan, s->free_stick[0], s->free_stick[1], &moveX, &moveY);
+        localSave = NpTouch::SelectSavePointerAxes(chan, s->free_stick[0], s->free_stick[1], &moveX, &moveY);
     }
     // Pointer: the stick moves a cursor that stays where it is left (menus need absolute aim; Mega Save aims with it).
-    const float speed = 1.6f * pointer_speed();
+    float multiplier = pointer_speed();
+    const bool liveSave = localSave && raw.source == NP_RAW_LIVE && (s->hold & 0x80u) != 0 && NpControls::PhysicalMegaControlsAllowed();
+    if (liveSave && NpControls::MegaPointerGain() > 1.0f) {
+        if (!isfinite(multiplier) || multiplier <= 0) multiplier = 1.0f;
+        multiplier = fmaxf(multiplier, fminf(4.0f, multiplier * NpControls::MegaPointerGain()));
+    }
+    const float speed = 1.6f * multiplier;
     auto dz = [](float v) { return fabsf(v) < 0.2f ? 0.0f : v; };
     s->cursor[0] = clampf(s->cursor[0] + dz(moveX) * speed * s->dt, -1.0f, 1.0f);
     s->cursor[1] = clampf(s->cursor[1] - dz(moveY) * speed * s->dt, -1.0f, 1.0f);
@@ -189,7 +212,16 @@ extern "C" void NpPadAdjust(NpPadSample* s) {
     if (chan >= 0 && chan < 4) {
         CtlChannel& ctl = g_ctl[chan];
         ctl.sampleMs = nowMs;
-        if (ctl.rear) {
+        const bool rearAim = liveSave && NpControls::RearSaveEnabled();
+        const bool invalidRear = raw.rear_count < 0 || raw.rear_count > NP_MAX_TOUCH;
+        if (rearAim || invalidRear) ctl.rearBlocked = true;
+        if (ctl.rearBlocked) {
+            ctl.rearPad.Reset();
+            ctl.rearLeft = ctl.rearRight = 0;
+            ctl.mapper.ClearRearPulses();
+            // A release on exit is consumed here, never interpreted as an ordinary tap.
+            if (!rearAim && raw.rear_count == 0) ctl.rearBlocked = false;
+        } else if (ctl.rear) {
             NpControls::RearPoint points[NP_MAX_TOUCH];
             const int n = raw.rear_count < 0 ? 0 : raw.rear_count > NP_MAX_TOUCH ? NP_MAX_TOUCH : raw.rear_count;
             for (int i = 0; i < n; ++i) points[i] = {raw.rear[i].id, raw.rear[i].x, raw.rear[i].y};
@@ -205,7 +237,7 @@ extern "C" void NpPadAdjust(NpPadSample* s) {
             ctl.rearLeft = ctl.rearRight = 0;
         }
     }
-    const bool minigame = NpTouch::Apply(chan, raw, &s->hold, s->cursor, g_epoch, nowMs);
+    const bool minigame = NpTouch::Apply(chan, raw, &s->hold, s->cursor, g_epoch, nowMs, nr.menu);
     if (chan == 0) {
         // a press that starts while the meter is already up (the shoot button still held from the charge when it opens does not count)
         const bool meter = NpTouch::CurrentMode(0) == NpTouch::Mode::Meter;
@@ -217,8 +249,15 @@ extern "C" void NpPadAdjust(NpPadSample* s) {
         g_meterButton = b;
         g_meterMode = meter;
     }
+    if (chan == 0 && raw.source == NP_RAW_LIVE) {
+        const int n = raw.touch_count < 0 ? 0 : raw.touch_count;
+        if (n > 0 && g_prevTouchCount == 0) __atomic_fetch_add(&g_touchStarts, 1u, __ATOMIC_ACQ_REL);
+        if (n == 0) __atomic_store_n(&g_touchHoldOff, 0, __ATOMIC_RELEASE);
+        g_prevTouchCount = n;
+    }
+    const bool holdOff = chan == 0 && raw.touch_count > 0 && __atomic_load_n(&g_touchHoldOff, __ATOMIC_ACQUIRE) != 0;
     // ... and in a menu a finger is a pointer: it points where it touches and presses A while it is down.
-    if (!minigame && nr.menu && touch_pointer_enabled() && raw.touch_count > 0) {
+    if (!minigame && !holdOff && nr.menu && touch_pointer_enabled() && raw.touch_count > 0) {
         NpTouch::PanelToCursor(raw.touch[0].x, raw.touch[0].y, s->cursor);
         s->hold |= NPW_A;
     }

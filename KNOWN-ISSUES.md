@@ -1,32 +1,47 @@
-# Known Issues And Test Limits
+# Known Issues
 
-- The movie, quiet-logging and LiveArea settings updates are included. The
-  executable was installed and read back on a physical Vita, preserving saves,
-  settings and artwork. Opening, returning from and reopening Settings were
-  checked on that normal-title build. Full VPK/desktop installation and a
-  complete-match playthrough of this release remain open. No new tests were
-  run when packaging this update.
-- Saved port settings take effect on the next launch. Use **Save and Restart**
-  to apply them now. The experimental independent interpolation presenter is
-  not supported by the settings overlay and remains disabled by default.
-- Main and stadium-selection menus can run below 30 FPS. Older console
-  measurements of those screens are not a performance guarantee for the
-  final package.
-- Movie improvements have been checked by the tester. Wider playback and
-  progression testing is still needed; this is not a claim of flawless audio
-  or a guaranteed frame rate in every scene.
-- Camera level 7 completed an emulator match. Level 6 gameplay and cycling
-  levels 5/6/7 through Options were not tested in that handoff.
-- Two-Vita LAN, Classic controls, rear touch, save/update behavior and wider
-  game progression need testing on the release candidate.
-- The current native source, renderer and patched vitaGL files are included.
-  The dependency recipe and pinned source setup are also included. Full
-  linked-library provenance, combined-package licensing and fresh
-  installation remain open requirements.
-- The executable retains generic Linux build-workspace paths. Their exact
-  bytes were reviewed separately from the private artwork, which is excluded.
-- The runtime requires the owner's shader compiler module even when the
-  startup cache is included. It is not part of the package.
+A few things we're still working on. If you hit something not listed here,
+please [open an issue](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/issues).
 
-The performance description is what testing has reached so far, not a promise
-that every scene runs at the same frame rate.
+## Performance
+
+- **Some menus run below 30 fps.** The main menu and the team and stadium
+  screens run in the low 20s. Matches are not affected.
+- **Goal replays and celebrations run at around 20-25 fps.** The close-up
+  camera shows far more detail than open play. Gameplay itself is not
+  affected, and we're working on it.
+- **60 fps depends on the scene.** AUTO runs matches at 60 whenever the Vita
+  can keep up and switches to 30 in the busiest moments. If you'd rather have
+  a constant frame rate, set **Frame Rate** to **30 FPS** in Settings.
+- **Distant Textures is experimental.** It is off by default. If ground or
+  wall textures look wrong with it on, turn it back off.
+
+## Gameplay
+
+- **The CPU judges distance a little differently at zoom levels 4 to 7.** It
+  now plays as if it could see the standard TV view, so zooming in no longer
+  makes it weaker.
+- **Some settings apply at next launch.** Use **Save and Restart** in Settings
+  to apply them straight away.
+- **Wider testing needed** for two-Vita local play, the Classic layout, rear
+  touch and long career runs. Reports are very welcome.
+
+## Install
+
+- **The desktop installer may take a little while to list a new version.** If
+  **Get** offers an older one, use the manual steps in the
+  [install guide](INSTALL.md), or try again later.
+- You need your own copy of the game and the Vita's shader compiler module
+  (`libshacccg.suprx`). Neither is included.
+
+## If Something Goes Wrong
+
+Open `ux0:data/mscharged/np-player.txt` and add either line to go back to the
+previous behaviour:
+
+```
+MSC_FPS=30
+MSC_DYNRES=off
+```
+
+More switches are listed in [Technical Notes](docs/TECHNICAL.md#runtime-switches).

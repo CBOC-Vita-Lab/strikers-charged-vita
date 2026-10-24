@@ -1,5 +1,7 @@
 // np_latency.cpp (W5 RT): pad read -> refresh that shows the frame. See include/np/latency.h.
 #include "np/latency.h"
+#include "np/touch_diag.h"
+#pragma weak NpDiagSnapshot
 
 #include <algorithm>
 #include <atomic>
@@ -22,6 +24,7 @@ constexpr unsigned kRing = 128;
 Rec g_ring[kRing];
 std::atomic<uint64_t> g_sendTag{0};
 uint64_t g_seq = 0;            // game thread
+std::atomic<uint64_t> g_shownTag{0};   // 1.1: the newest frame (tag) handed to the display, also without MSC_LAT (FramesInFlightGate)
 uint64_t g_padNs = 0;          // game thread: first pad use since the last latch
 bool g_havePad = false;
 int g_on = -1;
@@ -95,6 +98,7 @@ void Complete(Rec* r) {
 extern "C" {
 
 void NpLatPadUse(uint64_t rawReadNs, int chan) {
+    if (NpDiagEnabled()) return;
     if (chan != 0 || !On()) return;
     if (!g_havePad) {
         g_havePad = true;
@@ -103,7 +107,13 @@ void NpLatPadUse(uint64_t rawReadNs, int chan) {
 }
 
 void NpLatLatch(void) {
-    if (!On()) return;
+    if (NpDiagEnabled()) { if(NpDiagSnapshot)NpDiagSnapshot(); NpDiagLatch(); return; }
+    if (!On()) {
+        // (no record, but every frame still carries its number to the display: the frames-in-flight limit counts with it)
+        g_sendTag.store(++g_seq, std::memory_order_release);
+        g_havePad = false;
+        return;
+    }
     const uint64_t tag = ++g_seq;
     Rec* r = Get(tag);
     for (uint64_t& t : r->t) t = 0;
@@ -116,17 +126,27 @@ void NpLatLatch(void) {
     }
 }
 
-uint64_t NpLatTakeSendTag(void) { return g_sendTag.exchange(0, std::memory_order_acq_rel); }
+uint64_t NpLatTakeSendTag(void) {
+    if (NpDiagEnabled()) return NpDiagTake();
+    return g_sendTag.exchange(0, std::memory_order_acq_rel);
+}
 
 void NpLatDecoded(uint64_t tag) {
+    if (NpDiagEnabled()) { NpDiagEvent(NPD_DECODE,0,tag,0,0,0,0,0); return; }
+    if (!On()) return;
     if (Rec* r = Get(tag)) r->t[kDecoded] = Now();
 }
 
 void NpLatPresented(uint64_t tag) {
+    if (NpDiagEnabled()) return;
+    if (!On()) return;
     if (Rec* r = Get(tag)) r->t[kPresented] = Now();
 }
 
 void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo) {
+    if (NpDiagEnabled()) return;
+    for (uint64_t cur = g_shownTag.load(std::memory_order_relaxed); tag > cur && !g_shownTag.compare_exchange_weak(cur, tag);) {}
+    if (!On()) return;
     Rec* r = Get(tag);
     if (!r) return;
     const uint64_t now = Now();
@@ -139,7 +159,11 @@ void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo) {
     Complete(r);
 }
 
+uint64_t NpLatHandedOverTag(void) { return g_seq; }   // (game thread)
+uint64_t NpLatShownTag(void) { return g_shownTag.load(std::memory_order_acquire); }
+
 void NpLatTakeWindow(uint32_t* n, uint32_t* p50Us, uint32_t* p95Us) {
+    if (NpDiagEnabled()) { *n=*p50Us=*p95Us=0; return; }
     std::lock_guard<std::mutex> lk(g_mtx);
     *n = static_cast<uint32_t>(g_win.size());
     Pct(g_win, *p50Us, *p95Us);

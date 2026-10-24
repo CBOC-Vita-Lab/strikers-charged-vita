@@ -191,7 +191,8 @@ void QueueCopyDisp(bool clear);
 // run in place); otherwise the buffer goes through SubmitToBackend.
 // `onDecoded` is called between the two, when nothing of the frame is left to
 // be read from guest memory.
-void FrontPresent(bool direct, void (*onDecoded)());
+void FrontPresent(bool direct, void (*onDecoded)(), uint64_t latencyTag = 0);
+void DlCacheDiagnostic(uint64_t tag);
 // When set, a finished frame's command buffer is handed to this function instead of being
 // executed (or submitted) by FrontPresent. It may swap the buffer for an empty one and return
 // before the frame has been drawn (vgx_play.cpp: back end on its own thread).
@@ -221,6 +222,24 @@ void CopyCheckTexReport(); // MSC_VGX_COPYCHECK=1
 void SetGuestWriteGenerationHook(uint64_t (*fn)(const void*, size_t));
 // Optional: called on the player's thread for every texture upload (texture, GX format, frame).
 void SetTextureDumpHook(void (*fn)(const TexUpload& up, uint32_t gxFormat, uint64_t frame));
+// 1.1: optional replacement of a guest texture when it is uploaded (vgx_hdtex.cpp installs one, from the Galaxy port): `fn` may
+// fill `up` (width, height, format, levels, authored) with another image of the texture and return true. Asked only on upload,
+// never for EFB copies. The guest's dimensions stay what the draw state and the TEV see; the replacement carries its own mip
+// chain, and its binds get the mip filter `mipFilter` (FILT_LIN_MIP_*).
+struct TexReplaceQuery {
+    const uint8_t* data;  // level 0 in guest memory
+    uint32_t fmt;         // GX texture format
+    uint16_t width, height;
+    const uint8_t* tlut;  // palette of a CI texture (null otherwise)
+    uint32_t tlutBytes;
+    bool mipClamp;        // backend::Caps::mipClamp: no compressed level below one 4x4 block
+    uint64_t liveBytes;   // bytes of replacement textures the back end holds now
+};
+// `fn` returns 0 (not replaced), 1 (replaced: `up` filled) or 2 (the replacement is being read: *wait names it, and the cache
+// uploads the texture again once `ready(*wait)` says it is in).
+void SetTextureReplaceHook(int (*fn)(const TexReplaceQuery& q, TexUpload& up, uint32_t* wait), uint8_t mipFilter, bool (*ready)(uint32_t wait));
+uint64_t ReplacedTextureBytes();                 // bytes of replacement textures alive in the back end
+void SetReplacedTextureBudget(uint64_t bytes);   // past half of it, replacements unused for 600 frames are freed
 
 // ---- statistics (vgx_stats.cpp)
 namespace stats {
@@ -236,7 +255,7 @@ void Draw(const FsKey& fs, const VsKey& vs, uint32_t layoutMask, uint32_t verts)
 void VertexFormat(int attr, int type, const VtxAttrFmt& f);
 void Note(const char* what); // one-off feature flag, e.g. "indirect"
 void ShaderCreated(bool fragment, uint64_t frame);
-void FrameEnd(uint64_t frame);
+void FrameEnd(uint64_t frame,uint64_t tag=0);
 void CloseFrameLog();
 void Dump(const char* path);
 // Per-frame counters (one CSV line per presented frame, MSC_VGX_FRAMESTATS=<file>).

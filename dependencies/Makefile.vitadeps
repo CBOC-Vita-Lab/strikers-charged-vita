@@ -37,7 +37,8 @@ VGL_OPTS := -DHAVE_SHADER_CACHE -DSTORE_DEPTH_STENCIL -DSKIP_SPLASHSCREEN -DHAVE
 VGL_HASH := cdbba42-glb
 VGL_CFLAGS := -g -O3 -ffast-math -mtune=cortex-a9 -mfpu=neon -Wno-incompatible-pointer-types -Wno-stringop-overflow \
               -mfp16-format=ieee -DVGL_GIT_HASH='"$(VGL_HASH)"' -I$(VGL)/source -I$(INCDIR) $(VGL_OPTS) \
-              -DsceClibPrintf=msc_vgl_printf -w
+              -DsceClibPrintf=msc_vgl_printf -w \
+              -ffile-prefix-map=$(ROOT)=. -ffile-prefix-map=$(O)=build/dependencies/prefix   # (no local paths in the log strings)
 VGL_CXXFLAGS := $(VGL_CFLAGS) -fexceptions -std=gnu++11 -Wno-write-strings
 
 VGL_C   := $(wildcard $(VGL)/source/*.c) $(wildcard $(VGL)/source/utils/*.c)

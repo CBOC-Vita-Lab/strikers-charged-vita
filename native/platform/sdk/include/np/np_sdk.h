@@ -128,11 +128,11 @@ typedef struct NpRawPad {
     float gyro[3];                   // rad/s
     // W5 CTL: the rear touch panel (scaled to the front's 960 x 544, x growing to the right as seen from the front; 0 fingers
     // when it is off) and where the sample came from (NP_RAW_*: the player's controls, a GameCube-pad script, a Vita script).
-    int rear_count;
+    int rear_count;                  // -1 unavailable; zero is a verified release
     struct { int id; float x, y; } rear[NP_MAX_TOUCH];
     int source;
 } NpRawPad;
-enum { NP_RAW_LIVE = 0, NP_RAW_SCRIPT_GC = 1, NP_RAW_SCRIPT_VITA = 2 };
+enum { NP_RAW_LIVE = 0, NP_RAW_SCRIPT_GC = 1, NP_RAW_SCRIPT_VITA = 2, NP_RAW_BLOCKED = 3 };
 // Fills `out` for pad number `pad` (0 = the player's own controller) and returns 1, or returns 0 when
 // no such controller is connected. Called from the game thread, at most a few times per frame.
 typedef int (*NpInputSourceFn)(int pad, NpRawPad* out);

@@ -68,6 +68,8 @@
 
 #include <string.h>
 
+extern "C" void VgxMegaSceneHint(int on) __attribute__((weak)); // renderer (vgx_backend_gl.cpp)
+
 const nlVector3 gRenderUpVector = { 0.0f, 0.0f, 1.0f };
 
 GameRenderTask* GameRenderTask::sInstance;
@@ -474,6 +476,8 @@ void GameRenderTask::RenderFrame(float fDeltaT, bool bPictureInPicture)
 
         ShootToScoreMeter::instance.UpdateAndRender(fDeltaT);
         gMegastrikeBackgroundOverlay.UpdateAndRender(fDeltaT);
+        // (Vita port) the renderer draws Mega Strike scenes at a smaller internal size while this is reported
+        if (gMegastrikeBackgroundOverlay.mActive && VgxMegaSceneHint) VgxMegaSceneHint(1);
     }
     else if (currState == TASK_NIS)
     {

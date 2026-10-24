@@ -153,6 +153,7 @@ struct DrawRec {
     RenderState rs;
     TexBind tex[8];
     uint32_t skinBlock = kNoBlock; // W5 SKIN: offset of the bone matrices in CmdBuf::uni (kSkinBlockFloats), kNoBlock: not skinned on the GPU
+    uint8_t fx = 0;                // FX: an additive effect sprite draw (EXT_FX), which the back end may draw at a lower resolution
 };
 
 // ----------------------------------------------------------------- shaders
@@ -180,6 +181,7 @@ enum : uint8_t {
     TF_RGBA8 = 0, // 4 bytes per texel, R first, top row first
     TF_DXT1 = 1,  // S3TC DXT1 blocks (8 bytes each, row-major), as GL_COMPRESSED_RGBA_S3TC_DXT1_EXT takes them
     TF_LA88 = 2,  // 2 bytes per texel, luminance then alpha, sampling as (L,L,L,A); no mipmaps
+    TF_DXT5 = 3,  // S3TC DXT5 blocks (16 bytes each, row-major): only the HD replacements (vgx_hdtex.cpp)
 };
 struct TexUpload {
     uint32_t texId = 0;
@@ -325,12 +327,14 @@ struct CmdBuf {
     std::vector<uint32_t> vtxChunks;
     std::vector<VariantCmd> variants;
     uint64_t frame = 0; // presented-frame number this buffer belongs to (diagnostics)
+    uint64_t latencyTag = 0; // immutable identity delivered before decoder/backend execution
 
     bool empty() const { return cmds.empty(); }
     void clear() {
         cmds.clear(); draws.clear(); uploads.clear(); shaders.clear(); copyTex.clear();
         copyDisp.clear(); targets.clear(); bufUploads.clear(); passes.clear(); vtx.clear(); idx.clear(); uni.clear();
         vtxChunks.clear(); variants.clear();
+        latencyTag = 0;
     }
 };
 
@@ -377,10 +381,16 @@ void SetPresentHook(PresentHook hook);
 enum : unsigned { kHintNoLoad = 1u, kHintNoStore = 2u };
 using SceneHintHook = void (*)(unsigned framebuffer, unsigned hints);
 void SetSceneHintHook(SceneHintHook hook);
+// DYNRES (vgx_backend_gl.cpp "dynamic resolution"): the host's GPU time of the newest finished frame. Returns false when there is none; seq grows
+// by one per finished frame (a new value), ms is what the GPU was busy for it.
+typedef bool (*GpuTimeFn)(uint32_t* seq, float* ms);
+void SetGpuTimeSource(GpuTimeFn fn);
+float RenderScale(); // the scene's render scale in force (1: the game's own size)
 // W5 RT: a cheap microsecond clock for the draw timers (MSC_VGX_RTTIME=1; default: std::chrono::steady_clock).
 using MicroClock = uint32_t (*)();
 void SetMicroClock(MicroClock clock);
 uint64_t ExecutingFrame(); // W5 RT: CmdBuf::frame of the buffer being executed (the present hook's frame)
+uint64_t ExecutingLatencyTag();
 void GetDrawTimers(uint64_t out[4]); // MSC_VGX_RTTIME=1, cumulative: draws that began a scene, their microseconds, sampled other draws (every 32nd), theirs
 // Picture scaling at present (LOOK, wave 5). A host that shows the picture itself can scale the
 // display copy to the screen with a shader of the back end instead of a framebuffer blit:
@@ -389,9 +399,11 @@ void GetDrawTimers(uint64_t out[4]); // MSC_VGX_RTTIME=1, cumulative: draws that
 //               texels is blended over about one screen pixel (the picture is not blurred by a
 //               non-integer scale; one texture fetch per pixel)
 //   PIC_UNSHARP sharp bilinear plus an unsharp mask (four more fetches; amount `sharpen`, 0.2 to 0.6)
-// Hosts read MSC_VITA_UPSCALE=off|linear|sharp|sharp+ (PictureModeFromString; off = 0 = no shader:
+//   PIC_SMOOTH  plain bilinear plus the same unsharp mask (five fetches): edges stay smooth, the
+//               softness of the scale is taken back (the Vita host's default, amount 0.5)
+// Hosts read MSC_VITA_UPSCALE=off|linear|sharp|sharp+|smooth (PictureModeFromString; off = 0 = no shader:
 // the Vita host's glBlitFramebuffer) and MSC_VITA_SHARPEN=<amount>.
-enum PictureMode { PIC_BLIT = 0, PIC_LINEAR = 1, PIC_SHARP = 2, PIC_UNSHARP = 3 };
+enum PictureMode { PIC_BLIT = 0, PIC_LINEAR = 1, PIC_SHARP = 2, PIC_UNSHARP = 3, PIC_SMOOTH = 4 };
 int PictureModeFromString(const char* text);   // -1: not a mode name
 // Draws the display copy rectangle (x, y, w, h in render-target pixels, as in PresentHook) of the EFB into
 // the rectangle (dx, dy, dw, dh) of framebuffer object `fbo` (0: the display). flipY: the picture's top

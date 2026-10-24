@@ -41,7 +41,7 @@ ifeq ($(strip $(VGL_ID)),)
 VGL_ID := unidentified vitaGL
 endif
 
-CORE := vgx_api vgx_rec vgx_play vgx_guestmem vgx_dlcache vgx_state vgx_draw vgx_shadergen vgx_texdecode vgx_texcache vgx_stats vgx_interp vgx_present vgx_capture vgx_skin vgx_backend_gl
+CORE := vgx_api vgx_rec vgx_play vgx_guestmem vgx_dlcache vgx_state vgx_draw vgx_shadergen vgx_texdecode vgx_texcache vgx_stats vgx_interp vgx_present vgx_capture vgx_skin vgx_hdtex vgx_backend_gl
 SRCS := $(addprefix $(SRC)/,$(addsuffix .cpp,$(CORE))) $(ROOT)/vita/vgx_host_vita.cpp $(NAT)/vgx_native_bridge.cpp $(NAT)/vgx_native_vita_services.cpp
 OBJS := $(patsubst $(ROOT)/%.cpp,$(O)/%.o,$(SRCS))
 

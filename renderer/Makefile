@@ -63,7 +63,7 @@ INC := $(if $(filter glnull,$(BACKEND)),-I$(SRC)/glstub,) -I$(SRC) -I$(PORT)/aur
 EXTRA ?=
 CXXFLAGS := -std=c++20 -O2 -g -pipe $(TARGET) -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -DTARGET_PC -DNOMINMAX $(INC) $(EXTRA)
 
-VGX_SRC := vgx_api.cpp vgx_rec.cpp vgx_play.cpp vgx_guestmem.cpp vgx_dlcache.cpp vgx_state.cpp vgx_draw.cpp vgx_shadergen.cpp vgx_texdecode.cpp vgx_texcache.cpp vgx_stats.cpp vgx_host.cpp vgx_interp.cpp vgx_present.cpp vgx_capture.cpp vgx_skin.cpp
+VGX_SRC := vgx_api.cpp vgx_rec.cpp vgx_play.cpp vgx_guestmem.cpp vgx_dlcache.cpp vgx_state.cpp vgx_draw.cpp vgx_shadergen.cpp vgx_texdecode.cpp vgx_texcache.cpp vgx_stats.cpp vgx_host.cpp vgx_interp.cpp vgx_present.cpp vgx_capture.cpp vgx_skin.cpp vgx_hdtex.cpp
 ifeq ($(BACKEND),null)
   VGX_SRC += vgx_backend_null.cpp
 else ifeq ($(BACKEND),glnull)

@@ -1,57 +1,52 @@
-MARIO STRIKERS CHARGED VITA
-THE DESKTOP INSTALLER IS OPTIONAL. The game runs on PS Vita.
-Manual setup works from Windows, Mac (Intel or Apple Silicon), or Linux.
-No computer or desktop app is needed while playing.
+MARIO STRIKERS CHARGED FOR PS VITA - VERSION 1.1
+================================================
 
-Settings preview: 2026-10-19 / MSCN00003. Source/package licensing review and
-full installation testing remain pending. Publication is not third-party
-approval or a grant of additional redistribution rights.
+Thanks for downloading! This is a native PS Vita version of Mario Strikers
+Charged. You need your own copy of the Wii game; no game data is included.
 
-REQUIRED: homebrew-enabled Vita, VitaShell, your own supported disc and
-your legitimately obtained libshacccg.suprx in ur0:data/.
 
-MANUAL INSTALL: NO CBOC APP, PYTHON OR COMPILING NEEDED
-1. Extract this entire install ZIP on your computer. Do not unzip the VPK.
-2. Copy Strikers-Charged-Vita.vpk to ux0:VPK/ using VitaShell
-   USB, FTP or your already configured memory card (create VPK if needed).
-   INSTALL.md explains each transfer method. End the transfer, then open that VPK
-   in VitaShell and install it.
-3. Copy your own Wii USA Rev 1 (R4QE01) game's sys/ and files/ folders to:
-     ux0:data/mscharged/game/sys/fst.bin
-     ux0:data/mscharged/game/files/Art/
-   Do not create game/game or game/DATA. Allow about 3 GB free on the Vita.
-4. Check that ur0:data/libshacccg.suprx is present. If missing, copy your own
-   legitimate file there using VitaShell. USB/card users can first stage it
-   in ux0:VPK/, then use VitaShell to copy it into ur0:data/. Do not overwrite
-   an existing working copy.
-5. Open the Mario Strikers Charged bubble. See CONTROLS.md for the layout.
-   PS > LiveArea Settings opens settings without restarting your game.
+WHAT YOU NEED
+-------------
+- A Vita with homebrew enabled and VitaShell
+- Your own Mario Strikers Charged disc: Wii, USA, Rev 1 (R4QE01),
+  as an ISO, RVZ or extracted folder
+- libshacccg.suprx in ur0:data/ (most homebrew-ready Vitas already have it)
+- About 3 GB of free space
 
-ONLY HAVE AN ISO OR RVZ?
-PREPARE-GAME.md shows the Dolphin menu steps to extract it. No Python or
-compiling is needed for that route. The Python helper is optional.
-Already have the complete sys/ and files/ folders? Skip extraction.
-The VPK includes the playback fixes; no extra movie conversion is required.
 
-EASY INSTALL (OPTIONAL)
-CBOC Vita Installer (Mac, Windows or Linux) copies and installs everything for
-you: github.com/CBOC-Vita-Lab/vita-installer/releases/latest
-See DESKTOP-INSTALL.md. It installs the same VPK and keeps your saves.
+EASY INSTALL
+------------
+CBOC Vita Installer does everything for you on Windows, Mac or Linux:
+  github.com/CBOC-Vita-Lab/vita-installer/releases/latest
+See DESKTOP-INSTALL.md.
 
-ALREADY INSTALLED?
-Back up ux0:data/mscharged/ first. Install only the matching new player VPK.
-Do not delete the bubble, replace individual eboot/shader files, recopy the
-game, or replace the whole data folder as an ordinary app update.
 
-KEEP: game/ (your extracted disc), np-data/NAND/ (saves), np-player.txt
-      (settings), and your own artwork. Do not use someone else's save.
-INCLUDED: player VPK, matching shaders, generic app art, optional preparation helper,
-          source, guides, notices and an optional download checker.
-NOT INCLUDED: disc image, extracted game, saves, firmware or HD models.
+MANUAL INSTALL
+--------------
+1. Copy Strikers-Charged-Vita.vpk to ux0:VPK/ on your Vita.
+   (Don't unzip the VPK.)
 
-Keep the guides and notices on your computer; do not copy the whole ZIP
-contents into ux0:app/. The VPK installer places its own app resources.
-INSTALL.md has the full folder map, backup advice and troubleshooting.
+2. Extract your disc with Dolphin to get its "sys" and "files" folders.
+   PREPARE-GAME.md shows how. Then copy them so you have:
+     ux0:data/mscharged/game/sys/
+     ux0:data/mscharged/game/files/
 
-CHECK-DOWNLOAD.md has the optional file check. Technical and release notes
-are in BUILDING.md, SOURCE.md and KNOWN-ISSUES.md.
+3. Check that ur0:data/libshacccg.suprx is there. If not, copy your own.
+
+4. Open the VPK in VitaShell, install it, and launch the bubble.
+
+INSTALL.md has the full guide, including USB, FTP and memory card transfers.
+
+
+UPDATING
+--------
+Just install the new VPK over the old one. Your game files, saves and
+settings in ux0:data/mscharged/ are kept.
+
+
+HAVE FUN
+--------
+Controls: CONTROLS.md
+What's new: CHANGELOG.md
+Known issues: KNOWN-ISSUES.md
+Press PS during play and tap Settings in the LiveArea to change options.

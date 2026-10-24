@@ -21,6 +21,7 @@
 // Counters: per frame in the CSV (dlHit, dlBuild, dlRehash, dlBypass), totals in vgx_stats.txt.
 #include "vgx_guestmem.h"
 #include "vgx_state.h"
+#include "vgx_perf_diag.h"
 #include "vgx_ext.h"
 
 #define XXH_INLINE_ALL
@@ -95,6 +96,9 @@ struct ListInfo {
 };
 constexpr int kMaxVariants = 8;
 constexpr uint64_t kRetainFrames = 600;
+// Entries age by frames that call cacheable lists, not by wall frames, so a
+// loading screen, pause or movie does not throw the match's lists away.
+uint64_t g_useClock = 0, g_useClockFrame = ~0ull;
 std::unordered_map<const uint8_t*, ListInfo> g_map;
 // In front of g_map (see CacheFront in vgx_texcache.cpp): the list last looked up for each
 // of 256 address classes. Emptied whenever an entry of g_map is erased.
@@ -391,12 +395,13 @@ void Free(Entry* e) {
 }
 
 // Drops entries that were not used for a long time (called once in a while).
-void Sweep(uint64_t frame) {
+void Sweep(uint64_t frame, uint64_t use) {
+    const uint64_t begin=NpDiagActive&&NpDiagActive()?NpDiagNow():0;
     for (auto it = g_map.begin(); it != g_map.end();) {
         Entry** link = &it->second.head;
         while (*link) {
             Entry* e = *link;
-            if (frame - e->lastUse > kRetainFrames) {
+            if (use - e->lastUse > kRetainFrames) {
                 *link = e->next;
                 Free(e);
                 ++g_ctr.evicted;
@@ -411,6 +416,7 @@ void Sweep(uint64_t frame) {
         if (it->second.until + kRetainFrames < frame) it = g_bypass.erase(it);
         else ++it;
     }
+    if(begin)NpDiagEvent(NPD_GEOMETRY,1,frame,begin,NpDiagNow(),g_ctr.evicted,g_map.size(),g_bypass.size());
 }
 
 void FreeAll(ListInfo& li) {
@@ -445,6 +451,10 @@ bool StaticBufferData(uint32_t bufId, const uint8_t*& vtx, const uint16_t*& idx)
     return true;
 }
 
+void DlCacheDiagnostic(uint64_t tag){
+    if(NpDiagActive&&NpDiagActive())NpDiagEvent(NPD_GEOMETRY,0,tag,g_ctr.liveBytes,g_ctr.staticBytes,g_ctr.staticBufs,g_ctr.evicted,g_map.size());
+}
+
 void DlCacheReport(FILE* f) {
     std::fprintf(f,
                  "display-list cache: %llu hits (%llu verts), %llu builds (%llu verts), %llu re-validated by hash, %llu changed, %llu bypassed calls, "
@@ -457,6 +467,31 @@ void DlCacheReport(FILE* f) {
                  (unsigned long long)g_ctr.promotedSmall, (unsigned long long)g_ctr.staticBufs, g_ctr.staticBytes / 1048576.0);
 }
 
+// MSC_VGX_BYPASSLOG=1 (diagnostic): why a list is decoded every frame. Names what differs between the new binding and the newest variant.
+void BypassNote(const char* why, const uint8_t* list, uint32_t nbytes, const Entry* v) {
+    static const int on = EnvInt("MSC_VGX_BYPASSLOG", 0) ? 1 : 0;
+    if (!on) return;
+    char diff[160] = "";
+    if (v) {
+        size_t n = 0;
+        auto add = [&](const char* t) { n += std::snprintf(diff + n, sizeof diff - n, "%s ", t); };
+        if (std::memcmp(v->vcd, g.vcd, 21) != 0) add("vcd");
+        for (int f = 0; f < 8; ++f)
+            if ((v->fmtMask & (1u << f)) && std::memcmp(v->vat[f], &g.vat[f][9], sizeof v->vat[f]) != 0) { add("vat"); break; }
+        static const char* kNames[12] = {"pos", "nrm", "clr0", "clr1", "tex0", "tex1", "tex2", "tex3", "tex4", "tex5", "tex6", "tex7"};
+        for (int a = 9; a <= 20; ++a)
+            if ((v->idxMask & (1u << a)) && v->arr[a - 9] != g.arrays[a].data) add(kNames[a - 9]);
+        if (v->skin != g_skin.on) add("skin-on");
+        else if (v->skin && (v->skinW != g_skin.weights || v->skinI != g_skin.indices)) add("skin-arrays");
+        if (v->nbytes != nbytes) add("size");
+    }
+    char vd[40];
+    for (int a = 9; a <= 20; ++a) vd[a - 9] = "-dbw"[g.vcd[a] & 3];
+    vd[12] = 0;
+    std::fprintf(stderr, "[bypass] frame %llu list %p %u bytes: %s%s%s (vcd pos..tex7 %s, skin %d)\n", static_cast<unsigned long long>(CurrentFrame()), (const void*)list, nbytes, why,
+                 v ? "; differs: " : "", diff, vd, g_skin.on ? 1 : 0);
+}
+
 void CallList(const uint8_t* list, uint32_t nbytes) {
     Init();
     const uint64_t frame = CurrentFrame();
@@ -464,9 +499,11 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         ProcessStream(list, nbytes);
         return;
     }
+    if (frame != g_useClockFrame) { g_useClockFrame = frame; ++g_useClock; }
+    const uint64_t use = g_useClock;
     {
         static uint64_t lastSweep = 0;
-        if (frame - lastSweep >= 120) { lastSweep = frame; Sweep(frame); }
+        if (frame - lastSweep >= 120) { lastSweep = frame; Sweep(frame, use); }
     }
     if (!g_bypass.empty() && (!Gxd(GXD_DLFAST) || BypassMaybe(list))) {
         auto b = g_bypass.find(list);
@@ -523,7 +560,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             same = false;
         }
         if (same) {
-            e->lastUse = frame;
+            e->lastUse = use;
             e->fails = 0;
             ++g_ctr.hits;
             ++stats::Cur().dlHit;
@@ -541,7 +578,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             e->genList = gl;
             std::memcpy(e->genArr, ga, sizeof ga);
             e->okEpoch = ~0ull;
-            e->lastUse = frame;
+            e->lastUse = use;
             e->fails = 0;
             ++g_ctr.rehashOk;
             ++stats::Cur().dlRehash;
@@ -553,6 +590,15 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         if (++e->fails >= 3) {
             // Rewritten every time it is drawn (dynamic geometry): hashing and
             // storing it is wasted work. Decode directly for the next two seconds.
+            if (EnvInt("MSC_VGX_BYPASSLOG", 0)) {
+                static const char* kNames[12] = {"pos", "nrm", "clr0", "clr1", "tex0", "tex1", "tex2", "tex3", "tex4", "tex5", "tex6", "tex7"};
+                char w[200];
+                size_t n = std::snprintf(w, sizeof w, "contents rewritten each draw: written %s", tracked && gl != e->genList ? "list " : "");
+                for (int a = 9; a <= 20; ++a)
+                    if ((e->idxMask & (1u << a)) && (!tracked || ga[a - 9] != e->genArr[a - 9]))
+                        n += std::snprintf(w + n, sizeof w - n, "%s@%p+%u ", kNames[a - 9], (const void*)(e->arr[a - 9] + e->lo[a - 9]), e->hi[a - 9] - e->lo[a - 9]);
+                BypassNote(w, list, nbytes, nullptr);
+            }
             SetBypass(BypassFor(list), frame);
             Unlink(li, e);
             if (!li.head) { g_map.erase(list); MapFrontClear(); }
@@ -572,6 +618,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             else if (li.lastNewVariant != frame) li.streak = 1;
             li.lastNewVariant = frame;
             if (li.streak >= 4) {
+                BypassNote("a new binding every frame", list, nbytes, li.head);
                 SetBypass(BypassFor(list), frame);
                 FreeAll(li);
                 g_map.erase(list);
@@ -593,9 +640,8 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         e->next = li.head;
         li.head = e;
     }
-    // (Re)build. The array ranges are only known after the decode, so a write
-    // that races with it cannot be pinned to this entry: any write notification
-    // between here and the end of the build makes the entry untrusted.
+    // (Re)build. The array ranges are only known after the decode, so writes
+    // notified during it are checked against them afterwards (GuestWritesTouch).
     const uint64_t epoch0 = GuestWriteEpoch();
     g_ctr.liveBytes -= e->verts.capacity();
     e->list = list;
@@ -628,7 +674,24 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             e->genList = gl;
             std::memcpy(e->genArr, ga, sizeof ga);
             e->hash = ContentHash(*e);
-            e->raced = GuestWriteEpoch() != epoch0;
+            // Raced only if a write notified during the build overlaps the
+            // list or an array range it read (other game writes are common).
+            const uint64_t epoch1 = GuestWriteEpoch();
+            if (epoch1 == epoch0) {
+                e->raced = false;
+            } else {
+                HostRange used[15];
+                int nUsed = 0;
+                used[nUsed++] = {e->list, e->nbytes};
+                if (e->skin) {
+                    used[nUsed++] = {e->skinW, e->skinVerts * 16u};
+                    used[nUsed++] = {e->skinI, e->skinVerts * 4u};
+                }
+                for (int a = 9; a <= 20; ++a)
+                    if ((e->idxMask & (1u << a)) && e->arr[a - 9] && e->hi[a - 9] > e->lo[a - 9])
+                        used[nUsed++] = {static_cast<const uint8_t*>(e->arr[a - 9]) + e->lo[a - 9], e->hi[a - 9] - e->lo[a - 9]};
+                e->raced = GuestWritesTouch(epoch0, epoch1, used, nUsed);
+            }
         }
     }
     if (!ok) {
@@ -641,7 +704,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         ProcessStream(list, nbytes);
         return;
     }
-    e->lastUse = frame;
+    e->lastUse = use;
     ++g_ctr.builds;
     ++stats::Cur().dlBuild;
     g_ctr.builtVerts += e->totalVerts;

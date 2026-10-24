@@ -91,6 +91,10 @@ void np_gx_skin_begin(const float* mats, unsigned int nBones, const void* weight
     vgxn_ext(2, w, 6 + nBones * 12);
 }
 void np_gx_skin_end(void) { vgxn_ext(3, 0, 0); }
+void np_gx_fx_lowres(unsigned int on) {
+    const unsigned int w[1] = {on ? 1u : 0u};
+    vgxn_ext(4, w, 1);
+}
 void np_gx_diag_tag(unsigned int tag, unsigned int flags) {
     const unsigned int w[2] = {tag, flags};
     vgxn_ext(1, w, 2);

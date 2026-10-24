@@ -57,6 +57,7 @@ struct State {
 // Fills `s` from the game; `buttons` (optional) gets the live menu buttons, `pointer` (optional,
 // two floats) the pointer position. Called on the game thread at a frame end, never concurrently.
 void SampleState(State& s, std::vector<Button>* buttons, float* pointer);
+void SampleCoreState(State& s);
 // Name of the .fen file behind a scene id ("main_menu_v3"), "" if unknown.
 std::string SceneName(int32_t id);
 // Class name behind a vtable pointer, or the pointer in hex.

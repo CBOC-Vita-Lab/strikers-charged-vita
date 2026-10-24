@@ -81,7 +81,7 @@ INCLUDES := -I. -Iinclude -Isrc/ode -Isrc/zlib -Ilibs/RVL_SDK/include -Iref/RVL_
             -idirafter libs/MSL_C/include -idirafter libs/MetroTRK/include
 # NP_PARALLEL=1: the game's PortParallelFor() job sites (RenderSnapshot Grab/Blend) use the job pool of platform/vita/src/np_port_parallel.cpp
 NPDEF_PAR := $(if $(filter 1,$(NP_PARALLEL)),-DNP_HAVE_PARALLEL=1,)
-DEFS     := $(NPDEF_PAR) -DNP_NATIVE=1 -DNP_DISC_HOST_ORDER=1 -DBUILD_VERSION=0 -DVERSION_R4QE01 -DNDEBUG=1 -DdNODEBUG=1 -DdSINGLE=1
+DEFS     := $(NPDEF_PAR) $(if $(filter 1,$(NP_DIAG_GPU)),-DNP_DIAG_GPU_WRAPS=1,) -DNP_NATIVE=1 -DNP_DISC_HOST_ORDER=1 -DBUILD_VERSION=0 -DVERSION_R4QE01 -DNDEBUG=1 -DdNODEBUG=1 -DdSINGLE=1
 
 # NPR's renderer bridge (platform/gx): the game sources carry its patches (np_gx.h, NP_GX_SETARRAY_STREAM), so the
 # wrapper header platform/gx/include/revolution/gx/GXHardware.h (WGPIPE stand-in) must be FIRST on the include path in

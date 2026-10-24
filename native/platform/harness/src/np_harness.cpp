@@ -100,6 +100,13 @@
 // needs the native value: run with MSC_WATCH_BUTTONS=1 and read the "scene+0x..." column).
 #include "np_harness.h"
 #include "np_frame_timing.h"
+#include "../../../include/np/touch_diag.h"
+#pragma weak NpDiagEnabled
+#pragma weak NpDiagContext
+#pragma weak NpDiagIdentity
+#pragma weak NpDiagInputMode
+#pragma weak NpDiagTaskBegin
+#pragma weak NpDiagTaskEnd
 #include "np_harness_state.h"
 #include "np_time.h"
 
@@ -1268,6 +1275,16 @@ void OnFrameBody() {
 
 extern "C" {
 
+void NpDiagSnapshot(void) {
+    if(NpDiagEnabled&&NpDiagEnabled()){
+        State s;SampleCoreState(s);
+        NpDiagIdentity((uint32_t)s.stadium,s.simFrame,s.simTime,s.timeScale,(uint32_t)s.game);
+        const bool playing=s.game&&s.simStarted&&s.taskState==2&&!s.paused;
+        const uint32_t mode=playing?(NpDiagInputMode&&NpDiagInputMode()==1?2:1):(s.game&&!s.paused&&s.taskState!=4?3:0);
+        NpDiagContext(mode,s.scene.depth?s.scene.ids[s.scene.depth-1]:~0u,s.taskState,s.paused,s.gameState);
+    }
+}
+
 void NpOnFramePresented(void) {
     g_countAlways.fetch_add(1, std::memory_order_relaxed);
     // Sample first, before the platform's own logging and console work.
@@ -1371,6 +1388,7 @@ bool TaskMarksOn() {
 }
 } // namespace
 extern "C" void NpTaskBegin(const char* name, unsigned index) {
+    if(NpDiagTaskBegin)NpDiagTaskBegin(index);
     if (!TaskMarksOn() || index > 255) return;
     static bool named[256];
     if (!named[index]) { named[index] = true; std::fprintf(stderr, "[taskmarks] %u=%s\n", index, name ? name : "?"); }
@@ -1379,6 +1397,7 @@ extern "C" void NpTaskBegin(const char* name, unsigned index) {
 #endif
 }
 extern "C" void NpTaskEnd(const char*, unsigned index) {
+    if(NpDiagTaskEnd)NpDiagTaskEnd(index);
     if (!TaskMarksOn() || index > 255) return;
 #if defined(__linux__)
     syscall(0x7f00, 0x20000000L + static_cast<long>(index) * 2 + 1);

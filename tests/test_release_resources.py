@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ReleaseResourceTests(unittest.TestCase):
     def test_original_package_art_matches_inventory(self):
-        manifest = ROOT / "ARTWORK.json"
+        manifest = ROOT / "store/artwork.json"
         self.assertTrue(manifest.is_file(), "Original project-art inventory is missing")
         entries = json.loads(manifest.read_text())["files"]
         required = {"icon0.png", "icon0-test.png", "livearea/bg.png", "livearea/startup.png",

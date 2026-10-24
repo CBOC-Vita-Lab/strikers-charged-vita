@@ -29,6 +29,8 @@
 #include "shared.h"
 
 uint32_t vgl_rt_flags = 0;
+uint32_t vgl_aniso_min = 0; // utils/gxm_utils.h vglSetTexMinFilter
+void vglSetAnisotropicFilter(uint32_t sceFilter) { vgl_aniso_min = (sceFilter == 2 || sceFilter == 3) ? sceFilter : 0; }
 GLuint vgl_rt_hint_fb = 0;
 uint32_t vgl_rt_hint = 0;
 GLboolean vgl_rt_hint_valid = GL_FALSE;
@@ -278,6 +280,24 @@ void vglRtSetup(uint32_t flags, int watcher_priority, int watcher_affinity) {
 	} else if (!(flags & VGL_RT_GPU_TIMERS)) {
 		rt_slots = NULL;
 	}
+}
+
+// Scenes ended so far and scenes the GPU watcher has seen completed (VGL_RT_GPU_TIMERS): a frame whose last scene was number n is finished on
+// the GPU when done >= n (the Strikers port's adaptive queue depth waits for that). 0 / 0 without the timers.
+void vglRtSceneProgress(uint32_t *submitted, uint32_t *done) {
+	*submitted = rt_slots ? rt_produced : 0;
+	*done = rt_slots ? rt_consumed : 0;
+}
+
+// The newest frame the GPU watcher has finished (VGL_RT_GPU_TIMERS): 0 when there is none yet, else the count of frames finished so far
+// (the caller sees a new frame when it grows). Cheap: one record, no copy of the rings (the renderer's resolution governor reads it per frame).
+uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out) {
+	const uint32_t h = rt_gpu_frame_head;
+	if (!h)
+		return 0;
+	__sync_synchronize();
+	*out = rt_gpu_frames[(h - 1) % RT_FRAMES];
+	return h;
 }
 
 void vglRtGetStats(vglRtStats *s) {

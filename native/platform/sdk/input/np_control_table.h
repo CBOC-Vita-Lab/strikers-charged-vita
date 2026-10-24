@@ -21,10 +21,11 @@
 namespace NpControlTable {
 
 // What a line needs to be on (the player's switches; np_controls.h, np_touch.cpp).
-enum Need : uint8_t { kAlways = 0, kRearOn = 1, kTouchSave = 2, kTouchMeter = 4, kTouchShake = 8, kTouchPointer = 16 };
+enum Need : uint8_t { kAlways = 0, kRearOn = 1, kTouchSave = 2, kTouchMeter = 4, kTouchShake = 8, kTouchPointer = 16, kRearSave = 32 };
 struct Config {
     int layout;   // 0 CLASSIC, 1 MODERN (np_controls.h Layout)
     bool rear, touchSave, touchMeter, touchShake, touchPointer;
+    bool rearSave;
 };
 inline uint8_t LayoutBit(int layout) { return (uint8_t)(layout == 1 ? 2 : 1); }
 
@@ -183,7 +184,7 @@ inline const Line* Lines(int* count) {
         {C, 0, kCaptain, kSquare, 0, kGc, kGcB, "vchase 15 none goal;try vmash square 1 cmode == 2 || chave == 0 200", "cmega", 0},
         {C, 0, kMeter, kSquare, 0, kWii, kWiiB, "idle 3;vpress square 3 0", "cmeterpress", 0},
         {C, kTouchMeter, kMeter, 0, 0, kScriptOnly, 0, "idle 3;touch 480 272 6 0", "cmeterpress", 0}}},
-    {B, kAlways, "MEGA SAVE", 0, 0, "AIM WITH A STICK, BLOCK WITH CROSS OR R", {" (OR TOUCH)", 0}, {kTouchSave, 0}, {
+    {B, kAlways, "MEGA SAVE", 0, 0, "AIM WITH A STICK, BLOCK WITH CROSS OR R", {" (OR TOUCH)", " (OR REAR AIM)"}, {kTouchSave, kRearSave}, {
         {B, 0, kSave, kCross, 0, kWii, kWiiA, "vpress cross 3 0", "csavea", 0},
         {B, 0, kSave, kR, 0, kScriptOnly, 0, "idle 3;vpress r 3 0", "csavea", 0},
         {B, kTouchSave, kSave, 0, 0, kScriptOnly, 0, "touch 480 300 3 0", "csavea", 0}}},
@@ -255,6 +256,8 @@ inline Config ConfigFromEnv() {
     c.rear = RearEnabled(layout);
     const bool minigames = !EnvOff("MSC_TOUCH_MINIGAMES");
     c.touchSave = minigames && !EnvOff("MSC_TOUCH_SAVE");
+    c.rearSave = c.touchSave && RearSaveEnabled();
+    c.touchSave = c.touchSave && !c.rearSave;
     c.touchMeter = minigames && !EnvOff("MSC_TOUCH_METER");
     c.touchShake = minigames && !EnvOff("MSC_TOUCH_SHAKE");
     c.touchPointer = !EnvOff("NP_TOUCH_POINTER");
@@ -267,6 +270,7 @@ inline bool NeedsMet(uint8_t need, const Config& c) {
     if ((need & kTouchMeter) && !c.touchMeter) return false;
     if ((need & kTouchShake) && !c.touchShake) return false;
     if ((need & kTouchPointer) && !c.touchPointer) return false;
+    if ((need & kRearSave) && !c.rearSave) return false;
     return true;
 }
 

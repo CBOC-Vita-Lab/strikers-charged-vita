@@ -1,9 +1,11 @@
 // Front end: turns the register state into self-contained draw records.
 #include "vgx_state.h"
+#include "vgx_perf_diag.h"
 #include "vgx_ext.h"
 #include "vgx_zfreeze.h"
 #include "vgx_capture.h"
 #include "vgx_interp.h"
+extern "C" void NpLatDecoded(uint64_t tag) __attribute__((weak));
 
 #define XXH_INLINE_ALL
 #include <xxhash.h>
@@ -33,7 +35,7 @@ template <typename K> struct Registry {
     std::unordered_multimap<uint64_t, Entry> map;
     std::vector<std::unique_ptr<ShaderSource>> sources;
     std::vector<K> keys; // by id
-    struct Front { uint64_t h = 0; uint16_t id = 0; bool valid = false; } front[64];
+    struct Front { uint64_t h = 0; uint16_t id = 0; bool valid = false; } front[1024];   // (1.1: 64 collided; from the Galaxy port)
 };
 Registry<FsKey> g_fsReg;
 Registry<VsKey> g_vsReg;
@@ -60,7 +62,18 @@ FILE* g_shaderList = nullptr;   // open for appending once the list has been rea
 bool g_shaderListDone = false;  // read (or found absent / not configured)
 bool g_shaderListReplay = false;
 std::unordered_set<uint32_t> g_progSeen;
-std::unordered_set<uint64_t> g_varSeen; // VariantKey
+struct VariantHash {
+    size_t operator()(uint64_t key) const noexcept {
+        // Mix shader IDs into the low word before 32-bit size_t truncates it.
+        key ^= key >> 30;
+        key *= 0xbf58476d1ce4e5b9ull;
+        key ^= key >> 27;
+        key *= 0x94d049bb133111ebull;
+        key ^= key >> 31;
+        return static_cast<size_t>(key);
+    }
+};
+std::unordered_set<uint64_t, VariantHash> g_varSeen; // VariantKey
 uint64_t g_lastVariant = ~0ull;         // of the last draw (most draws repeat it)
 inline uint64_t VariantKey(uint32_t vsId, uint32_t fsId, uint32_t layoutMask, uint32_t blendKey) {
     return (static_cast<uint64_t>((vsId << 16) | fsId) << 32) | ((layoutMask & 0x1FFFu) << 12) | (blendKey & 0xFFFu);
@@ -79,7 +92,7 @@ uint16_t Lookup(Registry<K>& reg, const K& key, bool fragment, Gen gen) {
     const uint64_t h = HashKey(&key, sizeof(K));
     // (in front of the hash table: the last id seen for each of 64 hash values; the table's
     // lookup costs divisions, and the same few keys come round all frame)
-    typename Registry<K>::Front& fr = reg.front[h & 63u];
+    typename Registry<K>::Front& fr = reg.front[h & 1023u];
     if (fr.valid && fr.h == h && SameStruct(reg.keys[fr.id], key)) return fr.id;
     auto range = reg.map.equal_range(h);
     for (auto it = range.first; it != range.second; ++it)
@@ -151,7 +164,7 @@ void EnsureShaderList() {
                     else rewrite = true;
                 } else if (type == 4) {
                     uint32_t v[4];
-                    if (std::fread(v, sizeof v, 1, f) != 1 || v[0] >= vsIds.size() || v[1] >= fsIds.size() || v[2] > 0xFFFu || v[3] > 0xFFFu) { rewrite = true; break; }
+                    if (std::fread(v, sizeof v, 1, f) != 1 || v[0] >= vsIds.size() || v[1] >= fsIds.size() || v[2] > 0x1FFFu || v[3] > 0xFFFu) { rewrite = true; break; }
                     if (g_varSeen.insert(VariantKey(vsIds[v[0]], fsIds[v[1]], v[2], v[3])).second) {
                         g_buf.variants.push_back(VariantCmd{vsIds[v[0]], fsIds[v[1]], static_cast<uint16_t>(v[2]), static_cast<uint16_t>(v[3])});
                         g_buf.cmds.push_back(Cmd{CMD_VARIANT, static_cast<uint32_t>(g_buf.variants.size() - 1)});
@@ -190,7 +203,7 @@ void EnsureShaderList() {
             std::vector<uint64_t> vars(g_varSeen.begin(), g_varSeen.end());
             std::sort(vars.begin(), vars.end());
             for (uint64_t vk : vars) {
-                const uint32_t rec[5] = {4u, static_cast<uint32_t>(vk >> 48), static_cast<uint32_t>(vk >> 32) & 0xFFFFu, static_cast<uint32_t>(vk >> 12) & 0xFFFu,
+                const uint32_t rec[5] = {4u, static_cast<uint32_t>(vk >> 48), static_cast<uint32_t>(vk >> 32) & 0xFFFFu, static_cast<uint32_t>(vk >> 12) & 0x1FFFu,
                                          static_cast<uint32_t>(vk) & 0xFFFu};
                 std::fwrite(rec, sizeof rec, 1, f);
             }
@@ -1384,6 +1397,7 @@ static DrawRec* NewDrawRec(uint8_t prim, uint32_t layoutMask) {
     rec->skinBlock = (layoutMask & VL_SKIN) ? g_skinBlockOff : kNoBlock;
     rec->rs = cur.rs;
     std::memcpy(rec->tex, cur.tex, sizeof cur.tex);
+    rec->fx = g_fxDraws ? 1 : 0;
     g_lastDraw = static_cast<int>(g_buf.draws.size()) - 1;
     g_buf.cmds.push_back(Cmd{CMD_DRAW, static_cast<uint32_t>(g_lastDraw)});
     ++stats::Cur().drawCalls;
@@ -1503,7 +1517,7 @@ static inline bool SameBlocks(const DrawRec& p, const RenderState& rs) {
 }
 
 static inline bool SameDrawState(const DrawRec& a, const DrawRec& b) { // (uniform-block offsets, render state, texture bindings)
-    if (a.skinBlock != b.skinBlock) return false; // (W5 SKIN)
+    if (a.skinBlock != b.skinBlock || a.fx != b.fx) return false; // (W5 SKIN; FX)
     if (Gxd(GXD_WORDCMP))
         return SameWords(a.ublock, b.ublock, UB_COUNT) && SameWords(&a.rs, &b.rs, sizeof(RenderState) / 4) && SameWords(a.tex, b.tex, sizeof a.tex / 4);
     return std::memcmp(a.ublock, b.ublock, sizeof a.ublock) == 0 && std::memcmp(&a.rs, &b.rs, sizeof(RenderState)) == 0 && std::memcmp(a.tex, b.tex, sizeof a.tex) == 0;
@@ -1836,7 +1850,7 @@ void EmitDraw(uint8_t gxPrim, uint32_t layoutMask, uint32_t count) {
         if (p.vbuf == 0 && p.prim == prim && p.layoutMask == layoutMask && p.vsId == cur.vsId && p.fsId == cur.fsId &&
             p.vtxCount + count <= 0xFFFF && contiguous &&
             p.idxOffset + p.idxCount == g_buf.idx.size() && p.texMask == cur.texMask && SameBlocks(p, cur.rs) &&
-            p.skinBlock == ((layoutMask & VL_SKIN) ? g_skinBlockOff : kNoBlock)) {
+            p.skinBlock == ((layoutMask & VL_SKIN) ? g_skinBlockOff : kNoBlock) && p.fx == (g_fxDraws ? 1 : 0)) {
             rec = &p;
             if (!abs) base = p.vtxCount;
         }
@@ -3675,12 +3689,13 @@ void SetShaderListFile(const char* path) { g_shaderListPath = path ? path : ""; 
 static void (*g_frameSink)(CmdBuf&) = nullptr;
 void SetFrameSink(void (*sink)(CmdBuf& buf)) { g_frameSink = sink; }
 
-void FrontPresent(bool direct, void (*onDecoded)()) {
+void FrontPresent(bool direct, void (*onDecoded)(), uint64_t latencyTag) {
     if (!g_shaderListDone) EnsureShaderList();
     TexCacheEndFrame();
     SiFrame(); // (W5 SKIN soft instancing: the last batch is finished before the frame is looked at)
     g_buf.cmds.push_back(Cmd{CMD_PRESENT, 0});
     g_buf.frame = g_frame;
+    g_buf.latencyTag = latencyTag;
     MarkDeadCopies();
     IsolatePasses();
     AtlasPasses();
@@ -3729,7 +3744,14 @@ void FrontPresent(bool direct, void (*onDecoded)()) {
             }
         std::fprintf(stderr, "\n");
     }
-    stats::FrameEnd(g_frame);
+    if(NpDiagActive&&NpDiagActive()){
+        const auto& c=stats::Cur();
+        NpDiagEvent(NPD_CACHE,0,latencyTag,NpDiagInts(c.dlHit,c.dlBuild),NpDiagInts(c.dlRehash,c.dlBypass),NpDiagInts(c.texUploads,c.texUploadBytes),NpDiagInts(c.texEvicted,c.texEvictBytes),NpDiagInts(c.texHashes,c.texHashBytes));
+        NpDiagEvent(NPD_CACHE,1,latencyTag,NpDiagInts(c.drawCalls,c.tris),NpDiagInts(c.copies,c.copyPixels),NpDiagInts(c.efbScenes,c.offScenes),NpDiagInts(c.bufUploads,c.bufUploadBytes),NpDiagInts(c.vtxBytes,c.idxBytes));
+        NpDiagEvent(NPD_CACHE,2,latencyTag,NpDiagInts(c.deadCopies,c.efbReads),NpDiagInts(c.passes,c.passesDirect),NpDiagInts(c.fills,c.fillsRedundant),NpDiagInts(c.shadersVs,c.shadersFs),NpDiagInts(c.softVerts,c.staticDraws));
+    }
+    DlCacheDiagnostic(latencyTag);
+    stats::FrameEnd(g_frame,latencyTag);
     {
         static const long n = EnvInt("MSC_VGX_TRACE_DRAWS", 0);
         static bool done = false;
@@ -3745,6 +3767,7 @@ void FrontPresent(bool direct, void (*onDecoded)()) {
     ++g_frame;
     // Everything of this frame has been read from guest memory: the game
     // thread may go on while the back end draws.
+    if (latencyTag && NpLatDecoded) NpLatDecoded(latencyTag);
     if (onDecoded) onDecoded();
     if (capture::Enabled()) capture::OnFrame(g_buf); // MSC_VGX_CAPTURE (vgx_capture.h)
     if (g_frameSink) g_frameSink(g_buf);

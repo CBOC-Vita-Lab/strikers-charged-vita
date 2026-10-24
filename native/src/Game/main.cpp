@@ -16,6 +16,9 @@
 #include "Game/Debug/ShapeRender.h"
 #include "Game/Effects/EmissionManager.h"
 #include "Game/Effects/ParticleSystem.h"
+#ifdef NP_NATIVE
+#include "np/fx.h"
+#endif
 #include "Game/GL/GLTexturedColourMeshWriter.h"
 #include "Game/Task/FrontEndTask.h"
 #include "Game/FE/feMusic.h"
@@ -678,6 +681,10 @@ bool RenderParticleSystem(ParticleSystem* source, GLView* view,
 
         if (writer.End())
         {
+#ifdef NP_NATIVE
+            if (source->m_pTemplate->m_eBlend == EfBlend_Additive)   // FX (np/fx.h): the renderer may draw it at a lower resolution
+                NpFxMarkPacket(writer.GetModel()->packets);
+#endif
             view->AttachModel(writer.GetModel(), source->m_uLayer);
         }
     }
@@ -706,6 +713,10 @@ bool RenderParticleSystem(ParticleSystem* source, GLView* view,
 
         if (writer.End())
         {
+#ifdef NP_NATIVE
+            if (!isWarble && source->m_pTemplate->m_eBlend == EfBlend_Additive)   // FX (np/fx.h)
+                NpFxMarkPacket(writer.GetModel()->packets);
+#endif
             view->AttachModel(writer.GetModel(), source->m_uLayer);
         }
     }
@@ -720,6 +731,9 @@ void BuildParticleQuads(GLTexturedColourMeshWriter* writer,
     ParticleReturn ret;
     if (writer->Begin(source->m_NumParticles * 4, GLP_QuadList, 0))
     {
+#ifdef NP_NATIVE
+        const NpFxThin thin = NpFxThinFor(source->m_pTemplate, false);
+#endif
         nlDLListIterator<Particle*> iterator;
         iterator = vertices->Begin();
         while (iterator.hasNext())
@@ -727,6 +741,19 @@ void BuildParticleQuads(GLTexturedColourMeshWriter* writer,
             Particle* pPart = *iterator;
             source->UpdateParticle(&ret, pPart, source->m_pTemplate,
                 viewRight, viewUp, pCoordSys);
+#ifdef NP_NATIVE
+            if (NpFxThinParticle(thin, pPart, &ret))
+            {
+                for (int i = 0; i < 4; ++i)   // collapsed to one point: no fragments (np/fx.h)
+                {
+                    writer->Texcoord(ret.texcoord[0]);
+                    writer->Colour(ret.c);
+                    writer->Vertex(ret.position[0]);
+                }
+                iterator.Step();
+                continue;
+            }
+#endif
             for (int i = 0; i < 4; ++i)
             {
                 writer->Texcoord(ret.texcoord[i]);
@@ -754,6 +781,9 @@ void BuildParticleQuads(glShadowedTexturedColourModelWriter* writer,
     ParticleReturn ret;
     if (writer->Begin(source->m_NumParticles * 4, 3, 0))
     {
+#ifdef NP_NATIVE
+        const NpFxThin thin = NpFxThinFor(source->m_pTemplate, false);
+#endif
         nlDLListIterator<Particle*> iterator;
         iterator = vertices->Begin();
         while (iterator.hasNext())
@@ -761,6 +791,19 @@ void BuildParticleQuads(glShadowedTexturedColourModelWriter* writer,
             Particle* pPart = *iterator;
             source->UpdateParticle(&ret, pPart, source->m_pTemplate,
                 viewRight, viewUp, pCoordSys);
+#ifdef NP_NATIVE
+            if (NpFxThinParticle(thin, pPart, &ret))
+            {
+                for (int i = 0; i < 4; ++i)   // collapsed to one point: no fragments (np/fx.h)
+                {
+                    writer->Texcoord(ret.texcoord[0]);
+                    writer->Colour(ret.c);
+                    writer->Vertex(ret.position[0]);
+                }
+                iterator.Step();
+                continue;
+            }
+#endif
             for (int i = 0; i < 4; ++i)
             {
                 writer->Texcoord(ret.texcoord[i]);
