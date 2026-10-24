@@ -248,3 +248,22 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
   mode alone.
 - Larger front caches for texture, shader and program lookups (1024 entries,
   from the Galaxy port).
+- Display-list cache, from the Galaxy port: a list built while the game
+  thread wrote to memory is only distrusted when a write overlapped the list,
+  its skinning data or an array range it read (a log of the last 2048 write
+  notifications), and entries age by frames that call cached lists, so a
+  loading screen or pause does not throw the match's lists away.
+- Size changes (fourth console session, after the Galaxy port's finding):
+  on the console each change stalled the picture for 80-190 ms. A Mega Strike
+  that learned a smaller picture saves nothing keeps that for the session's
+  next Mega Strikes (no step down and back each time), the end of a Mega
+  Strike returns to the level of the play before it at the cut (no change a
+  few seconds into play), and with 24 MiB of video memory free the pass
+  objects of the sizes used in the last 600 presents stay pooled
+  (`MSC_VGX_KEEP_SIZES=0`: the 60-present age). The log reports each change's
+  cost (`size change to WxH`).
+- Edge smoothing in the SMOOTH picture filter: where the four neighbours it
+  already reads show a contrast edge, the pixel is taken a fraction of a
+  texel across the edge (FXAA's sub-pixel step) and the unsharp mask is
+  mostly left out there. One more texture read. `MSC_VITA_EDGE_AA=0` turns it
+  off.

@@ -222,6 +222,24 @@ void CopyCheckTexReport(); // MSC_VGX_COPYCHECK=1
 void SetGuestWriteGenerationHook(uint64_t (*fn)(const void*, size_t));
 // Optional: called on the player's thread for every texture upload (texture, GX format, frame).
 void SetTextureDumpHook(void (*fn)(const TexUpload& up, uint32_t gxFormat, uint64_t frame));
+// 1.1: optional replacement of a guest texture when it is uploaded (vgx_hdtex.cpp installs one, from the Galaxy port): `fn` may
+// fill `up` (width, height, format, levels, authored) with another image of the texture and return true. Asked only on upload,
+// never for EFB copies. The guest's dimensions stay what the draw state and the TEV see; the replacement carries its own mip
+// chain, and its binds get the mip filter `mipFilter` (FILT_LIN_MIP_*).
+struct TexReplaceQuery {
+    const uint8_t* data;  // level 0 in guest memory
+    uint32_t fmt;         // GX texture format
+    uint16_t width, height;
+    const uint8_t* tlut;  // palette of a CI texture (null otherwise)
+    uint32_t tlutBytes;
+    bool mipClamp;        // backend::Caps::mipClamp: no compressed level below one 4x4 block
+    uint64_t liveBytes;   // bytes of replacement textures the back end holds now
+};
+// `fn` returns 0 (not replaced), 1 (replaced: `up` filled) or 2 (the replacement is being read: *wait names it, and the cache
+// uploads the texture again once `ready(*wait)` says it is in).
+void SetTextureReplaceHook(int (*fn)(const TexReplaceQuery& q, TexUpload& up, uint32_t* wait), uint8_t mipFilter, bool (*ready)(uint32_t wait));
+uint64_t ReplacedTextureBytes();                 // bytes of replacement textures alive in the back end
+void SetReplacedTextureBudget(uint64_t bytes);   // past half of it, replacements unused for 600 frames are freed
 
 // ---- statistics (vgx_stats.cpp)
 namespace stats {

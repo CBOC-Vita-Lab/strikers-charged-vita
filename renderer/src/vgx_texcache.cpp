@@ -39,6 +39,8 @@ struct Entry {
     uint64_t lastUsed = 0; // frame of the last bind
     uint32_t size = 0;     // guest bytes of all levels
     uint64_t checkedEpoch = ~0ull; // GuestWriteEpoch() when the contents were last found unchanged
+    bool hd = false;       // 1.1: the back end holds an HD replacement (SetTextureReplaceHook), `bytes` of it
+    uint32_t hdWait = 0;   // 1.1: 1 + the replacement being read for this texture (0: none): uploaded again once it is in
 };
 struct CopyEntry {
     uint32_t texId = 0;
@@ -66,6 +68,11 @@ inline void CacheFrontClear() {
 }
 bool g_texVerify = false;
 void (*g_texDumpHook)(const TexUpload&, uint32_t, uint64_t) = nullptr;
+int (*g_replaceHook)(const TexReplaceQuery&, TexUpload&, uint32_t*) = nullptr;   // 1.1: HD character textures (vgx_hdtex.cpp)
+bool (*g_replaceReady)(uint32_t) = nullptr;
+uint8_t g_replaceMipFilter = FILT_LIN_MIP_NEAR;
+uint64_t g_hdLive = 0, g_hdUploads = 0, g_hdBytes = 0, g_hdFreed = 0;
+uint64_t g_hdBudget = 0;   // the replacement hook's budget: past half of it, replacements unused for 10 s are freed
 uint64_t g_texStale = 0;
 uint64_t g_liveBytes = 0;          // bytes of all guest textures held by the back end
 uint64_t g_budget = 0;             // 0 = keep everything
@@ -134,6 +141,13 @@ uint64_t TlutHash(int idx) {
 
 void SetGuestWriteGenerationHook(uint64_t (*fn)(const void*, size_t)) { g_genHook = fn; }
 void SetTextureDumpHook(void (*fn)(const TexUpload&, uint32_t, uint64_t)) { g_texDumpHook = fn; }
+void SetTextureReplaceHook(int (*fn)(const TexReplaceQuery&, TexUpload&, uint32_t*), uint8_t mipFilter, bool (*ready)(uint32_t)) {
+    g_replaceHook = fn;
+    g_replaceReady = ready;
+    g_replaceMipFilter = mipFilter;
+}
+uint64_t ReplacedTextureBytes() { return g_hdLive; }
+void SetReplacedTextureBudget(uint64_t bytes) { g_hdBudget = bytes; }
 
 // GXInvalidateTexAll. On the console it empties the texture cache in front of
 // the texture units, and the game calls it every frame. It carries no
@@ -312,6 +326,8 @@ static bool ResolveTextureImpl(int texMap, TexBind& out, uint16_t& width, uint16
         e.contentHash = XXH3_64bits(o.data, size);
         e.generation = Generation(o.data, size);
     }
+    // 1.1: an HD replacement that was being read is in: the same texture again, with it.
+    if (!upload && e.hdWait && g_replaceReady && g_replaceReady(e.hdWait - 1)) upload = true;
     if (upload) {
         static const bool texLog = EnvInt("MSC_VGX_TEXLOG", 0) != 0;   // diagnostic: what every texture upload was asked for
         if (texLog)
@@ -327,12 +343,23 @@ static bool ResolveTextureImpl(int texMap, TexBind& out, uint16_t& width, uint16
         // The levels to send. Unless the back end takes a short chain (mipClamp), a
         // mipmapped texture is completed down to 1x1 below (no GL_TEXTURE_MAX_LEVEL in GLES2).
         uint32_t authored = levels;
+        // A replacement image (vgx_hdtex.cpp: HD character textures), asked only here, at upload.
+        if (e.hd) { g_hdLive -= e.bytes; e.hd = false; }
+        bool hd = false;
+        if (g_replaceHook) {
+            const TexReplaceQuery q{data, fmt, o.width, o.height, tlut, tlut ? (tlutEntries == 0xFFFF ? 32768u : tlutEntries * 2u) : 0u, caps.mipClamp, g_hdLive};
+            uint32_t wait = 0;
+            const int r = g_replaceHook(q, up, &wait);
+            hd = r == 1;
+            e.hdWait = r == 2 ? wait + 1 : 0;
+            if (hd) authored = static_cast<uint32_t>(up.levels.size());
+        }
         // CMPR goes to the back end as DXT1 (an eighth of the memory, no decode) unless
         // a level uses the one thing DXT1 renders differently (see CmprToDxt1).
         //   MSC_VGX_DXT1=0  always decode;  =2  DXT1 for those textures too (their transparent
         //   texels become transparent black: dark fringes where they are filtered)
         static const bool dxtAll = EnvInt("MSC_VGX_DXT1", 1) == 2;
-        bool dxt = fmt == 0xE && caps.dxt1;
+        bool dxt = !hd && fmt == 0xE && caps.dxt1;
         // (vitaGL stores compressed textures swizzled; for sizes that are not powers of two it
         // takes another path that has not been read through: those are decoded on the console)
         if (dxt && caps.mipClamp && !(IsPow2(o.width) && IsPow2(o.height))) dxt = false;
@@ -357,7 +384,9 @@ static bool ResolveTextureImpl(int texMap, TexBind& out, uint16_t& width, uint16
                 ++g_cmprDecoded;
             }
         }
-        if (dxt) {
+        if (hd) {
+            // (up was filled by the hook: its own mip chain, sampled with a mip filter below)
+        } else if (dxt) {
             up.format = TF_DXT1;
             if (wantMips && !caps.mipClamp) {
                 // Complete the chain: decode the last authored level, halve, encode.
@@ -407,13 +436,14 @@ static bool ResolveTextureImpl(int texMap, TexBind& out, uint16_t& width, uint16
             }
         }
         up.authored = static_cast<uint8_t>(authored < up.levels.size() ? authored : up.levels.size());
-        e.mipmapped = wantMips;
+        e.mipmapped = wantMips || hd;
         {
             // Bytes the back end will hold for this texture.
             uint32_t bytes = 0;
             for (const auto& lv : up.levels) bytes += static_cast<uint32_t>(lv.size());
             if (up.genMips) bytes += bytes / 3;
-            if (up.format == TF_DXT1) { ++g_dxtUploads; g_dxtBytes += bytes; }
+            if (hd) { ++g_hdUploads; g_hdBytes += bytes; g_hdLive += bytes; e.hd = true; }
+            else if (up.format == TF_DXT1) { ++g_dxtUploads; g_dxtBytes += bytes; }
             else if (up.format == TF_LA88) { ++g_laUploads; g_laBytes += bytes; }
             else { ++g_rgbaUploads; g_rgbaBytes += bytes; if (fmt == 0xE) g_cmprRgbaBytes += bytes; }
             ++stats::Cur().texUploads;
@@ -431,6 +461,10 @@ static bool ResolveTextureImpl(int texMap, TexBind& out, uint16_t& width, uint16
         stats::TexFormat(fmt, o.width, o.height, wantMips);
     }
     out.texId = e.texId;
+    // A replacement is twice the original's size with a mip chain whose second level is the original's size: sampled with mips, so that
+    // wherever the game draws the texture at or below its original resolution (most of the time) no more texels are fetched than before,
+    // and only close-ups read the larger level.
+    if (e.hd && out.minFilter < FILT_NEAR_MIP_NEAR) out.minFilter = out.minFilter == FILT_NEAR ? FILT_NEAR_MIP_NEAR : g_replaceMipFilter;
     return true;
 }
 
@@ -493,6 +527,28 @@ void SetTextureBudget(uint64_t bytes) {
 
 void TexCacheEndFrame() {
     ++g_texMemoGen; // (GXD_TEXMEMO: nothing resolved in the frame that ended is trusted in the next)
+    // 1.1: HD replacements of characters no longer on screen (an earlier match's teams) are freed, so the next ones fit in the budget.
+    // Every 120 frames, only past half the budget; texture id order keeps the command stream independent of the hash map.
+    if (g_hdBudget && g_hdLive > g_hdBudget / 2 && CurrentFrame() % 120 == 0) {
+        const uint64_t now = CurrentFrame();
+        static std::vector<std::pair<uint32_t, Key>> old;
+        old.clear();
+        for (const auto& kv : g_cache)
+            if (kv.second.hd && kv.second.texId && kv.second.lastUsed + 600 < now) old.emplace_back(kv.second.texId, kv.first);
+        std::sort(old.begin(), old.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        CmdBuf& buf = Pending();
+        for (const auto& o : old) {
+            auto it = g_cache.find(o.second);
+            const uint32_t bytes = it->second.bytes;
+            buf.cmds.push_back(Cmd{CMD_TEX_FREE, o.first});
+            stats::TexLive(-1, -static_cast<int64_t>(bytes));
+            g_liveBytes -= bytes;
+            g_hdLive -= bytes;
+            ++g_hdFreed;
+            g_cache.erase(it);
+        }
+        if (!old.empty()) CacheFrontClear();
+    }
     static const uint64_t envBudget = static_cast<uint64_t>(EnvInt("MSC_VGX_TEXBUDGET", 0)) << 20;
     const uint64_t budget = g_budgetSet ? g_budget : envBudget;
     if (!budget || g_liveBytes <= budget) return;
@@ -518,6 +574,7 @@ void TexCacheEndFrame() {
         buf.cmds.push_back(Cmd{CMD_TEX_FREE, c.texId});
         stats::TexLive(-1, -static_cast<int64_t>(bytes));
         g_liveBytes -= bytes;
+        if (it->second.hd) g_hdLive -= bytes;
         ++g_evicted;
         g_evictedBytes += bytes;
         ++stats::Cur().texEvicted;
@@ -536,6 +593,8 @@ void TexCacheReport(FILE* f) {
                  static_cast<unsigned long long>(g_dxtUploads), g_dxtBytes / 1048576.0, static_cast<unsigned long long>(g_rgbaUploads),
                  g_rgbaBytes / 1048576.0, static_cast<unsigned long long>(g_cmprDecoded), g_cmprRgbaBytes / 1048576.0);
     if (g_laUploads) std::fprintf(f, "texture uploads: %llu as LA88 (%.1f MB)\n", static_cast<unsigned long long>(g_laUploads), g_laBytes / 1048576.0);
+    if (g_hdUploads) std::fprintf(f, "HD textures: %llu uploads (%.1f MB), %.1f MB alive at the end, %llu freed when unused\n", static_cast<unsigned long long>(g_hdUploads),
+                                  g_hdBytes / 1048576.0, g_hdLive / 1048576.0, static_cast<unsigned long long>(g_hdFreed));
     if (g_texMemoCalls) std::fprintf(f, "texture memo: %llu of %llu resolutions repeated a bind of the same frame (GXD_TEXMEMO)\n", static_cast<unsigned long long>(g_texMemoHits), static_cast<unsigned long long>(g_texMemoCalls));
     const uint64_t budget = g_budgetSet ? g_budget : (static_cast<uint64_t>(EnvInt("MSC_VGX_TEXBUDGET", 0)) << 20);
     if (budget)

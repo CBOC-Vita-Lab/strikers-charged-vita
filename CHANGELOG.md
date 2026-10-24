@@ -14,10 +14,14 @@ The performance update.
 - Stick and touch respond faster in Mega Saves and other heavy scenes.
 - The picture size adapts to the load: effects soften first and the scene
   only slightly, so the frame rate holds without the game looking rough.
+- Fewer hitches from those size changes: they now happen at the cuts into
+  and out of a Mega Strike, not a few seconds into play, and a size used
+  recently is switched back to quickly.
 
 **Better picture**
 - A light sharpening filter is on by default (Settings > Sharpness: SMOOTH).
   OFF, CRISP and CRISP+ are still there.
+- SMOOTH also softens jagged character outlines, at almost no cost.
 - When there's time to spare, the game is drawn above native resolution for
   cleaner edges.
 - New optional **Distant Textures** setting for sharper ground and walls at an
@@ -46,6 +50,8 @@ The performance update.
   Strike glow from switching on.
 - More reliable shader cache and graphics memory recovery.
 - Faster texture uploads and less background CPU use.
+- The game's 3D models are rebuilt less often after loading screens and
+  pauses (improvements shared with the Super Mario Galaxy port).
 
 Technical details for developers are in
 [Technical Notes](docs/TECHNICAL.md#version-11-changes).

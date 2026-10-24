@@ -96,6 +96,9 @@ struct ListInfo {
 };
 constexpr int kMaxVariants = 8;
 constexpr uint64_t kRetainFrames = 600;
+// Entries age by frames that call cacheable lists, not by wall frames, so a
+// loading screen, pause or movie does not throw the match's lists away.
+uint64_t g_useClock = 0, g_useClockFrame = ~0ull;
 std::unordered_map<const uint8_t*, ListInfo> g_map;
 // In front of g_map (see CacheFront in vgx_texcache.cpp): the list last looked up for each
 // of 256 address classes. Emptied whenever an entry of g_map is erased.
@@ -392,13 +395,13 @@ void Free(Entry* e) {
 }
 
 // Drops entries that were not used for a long time (called once in a while).
-void Sweep(uint64_t frame) {
+void Sweep(uint64_t frame, uint64_t use) {
     const uint64_t begin=NpDiagActive&&NpDiagActive()?NpDiagNow():0;
     for (auto it = g_map.begin(); it != g_map.end();) {
         Entry** link = &it->second.head;
         while (*link) {
             Entry* e = *link;
-            if (frame - e->lastUse > kRetainFrames) {
+            if (use - e->lastUse > kRetainFrames) {
                 *link = e->next;
                 Free(e);
                 ++g_ctr.evicted;
@@ -471,9 +474,11 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         ProcessStream(list, nbytes);
         return;
     }
+    if (frame != g_useClockFrame) { g_useClockFrame = frame; ++g_useClock; }
+    const uint64_t use = g_useClock;
     {
         static uint64_t lastSweep = 0;
-        if (frame - lastSweep >= 120) { lastSweep = frame; Sweep(frame); }
+        if (frame - lastSweep >= 120) { lastSweep = frame; Sweep(frame, use); }
     }
     if (!g_bypass.empty() && (!Gxd(GXD_DLFAST) || BypassMaybe(list))) {
         auto b = g_bypass.find(list);
@@ -530,7 +535,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             same = false;
         }
         if (same) {
-            e->lastUse = frame;
+            e->lastUse = use;
             e->fails = 0;
             ++g_ctr.hits;
             ++stats::Cur().dlHit;
@@ -548,7 +553,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             e->genList = gl;
             std::memcpy(e->genArr, ga, sizeof ga);
             e->okEpoch = ~0ull;
-            e->lastUse = frame;
+            e->lastUse = use;
             e->fails = 0;
             ++g_ctr.rehashOk;
             ++stats::Cur().dlRehash;
@@ -600,9 +605,8 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         e->next = li.head;
         li.head = e;
     }
-    // (Re)build. The array ranges are only known after the decode, so a write
-    // that races with it cannot be pinned to this entry: any write notification
-    // between here and the end of the build makes the entry untrusted.
+    // (Re)build. The array ranges are only known after the decode, so writes
+    // notified during it are checked against them afterwards (GuestWritesTouch).
     const uint64_t epoch0 = GuestWriteEpoch();
     g_ctr.liveBytes -= e->verts.capacity();
     e->list = list;
@@ -635,7 +639,24 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
             e->genList = gl;
             std::memcpy(e->genArr, ga, sizeof ga);
             e->hash = ContentHash(*e);
-            e->raced = GuestWriteEpoch() != epoch0;
+            // Raced only if a write notified during the build overlaps the
+            // list or an array range it read (other game writes are common).
+            const uint64_t epoch1 = GuestWriteEpoch();
+            if (epoch1 == epoch0) {
+                e->raced = false;
+            } else {
+                HostRange used[15];
+                int nUsed = 0;
+                used[nUsed++] = {e->list, e->nbytes};
+                if (e->skin) {
+                    used[nUsed++] = {e->skinW, e->skinVerts * 16u};
+                    used[nUsed++] = {e->skinI, e->skinVerts * 4u};
+                }
+                for (int a = 9; a <= 20; ++a)
+                    if ((e->idxMask & (1u << a)) && e->arr[a - 9] && e->hi[a - 9] > e->lo[a - 9])
+                        used[nUsed++] = {static_cast<const uint8_t*>(e->arr[a - 9]) + e->lo[a - 9], e->hi[a - 9] - e->lo[a - 9]};
+                e->raced = GuestWritesTouch(epoch0, epoch1, used, nUsed);
+            }
         }
     }
     if (!ok) {
@@ -648,7 +669,7 @@ void CallList(const uint8_t* list, uint32_t nbytes) {
         ProcessStream(list, nbytes);
         return;
     }
-    e->lastUse = frame;
+    e->lastUse = use;
     ++g_ctr.builds;
     ++stats::Cur().dlBuild;
     g_ctr.builtVerts += e->totalVerts;

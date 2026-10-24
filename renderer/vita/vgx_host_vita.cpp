@@ -91,6 +91,7 @@
 // The native library (np branch, native/native-vita.mk): no recompilation runtime. The services the host takes from the
 // platform layer (console, thread cores, debug pad, boot log) come from native/vita_shim, whose headers carry the
 // runtime's names; vgxn_* below replaces the aurora_* entry points.
+#include "vgx_hdtex.h"
 #include "vgx_native.h"
 #else
 #include <aurora/aurora.h>
@@ -1808,6 +1809,7 @@ bool EnsureThread() {
             vgx::SetShaderListFile(kShaderListFile);
         }
         if (!std::getenv("MSC_VGX_TEXBUDGET")) vgx::SetTextureBudget(kTextureBudget);
+        vgx::hdtex::Install(nullptr);   // 1.1: HD character textures from ux0:data/mscharged/hdtex.pack, when it is there (MSC_HDTEX=0: off)
         std::fprintf(stderr, "[vgx-vita] shader warm-up list: %s (%s); texture budget: %s\n",
                      std::getenv("MSC_VGX_SHADERLIST") ? std::getenv("MSC_VGX_SHADERLIST") : kShaderListFile,
                      Exists(std::getenv("MSC_VGX_SHADERLIST") ? std::getenv("MSC_VGX_SHADERLIST") : kShaderListFile)

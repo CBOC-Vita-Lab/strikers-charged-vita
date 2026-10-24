@@ -82,6 +82,9 @@ extern "C" void vgx_vita_log_glb_stats(void); // vita/vgx_host_vita.cpp (a no-op
 #ifndef GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
 #define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT 0x83F1
 #endif
+#ifndef GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
+#define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT 0x83F3
+#endif
 #ifndef GL_TEXTURE_MAX_LEVEL
 #define GL_TEXTURE_MAX_LEVEL 0x813D
 #endif
@@ -197,6 +200,7 @@ GLuint g_efbFbo = 0, g_efbColor = 0, g_efbDepthRb = 0, g_efbDepthTex = 0;
 GLuint g_ibo = 0, g_whiteTex = 0, g_quadVbo = 0;
 std::vector<GLuint> g_streamVbo; // one per chunk of the frame's vertex arena
 bool g_hasDepth24 = false, g_hasDepthTex = false, g_hasS3tc = false, g_hasMaxLevel = false;
+bool g_hasDxt5 = false; // GL_COMPRESSED_RGBA_S3TC_DXT5_EXT (1.1: HD character textures; decoded to RGBA8 without it)
 bool g_quadClear = true;
 GLuint g_copyProg = 0;
 GLint g_copyRect = -1, g_copyMat = -1, g_copyAdd = -1;
@@ -765,6 +769,55 @@ bool CreateTarget() {
     VGX_LOG("render target %dx%d for EFB %dx%d (depth %s)\n", w, h, g_efbW, g_efbH,
             g_hasDepthTex ? "texture" : (g_hasDepth24 ? "24-bit rb" : "16-bit rb"));
     return true;
+}
+
+// 1.1 (resize stalls): EFB targets of sizes left by the dynamic resolution, kept for a return to that size (a Mega Strike's start and
+// end): their framebuffer object keeps its GPU render target, which vitaGL would otherwise make again. At most three; dropped after 1800
+// presents unused, or at once when less than 24 MiB of video memory is free (TrimPool). MSC_VGX_KEEP_TARGETS=0: off.
+struct EfbSlot { int w = 0, h = 0; GLuint fbo = 0, color = 0, depthRb = 0, depthTex = 0; uint32_t lastPresent = 0; };
+EfbSlot g_efbKept[3];
+uint32_t g_efbReused = 0;
+bool EfbKeepOn() {
+    static const bool on = EnvInt("MSC_VGX_KEEP_TARGETS", 1) != 0;
+    return on;
+}
+void EfbDrop(EfbSlot& k) {
+    if (!k.fbo) return;
+    if (S.fbo == k.fbo) { G(glBindFramebuffer(GL_FRAMEBUFFER, 0)); S.fbo = 0; g_fbDirty = true; }
+    if (g_inUseFbo == k.fbo) g_inUseFbo = ~0u;
+    if (k.color) { GLuint t = k.color; G(glDeleteTextures(1, &t)); ForgetTex(t); }
+    if (k.depthTex) { GLuint t = k.depthTex; G(glDeleteTextures(1, &t)); ForgetTex(t); }
+    if (k.depthRb) G(glDeleteRenderbuffers(1, &k.depthRb));
+    G(glDeleteFramebuffers(1, &k.fbo));
+    k = EfbSlot{};
+}
+bool EfbTake(int w, int h, EfbSlot& out) {
+    for (EfbSlot& k : g_efbKept)
+        if (k.fbo && k.w == w && k.h == h) { out = k; k = EfbSlot{}; return true; }
+    return false;
+}
+void EfbKeep(const EfbSlot& cur) {
+    EfbSlot* dst = nullptr;
+    for (EfbSlot& k : g_efbKept) if (!k.fbo) { dst = &k; break; }
+    if (!dst) {   // (all used: the one left longest ago goes)
+        dst = &g_efbKept[0];
+        for (EfbSlot& k : g_efbKept) if (k.lastPresent < dst->lastPresent) dst = &k;
+        EfbDrop(*dst);
+    }
+    *dst = cur;
+}
+// A taken-back target: depth cleared to 1.0 as a new one starts (its colour is overwritten with the old picture).
+void ClearTargetDepth() {
+    BindFbo(g_efbFbo);
+    SetViewport(0, 0, g_rtW, g_rtH);
+    SetScissor(false);
+    SetColorMask(true, true);
+    SetDepthMask(true);
+    G(glClearColor(0, 0, 0, 1));
+    G(glClearDepthf(1.0f));
+    TouchTarget(OP_CLEAR_FULLDEPTH);
+    G(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
+    ++C.clears;
 }
 
 // In front of g_programs: the program last asked for in each of 64 classes (entries of an
@@ -1489,6 +1542,48 @@ void DecodeDxt1(const uint8_t* src, uint32_t w, uint32_t h, std::vector<uint8_t>
         }
 }
 
+// (from the Galaxy port)
+void DecodeDxt5(const uint8_t* src, uint32_t w, uint32_t h, std::vector<uint8_t>& out) {
+    const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+    std::vector<uint8_t> colour(static_cast<size_t>(bw) * bh * 8);
+    for (size_t b = 0; b < static_cast<size_t>(bw) * bh; ++b) {
+        std::memcpy(&colour[b * 8], src + b * 16 + 8, 8);
+        // (a DXT5 colour block is always read in four-colour mode)
+        uint16_t c0, c1;
+        std::memcpy(&c0, &colour[b * 8], 2);
+        std::memcpy(&c1, &colour[b * 8 + 2], 2);
+        if (c0 <= c1) {
+            // swap the end points and remap the indices so DXT1 decoding picks the same colours
+            std::memcpy(&colour[b * 8], &c1, 2);
+            std::memcpy(&colour[b * 8 + 2], &c0, 2);
+            for (int i = 4; i < 8; ++i) {
+                uint8_t v = colour[b * 8 + i], r = 0;
+                for (int k = 0; k < 4; ++k) {
+                    static const uint8_t kMap[4] = {1, 0, 3, 2};
+                    r |= static_cast<uint8_t>(kMap[(v >> (2 * k)) & 3] << (2 * k));
+                }
+                colour[b * 8 + i] = r;
+            }
+            if (c0 == c1) for (int i = 4; i < 8; ++i) colour[b * 8 + i] = 0;
+        }
+    }
+    DecodeDxt1(colour.data(), w, h, out);
+    for (uint32_t by = 0; by < bh; ++by)
+        for (uint32_t bx = 0; bx < bw; ++bx) {
+            const uint8_t* a = src + (static_cast<size_t>(by) * bw + bx) * 16;
+            uint8_t pal[8] = {a[0], a[1]};
+            if (a[0] > a[1]) for (int i = 1; i < 7; ++i) pal[i + 1] = static_cast<uint8_t>(((7 - i) * a[0] + i * a[1]) / 7);
+            else { for (int i = 1; i < 5; ++i) pal[i + 1] = static_cast<uint8_t>(((5 - i) * a[0] + i * a[1]) / 5); pal[6] = 0; pal[7] = 255; }
+            uint64_t bits = 0;
+            for (int i = 0; i < 6; ++i) bits |= static_cast<uint64_t>(a[2 + i]) << (8 * i);
+            for (uint32_t y = 0; y < 4; ++y)
+                for (uint32_t x = 0; x < 4; ++x) {
+                    const uint32_t px = bx * 4 + x, py = by * 4 + y;
+                    if (px < w && py < h) out[(static_cast<size_t>(py) * w + px) * 4 + 3] = pal[(bits >> (3 * (y * 4 + x))) & 7];
+                }
+        }
+}
+
 void Upload(const TexUpload& up) {
     Tex& t = TexSlotFor(up.texId);
     if (t.renderTarget && t.id) DeleteTex(t);
@@ -1506,7 +1601,7 @@ void Upload(const TexUpload& up) {
 #if defined(__VGX_VITA__)
     // vitaGL grows compressed storage to the highest supplied level. Upload it
     // after level zero so intermediate levels reuse that allocation.
-    if (up.format == TF_DXT1 && g_hasS3tc && !up.genMips && up.levels.size() > 2 && up.levels.size() < 32 &&
+    if (((up.format == TF_DXT1 && g_hasS3tc) || (up.format == TF_DXT5 && g_hasDxt5)) && !up.genMips && up.levels.size() > 2 && up.levels.size() < 32 &&
         w && h && !(w & (w - 1)) && !(h & (h - 1))) {
         const size_t last = up.levels.size() - 1;
         reserveMipChain = (w >> last) >= 4 && (h >> last) >= 4;
@@ -1517,14 +1612,16 @@ void Upload(const TexUpload& up) {
         const size_t l = reserveMipChain ? (i == 1 ? up.levels.size() - 1 : i > 1 ? i - 1 : 0) : i;
         if (reserveMipChain) { w = up.width >> l; h = up.height >> l; }
         const std::vector<uint8_t>& lv = up.levels[l];
-        if (up.format == TF_DXT1 && g_hasS3tc) {
-            G(glCompressedTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(l), GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, static_cast<GLsizei>(w),
+        if ((up.format == TF_DXT1 && g_hasS3tc) || (up.format == TF_DXT5 && g_hasDxt5)) {
+            G(glCompressedTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(l),
+                                     up.format == TF_DXT5 ? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, static_cast<GLsizei>(w),
                                      static_cast<GLsizei>(h), 0, static_cast<GLsizei>(lv.size()), lv.data()));
             g_stats.textureBytes += lv.size();
             C.texUploadBytes += static_cast<uint32_t>(lv.size());
         } else {
             const uint8_t* px = lv.data();
             if (up.format == TF_DXT1) { DecodeDxt1(lv.data(), w, h, tmp); px = tmp.data(); }
+            if (up.format == TF_DXT5) { DecodeDxt5(lv.data(), w, h, tmp); px = tmp.data(); }
             const GLenum format = up.format == TF_LA88 ? GL_LUMINANCE_ALPHA : GL_RGBA;
             const uint64_t bytes = static_cast<uint64_t>(w) * h * (up.format == TF_LA88 ? 2u : 4u);
             G(glTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(l), format, static_cast<GLsizei>(w), static_cast<GLsizei>(h), 0, format,
@@ -1680,8 +1777,31 @@ PicProg* EnsurePictureProgram(int mode) {
               "  vec2 u1 = clamp(uv + dx, u_lim.xy, u_lim.zw);\n  vec2 u2 = clamp(uv - dx, u_lim.xy, u_lim.zw);\n"
               "  vec2 u3 = clamp(uv + dy, u_lim.xy, u_lim.zw);\n  vec2 u4 = clamp(uv - dy, u_lim.xy, u_lim.zw);\n"
               "  vec4 s1 = texture2D(u_src, u1);\n  vec4 s2 = texture2D(u_src, u2);\n  vec4 s3 = texture2D(u_src, u3);\n  vec4 s4 = texture2D(u_src, u4);\n"
-              "  vec3 b = (s1.rgb + s2.rgb + s3.rgb + s4.rgb) * 0.25;\n"
-              "  c.rgb = c.rgb + (c.rgb - b) * u_p.z;\n";
+              "  vec3 b = (s1.rgb + s2.rgb + s3.rgb + s4.rgb) * 0.25;\n";
+    if (mode == PIC_SMOOTH)
+        // 1.1: edge smoothing in the same pass (u_p.w: amount, 0 = off), from the four neighbours it already reads. Where the
+        // picture has a contrast edge (a character's outline against the pitch), the pixel is taken a fraction of a texel across
+        // the edge (FXAA's sub-pixel step, without its search along the edge), which softens the stair steps of the upscaled
+        // picture; there the unsharp mask is mostly left out, as it would sharpen the steps again. One more texture read.
+        fs += "  vec3 lw = vec3(0.299, 0.587, 0.114);\n"
+              "  float lC = dot(c.rgb, lw);\n  float lE = dot(s1.rgb, lw);\n  float lW = dot(s2.rgb, lw);\n"
+              "  float lS = dot(s3.rgb, lw);\n  float lN = dot(s4.rgb, lw);\n"
+              "  float lMax = max(max(max(lE, lW), max(lS, lN)), lC);\n  float lMin = min(min(min(lE, lW), min(lS, lN)), lC);\n"
+              "  float range = lMax - lMin;\n"
+              "  float on = step(max(0.06, 0.15 * lMax), range) * u_p.w;\n"
+              "  float sub = clamp(abs((lE + lW + lS + lN) * 0.25 - lC) / max(range, 0.001), 0.0, 1.0);\n"
+              "  float sm = sub * sub * (3.0 - 2.0 * sub);\n"
+              "  float blend = sm * sm * 0.75 * on;\n"
+              "  float horz = step(abs(lE + lW - 2.0 * lC), abs(lN + lS - 2.0 * lC));\n"
+              "  float sy = step(abs(lN - lC), abs(lS - lC)) * 2.0 - 1.0;\n"
+              "  float sx = step(abs(lW - lC), abs(lE - lC)) * 2.0 - 1.0;\n"
+              "  vec2 nrm = vec2((1.0 - horz) * sx * u_size.z, horz * sy * u_size.w);\n"
+              "  vec2 ua = clamp(uv + nrm * blend, u_lim.xy, u_lim.zw);\n"
+              "  vec4 a = texture2D(u_src, ua);\n"
+              "  float keep = 1.0 - 0.7 * on;\n"
+              "  c.rgb = a.rgb + (c.rgb - b) * (u_p.z * keep);\n";
+    else if (mode == PIC_UNSHARP)
+        fs += "  c.rgb = c.rgb + (c.rgb - b) * u_p.z;\n";
     fs += "  gl_FragColor = vec4(c.rgb, 1.0);\n}\n";
     const GLuint v = Compile(GL_VERTEX_SHADER, vs, "picture vertex"), f = Compile(GL_FRAGMENT_SHADER, fs.c_str(), "picture fragment");
     if (!v || !f) {
@@ -1781,7 +1901,12 @@ bool DrawPicture(unsigned fbo, int x, int y, int w, int h, int dx, int dy, int d
     G(glUniform4f(pp.size, tw, th, 1.0f / tw, 1.0f / th));
     G(glUniform4f(pp.lim, (static_cast<float>(x) + 0.5f) / tw, (static_cast<float>(y) + 0.5f) / th, (static_cast<float>(x + w) - 0.5f) / tw,
                   (static_cast<float>(y + h) - 0.5f) / th));
-    G(glUniform4f(pp.p, static_cast<float>(dw) / static_cast<float>(w), static_cast<float>(dh) / static_cast<float>(h), sharpen, 0.0f));
+    static const float edge = [] {   // MSC_VITA_EDGE_AA=0: the smooth picture without the edge smoothing (1.1; 0..1, default 1)
+        const char* e = std::getenv("MSC_VITA_EDGE_AA");
+        const float v = (e && *e) ? static_cast<float>(std::atof(e)) : 1.0f;
+        return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+    }();
+    G(glUniform4f(pp.p, static_cast<float>(dw) / static_cast<float>(w), static_cast<float>(dh) / static_cast<float>(h), sharpen, mode == PIC_SMOOTH ? edge : 0.0f));
     C.uniformCalls += 4;
     C.uniformBytes += 64;
     g_uniDirtyV = g_uniDirtyF = false;
@@ -1989,10 +2114,17 @@ int AcquireFbo(int w, int h, GLuint tex, bool wantDepth) {
 // with no memory left crashed the GPU set-up. At each present, objects not used for 60 presents are deleted (vitaGL frees their
 // memory once the GPU is done with them). Nothing holds a pool index across a present.
 uint32_t g_poolFastTrim = 0;   // presents left in which objects unused for 2 presents are deleted (after a target size change)
+int DynVramFreeKib(bool fresh = false);
+static const bool g_keepSizes = EnvInt("MSC_VGX_KEEP_SIZES", 1) != 0;   // MSC_VGX_KEEP_SIZES=0: the 60-present age always
 void TrimPool() {
     ++g_poolPresents;
     if (g_pass >= 0 || g_inPass) return;   // (an index into the pool is in use: never compact under it)
-    const uint32_t age = g_poolFastTrim ? 2u : 60u;
+    // 1.1 (resize stalls, after the Galaxy port's finding): on the console a size change stalled the picture for 80-190 ms, much of it
+    // making the new size's pass objects (vitaGL makes a GPU render target for each). With video memory to spare the objects of the
+    // sizes used in the last 20 s stay, so the size a Mega Strike goes back to finds its objects still there. Short of memory: as before.
+    const int freeKib = DynVramFreeKib(false);
+    const bool roomy = freeKib < 0 || freeKib >= 24576;
+    const uint32_t age = (g_poolFastTrim && !roomy) ? 2u : (roomy && g_keepSizes ? 600u : 60u);
     if (g_poolFastTrim) --g_poolFastTrim;
     size_t kept = 0, freed = 0;
     for (size_t i = 0; i < g_pool.size(); ++i) {
@@ -2014,6 +2146,8 @@ void TrimPool() {
         if (kept != i) g_pool[kept] = f;
         ++kept;
     }
+    for (EfbSlot& k : g_efbKept)
+        if (k.fbo && k.fbo != g_inUseFbo && (!roomy || g_poolPresents - k.lastPresent > 1800)) EfbDrop(k);
     if (freed) {
         g_pool.resize(kept);
         VGX_LOG_N(40, "framebuffer objects: %u unused for %u frames deleted, %u pooled\n", static_cast<unsigned>(freed), static_cast<unsigned>(age), static_cast<unsigned>(kept));
@@ -2899,10 +3033,12 @@ bool Init(int renderWidth, int renderHeight) {
     g_hasDepthTex = ext && std::strstr(ext, "GL_OES_depth_texture") && EnvInt("MSC_VGX_DEPTH_TEX", 1);
 #ifdef __VGX_VITA__
     g_hasS3tc = true; // (vitaGL takes DXT1 whatever its extension string says)
+    g_hasDxt5 = true; // (and DXT5: SCE_GXM_TEXTURE_FORMAT_UBC3)
 #else
     g_hasS3tc = ext && (std::strstr(ext, "GL_EXT_texture_compression_s3tc") || std::strstr(ext, "GL_EXT_texture_compression_dxt1")) &&
                 EnvInt("MSC_VGX_S3TC", 1);
     g_hasMaxLevel = (ver && std::strstr(ver, "OpenGL ES 3")) || (ext && std::strstr(ext, "GL_APPLE_texture_max_level"));
+    g_hasDxt5 = g_hasS3tc && std::strstr(ext, "GL_EXT_texture_compression_s3tc");
 #endif
     g_quadClear = EnvInt("MSC_VGX_QUADCLEAR", 1) != 0;
     g_noCache = EnvInt("MSC_VGX_GLCACHE", 1) == 0;
@@ -2952,6 +3088,10 @@ double g_profTotal = 0, g_profStream = 0;
 uint64_t g_profSum[96] = {}; // the call census (VGX_GL_COUNTERS) summed over the same frames
 static_assert(sizeof(Counts) / sizeof(uint32_t) <= 96, "g_profSum too small");
 inline double Now() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+float g_resizeCpuMs = 0, g_resizeCreateMs = 0;
+bool g_resizeReused = false;
+int g_resizeWatch = 0;
+double g_resizeLast = 0;
 uint64_t g_profCmds = 0; // commands timed (MSC_VGX_PROF=1/2) over the same frames
 // What one Now() costs, measured once (W5 GLB). On the console steady_clock is a system call plus a 64-bit divide (about 6.7 us, measured from the
 // 5 Oct log: a command that does nothing reads 0.01 ms), and MSC_VGX_PROF=1/2 reads it twice per command: about 5.6 ms of the 17.4 ms "all=" of that run
@@ -3054,6 +3194,7 @@ struct DynRes {
     int probeFrom = -1;
     float probeEma = 0.0f;
     int noGainFloor = -1;
+    int megaNoGain = -1;          // 1.1: the level a Mega Strike found no gain below (kept for the session's next Mega Strikes)
     int interval = 0;             // NpFpsDisplayInterval of the last decision
     float fakeRing[4] = {};
     uint32_t fakeSeq = 0;
@@ -3121,7 +3262,7 @@ void DynTargetSize(int efbW, int efbH, int* w, int* h) {
 
 double DynBudgetMs(int interval) { return (interval == 1 ? 1.0 : 2.0) * 1001.0 / 60.0; }   // (0: no policy yet, unlocked: the 30 budget)
 
-int DynVramFreeKib(bool fresh = false);
+int DynVramFreeKib(bool fresh);
 // 1.1 (console review): a level that changes the EFB size allocates a new colour target, vitaGL's depth buffer and render target for
 // it, and new pass objects, while the old ones are only freed later (the collector, TrimPool). So a size change waits 20 presents
 // after the previous one (a Mega Strike stepping down every few frames had four sizes alive at once), needs the free GPU memory for
@@ -3215,14 +3356,18 @@ void DynamicResolution() {
             const bool fx = FxDiv() > 0 && FxDepthAvailable();
             const int start = fx ? 5 : kDynMegaStart;
             if (d.on && megaLevels && (fx ? d.level != start : d.level < start)) DynSetLevel(start, "a Mega Strike began", true);
-            d.noGainFloor = -1;
+            // 1.1: what an earlier Mega Strike learned (a smaller picture did not help) holds for the next ones: no step down and back
+            d.noGainFloor = d.megaNoGain;
             d.probeAt = 0;
             d.frames = -10;
             d.windowStart = Now();
         } else {
             d.noGainFloor = -1;
             d.probeAt = 0;
-            int back = d.normalLevel < d.level ? d.normalLevel : d.level;
+            // 1.1: back to the level of the play before it, at the cut back to play. (It kept the Mega Strike's better level when that was
+            // better, and the GPU then went over its budget a few seconds into play: a size change in the middle of play, which on the
+            // console stalls the picture for up to 190 ms.)
+            int back = d.normalLevel;
             if (back > d.floorLevel) back = d.floorLevel;
             if (back < d.minLevel) back = d.minLevel;
             DynSetLevel(back, "the Mega Strike is over", true);
@@ -3261,7 +3406,7 @@ void DynamicResolution() {
             }
             if (ms > budget) ++d.over; else d.over = 0;
             if (d.upHold > 45 && d.seq - d.lastDownSeq > 1200) d.upHold = 45;   // stable for a while: tries come at the usual pace again
-            if (d.noGainFloor >= 0 && d.seq - d.lastDownSeq > 900) d.noGainFloor = -1;   // (the scene has changed by then)
+            if (d.noGainFloor >= 0 && !d.mega && d.seq - d.lastDownSeq > 900) d.noGainFloor = -1;   // (the scene has changed by then)
             const int vram = DynVramFreeKib();
             // judge the last step down once its frames are measured
             if (d.probeAt && d.seq >= d.probeAt) {
@@ -3272,6 +3417,7 @@ void DynamicResolution() {
                     const int from = d.probeFrom;
                     if (DynSetLevel(from, "the smaller picture did not save GPU time", true)) {
                         d.noGainFloor = from;
+                        d.megaNoGain = from;
                         d.lastDownSeq = d.seq;
                     }
                 }
@@ -3343,8 +3489,41 @@ void DynamicResolution() {
     // clear colour and alpha, or the picture), and the game's effects read it (a target that started black made the whole scene of the first
     // frame at the new size dark). Depth starts cleared (1.0, what the display copy's clear leaves in practice).
     const GLuint oldColor = g_efbColor;
-    if (oldColor && g_efbFbo) G(glGenTextures(1, &g_efbColor));
-    if (!CreateTarget()) {
+    const double resizeT0 = Now();
+    // 1.1 (resize stalls): on the console most of a size change's cost is vitaGL making a GPU render target for the new size (14-42 ms
+    // here, more in the frames after). The target of the size left is kept (EfbKeep), and a size used before is taken back as it was.
+    bool created = false, keptOld = false;
+    g_resizeReused = false;
+    if (oldColor && g_efbFbo && EfbKeepOn()) {
+        const EfbSlot cur{g_rtW, g_rtH, g_efbFbo, g_efbColor, g_efbDepthRb, g_efbDepthTex, g_poolPresents};
+        EfbSlot hit{};
+        if (EfbTake(w, h, hit)) {
+            g_efbFbo = hit.fbo; g_efbColor = hit.color; g_efbDepthRb = hit.depthRb; g_efbDepthTex = hit.depthTex;
+            g_rtW = hit.w; g_rtH = hit.h;
+            ClearTargetDepth();
+            created = true;
+            ++g_efbReused;
+            g_resizeReused = true;
+        } else {
+            g_efbFbo = 0; g_efbColor = 0; g_efbDepthRb = 0; g_efbDepthTex = 0;
+            created = CreateTarget();
+            if (!created) {   // (CreateTarget made the new objects: drop them, and back to the old ones)
+                if (g_efbColor) { GLuint t = g_efbColor; G(glDeleteTextures(1, &t)); ForgetTex(t); }
+                if (g_efbDepthTex) { GLuint t = g_efbDepthTex; G(glDeleteTextures(1, &t)); ForgetTex(t); }
+                if (g_efbDepthRb) G(glDeleteRenderbuffers(1, &g_efbDepthRb));
+                if (g_efbFbo) { if (g_inUseFbo == g_efbFbo) g_inUseFbo = ~0u; G(glDeleteFramebuffers(1, &g_efbFbo)); }
+                g_efbFbo = cur.fbo; g_efbColor = cur.color; g_efbDepthRb = cur.depthRb; g_efbDepthTex = cur.depthTex;
+                g_rtW = cur.w; g_rtH = cur.h;
+                BindFbo(g_efbFbo);
+            }
+        }
+        if (created) { EfbKeep(cur); keptOld = true; }
+    } else {
+        if (oldColor && g_efbFbo) G(glGenTextures(1, &g_efbColor));
+        created = CreateTarget();
+    }
+    g_resizeCreateMs = static_cast<float>(Now() - resizeT0);
+    if (!created && !keptOld) {
         // no memory for the new size: keep the old target and go back to the level of its size
         if (oldColor && g_efbColor != oldColor) {
             GLuint dead = g_efbColor;
@@ -3372,12 +3551,32 @@ void DynamicResolution() {
         static const float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}, kZero[4] = {0, 0, 0, 0};
         DrawQuad(oldColor, 0.0f, 0.0f, 1.0f, 1.0f, kIdentity, kZero);
         ++C.copyQuads;
-        GLuint dead = oldColor;
-        G(glDeleteTextures(1, &dead));
-        ++C.texDeletes;
-        ForgetTex(dead);
+        if (!keptOld) {
+            GLuint dead = oldColor;
+            G(glDeleteTextures(1, &dead));
+            ++C.texDeletes;
+            ForgetTex(dead);
+        }
     }
     g_rsValid = false;
+    // 1.1: what a size change costs (the console's log): the CPU time here and the next presents' spacing (DynResizeWatch)
+    g_resizeCpuMs = static_cast<float>(Now() - resizeT0);
+    g_resizeWatch = 5;   // (the first watch call is this frame's, right after: it only starts the clock)
+}
+
+// Logs the spacing of the four presents after a size change (called once per present).
+void DynResizeWatch() {
+    if (g_resizeWatch <= 0) return;
+    static float gaps[4];
+    const double now = Now();
+    if (g_resizeWatch <= 4) gaps[4 - g_resizeWatch] = static_cast<float>(now - g_resizeLast);
+    g_resizeLast = now;
+    if (--g_resizeWatch == 0) {
+        static int logged = 0;
+        if (logged++ < 60)
+            std::fprintf(stderr, "[vgx] size change to %dx%d: %.1f ms on the CPU (targets %.1f%s), next presents %.1f %.1f %.1f %.1f ms apart\n", g_rtW, g_rtH,
+                         g_resizeCpuMs, g_resizeCreateMs, g_resizeReused ? ", kept target taken back" : "", gaps[0], gaps[1], gaps[2], gaps[3]);
+    }
 }
 } // namespace
 
@@ -3418,7 +3617,7 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
     // first draw sets its whole layout, constants included.
     S.attrConstSet = 0;
     S.layoutVbo = ~0u;
-    if (!replay) DynamicResolution();
+    if (!replay) { DynamicResolution(); DynResizeWatch(); }
     BindFbo(g_efbFbo);
     if (!replay || opts.restream) UploadStream(buf, opts.vtx ? opts.vtx : buf.vtx.data(), !replay);
     if (prof) g_profStream += Now() - tFrame;

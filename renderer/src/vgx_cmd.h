@@ -181,6 +181,7 @@ enum : uint8_t {
     TF_RGBA8 = 0, // 4 bytes per texel, R first, top row first
     TF_DXT1 = 1,  // S3TC DXT1 blocks (8 bytes each, row-major), as GL_COMPRESSED_RGBA_S3TC_DXT1_EXT takes them
     TF_LA88 = 2,  // 2 bytes per texel, luminance then alpha, sampling as (L,L,L,A); no mipmaps
+    TF_DXT5 = 3,  // S3TC DXT5 blocks (16 bytes each, row-major): only the HD replacements (vgx_hdtex.cpp)
 };
 struct TexUpload {
     uint32_t texId = 0;
