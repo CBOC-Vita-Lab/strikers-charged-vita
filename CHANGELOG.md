@@ -22,6 +22,11 @@ The performance update.
 - A light sharpening filter is on by default (Settings > Sharpness: SMOOTH).
   OFF, CRISP and CRISP+ are still there.
 - SMOOTH also softens jagged character outlines, at almost no cost.
+- Optional HD characters and ball: sharper faces, kits and ball in close-ups
+  (Mega Strikes, celebrations, menus), made on your computer from your own
+  game files with `tools/hdtex` and copied to `ux0:data/mscharged/hdtex.pack`.
+  In normal play the game draws the same detail as before, so it costs no
+  frame rate.
 - When there's time to spare, the game is drawn above native resolution for
   cleaner edges.
 - New optional **Distant Textures** setting for sharper ground and walls at an

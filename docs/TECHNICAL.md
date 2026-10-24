@@ -49,6 +49,9 @@ Save ones; add the others by hand. These are the switches added for the
 | `MSC_MEGA_AIM=rear`, `MSC_MEGA_POINTER_SPEED=2..4` | Mega Save rear-touch aim and stick speed |
 | `MSC_TOUCH_DIAG=1` | In-memory performance recorder (development; off by default) |
 | `NP_TOUCH_POINTER=0` | No front-panel presses at all, title tap included |
+| `MSC_VITA_EDGE_AA=0` | No edge smoothing in the SMOOTH picture filter (default 1) |
+| `MSC_HDTEX=0` | Ignore the HD texture pack (`ux0:data/mscharged/hdtex.pack`, when it is there); `MSC_HDTEX_BUDGET=MiB` caps its graphics memory (default 8) |
+| `MSC_VGX_KEEP_TARGETS=0`, `MSC_VGX_KEEP_SIZES=0` | Do not keep the render targets and pass objects of recently used picture sizes |
 
 ## Dynamic Resolution And Frame Rate
 
@@ -267,3 +270,14 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
   texel across the edge (FXAA's sub-pixel step) and the unsharp mask is
   mostly left out there. One more texture read. `MSC_VITA_EDGE_AA=0` turns it
   off.
+- HD textures (from the Galaxy port, `renderer/src/vgx_hdtex.cpp`,
+  `tools/hdtex`): an optional pack of 2x versions of the character and ball
+  textures (278, DXT1 with their own mip chains; 1-bit alpha where the
+  original's alpha is on/off), keyed by a hash of the original texels and
+  looked up only when a texture is uploaded. The pack (37 MiB) is too big to
+  preload, and a read on the player thread took 5-51 ms on the console, so a
+  reader thread loads each replacement and the texture is uploaded again
+  once it is in. At most 8 MiB alive (`MSC_HDTEX_BUDGET`); replacements
+  unused for 600 frames are freed past half of that; a typical match uses
+  about 2.6 MiB. Sampled with mips, so ordinary play reads the
+  original-sized level. `MSC_HDTEX=0` turns it off.

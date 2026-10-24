@@ -32,8 +32,11 @@ for it.
 - **Mega Saves feel responsive again.** Stick and touch input reach the game
   sooner, so blocking a Mega Strike is about reflexes, not guessing.
 - **Sharper picture everywhere.** A light sharpening filter is on by default,
-  and when the Vita has room to spare the game draws above native resolution
-  for cleaner edges.
+  it smooths jagged character outlines, and when the Vita has room to spare
+  the game draws above native resolution for cleaner edges.
+- **Optional HD characters.** Turn your own game files into sharper faces,
+  kits and a sharper ball for Mega Strikes, celebrations and menus, with no
+  cost to frame rate. [How](tools/hdtex/README.md).
 - **Resolution that adapts.** In the rare moments when the graphics chip is
   stretched, the game softens effects first and the scene only slightly, so
   the frame rate holds without the picture falling apart.

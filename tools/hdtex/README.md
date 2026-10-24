@@ -6,6 +6,22 @@ network, stored GPU-ready (DXT1/DXT5 with their own mip chains) in one pack file
 renderer's texture cache reads on the console. The pack is game-derived data: it lives only in
 the build directory and on the memory card, never in git.
 
+## Quick start
+
+On a Windows, Mac or Linux computer with Python 3 (about 2 GB of free space, 30-60 minutes):
+
+1. Extract your disc with Dolphin as for the install ([how](../../PREPARE-GAME.md)), so you
+   have its `files` folder.
+2. Install the helpers and download the upscaling model (commands under **Rebuild** below).
+3. Run `python3 tools/hdtex/build_pack.py --data <your files folder> --out hdtex-build`.
+4. Copy `hdtex-build/hdtex.pack` to `ux0:data/mscharged/hdtex.pack` on the Vita.
+
+The game finds it at the next start. Delete the file, or add `MSC_HDTEX=0` to
+`ux0:data/mscharged/np-player.txt`, to go back to the original textures. Keep the pack to
+yourself: it is made from your copy of the game.
+
+## How it works
+
 The tools are the Super Mario Galaxy port's (same pack format, same key rule, same quality
 rules); the reader of the game data (`rlt.py` instead of the RARC/J3D reader), the selection
 (characters and the ball) and DXT1 with 1-bit alpha for on/off alpha differ.
