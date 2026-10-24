@@ -7,7 +7,7 @@ The selected build adds LiveArea settings to the quiet-logging update, based on 
 
 | Item | Recorded value |
 | --- | --- |
-| Package | `MarioStrikersCharged.vpk` |
+| Package | `Strikers-Charged-Vita.vpk` |
 | Title ID | `MSCN00003` |
 | Native base / renderer | `a8d4ad6` / `47e8568` |
 | Executable SHA-256 | `0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4` |

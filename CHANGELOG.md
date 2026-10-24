@@ -1,8 +1,8 @@
 # Changes
 
-## 1.0
+## Version 1.0 — October 19, 2026
 
-Public preview, 19 October 2026.
+The first public preview.
 
 - Open Settings from LiveArea while the game is running, then return to play.
 - Save changes for the next launch, or restart only after confirmation.
@@ -10,7 +10,7 @@ Public preview, 19 October 2026.
 - Smoother intro and stadium-preview movies with their audio kept.
 - No runtime logging.
 
-Downloads: `MarioStrikersCharged.vpk` (the game) and `MarioStrikersCharged.zip`
+Downloads: `Strikers-Charged-Vita.vpk` (the game) and `Strikers-Charged-Vita-install.zip`
 (the game with guides and source). Easy install: [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases/latest).
 
 ## 2026-10-19: Quiet Update

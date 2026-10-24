@@ -4,7 +4,7 @@ __pycache__/
 build/
 /private/
 *.vpk
-!/MarioStrikersCharged.vpk
+!/Strikers-Charged-Vita.vpk
 *.elf
 *.o
 *.a

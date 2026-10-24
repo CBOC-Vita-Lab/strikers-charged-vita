@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "releaseId": "1.0",
+  "releaseId": "strikers-v1.0",
   "date": "2026-10-19",
   "baseNative": "a8d4ad6",
   "renderer": "47e8568",
   "titleId": "MSCN00003",
   "package": {
-    "path": "MarioStrikersCharged.vpk",
+    "path": "Strikers-Charged-Vita.vpk",
     "sha256": "43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a",
     "runtimeSha256": "0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4"
   },

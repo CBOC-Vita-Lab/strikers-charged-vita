@@ -48,7 +48,7 @@ Native Mario Strikers Charged port for PS Vita; requires the owner's Wii game da
 
 # Download Link
 
-https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/MarioStrikersCharged.vpk
+https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita.vpk
 
 VPK SHA-256: `43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a`
 
