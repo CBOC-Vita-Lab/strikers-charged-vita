@@ -39,7 +39,7 @@ You need a homebrew-enabled Vita, VitaShell, about 3 GB free, your own
 **Wii USA Rev 1 (`R4QE01`)** game dump and a legitimately obtained
 `libshacccg.suprx`. The last file is a one-time Vita module, not a PC program.
 
-1. Download [the ready-made VPK](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/MarioStrikersCharged.vpk), or the [complete install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/MarioStrikersCharged.zip) with guides and source. Keep the VPK intact.
+1. Download [the ready-made VPK](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita.vpk), or the [complete install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita-install.zip) with guides and source. Keep the VPK intact.
 2. [Extract your ISO/RVZ in Dolphin](PREPARE-GAME.md#dolphin-no-python-needed). Already have the complete `sys/` and `files/` folders? Skip extraction. Dolphin is only used to extract files, not to run the game on Vita.
 3. Copy `sys/` and `files/` into `ux0:data/mscharged/game/`, and the VPK to `ux0:VPK/`. Use [USB, FTP or an already configured memory card](INSTALL.md#choose-a-transfer-method).
 4. If missing, place your `libshacccg.suprx` at `ur0:data/libshacccg.suprx`. End the transfer, install the VPK in VitaShell, then launch the Strikers bubble.
@@ -60,7 +60,7 @@ Charged, choose your own disc (ISO, RVZ, WBFS or an extracted folder) and click
 ## Already Installed?
 
 Back up your saves and settings, then install only the matching
-`MarioStrikersCharged.vpk` in VitaShell. Keep your existing game data.
+`Strikers-Charged-Vita.vpk` in VitaShell. Keep your existing game data.
 No desktop app or repeat extraction is needed. See [Update and Back Up](INSTALL.md#update-and-back-up).
 
 The executable matches the recorded physical-Vita update; a full fresh desktop

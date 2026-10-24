@@ -12,7 +12,7 @@ your legitimately obtained libshacccg.suprx in ur0:data/.
 
 MANUAL INSTALL: NO CBOC APP, PYTHON OR COMPILING NEEDED
 1. Extract this entire install ZIP on your computer. Do not unzip the VPK.
-2. Copy MarioStrikersCharged.vpk to ux0:VPK/ using VitaShell
+2. Copy Strikers-Charged-Vita.vpk to ux0:VPK/ using VitaShell
    USB, FTP or your already configured memory card (create VPK if needed).
    INSTALL.md explains each transfer method. End the transfer, then open that VPK
    in VitaShell and install it.
