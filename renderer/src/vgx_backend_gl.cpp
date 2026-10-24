@@ -3036,6 +3036,14 @@ struct DynRes {
     int over = 0, headroom = 0;
     int upHold = 45;              // measured frames of room before going up a level; doubled when a level gone up to is left again soon
     uint32_t lastUpSeq = 0, lastDownSeq = 0;
+    // 1.1 (console test): a step down that does not lower the GPU time is undone. In a Mega Save on the console the picture went down to
+    // 0.50 while the GPU time stayed at the frame budget (the haze, already at a quarter of the pixels, and the per-draw work do not shrink
+    // with the picture), so the scene looked rough for nothing. probeAt: when to judge the last step down; noGainFloor: the lowest level
+    // worth using until the scene changes (-1: none).
+    uint32_t probeAt = 0;
+    int probeFrom = -1;
+    float probeEma = 0.0f;
+    int noGainFloor = -1;
     int interval = 0;             // NpFpsDisplayInterval of the last decision
     float fakeRing[4] = {};
     uint32_t fakeSeq = 0;
@@ -3192,11 +3200,18 @@ void DynamicResolution() {
             d.normalLevel = d.level;
             // With the effects drawn at the lower resolution (FX) the scene itself starts at the game's own size, the large passes at half;
             // without them (no depth texture, MSC_FX_LOWRES=0) the whole scene starts at 70 % as before.
-            const int start = (FxDiv() > 0 && FxDepthAvailable()) ? 5 : kDynMegaStart;
-            if (d.on && megaLevels && d.level < start) DynSetLevel(start, "a Mega Strike began", true);
+            // With the effects at the lower resolution the Mega Strike starts with the scene at the game's own size (also from the
+            // ordinary floor of a match); without them at 70 % as before.
+            const bool fx = FxDiv() > 0 && FxDepthAvailable();
+            const int start = fx ? 5 : kDynMegaStart;
+            if (d.on && megaLevels && (fx ? d.level != start : d.level < start)) DynSetLevel(start, "a Mega Strike began", true);
+            d.noGainFloor = -1;
+            d.probeAt = 0;
             d.frames = -10;
             d.windowStart = Now();
         } else {
+            d.noGainFloor = -1;
+            d.probeAt = 0;
             int back = d.normalLevel < d.level ? d.normalLevel : d.level;
             if (back > d.floorLevel) back = d.floorLevel;
             if (back < d.minLevel) back = d.minLevel;
@@ -3236,8 +3251,21 @@ void DynamicResolution() {
             }
             if (ms > budget) ++d.over; else d.over = 0;
             if (d.upHold > 45 && d.seq - d.lastDownSeq > 1200) d.upHold = 45;   // stable for a while: tries come at the usual pace again
+            if (d.noGainFloor >= 0 && d.seq - d.lastDownSeq > 900) d.noGainFloor = -1;   // (the scene has changed by then)
             const int vram = DynVramFreeKib();
-            if (d.level > floor) DynSetLevel(floor, "past this scene's floor");
+            // judge the last step down once its frames are measured
+            if (d.probeAt && d.seq >= d.probeAt) {
+                d.probeAt = 0;
+                if (d.probeFrom >= 0 && d.level > d.probeFrom && d.ema > 0.92f * d.probeEma) {
+                    const int from = d.probeFrom;
+                    if (DynSetLevel(from, "the smaller picture did not save GPU time", true)) {
+                        d.noGainFloor = from;
+                        d.lastDownSeq = d.seq;
+                    }
+                }
+            }
+            const int floorUsed = (d.noGainFloor >= 0 && d.noGainFloor < floor) ? d.noGainFloor : floor;
+            if (d.level > floorUsed) DynSetLevel(floorUsed, "past this scene's floor");
             else if (d.level < best) DynSetLevel(best, "above this scene's best level");
             else if (d.level < kDynNative && vram >= 0 && vram < 12288) {
                 if (DynSetLevel(kDynNative, "video memory is low", true)) {
@@ -3246,15 +3274,24 @@ void DynamicResolution() {
                     if (d.upHold < 720) d.upHold *= 2;
                 }
             }
-            else if (d.ema > 0.90f * budget || d.over >= 3) {
+            else if (d.probeAt) {
+                // (a step down is being judged: no further step until its frames are measured)
+            } else if (d.ema > 0.90f * budget || d.over >= 3) {
                 int l = d.level;
-                while (l < floor && pred(l) > 0.82f * budget) ++l;
-                if (l == d.level && l < floor && d.over >= 3) ++l;   // over the budget for three frames although predicted to fit: one more
+                while (l < floorUsed && pred(l) > 0.82f * budget) ++l;
+                if (l == d.level && l < floorUsed && d.over >= 3) ++l;   // over the budget for three frames although predicted to fit: one more
                 if (l != d.level) {
                     // a level gone up to that does not hold (the model does not know every saving, the effects at the lower resolution
                     // among them): wait twice as long before the next try, up to 16 times
                     if (d.lastUpSeq && d.seq - d.lastUpSeq < 180 && d.upHold < 720) d.upHold *= 2;
-                    if (DynSetLevel(l, "the GPU is over its budget")) d.lastDownSeq = d.seq;
+                    const int from = d.level;
+                    const float emaBefore = d.ema;
+                    if (DynSetLevel(l, "the GPU is over its budget")) {
+                        d.lastDownSeq = d.seq;
+                        d.probeFrom = from;
+                        d.probeEma = emaBefore;
+                        d.probeAt = d.seq + 24;   // (3 frames still at the old size, then about 20 measured)
+                    }
                 } else {
                     d.over = 0;
                 }

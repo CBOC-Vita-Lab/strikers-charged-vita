@@ -220,3 +220,15 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
 - The pool is never compacted while a pass is open; a frame-rate interval of
   0 (no policy yet) uses the 30 fps budget; with a fixed render size
   (`MSC_VITA_RENDER`) Mega Strikes are still held at 30.
+- Second console test: in a Mega Save the GPU time stayed at the frame budget
+  while the picture went down to 0.50 (the effects are already at a quarter of
+  the pixels). A step down is now judged after about 20 measured frames and
+  undone if the GPU time fell by less than 8 %; the scene then stays at that
+  level (until the Mega Strike ends, or 900 frames in ordinary scenes). Mega
+  Strikes start with the scene at the game's own size when the effects pass
+  is available, also from a match's 0.86.
+- Mega Save stick speed: 3x by default (`MSC_MEGA_POINTER_SPEED=1` is the
+  original speed).
+- The package's shader pack and warm-up list include the shaders the console
+  compiled in a first match (768 programs' shaders, the warm-up list of that
+  console), so the first goal replay at close zoom no longer compiles.

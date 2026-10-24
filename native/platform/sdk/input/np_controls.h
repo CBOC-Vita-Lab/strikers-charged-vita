@@ -75,7 +75,8 @@ inline bool RearSaveEnabled() {
 inline float MegaPointerGain() {
     static const float gain = [] {
         const char* e = getenv("MSC_MEGA_POINTER_SPEED");
-        return e && e[0] >= '1' && e[0] <= '4' && e[1] == '\0' ? float(e[0] - '0') : 1.0f;
+        // 1.1 (console test): the original speed cannot cross the goal in time with a stick; 3x is the default, =1 the original
+        return e && e[0] >= '1' && e[0] <= '4' && e[1] == '\0' ? float(e[0] - '0') : 3.0f;
     }();
     return gain;
 }

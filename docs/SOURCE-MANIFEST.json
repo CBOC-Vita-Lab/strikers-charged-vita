@@ -6772,7 +6772,7 @@
   },
   {
    "path": "native/platform/sdk/input/np_controls.h",
-   "sha256": "69a63449b1e0a5c0050bceaa043c6341e6e85dc0cf0d5fc8cd53fc0b3b88ef6b"
+   "sha256": "b5beb3b8a9cc54d38182a46d3769246181a88838daac58ef4e64557a65c90b9c"
   },
   {
    "path": "native/platform/sdk/input/np_ctl_font.h",
@@ -7460,7 +7460,7 @@
   },
   {
    "path": "native/platform/vita/src/np_settings.cpp",
-   "sha256": "89516295e8dfa076dec222893859c651721c46a34088aea9a0883e35ba33612f"
+   "sha256": "2379e457f233c9016ab9b027345678c14d9d5b0bb3f90d3fdfbbec919c0a47a7"
   },
   {
    "path": "native/platform/vita/src/np_settings.h",
@@ -7600,7 +7600,7 @@
   },
   {
    "path": "native/platform/vita/tests/test_settings.cpp",
-   "sha256": "611301fcb3b4c21c702fb1d5209dee02d91703a414326c3840809896ec2f32cd"
+   "sha256": "1f94bb1c5d44125fcb8222168624b77fce2355585105435e00bff654f06437c7"
   },
   {
    "path": "native/platform/vita/tests/test_silent_frames.cpp",
@@ -15956,7 +15956,7 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "970bb778fb7af8df446fcb010e16079866aa1d903cc531ca98d28128057524c9"
+   "sha256": "f9f72133d674c4d4b033110ab0c0cb89455cd21099367127365c27937bf9014a"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",

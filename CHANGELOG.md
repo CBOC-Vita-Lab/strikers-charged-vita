@@ -29,12 +29,18 @@ The performance update.
 - The CPU plays just as well when your camera is zoomed in close.
 - Quick screen taps are never missed, and button presses are never lost or
   repeated after a system pop-up.
-- Optional rear-touch aiming and faster Mega Save stick speed in Settings.
+- The stick moves the glove three times faster in Mega Saves by default, so
+  you can reach the far side of the goal in time (Settings > Mega Save Speed:
+  3x, 4x, 2x or ORIGINAL). Optional rear-touch aiming is in Settings too.
 
 **Under the hood**
 - Fixed a crash when starting a match after the picture size had changed a
   few times: unused graphics buffers are now freed, and the game only draws a
   larger picture when there is graphics memory to spare.
+- Mega Strikes no longer drop to a low resolution when that would not make
+  them any faster.
+- More of the game's graphics come prebuilt, so a goal replay no longer stops
+  for a loading bar the first time.
 - Fixed new graphics effects never being built on the console (a fault in
   the shader cache code), which kept the sharpening and the lighter Mega
   Strike glow from switching on.

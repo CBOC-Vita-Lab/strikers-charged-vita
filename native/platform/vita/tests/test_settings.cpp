@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
             CHECK(s.choice[aim] == 0 && s.choice[speed] == 0);
             SetChoice(s, aim, 1); SetChoice(s, speed, 2);
             std::string out;
-            CHECK(Serialize(s, out) && Has(out, "MSC_MEGA_AIM=rear") && Has(out, "MSC_MEGA_POINTER_SPEED=3"));
+            CHECK(Serialize(s, out) && Has(out, "MSC_MEGA_AIM=rear") && Has(out, "MSC_MEGA_POINTER_SPEED=2"));
             CHECK(Has(out, "MSC_REAR_TOUCH=0") && Has(out, "# retained") && Has(out, "MSC_WATCH=1"));
             State t; Load(t, out.c_str());
             CHECK(t.choice[aim] == 1 && t.choice[speed] == 2);
@@ -364,7 +364,7 @@ int main(int argc, char** argv) {
             }
             {
                 State rear;
-                Load(rear, "MSC_MEGA_AIM=rear\nMSC_MEGA_POINTER_SPEED=3\n");
+                Load(rear, "MSC_MEGA_AIM=rear\nMSC_MEGA_POINTER_SPEED=4\n");
                 Draw(buffer.data(), rear, Find("MEGA SAVE AIM") + 1, "", false, true);
                 std::snprintf(path, sizeof path, "%s/settings-mega-aim.ppm", argv[1]);
                 CHECK(Ppm(path, buffer.data()));
