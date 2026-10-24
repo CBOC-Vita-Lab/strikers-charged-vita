@@ -1,5 +1,5 @@
 {
- "date": "2026-10-23",
+ "date": "2026-10-24",
  "scope": "Source of the release in RELEASE.json (native/, renderer/, dependencies/)",
  "files": [
   {
@@ -1432,7 +1432,7 @@
   },
   {
    "path": "native/include/Game/GL/ShaderSkinMesh.h",
-   "sha256": "17e495c042fb45b637b48d6ee5b48144778543b7043c5231a07b1082ca0d55e6"
+   "sha256": "498a42f076f52e896f441ac12ecc082dfcde38e07ded2b424551b3d2dd9a1245"
   },
   {
    "path": "native/include/Game/GL/glModelBuilder.h",
@@ -11220,7 +11220,7 @@
   },
   {
    "path": "native/src/Game/GL/ShaderSkinMesh.cpp",
-   "sha256": "4cea0c4c9e867b7815792b32b7ac77d46614e256ced7857a258778a80042aa3b"
+   "sha256": "d69d05c124038c702498f38d3df95bd5d9f29234422b502a6c55f32fcfc9dda6"
   },
   {
    "path": "native/src/Game/GL/glModelBuilder.cpp",
@@ -15980,7 +15980,7 @@
   },
   {
    "path": "renderer/src/vgx_dlcache.cpp",
-   "sha256": "1fddf4ec62293f21c1c85f861851de2e397229ba836a47bf1d33e24544ce00ba"
+   "sha256": "0d9111e7c4bc24388d305b3d0f8c8692deae4791a83c8f66368affdc727d798a"
   },
   {
    "path": "renderer/src/vgx_draw.cpp",
@@ -15992,7 +15992,7 @@
   },
   {
    "path": "renderer/src/vgx_guestmem.cpp",
-   "sha256": "a957729a1ff2703c6854b8ab11861c8441d37f11c090eaa1107a354bb19ce192"
+   "sha256": "de91c96da915e0d1e828575a7a886042af7d8ffb6cdf0ef1aefb82e7fc6d4d63"
   },
   {
    "path": "renderer/src/vgx_guestmem.h",
