@@ -969,7 +969,7 @@ int vglStrikersBindFramebufferDepth(GLuint fb_id) {
 	if (tex->data)
 		return 0; // (a texture with storage of its own is never repointed)
 	const int row = VGL_ALIGN(fb->width, SCE_GXM_TILE_SIZEX);
-	sceGxmDepthStencilSurfaceSetForceStoreMode(fb->depthbuffer_ptr, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED);
+	// (no store-mode change here: it would alter a surface whose scene may still be open; the caller's scene hints store the depth)
 	if (sceGxmTextureInitLinear(&tex->gxm_tex, fb->depthbuffer_ptr->depthData, SCE_GXM_TEXTURE_FORMAT_DF32M, row, fb->height, 0) < 0)
 		return 0;
 	tex->status = TEX_VALID;

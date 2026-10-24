@@ -770,7 +770,7 @@ bool CreateTarget() {
 // In front of g_programs: the program last asked for in each of 64 classes (entries of an
 // unordered_map do not move; EvictPrograms empties this when it deletes any).
 struct ProgramFront { uint32_t key; Program* p; };
-ProgramFront g_programFront[64] = {};
+ProgramFront g_programFront[1024] = {};   // (1.1: 64 collided in a match; from the Galaxy port)
 uint64_t g_programRetryFrame = ~0ull;
 
 // W5 SEED (after Galaxy 98a0d5e). vitaGL has room for 1,024 linked programs and its
@@ -833,7 +833,7 @@ void EvictPrograms() {
 
 Program& GetProgram(uint16_t vsId, uint16_t fsId) {
     const uint32_t key = (static_cast<uint32_t>(vsId) << 16) | fsId;
-    auto& fr = g_programFront[(vsId * 7u + fsId) & 63u];
+    auto& fr = g_programFront[((vsId * 7u + fsId) * 2654435761u) >> 22];
     if (fr.p && fr.key == key && fr.p->ok) return *fr.p;
     auto it = g_programs.find(key);
     uint8_t failures = 0;
@@ -1433,10 +1433,13 @@ void DetachFromPool(GLuint name) {
     bool moved = false;
     for (PoolFbo& f : g_pool)
         if (f.attached == name) {
-            BindFbo(f.fbo);
-            AttachColor(0);
+            // (never the target of the open scene: vitaGL ends that scene later, with its target; the texture stays alive until then)
+            if (f.fbo != g_inUseFbo) {
+                BindFbo(f.fbo);
+                AttachColor(0);
+                moved = true;
+            }
             f.attached = 0;
-            moved = true;
         }
     if (moved && prev != ~0u) BindFbo(prev);
 }
@@ -1994,7 +1997,7 @@ void TrimPool() {
     size_t kept = 0, freed = 0;
     for (size_t i = 0; i < g_pool.size(); ++i) {
         PoolFbo& f = g_pool[i];
-        if (g_poolPresents - f.lastPresent > age) {
+        if (g_poolPresents - f.lastPresent > age && f.fbo != g_inUseFbo && f.fbo != S.fbo) {   // (not the open scene's target)
             if (S.fbo == f.fbo) {
                 G(glBindFramebuffer(GL_FRAMEBUFFER, 0));
                 S.fbo = 0;
@@ -2229,21 +2232,10 @@ void BeginFx() {
     // the depth source and the part of it the picture covers (u: the console's depth buffer rows are 32-pixel aligned)
     GLuint depthTex = g_efbDepthTex;
     float depthU = 1.0f;
-    if (!(g_hasDepthTex && g_efbDepthTex)) {
-#ifdef __VGX_VITA__
-        if (!g_fxDepthSrc) G(glGenTextures(1, &g_fxDepthSrc));
-        BindTexForEdit(g_fxDepthSrc);
-        const int aligned = vglStrikersBindFramebufferDepth ? vglStrikersBindFramebufferDepth(g_efbFbo) : 0;
-        if (aligned <= 0) { g_fxBuf = false; return; }   // (no depth buffer yet: this run is drawn as before)
-        G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-        G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-        depthTex = g_fxDepthSrc;
-        depthU = static_cast<float>(g_rtW) / static_cast<float>(aligned);
-#else
-        g_fxBuf = false;
-        return;
+    const bool consoleDepth = !(g_hasDepthTex && g_efbDepthTex);
+#ifndef __VGX_VITA__
+    if (consoleDepth) { g_fxBuf = false; return; }
 #endif
-    }
     const int div = FxDiv();
     const int w = (g_rtW + div - 1) / div, h = (g_rtH + div - 1) / div;
     g_fxPoolIdx = AcquireFbo(w, h, 0, true);
@@ -2256,21 +2248,39 @@ void BeginFx() {
     TouchTarget(OP_PASS_CLEAR);
     G(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
     ++C.clears;
+#ifdef __VGX_VITA__
+    if (consoleDepth) {
+        // (bound here, after the EFB's scene has ended: its depth is stored by then; the RT scan marked the run start as a depth read)
+        if (!g_fxDepthSrc) G(glGenTextures(1, &g_fxDepthSrc));
+        BindTexForEdit(g_fxDepthSrc);
+        const int aligned = vglStrikersBindFramebufferDepth ? vglStrikersBindFramebufferDepth(g_efbFbo) : 0;
+        if (aligned > 0) {
+            G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+            G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+            depthTex = g_fxDepthSrc;
+            depthU = static_cast<float>(g_rtW) / static_cast<float>(aligned);
+        } else {
+            depthTex = 0;   // (no depth buffer: the effects are not hidden behind anything this once)
+        }
+    }
+#endif
     // the scene's depth: the EFB depth under each pixel's centre (the depth texture is NEAREST)
     SetColorMask(false, false);
     SetBlendOff();
     SetCull(CULL_NONE);
     SetDepthTest(true, GL_ALWAYS);
     SetDepthMask(true);
-    UseProgram(g_fxDepthProg);
-    BindTex(0, depthTex);
-    G(glUniform4f(g_fxDepthRect, 0.0f, 0.0f, depthU, 1.0f));
-    ++C.uniformCalls;
-    g_uniDirtyV = g_uniDirtyF = false;
-    UsePictureQuadLayout();
-    TouchTarget();
-    G(glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
-    ++C.copyQuads;
+    if (depthTex) {
+        UseProgram(g_fxDepthProg);
+        BindTex(0, depthTex);
+        G(glUniform4f(g_fxDepthRect, 0.0f, 0.0f, depthU, 1.0f));
+        ++C.uniformCalls;
+        g_uniDirtyV = g_uniDirtyF = false;
+        UsePictureQuadLayout();
+        TouchTarget();
+        G(glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+        ++C.copyQuads;
+    }
     // the run's draws: like a pass over the whole EFB at 1/div of the render scale
     g_pass = g_fxPoolIdx;
     g_inPass = true;
@@ -3256,7 +3266,9 @@ void DynamicResolution() {
             // judge the last step down once its frames are measured
             if (d.probeAt && d.seq >= d.probeAt) {
                 d.probeAt = 0;
-                if (d.probeFrom >= 0 && d.level > d.probeFrom && d.ema > 0.92f * d.probeEma) {
+                // Only in a Mega Strike (where it was seen), and only when the time stayed about the same: a time that went UP is a scene change
+                // (a replay, a cut) that a bigger picture would make worse, so the step stands.
+                if (d.mega && d.probeFrom >= 0 && d.level > d.probeFrom && d.ema > 0.92f * d.probeEma && d.ema < 1.15f * d.probeEma) {
                     const int from = d.probeFrom;
                     if (DynSetLevel(from, "the smaller picture did not save GPU time", true)) {
                         d.noGainFloor = from;
@@ -3288,9 +3300,11 @@ void DynamicResolution() {
                     const float emaBefore = d.ema;
                     if (DynSetLevel(l, "the GPU is over its budget")) {
                         d.lastDownSeq = d.seq;
-                        d.probeFrom = from;
-                        d.probeEma = emaBefore;
-                        d.probeAt = d.seq + 24;   // (3 frames still at the old size, then about 20 measured)
+                        if (d.mega) {
+                            d.probeFrom = from;
+                            d.probeEma = emaBefore;
+                            d.probeAt = d.seq + 24;   // (3 frames still at the old size, then about 20 measured)
+                        }
                     }
                 } else {
                     d.over = 0;

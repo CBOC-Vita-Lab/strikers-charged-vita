@@ -44,7 +44,7 @@
   },
   {
    "path": "dependencies/vitaGL/source/framebuffers.c",
-   "sha256": "1a52b5065f2969ac56be68ed376089f3ae944815f6708f7e746dce83ca550050"
+   "sha256": "068246eafb5c9266a39e3fec8b2b5f0f3362e653d5116d9b9828544683493065"
   },
   {
    "path": "dependencies/vitaGL/source/get_info.c",
@@ -6492,7 +6492,7 @@
   },
   {
    "path": "native/platform/compat/np_fps.cpp",
-   "sha256": "5578be5dac81b8a5e017b52f6952ffba1c44a65b44ff0d3709ecdec82c041a81"
+   "sha256": "93b06b36f77db860b64ddbdc13933ee50a04abb7243fadfa294a45010344a1c7"
   },
   {
    "path": "native/platform/compat/np_fps_ctl.h",
@@ -6512,7 +6512,7 @@
   },
   {
    "path": "native/platform/compat/np_latency.cpp",
-   "sha256": "81f5ab514935fbeeeba63393bfd3cde364e0b437fbaecf73efb49a985d58a168"
+   "sha256": "73f884ab5088417f6d83ad79072a4ceca16c8b89b7253212e1d762681b24850f"
   },
   {
    "path": "native/platform/compat/np_main.cpp",
@@ -15956,7 +15956,7 @@
   },
   {
    "path": "renderer/src/vgx_backend_gl.cpp",
-   "sha256": "f9f72133d674c4d4b033110ab0c0cb89455cd21099367127365c27937bf9014a"
+   "sha256": "5650305d444127837bca87d9f014638928c6fdf79ad0a6dacc4f1e74aff18dd9"
   },
   {
    "path": "renderer/src/vgx_backend_null.cpp",
@@ -15984,7 +15984,7 @@
   },
   {
    "path": "renderer/src/vgx_draw.cpp",
-   "sha256": "b0816f5739f3079be7d86f4beed68def91258c6fb319cc8308c51a3cd357ef06"
+   "sha256": "e981baa2a6af133863f5cb4aa5ecf2682d1066ccc2bf265901df90b05c68a22d"
   },
   {
    "path": "renderer/src/vgx_ext.h",
@@ -16080,7 +16080,7 @@
   },
   {
    "path": "renderer/src/vgx_texcache.cpp",
-   "sha256": "a0536749c23ce66ca48a1b4ff410c7d51898ac3b35b0292aa52fa5a512b665fc"
+   "sha256": "d9707131e5baf96881a4d52aab192d3e2e6a4d86bebed6ce403e0da8c32cd78b"
   },
   {
    "path": "renderer/src/vgx_texdecode.cpp",

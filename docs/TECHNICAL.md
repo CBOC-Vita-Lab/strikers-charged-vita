@@ -232,3 +232,19 @@ The full engineering list behind the [1.1 release notes](../CHANGELOG.md).
 - The package's shader pack and warm-up list include the shaders the console
   compiled in a first match (768 programs' shaders, the warm-up list of that
   console), so the first goal replay at close zoom no longer compiles.
+- Input delay (third console session): every stage after the game thread is
+  faster than a frame, but the display shows a picture every second refresh,
+  so each hand-off held a queue and a button took about 150 ms to reach the
+  screen at 30 fps. Frames now carry their number to the display also without
+  `MSC_LAT`, and the game thread starts the next frame only when at most
+  `MSC_LAT_DEPTH` (default 2) of its frames are still on their way (one refresh
+  of waiting at most; it stands aside for 150 frames after any late frame so
+  it never costs frame rate). Scripted match on the console: 150 ms -> 99 ms.
+- The no-gain revert of the dynamic resolution only runs in Mega Strikes, and
+  only when the GPU time stayed about the same (a rise is a scene change).
+- Pool trimming and texture deletion never touch the framebuffer object of
+  the open scene (a console crash in `scene_end`). The effects pass binds the
+  console depth buffer after the EFB's scene has ended and leaves its store
+  mode alone.
+- Larger front caches for texture, shader and program lookups (1024 entries,
+  from the Galaxy port).

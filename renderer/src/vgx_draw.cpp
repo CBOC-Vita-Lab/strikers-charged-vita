@@ -35,7 +35,7 @@ template <typename K> struct Registry {
     std::unordered_multimap<uint64_t, Entry> map;
     std::vector<std::unique_ptr<ShaderSource>> sources;
     std::vector<K> keys; // by id
-    struct Front { uint64_t h = 0; uint16_t id = 0; bool valid = false; } front[64];
+    struct Front { uint64_t h = 0; uint16_t id = 0; bool valid = false; } front[1024];   // (1.1: 64 collided; from the Galaxy port)
 };
 Registry<FsKey> g_fsReg;
 Registry<VsKey> g_vsReg;
@@ -92,7 +92,7 @@ uint16_t Lookup(Registry<K>& reg, const K& key, bool fragment, Gen gen) {
     const uint64_t h = HashKey(&key, sizeof(K));
     // (in front of the hash table: the last id seen for each of 64 hash values; the table's
     // lookup costs divisions, and the same few keys come round all frame)
-    typename Registry<K>::Front& fr = reg.front[h & 63u];
+    typename Registry<K>::Front& fr = reg.front[h & 1023u];
     if (fr.valid && fr.h == h && SameStruct(reg.keys[fr.id], key)) return fr.id;
     auto range = reg.map.equal_range(h);
     for (auto it = range.first; it != range.second; ++it)

@@ -52,9 +52,9 @@ std::unordered_map<Key, Entry, KeyHash> g_cache;
 // textures hundreds of times). Entries of an unordered_map do not move; the front is
 // emptied whenever one is erased.
 struct CacheFront { Key key; Entry* e; };
-CacheFront g_cacheFront[128] = {};
+CacheFront g_cacheFront[1024] = {};   // (1.1, from the Galaxy port: 1024 classes with a multiplicative hash; 128 collided in a match)
 inline Entry& CacheEntry(const Key& key) {
-    CacheFront& f = g_cacheFront[(reinterpret_cast<uintptr_t>(key.data) >> 5) & 127u];
+    CacheFront& f = g_cacheFront[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(key.data) >> 5) * 2654435761u) >> 22];
     if (f.e && f.key == key) return *f.e;
     Entry& e = g_cache[key];
     f.key = key;
