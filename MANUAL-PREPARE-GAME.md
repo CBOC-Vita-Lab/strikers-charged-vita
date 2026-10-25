@@ -1,12 +1,14 @@
 # Prepare Your Game
 
+> **Most people should use [CBOC Vita Installer](EASY-INSTALL.md) instead.** It does every step below for you: pick Mario Strikers Charged, choose your disc, press Install. Use this guide only if you can't or don't want to use it.
+
 **This is the manual route; CBOC Vita Installer is not required.**
 It can be done on Windows, macOS (Intel or Apple Silicon), or Linux. The game
 runs on Vita, not in Dolphin. No computer is needed after installation.
 
 Use your own **Wii USA Rev 1 (`R4QE01`)** dump. If you already have its
 complete `sys/` and `files/` folders, skip extraction and [copy them to the
-Vita](INSTALL.md#installation). Do not copy the ISO or RVZ itself.
+Vita](MANUAL-INSTALL.md#installation). Do not copy the ISO or RVZ itself.
 
 ## Dolphin: No Python Needed
 
@@ -19,7 +21,7 @@ Vita](INSTALL.md#installation). Do not copy the ISO or RVZ itself.
    choose **Extract Entire Partition...**. Select a new, empty folder;
    allow about 3 GB extra space and wait for extraction to finish.
 4. Copy the resulting `sys/` and `files/` folders into
-   **`ux0:data/mscharged/game/`** using [USB, FTP or your configured memory card](INSTALL.md#choose-a-transfer-method).
+   **`ux0:data/mscharged/game/`** using [USB, FTP or your configured memory card](MANUAL-INSTALL.md#choose-a-transfer-method).
 
 Choose the entire **data partition**, not the update partition or just
 **Extract Files...**, which leaves out the system files. Keep your original
@@ -34,7 +36,7 @@ ux0:data/mscharged/game/files/Art/
 ```
 
 Do not add another `game/` or `DATA/` level. Other extracted partition
-metadata is not needed. Return to [Install](INSTALL.md).
+metadata is not needed. Return to [Install](MANUAL-INSTALL.md).
 
 That is all the game-data preparation this Strikers package needs. The VPK
 contains its playback fixes and startup shaders; you do not need to run the
@@ -64,7 +66,7 @@ validates the data while extracting, and checks the disc revision and
 first extractor download.
 
 When it says **READY**, copy `prepared-game/sys/` and `prepared-game/files/`
-into **`ux0:data/mscharged/game/`**, then return to [Install](INSTALL.md).
+into **`ux0:data/mscharged/game/`**, then return to [Install](MANUAL-INSTALL.md).
 It never connects to your Vita, uploads game data or replaces existing
 folders. To retry after an interruption, choose a new folder with
 `--output "prepared-game-2"`. Keep your original dump.

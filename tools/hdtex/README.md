@@ -10,7 +10,7 @@ the build directory and on the memory card, never in git.
 
 On a Windows, Mac or Linux computer with Python 3 (about 2 GB of free space, 30-60 minutes):
 
-1. Extract your disc with Dolphin as for the install ([how](../../PREPARE-GAME.md)), so you
+1. Extract your disc with Dolphin as for the install ([how](../../MANUAL-PREPARE-GAME.md)), so you
    have its `files` folder.
 2. Install the helpers and download the upscaling model (commands under **Rebuild** below).
 3. Run `python3 tools/hdtex/build_pack.py --data <your files folder> --out hdtex-build`.

@@ -30,7 +30,7 @@ please [open an issue](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/is
 
 - **The desktop installer may take a little while to list a new version.** If
   **Get** offers an older one, use the manual steps in the
-  [install guide](INSTALL.md), or try again later.
+  [install guide](MANUAL-INSTALL.md), or try again later.
 - You need your own copy of the game and the Vita's shader compiler module
   (`libshacccg.suprx`). Neither is included.
 

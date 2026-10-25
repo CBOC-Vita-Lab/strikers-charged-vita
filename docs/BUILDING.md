@@ -1,6 +1,6 @@
 # Building
 
-For installation, use [Install](../INSTALL.md). This page is for developers.
+For installation, use [Install](../MANUAL-INSTALL.md). This page is for developers.
 
 Build the native player (title `MSCN00003`) from this tree. Dependency setup uses
 fixed revisions rather than whichever upstream versions are newest.
