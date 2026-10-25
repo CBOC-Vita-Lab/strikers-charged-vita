@@ -1,5 +1,7 @@
 # Manual Install: Windows, Mac Or Linux
 
+> **Most people should use [CBOC Vita Installer](EASY-INSTALL.md) instead.** It does every step below for you: pick Mario Strikers Charged, choose your disc, press Install. Use this guide only if you can't or don't want to use it.
+
 **You do not need CBOC Vita Installer to install or play this game.**
 The ready-made VPK runs on the Vita. Any of the computer platforms above can
 prepare and copy the required files. Once installed, no computer is needed.
@@ -19,7 +21,7 @@ Use `Strikers-Charged-Vita.vpk`, application ID `MSCN00003`.
 ## Installation
 
 1. Download [the VPK](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita.vpk), or extract the [complete install ZIP](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita-install.zip) for the VPK plus guides and source. **Do not unzip the VPK.** [Download checks](docs/CHECK-DOWNLOAD.md) are optional.
-2. Prepare your own game's complete `sys/` and `files/` folders. If you only have an ISO/RVZ, follow [Dolphin's extraction steps](PREPARE-GAME.md#dolphin-no-python-needed). It is used only for extraction, not gameplay. Already extracted? Skip this step.
+2. Prepare your own game's complete `sys/` and `files/` folders. If you only have an ISO/RVZ, follow [Dolphin's extraction steps](MANUAL-PREPARE-GAME.md#dolphin-no-python-needed). It is used only for extraction, not gameplay. Already extracted? Skip this step.
 3. Use one of the transfer methods below. Copy both folders into `ux0:data/mscharged/game/`, and copy `Strikers-Charged-Vita.vpk` into `ux0:VPK/`. Create missing folders. Do not copy the ISO/RVZ itself or the whole repository into `ux0:app/`.
 4. Check for `ur0:data/libshacccg.suprx` in VitaShell. If it is missing, copy your legitimately obtained file there. **USB/card drives expose `ux0:`, not `ur0:`:** stage the file in `ux0:VPK/`, end the transfer, then use VitaShell's **Triangle > Copy**, open `ur0:data/`, and **Triangle > Paste**. Do not replace an existing working copy.
 5. End the transfer. In VitaShell, open `ux0:VPK/Strikers-Charged-Vita.vpk`, press the confirm button (usually Cross) and confirm installation. Launch the Mario Strikers Charged bubble. See [Controls](CONTROLS.md) for the layout.
@@ -107,7 +109,7 @@ See [Known Issues](KNOWN-ISSUES.md) for build-specific notes.
 
 ## Optional Automated Setup
 
-[CBOC Vita Installer](DESKTOP-INSTALL.md) does extraction, checks, transfer and
+[CBOC Vita Installer](EASY-INSTALL.md) does extraction, checks, transfer and
 installation for you on Mac, Windows or Linux. No additional movie/image
 conversion is required by this Strikers package; its current playback fixes
 are in the VPK.

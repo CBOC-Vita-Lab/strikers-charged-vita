@@ -13,7 +13,7 @@ built for the handheld.
 ![Gameplay on a PS Vita](store/screenshots/gameplay-vita.png)
 
 **[Download the latest version](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest)** ·
-[Install guide](INSTALL.md) · [Controls](CONTROLS.md) · [What's new](CHANGELOG.md)
+[Install guide](MANUAL-INSTALL.md) · [Controls](CONTROLS.md) · [What's new](CHANGELOG.md)
 
 You'll need your own copy of the game. No game data is included.
 
@@ -83,18 +83,18 @@ You need:
 [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases/latest)
 does everything for you on Windows, Mac or Linux. Open it, press SELECT in
 VitaShell, click **Get** next to Mario Strikers Charged, choose your disc and
-click **Install**. [Step-by-step guide](DESKTOP-INSTALL.md).
+click **Install**. [Step-by-step guide](EASY-INSTALL.md).
 
 ### Manual way
 
 1. Download **[Strikers-Charged-Vita.vpk](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest/download/Strikers-Charged-Vita.vpk)**.
 2. Extract your disc with Dolphin to get its `sys` and `files` folders
-   ([how](PREPARE-GAME.md)).
+   ([how](MANUAL-PREPARE-GAME.md)).
 3. Copy `sys` and `files` to `ux0:data/mscharged/game/` on the Vita, and the
    VPK to `ux0:VPK/`.
 4. Install the VPK in VitaShell and launch the bubble.
 
-The [full install guide](INSTALL.md) covers USB, FTP and memory card transfers
+The [full install guide](MANUAL-INSTALL.md) covers USB, FTP and memory card transfers
 and what to do if something doesn't start.
 
 **Updating from an earlier version?** Just install the new VPK over the old

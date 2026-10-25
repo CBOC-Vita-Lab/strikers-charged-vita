@@ -1,7 +1,7 @@
 # Easy Install With CBOC Vita Installer
 
 **The game does not need this program.** It runs on the Vita by itself, and
-[Manual Install](INSTALL.md) works from any computer. The installer just does
+[Manual Install](MANUAL-INSTALL.md) works from any computer. The installer just does
 the copying and installing for you.
 
 [CBOC Vita Installer](https://github.com/CBOC-Vita-Lab/vita-installer/releases/latest)

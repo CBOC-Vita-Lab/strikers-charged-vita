@@ -33,7 +33,7 @@ def tool_asset(system, machine):
     try:
         return ASSETS[(system, machine)]
     except KeyError:
-        raise ValueError(f"Unsupported computer: {system} {machine}. See PREPARE-GAME.md.") from None
+        raise ValueError(f"Unsupported computer: {system} {machine}. See MANUAL-PREPARE-GAME.md.") from None
 
 
 def sha256(path):
@@ -131,7 +131,7 @@ def main():
         return 1
     print(f"READY: {args.output.resolve()}")
     print("Copy only its sys and files folders into ux0:data/mscharged/game/.")
-    print("Then install the matching player VPK with VitaShell. See INSTALL.md.")
+    print("Then install the matching player VPK with VitaShell. See MANUAL-INSTALL.md.")
     return 0
 
 

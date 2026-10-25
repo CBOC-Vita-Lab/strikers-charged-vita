@@ -15,7 +15,7 @@ than compiling individual files with guessed defaults.
 The player uses `ux0:data/mscharged/`; extracted game data lives in `game/`.
 Preserve `np-data/` and existing NAND/save files, plus `np-player.txt`.
 The startup shader cache is build-specific. A cache from another renderer
-is not a supported replacement. See [Install](../INSTALL.md) for exact paths.
+is not a supported replacement. See [Install](../MANUAL-INSTALL.md) for exact paths.
 
 `native/platform/vita/lab/` holds developer tools for scripted test runs and
 diagnostics. They are not needed to install or play. Desktop or emulator

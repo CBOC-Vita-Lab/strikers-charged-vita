@@ -18,7 +18,7 @@ EASY INSTALL
 ------------
 CBOC Vita Installer does everything for you on Windows, Mac or Linux:
   github.com/CBOC-Vita-Lab/vita-installer/releases/latest
-See DESKTOP-INSTALL.md.
+See EASY-INSTALL.md.
 
 
 MANUAL INSTALL
@@ -27,7 +27,7 @@ MANUAL INSTALL
    (Don't unzip the VPK.)
 
 2. Extract your disc with Dolphin to get its "sys" and "files" folders.
-   PREPARE-GAME.md shows how. Then copy them so you have:
+   MANUAL-PREPARE-GAME.md shows how. Then copy them so you have:
      ux0:data/mscharged/game/sys/
      ux0:data/mscharged/game/files/
 
@@ -35,7 +35,7 @@ MANUAL INSTALL
 
 4. Open the VPK in VitaShell, install it, and launch the bubble.
 
-INSTALL.md has the full guide, including USB, FTP and memory card transfers.
+MANUAL-INSTALL.md has the full guide, including USB, FTP and memory card transfers.
 
 
 UPDATING
