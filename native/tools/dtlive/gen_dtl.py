@@ -8,7 +8,7 @@ NP = os.path.abspath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
 import mwcc, declscan
 
-DECOMP = '/home/claude/research/decomp/mscharged-decomp/config/R4QE01'
+DECOMP = '/work/research/decomp/mscharged-decomp/config/R4QE01'
 SHARDS_INDEX = os.path.join(NP, 'tools', 'difftest', 'index.pkl')
 SWEEP_TUS = ['NL/nlMath.cpp', 'NL/math.cpp', 'NL/plane.cpp', 'NL/utility.cpp', 'NL/plat/platqmath.cpp', 'NL/plat/platvmath.cpp', 'NL/nlIntersection.cpp', 'NL/nlPolygonRegion.cpp',
              'Game/AI/AiUtil.cpp', 'Game/Render/Frustum.cpp', 'Game/PoseNode.cpp', 'Game/SAnim.cpp', 'Game/SAnim/pnSAnimController.cpp', 'Game/PoseAccumulator.cpp', 'Game/SAnim/pnBlender.cpp',
@@ -122,7 +122,7 @@ class Tool:
         self.idx = pickle.load(open(SHARDS_INDEX, 'rb'))
         self.cache = {}
         # the recompiler's "fast reference" set: baseline translations of the functions it replaces by hand-written host code (fastref_<ADDR>)
-        fr = '/home/claude/msc/split/gen-trunk/fast_reference/fast_reference.cpp'
+        fr = '/work/msc/split/gen-trunk/fast_reference/fast_reference.cpp'
         if os.path.exists(fr):
             lines = open(fr, errors='replace').read().split('\n'); self.cache[fr] = lines
             marks = [(i, int(m.group(1), 16)) for i, l in enumerate(lines) for m in [re.match(r'extern "C" void fastref_([0-9A-F]{8})\(CpuContext\* MKW_RESTRICT ctx\)', l)] if m]

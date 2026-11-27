@@ -6,8 +6,8 @@ cd "$(dirname "$0")/../.."
 # W5ONE: ROOT=<build root> (default NPM2's), TID=<title id> (default MSCN00001, the lab build; the player build is MSCN00003 or MSCH00002), ENVNAME=np-player.txt for the
 # player build (it reads that file, not env.txt), KEEPALIVE_MS=<ms> (default 20000), FRESHSHADERS=0 keeps the emulator's shader cache (a cold cache makes first-use frames take 10 to 20 s
 # and, under load, more than the 20 s keep-alive: the match is then ended by the game's own 'connection lost'), EXTRA="a b" more files for ux0:data/mscharged, SHOTS=<s> seconds between screenshots.
-ROOT=${ROOT:-/home/claude/msc/build/np/NPM2}
-TAG=${1:?tag}; SECS=${2:-600}; VPK=${3:-/home/claude/msc/build/np/NPM2/keep/mscharged-np-npm2-ba4e1d3a.vpk}; TID=${TID:-MSCN00001}
+ROOT=${ROOT:-/work/msc/build/np/NPM2}
+TAG=${1:?tag}; SECS=${2:-600}; VPK=${3:-/work/msc/build/np/NPM2/keep/mscharged-np-npm2-ba4e1d3a.vpk}; TID=${TID:-MSCN00001}
 OUT=$ROOT/v3k-runs/$TAG; rm -rf "$OUT"; mkdir -p "$OUT/host" "$OUT/join"
 mk() {  # role index port vip script
   cat > $OUT/$1/env.txt <<EOT

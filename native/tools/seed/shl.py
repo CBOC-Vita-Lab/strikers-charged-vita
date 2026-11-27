@@ -13,7 +13,13 @@ Commands:
   shl.py table  [--base seed.shl] a.shl b.shl ...   per file: keys used, and NEW keys over the union of the files before it
   shl.py decode a.shl                       one line per shader key (stages, texgens, ...)
   shl.py check  a.shl                       structure check (ids in range, no duplicates), as the C++ reader requires
-  shl.py sub    -o out.shl --novariants a.shl   copy without the type 4 records (or --maxvar N)
+  shl.py sub    -o out.shl --novariants a.shl   copy without the type 4 records (or --maxvar N); --noprograms: the shader keys alone, for a compile turn that links nothing
+  shl.py pal60  -o out.shl a.shl           1.3 MSC_VGX_PALMERGE: a copy plus, for every short-palette vertex key (perVtxPos 2, palRows 0), its 60-row twin
+                                            (palRows 60: a palette run's record) with the programs and variants of the key: the list a pack regeneration
+                                            compiles so that the default MSC_VGX_PALMERGE=2 finds the twins listed
+  shl.py palkeys -o out.shl --from cat.shl a.shl   a copy of a.shl plus, as vertex keys alone (no programs), every 60-row short-palette key (perVtxPos 2, palRows 60) that
+                                            cat.shl holds: the warm-up list of a pack with palette-run twins (MSC_VGX_PALMERGE=2 arms itself when the list has such a key
+                                            and uses a twin only when its key is listed; the twins' programs link from the pack on first use). Every key added must be in the pack.
   shl.py split  --parts N -o prefix a.shl   N lists that together hold everything (programs dealt out in order, each with the shaders it needs and its variants):
                                             for a warm-up that does not fit one Vita3K turn; the cache of the parts adds up
 """
@@ -29,6 +35,7 @@ class SList:
         self.fs = []
         self.prog = []    # (vsKey, fsKey)
         self.var = []     # (vsKey, fsKey, layout, blend)
+        self.marks = set()   # (vsKey, fsKey) of programs a match drew (record 5)
         self._vsIdx = {}
         self._fsIdx = {}
         self._prog = set()
@@ -85,6 +92,9 @@ def read(path):
         elif t == 4:
             v, f, lay, bl = struct.unpack_from('<IIII', d, p); p += 16
             L.add_var(L.vs[v], L.fs[f], lay, bl)
+        elif t == 5:   # 1.3 MSC_VGX_WARM_ORDER: a program drawn in a match (linked first at the next start)
+            v, f = struct.unpack_from('<II', d, p); p += 8
+            L.marks.add((L.vs[v], L.fs[f]))
         else:
             raise ValueError('%s: bad record type %d at %d' % (path, t, p - 4))
     if p != len(d):
@@ -92,18 +102,22 @@ def read(path):
     return L
 
 
-def write(L, path, novariants=False, maxvar=None):
+def write(L, path, novariants=False, maxvar=None, noprograms=False):
     out = bytearray(MAGIC + struct.pack('<IIII', L.vsSize, L.fsSize, L.gen, 0))
     for k in L.vs: out += struct.pack('<I', 1) + k
     for k in L.fs: out += struct.pack('<I', 2) + k
     vi = {k: i for i, k in enumerate(L.vs)}
     fi = {k: i for i, k in enumerate(L.fs)}
-    for v, f in L.prog: out += struct.pack('<III', 3, vi[v], fi[f])
-    if not novariants:
+    if not noprograms:
+        for v, f in L.prog: out += struct.pack('<III', 3, vi[v], fi[f])
+    if not novariants and not noprograms:
         n = 0
         for v, f, lay, bl in L.var:
             if maxvar is not None and n >= maxvar: break
             out += struct.pack('<IIIII', 4, vi[v], fi[f], lay, bl); n += 1
+    if not noprograms:
+        for v, f in L.prog:
+            if (v, f) in L.marks: out += struct.pack('<III', 5, vi[v], fi[f])
     tmp = path + '.tmp'
     open(tmp, 'wb').write(out)
     os.replace(tmp, path)
@@ -120,8 +134,29 @@ def merge(lists):
         for k in L.fs: U.add_fs(k)
         for v, f in L.prog: U.add_prog(v, f)
         for t in L.var: U.add_var(*t)
+        U.marks |= L.marks
     U.dups = 0
     return U
+
+
+VS_PERVTXPOS, VS_PALROWS = 2, 3   # byte offsets in VsKey (vgx_shadergen.h)
+
+
+def pal60(L):
+    """L plus the 60-row twin of every short-palette vertex key, with its programs and variants (MSC_VGX_PALMERGE)."""
+    U = merge([L])
+    twin = {}
+    for k in L.vs:
+        if k[VS_PERVTXPOS] == 2 and k[VS_PALROWS] == 0:
+            t = k[:VS_PALROWS] + bytes([60]) + k[VS_PALROWS + 1:]
+            twin[k] = t
+            U.add_vs(t)
+    for v, f in L.prog:
+        if v in twin: U.add_prog(twin[v], f)
+    for v, f, lay, bl in L.var:
+        if v in twin: U.add_var(twin[v], f, lay, bl)
+    U.dups = 0
+    return U, len(twin)
 
 
 def counts(L):
@@ -146,7 +181,9 @@ def main():
     s = sub.add_parser('table'); s.add_argument('--base'); s.add_argument('files', nargs='+')
     s = sub.add_parser('decode'); s.add_argument('file')
     s = sub.add_parser('check'); s.add_argument('file')
-    s = sub.add_parser('sub'); s.add_argument('-o', required=True); s.add_argument('--novariants', action='store_true'); s.add_argument('--maxvar', type=int); s.add_argument('file')
+    s = sub.add_parser('sub'); s.add_argument('-o', required=True); s.add_argument('--novariants', action='store_true'); s.add_argument('--noprograms', action='store_true'); s.add_argument('--maxvar', type=int); s.add_argument('file')
+    s = sub.add_parser('pal60'); s.add_argument('-o', required=True); s.add_argument('file')
+    s = sub.add_parser('palkeys'); s.add_argument('-o', required=True); s.add_argument('--from', dest='frm', required=True); s.add_argument('file')
     s = sub.add_parser('split'); s.add_argument('--parts', type=int, required=True); s.add_argument('-o', required=True); s.add_argument('file')
     a = ap.parse_args()
 
@@ -176,9 +213,20 @@ def main():
         U = merge([read(f) for f in a.files])
         write(U, a.o, a.novariants, a.maxvar)
         print('merged %d lists -> %s: vs %d fs %d prog %d var %d' % ((len(a.files), a.o) + counts(U)))
+    elif a.cmd == 'pal60':
+        U, n = pal60(read(a.file))
+        write(U, a.o)
+        print('%s: %d short-palette vertex keys, their 60-row twins added: vs %d fs %d prog %d var %d' % (a.o, n, *counts(U)))
+    elif a.cmd == 'palkeys':
+        U = merge([read(a.file)]); C = read(a.frm); n = 0
+        for k in C.vs:
+            if k[VS_PERVTXPOS] == 2 and k[VS_PALROWS] == 60 and U.add_vs(k): n += 1
+        U.dups = 0
+        write(U, a.o)
+        print('%s: %d 60-row palette vertex keys added (keys alone): vs %d fs %d prog %d var %d' % ((a.o, n) + counts(U)))
     elif a.cmd == 'sub':
         L = read(a.file)
-        write(L, a.o, a.novariants, a.maxvar)
+        write(L, a.o, a.novariants, a.maxvar, a.noprograms)
         print('%s -> %s' % (a.file, a.o))
     elif a.cmd == 'diff':
         B, N = read(a.base), read(a.new)

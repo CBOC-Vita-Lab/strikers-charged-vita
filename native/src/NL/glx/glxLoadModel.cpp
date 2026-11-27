@@ -23,6 +23,10 @@
 #endif
 
 
+#ifdef NP_NATIVE
+extern "C" void NpLodModelLoaded(const glModel* m);
+#endif
+
 class GLXRLGReader : public RLGReader
 {
 public:
@@ -205,6 +209,9 @@ void GLXRLGReader::FinalizeModels()
             ((GLMaterialProgram*)packet->materialProgram)->Prepare(packet);
         }
 
+#ifdef NP_NATIVE
+        NpLodModelLoaded(model);   // MSC_LOD_INV / MSC_LOD_DUMP (src/Game/Render/NpLod.cpp)
+#endif
         GLVertexAnim* loaded = m_pResource->m_inventory->GetVertexAnim(model->id);
         if (loaded != 0)
         {

@@ -1,0 +1,14 @@
+# console-1.2 run maskbg0: Full-target mask quad drawn in every scene again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# MSC_VGX_VGL_MASKBG=1 (on, vitaGL 0029, the Galaxy port's MASK_KEEP / patch 0018): a scene that does not load its depth/stencil surface and has the scissor test off begins with the mask set and the full-target mask quad is not drawn. Against d1: GPU busy ms ([rt]/[gpu]) and the '[rt] scissor mask background' line (scenes armed per run); the picture must be the same (any part of the picture missing or drawn outside its frame, or stencil-masked effects gone, means it goes off). Quads saved per frame is the scene count that began unloaded.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_VGL_MASKBG=0

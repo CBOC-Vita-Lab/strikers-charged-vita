@@ -42,7 +42,7 @@ GLboolean display_list_execute;
 display_list display_lists[NUM_DISPLAY_LISTS];
 static uint32_t dlist_offs = 0;
 
-void resetDlists() {
+void reset_dlists() {
 	vgl_memset(&display_lists[0], 0, sizeof(display_list) * NUM_DISPLAY_LISTS);
 }
 
@@ -311,7 +311,7 @@ void glCallList(GLuint list) {
 			break;
 		case DLIST_FUNC_U8_U8_U8:
 #ifdef DEBUG_DLISTS
-			vgl_log("%s:%d %s: %s(%hhu, %hhu, %hhu)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), *(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]));
+			vgl_log("%s:%d %s: %s(%u, %u, %u)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), (unsigned)(*(uint8_t *)(l->args)), (unsigned)(*(uint8_t *)(&l->args[1])), (unsigned)(*(uint8_t *)(&l->args[2])));
 #endif
 			f_u8_u8_u8 = l->func;
 			f_u8_u8_u8(*(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]));
@@ -382,7 +382,7 @@ void glCallList(GLuint list) {
 			break;
 		case DLIST_FUNC_U8_U8_U8_U8:
 #ifdef DEBUG_DLISTS
-			vgl_log("%s:%d %s: %s(%hhu, %hhu, %hhu, %hhu)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), *(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]), *(uint8_t *)(&l->args[3]));
+			vgl_log("%s:%d %s: %s(%u, %u, %u, %u)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), (unsigned)(*(uint8_t *)(l->args)), (unsigned)(*(uint8_t *)(&l->args[1])), (unsigned)(*(uint8_t *)(&l->args[2])), (unsigned)(*(uint8_t *)(&l->args[3])));
 #endif
 			f_u8_u8_u8_u8 = l->func;
 			f_u8_u8_u8_u8(*(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]), *(uint8_t *)(&l->args[3]));

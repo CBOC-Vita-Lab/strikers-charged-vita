@@ -24,6 +24,7 @@
 #include "../shared.h"
 
 #include "texture_swizzler.h"
+#include "geom_fix.h" // 0058
 
 #ifdef HAVE_TEX_CACHE
 #define XXH_STATIC_LINKING_ONLY
@@ -40,14 +41,42 @@ uint32_t vgl_tex_cache_freq = 3600; // Number of frames prior a texture becomes 
 
 #define vgl_alloc_attempt(alignment, size, type) \
 	res = vgl_memalign(alignment, size, type); \
-	if (res) \
-		return res;
+	if (res) { \
+		return res; \
+	}
 
 // VRAM usage setting
 uint8_t use_vram_for_usse = GL_FALSE;
 
 // Newlib mempool usage setting
 GLboolean use_extra_mem = GL_TRUE;
+
+/* MEMSITES BEGIN */
+// 0041 MSC_VGL_MEMSITES (mem_utils.c): the allocation routines name their caller and their kind for the table of who holds each pool; with the switch off each costs one branch.
+typedef struct {
+	void *site;
+	uint8_t kind;
+} ms_ctx_t;
+extern int vgl_ms_on;
+ms_ctx_t vgl_ms_enter(uint8_t kind, void *ra);
+void vgl_ms_leave(ms_ctx_t *old);
+void vgl_ms_note_spill(void *ptr, size_t size);
+void vgl_ms_recovery(size_t size);
+static inline __attribute__((always_inline)) ms_ctx_t ms_enter_if_on(uint8_t kind, void *ra) {
+	ms_ctx_t o = { NULL, 0 };
+	if (__builtin_expect(vgl_ms_on, 0))
+		o = vgl_ms_enter(kind, ra);
+	return o;
+}
+static inline __attribute__((always_inline)) void ms_leave_if_on(ms_ctx_t *o) {
+	if (__builtin_expect(vgl_ms_on, 0))
+		vgl_ms_leave(o);
+}
+#define MS_ENTER(kind) ms_ctx_t ms_ctx_var __attribute__((cleanup(ms_leave_if_on))) = ms_enter_if_on(kind, __builtin_return_address(0))
+#define MS_SPILL(res, size) \
+	if (__builtin_expect(vgl_ms_on, 0)) \
+		vgl_ms_note_spill(res, size)
+/* MEMSITES END */
 
 static inline __attribute__((always_inline)) uint64_t morton_1(uint64_t x) {
 	x = x & 0x5555555555555555;
@@ -96,6 +125,7 @@ static inline __attribute__((always_inline)) void *gpu_alloc_mapped_aligned_for_
 	vgl_alloc_attempt(alignment, size, VGL_MEM_VRAM)
 	if (use_extra_mem) {
 		res = vgl_memalign(alignment, size, VGL_MEM_EXTERNAL);
+		MS_SPILL(res, size); // 0041
 	}
 	return res;
 }
@@ -108,6 +138,7 @@ static inline __attribute__((always_inline)) void *gpu_alloc_mapped_aligned_for_
 	vgl_alloc_attempt(alignment, size, VGL_MEM_BUDGET)
 	if (use_extra_mem) {
 		res = vgl_memalign(alignment, size, VGL_MEM_EXTERNAL);
+		MS_SPILL(res, size); // 0041
 	}
 	return res;
 }
@@ -120,8 +151,9 @@ static inline __attribute__((always_inline)) uint32_t vgl_cache_old_textures(siz
 	while (vgl_uncached_tex_head && cached_bytes < size) {
 		texture *tex = vgl_uncached_tex_head; // Just some readability sugar
 		if ((tex->last_frame == OBJ_NOT_USED && tex->upload_frame != vgl_framecount) || (vgl_framecount - tex->last_frame > vgl_tex_cache_freq && tex->last_frame < OBJ_CACHED)) {
-			if (tex->next)
+			if (tex->next) {
 				tex->next->prev = NULL;
+			}
 			tex->last_frame = OBJ_CACHED;
 			SceGxmTextureFormat tex_format = vglGetTexFormat(&tex->gxm_tex);
 			uint8_t bpp = tex_format_to_bytespp(tex_format);
@@ -153,58 +185,126 @@ static inline __attribute__((always_inline)) uint32_t vgl_cache_old_textures(siz
 #endif
 
 int unsafe_allocator_counter = 0;
-static void *gpu_alloc_mapped_aligned_recover(size_t alignment, size_t size, GLboolean for_gpu) {
-	if (vgl_gc_failed()) return NULL;
-	// Performing a garbage collection cycle prior to attempting to allocate the memory again
-	unsafe_allocator_counter++;
-	if (unsafe_allocator_counter == 1) {
-		if (for_gpu) {
-			// glFinish can recursively allocate the depth surface being recovered.
-			sceGxmFinish(gxm_context);
-		} else {
-			glFinish();
-		}
+
+// 0036: the recovery's wait is bounded (vglSetGcPauseMs, default 16 ms; 1000 = about the 1 s a failed allocation used to stop the thread for) and counted (vglGetGcRecoveryStats).
+#include "gc_retry.h"
+uint32_t vgl_gc_pause_ms = 16;
+static vgl_gc_stats gc_stats;
+static uint32_t gc_note_count;
+
+void vglSetGcPauseMs(int ms) {
+	vgl_gc_pause_ms = ms < 0 ? 0 : (ms > 5000 ? 5000 : (uint32_t)ms);
+}
+
+void vglGetGcRecoveryStats(uint32_t *recoveries, uint32_t *resolved, uint32_t *failed, uint32_t *pauses, uint32_t *legacy, uint32_t *cycles, uint32_t *max_us, uint64_t *total_us, uint64_t *pause_us, uint64_t *bytes) {
+	if (recoveries) *recoveries = __atomic_load_n(&gc_stats.recoveries, __ATOMIC_RELAXED);
+	if (resolved) *resolved = __atomic_load_n(&gc_stats.resolved, __ATOMIC_RELAXED);
+	if (failed) *failed = __atomic_load_n(&gc_stats.failed, __ATOMIC_RELAXED);
+	if (pauses) *pauses = __atomic_load_n(&gc_stats.pauses, __ATOMIC_RELAXED);
+	if (legacy) *legacy = __atomic_load_n(&gc_stats.legacy, __ATOMIC_RELAXED);
+	if (cycles) *cycles = __atomic_load_n(&gc_stats.cycles, __ATOMIC_RELAXED);
+	if (max_us) *max_us = __atomic_load_n(&gc_stats.max_us, __ATOMIC_RELAXED);
+	if (total_us) *total_us = __atomic_load_n(&gc_stats.total_us, __ATOMIC_RELAXED);
+	if (pause_us) *pause_us = __atomic_load_n(&gc_stats.pause_us, __ATOMIC_RELAXED);
+	if (bytes) *bytes = __atomic_load_n(&gc_stats.bytes, __ATOMIC_RELAXED);
+}
+
+// 0036 test knob (default off): every `every`-th GPU allocation of 64 KiB or more is treated as refused by every pool, and the following `fails` tries of its recovery are refused too, so the
+// recovery runs (finish, collector cycles, timed wait when fails > 4) in an emulator that has memory to spare. vglSetGcTestInject(0, 0) = off.
+static uint32_t gc_inject_every, gc_inject_fails, gc_inject_count, gc_inject_hits;
+static int gc_inject_left;
+void vglSetGcTestInject(int every, int fails) {
+	gc_inject_every = every < 0 ? 0 : (uint32_t)every;
+	gc_inject_fails = fails < 0 ? 0 : (uint32_t)fails;
+}
+static int gc_inject_hit(size_t size) {
+	if (!gc_inject_every || size < 65536) return 0;
+	if (__atomic_add_fetch(&gc_inject_count, 1, __ATOMIC_RELAXED) % gc_inject_every) return 0;
+	__atomic_add_fetch(&gc_inject_hits, 1, __ATOMIC_RELAXED);
+	__atomic_store_n(&gc_inject_left, (int)gc_inject_fails, __ATOMIC_RELAXED);
+	return 1;
+}
+uint32_t vglGetGcTestInjectHits(void) {
+	return __atomic_load_n(&gc_inject_hits, __ATOMIC_RELAXED);
+}
+
+void vgl_gc_note_legacy(void) {
+	__atomic_add_fetch(&gc_stats.legacy, 1, __ATOMIC_RELAXED);
+}
+
+typedef struct gc_rec_ctx {
+	size_t alignment, size;
+	GLboolean for_gpu;
+} gc_rec_ctx;
+
+static void gc_rec_finish(void *c) {
+	if (((gc_rec_ctx *)c)->for_gpu) {
+		// glFinish can recursively allocate the depth surface being recovered.
+		sceGxmFinish(gxm_context);
+	} else {
+		glFinish();
 	}
+	if (vgl_fg_on)
+		vgl_fg_flush_all(); // 0050: the free guard's held deletes go to the collector that the next step runs
+}
+
+static int gc_rec_cycle(void *c) {
 	// A nested depth allocation may have failed through the void glFinish call.
-	if (vgl_gc_failed()) return NULL;
-	int collected = 1;
+	if (vgl_gc_failed()) return 0;
+	unsafe_allocator_counter++;
 #if defined(HAVE_SINGLE_THREADED_GC) && !defined(HAVE_PTHREAD)
 	garbage_collector(0, NULL);
+	return 1;
 #else
-	collected = vgl_gc_recover();
-	if (!collected) return NULL;
+	return vgl_gc_recover();
 #endif
+}
 
-	// Allocating requested memblock
+static void *gc_rec_attempt(void *c) {
 	if (vgl_gc_failed()) return NULL;
-	void *res = for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size)
-	                   : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
+	const gc_rec_ctx *r = (const gc_rec_ctx *)c;
+	if (__atomic_load_n(&gc_inject_left, __ATOMIC_RELAXED) > 0 && __atomic_sub_fetch(&gc_inject_left, 1, __ATOMIC_RELAXED) >= 0) return NULL; // test knob
+	return r->for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(r->alignment, r->size) : gpu_alloc_mapped_aligned_for_cpu_inner(r->alignment, r->size);
+}
 
-	// Iterating for as many as possible max pending garbage collector cycles
-	if (!res && unsafe_allocator_counter < FRAME_PURGE_FREQ) {
-		res = gpu_alloc_mapped_aligned_recover(alignment, size, for_gpu);
-	}
+static void gc_rec_delay(void *c, uint32_t us) {
+	sceKernelDelayThread(us);
+}
 
-	// Inspect all retired buckets promptly. If none suffices, retain the legacy
-	// waiting opportunities for other threads to release shared-heap memory.
-	if (!res && collected == 2 && vgl_gc_retry_pause())
-		res = for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size)
-		              : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
+static uint64_t gc_rec_now(void *c) {
+	return sceKernelGetSystemTimeWide();
+}
+
+static void *gpu_alloc_mapped_aligned_recover(size_t alignment, size_t size, GLboolean for_gpu) {
+	if (vgl_gc_failed()) return NULL;
+	gc_rec_ctx ctx = {alignment, size, for_gpu};
+	const vgl_gc_ops ops = {&ctx, gc_rec_finish, gc_rec_cycle, gc_rec_attempt, gc_rec_delay, gc_rec_now};
+	const uint32_t before_pauses = __atomic_load_n(&gc_stats.pauses, __ATOMIC_RELAXED);
+	const uint64_t t0 = sceKernelGetSystemTimeWide();
+	void *res = vgl_gc_retry(&ops, &gc_stats, size, FRAME_PURGE_FREQ, vgl_gc_pause_ms * 1000u, 2000);
+	const uint32_t n = __atomic_add_fetch(&gc_note_count, 1, __ATOMIC_RELAXED);
+	if (n <= 8 || (n & 63) == 0) // one line per recovery for the first eight, then one in 64
+		vgl_log("%s:%d GPU memory recovery #%u: %u bytes asked, %s after %u us (%s, limit %u ms)\n", __FILE__, __LINE__, n, (unsigned)size, res ? "obtained" : "NOT obtained",
+		        (unsigned)(sceKernelGetSystemTimeWide() - t0), __atomic_load_n(&gc_stats.pauses, __ATOMIC_RELAXED) != before_pauses ? "timed wait used" : "no timed wait", (unsigned)vgl_gc_pause_ms);
 	return res;
 }
 
 void *gpu_alloc_mapped_aligned_unsafe_for_cpu(size_t alignment, size_t size) {
+	MS_ENTER(2); // 0041
 	return gpu_alloc_mapped_aligned_recover(alignment, size, GL_FALSE);
 }
 
 void *gpu_alloc_mapped_aligned_unsafe_for_gpu(size_t alignment, size_t size) {
+	MS_ENTER(1); // 0041
 	return gpu_alloc_mapped_aligned_recover(alignment, size, GL_TRUE);
 }
 
 void *gpu_alloc_mapped_aligned_for_cpu(size_t alignment, size_t size) {
-	void *res = gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
-	if (res)
+	MS_ENTER(2); // 0041
+	void *res = gc_inject_hit(size) ? NULL : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
+	if (res) {
 		return res;
+	}
 	
 #ifdef HAVE_TEX_CACHE
 	if (vgl_cache_old_textures(size) >= size) {
@@ -216,6 +316,8 @@ void *gpu_alloc_mapped_aligned_for_cpu(size_t alignment, size_t size) {
 #ifdef LOG_ERRORS
 	vgl_log("%s:%d gpu_alloc_mapped_aligned_for_cpu failed with a requested size of %u bytes, attempting to forcefully free required memory.\n", __FILE__, __LINE__, size);
 #endif
+	if (__builtin_expect(vgl_ms_on, 0))
+		vgl_ms_recovery(size); // 0041
 	unsafe_allocator_counter = 0;
 	res = gpu_alloc_mapped_aligned_unsafe_for_cpu(alignment, size);
 
@@ -231,9 +333,11 @@ void *gpu_alloc_mapped_aligned_for_cpu(size_t alignment, size_t size) {
 }
 
 void *gpu_alloc_mapped_aligned_for_gpu(size_t alignment, size_t size) {
-	void *res = gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size);
-	if (res)
+	MS_ENTER(1); // 0041
+	void *res = gc_inject_hit(size) ? NULL : gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size);
+	if (res) {
 		return res;
+	}
 	
 #ifdef HAVE_TEX_CACHE
 	if (vgl_cache_old_textures(size) >= size) {
@@ -245,6 +349,8 @@ void *gpu_alloc_mapped_aligned_for_gpu(size_t alignment, size_t size) {
 #ifdef LOG_ERRORS
 	vgl_log("%s:%d gpu_alloc_mapped_aligned_for_gpu failed with a requested size of %u bytes, attempting to forcefully free required memory.\n", __FILE__, __LINE__, size);
 #endif
+	if (__builtin_expect(vgl_ms_on, 0))
+		vgl_ms_recovery(size); // 0041
 	unsafe_allocator_counter = 0;
 	res = gpu_alloc_mapped_aligned_unsafe_for_gpu(alignment, size);
 
@@ -260,6 +366,7 @@ void *gpu_alloc_mapped_aligned_for_gpu(size_t alignment, size_t size) {
 }
 
 void *gpu_vertex_usse_alloc_mapped(size_t size, unsigned int *usse_offset) {
+	MS_ENTER(6); // 0041
 	// Allocating memblock
 	void *addr;
 	if (use_vram_for_usse) {
@@ -284,6 +391,7 @@ void gpu_vertex_usse_free_mapped(void *addr) {
 }
 
 void *gpu_fragment_usse_alloc_mapped(size_t size, unsigned int *usse_offset) {
+	MS_ENTER(6); // 0041
 	// Allocating memblock
 	void *addr;
 	if (use_vram_for_usse) {
@@ -318,26 +426,30 @@ static inline __attribute__((always_inline)) int tex_format_to_alignment(SceGxmT
 }
 
 void *gpu_alloc_palette(const void *data, uint32_t w, uint32_t bpe) {
+	MS_ENTER(5); // 0041
 	// Allocating palette data buffer
 	void *texture_palette = gpu_alloc_mapped_aligned_for_gpu(SCE_GXM_PALETTE_ALIGNMENT, 256 * sizeof(uint32_t));
 
 	// Initializing palette
-	if (data == NULL)
+	if (data == NULL) {
 		vgl_memset(texture_palette, 0, 256 * sizeof(uint32_t));
-	else if (bpe == 4)
+	} else if (bpe == 4) {
 		vgl_fast_memcpy(texture_palette, data, w * sizeof(uint32_t));
+	}
 
 	// Returning palette
 	return texture_palette;
 }
 
 void gpu_alloc_cube_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, SceGxmTransferFormat src_format, const void *data, texture *tex, uint8_t src_bpp, int index) {
+	MS_ENTER(3); // 0041
 	// If there's already a texture in passed texture object we first dealloc it
 	if (tex->status == TEX_VALID && tex->faces_counter >= 6) {
 		gpu_free_texture_data(tex);
 		tex->faces_counter = 1;
-	} else
+	} else {
 		tex->faces_counter++;
+	}
 
 	// Getting texture format bpp
 	uint8_t bpp = tex_format_to_bytespp(format);
@@ -362,8 +474,9 @@ void gpu_alloc_cube_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, 
 				dst_fmt, SCE_GXM_TRANSFER_SWIZZLED,
 				texture_data, 0, 0, VGL_ALIGN(w, 8) * bpp,
 				NULL, 0, NULL);
-		} else
+		} else {
 			vgl_memset(texture_data, 0, face_size);
+		}
 
 		// Initializing texture and validating it
 		tex->mip_count = 0;
@@ -381,9 +494,11 @@ void gpu_alloc_cube_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, 
 }
 
 void gpu_alloc_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const void *data, texture *tex, uint8_t src_bpp, uint32_t (*read_cb)(void *), void (*write_cb)(void *, uint32_t), GLboolean fast_store) {
+	MS_ENTER(3); // 0041
 	// If there's already a texture in passed texture object we first dealloc it
-	if (tex->status == TEX_VALID)
+	if (tex->status == TEX_VALID) {
 		gpu_free_texture_data(tex);
+	}
 
 	// Getting texture format bpp
 	uint8_t bpp = tex_format_to_bytespp(format);
@@ -400,7 +515,7 @@ void gpu_alloc_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const
 			uint8_t *dst;
 			if (fast_store) { // Internal Format and Data Format are the same, we can just use vgl_fast_memcpy for better performance
 				if (aligned_w == w) // Texture size is already aligned, we can use a single vgl_fast_memcpy for better performance
-					vgl_fast_memcpy(texture_data, src, tex_size);
+					vgl_tex_copy(texture_data, src, tex_size); // 0051
 				else {
 					uint32_t line_size = w * bpp;
 					for (int i = 0; i < h; i++) {
@@ -420,16 +535,18 @@ void gpu_alloc_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const
 					}
 				}
 			}
-		} else
+		} else {
 			vgl_memset(texture_data, 0, tex_size);
+		}
 
 		// Initializing texture and validating it
 		tex->mip_count = 1;
 		vglInitLinearTexture(&tex->gxm_tex, texture_data, format, w, h, tex->mip_count);
-		if ((format & 0x9F000000U) == SCE_GXM_TEXTURE_BASE_FORMAT_P8)
+		if ((format & 0x9F000000U) == SCE_GXM_TEXTURE_BASE_FORMAT_P8) {
 			tex->palette_data = color_table;
-		else
+		} else {
 			tex->palette_data = NULL;
+		}
 		tex->status = TEX_VALID;
 		tex->data = texture_data;
 #ifndef TEXTURES_SPEEDHACK
@@ -442,9 +559,11 @@ void gpu_alloc_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const
 }
 
 void gpu_alloc_paletted_texture(int32_t level, uint32_t w, uint32_t h, SceGxmTextureFormat format, const void *data, texture *tex, uint8_t src_bpp, uint32_t (*read_cb)(void *)) {
+	MS_ENTER(3); // 0041
 	// If there's already a texture in passed texture object we first dealloc it
-	if (tex->status == TEX_VALID)
+	if (tex->status == TEX_VALID) {
 		gpu_free_texture_data(tex);
+	}
 
 	// Check if the texture is P8
 	uint8_t is_p8 = tex_format_to_bytespp(format);
@@ -454,9 +573,14 @@ void gpu_alloc_paletted_texture(int32_t level, uint32_t w, uint32_t h, SceGxmTex
 	// Calculating texture data buffer size
 	uint32_t tex_size = 0;
 	for (int j = 0; j <= level; j++) {
-		tex_size += is_p8 ? (w * h) : (w * h / 2);
-		w /= 2;
-		h /= 2;
+		uint32_t aligned_w = VGL_ALIGN(w, 8);
+		tex_size += (is_p8 ? aligned_w : aligned_w / 2) * h;
+		if (w > 1) {
+			w /= 2;
+		}
+		if (h > 1) {
+			h /= 2;
+		}
 	}
 
 	// Allocating texture and palette data buffers
@@ -474,12 +598,29 @@ void gpu_alloc_paletted_texture(int32_t level, uint32_t w, uint32_t h, SceGxmTex
 		}
 
 		// Populating texture data
-		if (is_p8)
-			vgl_fast_memcpy(tex->data, src, tex_size);
-		else {
-			uint8_t *dst = (uint8_t *)tex->data;
-			for (int i = 0; i < tex_size; i++) {
-				dst[i] = ((src[i] & 0x0F) << 4) | (src[i] >> 4);
+		uint8_t *dst = (uint8_t *)tex->data;
+		uint32_t mip_w = orig_w;
+		uint32_t mip_h = orig_h;
+		for (int j = 0; j <= level; j++) {
+			uint32_t aligned_w = VGL_ALIGN(mip_w, 8);
+			uint32_t src_row_size = is_p8 ? mip_w : (mip_w + 1) / 2;
+			uint32_t dst_row_size = is_p8 ? aligned_w : aligned_w / 2;
+			for (uint32_t y = 0; y < mip_h; y++) {
+				if (is_p8) {
+					vgl_fast_memcpy(dst, src, src_row_size);
+				} else {
+					for (uint32_t x = 0; x < src_row_size; x++) {
+						dst[x] = ((src[x] & 0x0F) << 4) | (src[x] >> 4);
+					}
+				}
+				src += src_row_size;
+				dst += dst_row_size;
+			}
+			if (mip_w > 1) {
+				mip_w /= 2;
+			}
+			if (mip_h > 1) {
+				mip_h /= 2;
 			}
 		}
 	} else {
@@ -530,10 +671,12 @@ static inline __attribute__((always_inline)) int gpu_get_compressed_mipchain_siz
 
 	for (int currentLevel = 0; currentLevel <= level; currentLevel++) {
 		size += gpu_get_compressed_mip_size(currentLevel, width, height, format);
-		if (width > 1)
+		if (width > 1) {
 			width /= 2;
-		if (height > 1)
+		}
+		if (height > 1) {
 			height /= 2;
+		}
 	}
 
 	return size;
@@ -544,6 +687,7 @@ static inline __attribute__((always_inline)) int gpu_get_compressed_mip_offset(i
 }
 
 void gpu_alloc_compressed_cube_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, uint32_t image_size, const void *data, texture *tex, uint8_t src_bpp, GLboolean uncompressed, int index) {
+	MS_ENTER(3); // 0041
 	// If there's already a texture in passed texture object we first dealloc it
 	if (tex->status == TEX_VALID && tex->faces_counter >= 6) {
 		gpu_free_texture_data(tex);
@@ -658,6 +802,7 @@ void gpu_alloc_compressed_cube_texture(uint32_t w, uint32_t h, SceGxmTextureForm
 }
 
 void gpu_alloc_compressed_texture(int32_t mip_level, uint32_t w, uint32_t h, SceGxmTextureFormat format, uint32_t image_size, const void *data, texture *tex, uint8_t src_bpp, GLboolean uncompressed) {
+	MS_ENTER(3); // 0041
 	// If there's already a texture in passed texture object we first dealloc it
 	if (tex->status == TEX_VALID && !mip_level)
 		gpu_free_texture_data(tex);
@@ -803,6 +948,7 @@ void gpu_alloc_compressed_texture(int32_t mip_level, uint32_t w, uint32_t h, Sce
 }
 
 void gpu_alloc_mipmaps(int level, texture *tex) {
+	MS_ENTER(4); // 0041
 	// Getting current mipmap count in passed texture
 	int count = tex->mip_count - 1;
 
@@ -816,6 +962,11 @@ void gpu_alloc_mipmaps(int level, texture *tex) {
 		vglGetTexSizes(&tex->gxm_tex, &orig_w, &orig_h);
 		uint32_t w = nearest_po2(orig_w);
 		uint32_t h = nearest_po2(orig_h);
+
+		// 0058: the block is laid out for a chain that stops where the smaller side reaches 1. A level past it (a full chain of a non-square texture, down to 1x1) has no room:
+		// mip_count would name levels the block does not hold, and the sampler, a swizzle of the chain and glTexSubImage2D would read and write past its end.
+		if (level >= (int)vgl_mip_chain_levels(w, h))
+			return;
 
 		// Calculating new texture data buffer size
 		uint32_t jumps[16];
@@ -907,6 +1058,73 @@ void gpu_alloc_mipmaps(int level, texture *tex) {
 	}
 }
 
+// 0020 (Mario Strikers Charged, MSC_VGX_TEXSWIZZLE): the texture bound to the active unit, in the linear layout gpu_alloc_texture and gpu_alloc_mipmaps leave, goes to the swizzled layout the
+// sampler's caches are built for. Imagination's SGX OpenGL ES guide: the driver "uses a twiddled layout (i.e. following a plane-filling curve) to greatly improve memory access locality";
+// vitaGL leaves every uncompressed texture linear (compressed ones already go through this same transfer). Levels go through the transfer queue, so the layout is the hardware's own, also
+// for non-square sizes. Same texels; a level costs one transfer, and the call waits for the queue: the old block is freed here, and a scene must not sample a half-written copy.
+// Power-of-two sizes only (an arbitrary size is a different layout). Anything else, or no memory, or a refused transfer: GL_FALSE and the texture stays as it was.
+GLboolean gpu_swizzle_texture(texture *tex) {
+	if (tex->status != TEX_VALID || !tex->data || tex->palette_data)
+		return GL_FALSE;
+	SceGxmTextureInternal *ti = (SceGxmTextureInternal *)&tex->gxm_tex;
+	if ((ti->control_words[1] & 0xE0000000) != SCE_GXM_TEXTURE_LINEAR)
+		return GL_FALSE;
+	SceGxmTextureFormat format = vglGetTexFormat(&tex->gxm_tex);
+	const uint32_t bpp = tex_format_to_bytespp(format);
+	if (bpp != 2 && bpp != 4) // (swz20: no 1 byte a texel, as Galaxy, whose swizzled upload has run on the console without a fallback)
+		return GL_FALSE;
+	uint32_t w, h;
+	vglGetTexSizes(&tex->gxm_tex, &w, &h);
+	if (w < 8 || h < 8 || (w & (w - 1)) || (h & (h - 1)) || w > 1024 || h > 1024) // (swz20: 8 to 1024 a side, as Galaxy)
+		return GL_FALSE;
+	const uint32_t levels = tex->mip_count ? tex->mip_count : 1;
+	uint32_t size = 0, lw = w, lh = h;
+	for (uint32_t i = 0; i < levels; i++) {
+		size += lw * lh * bpp;
+		lw = lw > 1 ? lw / 2 : 1;
+		lh = lh > 1 ? lh / 2 : 1;
+	}
+	uint8_t *dst = (uint8_t *)gpu_alloc_mapped_for_gpu(size);
+	if (!dst)
+		return GL_FALSE;
+	const SceGxmTransferFormat raw = bpp == 4 ? SCE_GXM_TRANSFER_FORMAT_RAW32 : bpp == 2 ? SCE_GXM_TRANSFER_FORMAT_RAW16 : SCE_GXM_TRANSFER_FORMAT_U8_R;
+	uint8_t *src = (uint8_t *)tex->data, *out = dst;
+	int rc = 0;
+	lw = w;
+	lh = h;
+	for (uint32_t i = 0; i < levels && rc >= 0; i++) {
+		const uint32_t src_stride = VGL_ALIGN(lw, 8) * bpp; // (as gpu_alloc_texture and gpu_alloc_mipmaps lay a level out)
+		rc = sceGxmTransferCopy(lw, lh, 0, 0, SCE_GXM_TRANSFER_COLORKEY_NONE, raw, SCE_GXM_TRANSFER_LINEAR, src, 0, 0, src_stride, raw, SCE_GXM_TRANSFER_SWIZZLED, out, 0, 0, lw * bpp, NULL, 0, NULL);
+		src += src_stride * lh;
+		out += lw * lh * bpp;
+		lw = lw > 1 ? lw / 2 : 1;
+		lh = lh > 1 ? lh / 2 : 1;
+	}
+	sceGxmTransferFinish();
+	if (rc < 0) {
+		vgl_free(dst);
+		return GL_FALSE;
+	}
+	SceGxmTexture probe; // (swz20: the SDK's own initialiser must accept it before the descriptor is committed, as Galaxy checks)
+	if (sceGxmTextureInitSwizzled(&probe, dst, format, w, h, tex->use_mips ? tex->mip_count : 1) != 0) {
+		vgl_free(dst);
+		return GL_FALSE;
+	}
+	SceGxmTexture new_tex;
+	vglInitSwizzledTexture(&new_tex, dst, format, w, h, tex->use_mips ? tex->mip_count : 0);
+	vglSetTexUMode(&new_tex, tex->u_mode);
+	vglSetTexVMode(&new_tex, tex->v_mode);
+	vglSetTexMinFilter(&new_tex, tex->min_filter);
+	vglSetTexMagFilter(&new_tex, tex->mag_filter);
+	vglSetTexMipFilter(&new_tex, tex->mip_filter);
+	vglSetTexLodBias(&new_tex, tex->lod_bias);
+	void *old = tex->data;
+	tex->gxm_tex = new_tex;
+	tex->data = dst;
+	vgl_free(old); // (no scene has seen it: this is the upload that made it, and the transfers are done)
+	return GL_TRUE;
+}
+
 void gpu_free_palette(void *pal) {
 	// Deallocating palette memblock and object
 	if (pal != NULL)
@@ -914,6 +1132,7 @@ void gpu_free_palette(void *pal) {
 }
 
 void gpu_alloc_planar_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const void *data, texture *tex) {
+	MS_ENTER(3); // 0041
 	// If there's already a texture in passed texture object we first dealloc it
 	if (tex->status == TEX_VALID)
 		gpu_free_texture_data(tex);

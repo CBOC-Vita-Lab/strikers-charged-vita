@@ -16,6 +16,7 @@
 #include "Game/Render/ShootToScoreMeter.h"
 #include "Game/Physics/PhysicsAIBall.h"
 #include "Game/Character.h"
+#include "np/physpose.h"
 #include "Game/CharacterTemplate.h"
 #include "Game/Player.h"
 
@@ -822,7 +823,7 @@ cPN_SAnimController* cCharacter::NewAnimController(int animID, bool bRestartCycl
     return controller;
 }
 
-void cCharacter::PostPhysicsUpdate()
+void cCharacter::PostPhysicsUpdatePre()
 {
     m_DetChar.m_v3PrevPosition = m_DetChar.m_v3Position;
     m_pPhysicsCharacter->GetCharacterPositionXY(&m_DetChar.m_v3Position);
@@ -834,8 +835,19 @@ void cCharacter::PostPhysicsUpdate()
         nlSqrt(nlGetLengthSquared1D(velX) + nlGetLengthSquared1D(velY), true);
 
     CreateWorldMatrix();
+}
 
-    m_pPoseAccumulator->Pose(*m_pPoseTree, m_m4WorldMatrix);
+void cCharacter::PostPhysicsUpdate()
+{
+    // MSC_PHYS_POSE: the pose of this character was made on a job lane (PhysicsWorld::PostUpdate, np/physpose.h): the part before it and the pose are done
+    if (!NpPhysPoseTake(this))
+    {
+        PostPhysicsUpdatePre();
+        m_pPoseAccumulator->Pose(*m_pPoseTree, m_m4WorldMatrix);
+    }
+    // MSC_SIM26_BONES: the lane that made the pose did UpdatePose's arithmetic too; this writes it after checking every input (else the old call)
+    else if (NpSim26BonesOn() && m_pPhysicsCharacter->NpSim26Apply(m_pPoseAccumulator))
+        return;
     m_pPhysicsCharacter->UpdatePose(
         m_pPoseAccumulator, m_DetChar.m_v3Position.z, false);
 }

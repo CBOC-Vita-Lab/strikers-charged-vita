@@ -1,0 +1,15 @@
+# console-1.2 run dumpmat-texcompact: The Dump: compact texture formats (I8/IA8 one byte, CMPR-alpha as DXT5)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group hardware, route worstgpu, version payload 1.3, role ab
+# gpu25: at The Dump 93 CMPR textures with transparent texels (7.1 MB) are held as 32-bit RGBA8 and go DXT5 under MSC_VGX_CMPRA=2 (colour within 12 of 255 or the texture stays decoded; alpha exact), the 14 I8 textures (4.6 MB) one byte a texel. A quarter of the texture bytes for those draws, compressed textures are swizzled already. Reads: [lane] gpu ms in open play, the [vgx] texture lines (live MiB), by eye the stadium textures with alpha.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_LA88=2
+MSC_VGX_CMPRA=2

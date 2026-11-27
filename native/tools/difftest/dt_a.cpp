@@ -500,7 +500,7 @@ struct ImplA2 : ImplA {
 int main(int argc, char** argv)
 {
     g_dt_guest = (uint8_t*)calloc(1, 0x01800000);
-    loadDol(argc > 1 ? argv[1] : "/home/claude/msc/game/sys/main.dol");
+    loadDol(argc > 1 ? argv[1] : "/work/msc/game/sys/main.dol");
     initTable();
     int s0 = argc > 2 ? atoi(argv[2]) : 0, n = argc > 3 ? atoi(argv[3]) : 20;
     if (argc > 4 && !strcmp(argv[4], "desire")) { ImplA2 I; runDesire(I, s0, n); return 0; }

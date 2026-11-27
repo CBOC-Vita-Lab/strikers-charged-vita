@@ -1,0 +1,16 @@
+# console-1.2 run on-conn: Connection check after a failed HOST A ROOM  -- BY HAND on a Wi-Fi with no internet
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group online24, route onconn, version payload 1.3, role manual
+# (b) the connection check (mpdiag18, np_conntest) -- BY HAND, in no unattended list: its only entry is the failure popup's TEST CONNECTION after HOST A ROOM failed to reach the service, and the isolated build's env reader refuses an MSC_ONLINE_URL (a `/` or `:` in a value), so nothing in np-player.txt can make the first try fail. HANDS: put the Vita on a Wi-Fi that has no internet (router WAN unplugged, or a hotspot with data off), then `bash session.sh run on-conn`. The route presses HOST A ROOM, waits for the failure popup (2 buttons), presses TEST CONNECTION and reads the result popup. Answers: the verdict sentence (`[online-menu]` lines, popup by eye) and `[np-net] req ... -> FAIL` lines. Pass differs from the others: FAIL lines are expected here, nothing else; the healthy-service result of the check has no menu entry.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/on-conn.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_ONLINE_HOST=auto
+MSC_NET_REQLOG=1
+MSC_ONLINE_NAME=VitaKit24

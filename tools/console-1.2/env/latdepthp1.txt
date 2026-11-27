@@ -1,0 +1,13 @@
+# console-1.2 run latdepthp1: Free run keeps 3 frames in flight (the old depth)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group pacing, route tour, version payload 1.3, role ab
+# MSC_LAT_DEPTH_PACED=1 (the Vita plan sets 2 since wave 9: an aligned free run keeps 4 frames in flight, the model gives 59.2 pictures a second against 52.3 at a GPU of 1.0 refresh, 56.4 against 49.0 at 1.05, for 4.3 ms more button delay at 1.0). Against the default in an UP TO 60 scene of 45-58 fps: `[fps] between:` pictures a second, the `[pace]` display line (held 1/2/3+, flip late) and `[lat]` p50. Keep 2 if the pictures rise by about 3 and the p50 grows by under 5 ms.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LAT_DEPTH_PACED=1

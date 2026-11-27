@@ -1,0 +1,16 @@
+# console-1.2 run cpu22on-v: cpu22 exact cuts on at Vice (MSC_CPU22_*=1), split lines on
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route tour, version payload 1.3, role ab
+# cpu22: game-thread ms from [gsplit] against price17ref (estimate 0.2-0.3 ms); only after cpu22v-v and cpu22v-d read 0 mismatches. Then the coordinator puts the three keys at 1 in the plan.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=2
+MSC_CPU22_INVLAZY=1
+MSC_CPU22_POWERUP=1
+MSC_CPU22_REPLAY=1

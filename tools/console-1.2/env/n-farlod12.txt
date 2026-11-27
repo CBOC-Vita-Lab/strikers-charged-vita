@@ -1,0 +1,14 @@
+# console-1.2 run n-farlod12: Replay far players with the open-play mesh
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group replay, route crep, version payload 1.3, role nab
+# Settings row REPLAY FAR PLAYERS. Risk: mesh pop at the distance, no hysteresis. Stays off until seen.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_REPLAY_FARLOD=12

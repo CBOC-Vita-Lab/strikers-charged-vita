@@ -1,0 +1,228 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: compile a shader into the cache on another thread (vglCompileShaderToCache, vglShaderCacheProbe, the compiler lock)
+
+MSC_VGX_ASYNC_SHADERS (the Galaxy port's vitaGL 0020 vglCompileShaderPairToCache, r101; written again from its description, one shader a call):
+vglShaderCompilerLockInit creates a mutex that glCompileShader then holds around the compiler start and around translate + compile + cache write,
+and that vglCompileShaderToCache holds around its own: the GLSL translator's and vitaShaRK's state are global. vglCompileShaderToCache builds the
+text glShaderSource would (the same parts, the same XXH3 file name), translates and compiles it, and writes the cache file the render thread's
+next glCompileShader of that text loads; nothing is registered with the shader patcher and no GL state is touched. vglShaderCacheProbe answers
+whether the pack, the cache or the seed has the text's compiled form. Without vglShaderCompilerLockInit no lock is taken: the library is as before.
+
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 9faf8be..e148e36 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -1081,6 +1081,173 @@ done:
+ #endif
+ }
+ 
++/* 1.3 ASYNC_SHADERS (patch 0027; the Galaxy port's 0020 vglCompileShaderPairToCache, written again from its description): a shader is compiled
++   into the shader cache on another thread, never registered with the patcher. Every compile (this one and glCompileShader's translate and
++   compile) holds the compiler lock: the translator's and vitaShaRK's state is global. The render thread's next glCompileShader of the same
++   text finds the cache file and loads it. Without vglShaderCompilerLockInit nothing here changes: the lock is not taken. */
++static SceUID vgl_compiler_lock = -1;
++int vglShaderCompilerLockInit(void) {
++	if (vgl_compiler_lock >= 0)
++		return 0;
++	SceUID m = sceKernelCreateMutex("vgl compiler", 0, 0, NULL);
++	if (m < 0)
++		return m;
++	vgl_compiler_lock = m;
++	return 0;
++}
++static inline void vgl_compiler_enter(void) {
++	if (vgl_compiler_lock >= 0)
++		sceKernelLockMutex(vgl_compiler_lock, 1, NULL);
++}
++static inline void vgl_compiler_leave(void) {
++	if (vgl_compiler_lock >= 0)
++		sceKernelUnlockMutex(vgl_compiler_lock, 1);
++}
++
++#ifdef HAVE_SHADER_CACHE
++/* The text glShaderSource would make of these parts, and its cache file name (glCompileShader's spelling). */
++static char *vgl_async_source(GLenum type, const char *const *parts, int count, uint32_t *size, uint64_t *hash, char *fname) {
++	uint32_t n = 0;
++	for (int i = 0; i < count; i++)
++		n += strlen(parts[i]);
++	char *src = (char *)vglMalloc(n + 1);
++	if (!src)
++		return NULL;
++	n = 0;
++	for (int i = 0; i < count; i++) {
++		size_t l = strlen(parts[i]);
++		vgl_fast_memcpy(&src[n], parts[i], l);
++		n += l;
++	}
++	src[n] = 0;
++	*size = n;
++	*hash = XXH3_64bits(src, n);
++	sprintf(fname, "%s/%s/%02X/%016llX.gxp", vgl_shader_cache_path, type == GL_VERTEX_SHADER ? "v" : "f", (uint8_t)(*hash >> 56), *hash);
++	return src;
++}
++static int vgl_async_cached(GLenum type, uint64_t hash, const char *fname) {
++	SceIoStat st;
++	if (vgl_shader_pack_lookup) {
++		uint32_t psz = 0;
++		if (vgl_shader_pack_lookup(type == GL_FRAGMENT_SHADER, hash, &psz))
++			return 1;
++	}
++	if (sceIoGetstat(fname, &st) >= 0 && st.st_size > 0)
++		return 1;
++	SceUID f = vgl_open_seed(type == GL_VERTEX_SHADER ? "v" : "f", (uint8_t)(hash >> 56), hash);
++	if (f >= 0) {
++		sceIoClose(f);
++		return 1;
++	}
++	return 0;
++}
++#endif
++
++/* 1 = the pack, the cache or the seed has the compiled form of this text (glCompileShader would load it), 0 = it would compile. */
++int vglShaderCacheProbe(GLenum type, const char *const *parts, int count) {
++#ifdef HAVE_SHADER_CACHE
++	char fname[256];
++	uint32_t size;
++	uint64_t hash;
++	if (!vgl_shader_cache_path[0])
++		return 0;
++	char *src = vgl_async_source(type, parts, count, &size, &hash, fname);
++	if (!src)
++		return 0;
++	vgl_free(src);
++	return vgl_async_cached(type, hash, fname);
++#else
++	return 0;
++#endif
++}
++
++/* Compiles the text into the cache: 1 compiled and written, 2 the pack / cache / seed has it already, 0 the compile or the write failed,
++   -1 no cache path, -2 the compiler is not online. Any thread; the GL state is not touched. */
++int vglCompileShaderToCache(GLenum type, const char *const *parts, int count) {
++#ifdef HAVE_SHADER_CACHE
++	char fname[256];
++	uint32_t size;
++	uint64_t hash;
++	if (!vgl_shader_cache_path[0])
++		return -1;
++	shader s = {0};
++	s.type = type;
++	s.is_glsl = GL_TRUE;
++	s.source = vgl_async_source(type, parts, count, &size, &hash, fname);
++	if (!s.source)
++		return 0;
++	s.size = size;
++	if (vgl_async_cached(type, hash, fname)) {
++		vgl_free(s.source);
++		return 2;
++	}
++	int result = 0;
++	vgl_compiler_enter();
++	if (!is_shark_online && !start_shader_compiler()) {
++		vgl_compiler_leave();
++		vgl_free(s.source);
++		return -2;
++	}
++	glsl_translator_process(&s);
++	shader candidate = {0};
++	candidate.type = type;
++	candidate.size = (uint32_t)strlen((const char *)s.source);
++	const SceGxmProgram *output = shark_compile_shader_extended((const char *)s.source, &candidate.size, type == GL_FRAGMENT_SHADER ? SHARK_FRAGMENT_SHADER : SHARK_VERTEX_SHADER, compiler_opts, compiler_fastmath, compiler_fastprecision, compiler_fastint);
++	if (output && candidate.size) {
++		SceGxmProgram *res = (SceGxmProgram *)vglMalloc(candidate.size);
++		if (res) {
++			candidate.prog = res;
++			vgl_fast_memcpy(res, output, candidate.size);
++			GLboolean ok = GL_TRUE;
++			SceShaccCgCompileOutput *cout = (SceShaccCgCompileOutput *)shark_get_internal_compile_output();
++			SceShaccCgParameter param = sceShaccCgGetFirstParameter(cout);
++			while (param && ok) {
++				if (sceShaccCgGetParameterClass(param) == SCE_SHACCCG_PARAMETERCLASS_MATRIX) {
++					const SceGxmProgramParameter *ptr = sceGxmProgramFindParameterByName(res, sceShaccCgGetParameterName(param));
++					if (ptr) {
++						matrix_uniform *m = (matrix_uniform *)vglMalloc(sizeof(matrix_uniform));
++						if (!m)
++							ok = GL_FALSE;
++						else {
++							m->ptr = ptr;
++							m->chain = candidate.mat;
++							candidate.mat = m;
++						}
++					}
++				} else if (sceShaccCgGetParameterClass(param) == SCE_SHACCCG_PARAMETERCLASS_UNIFORMBLOCK) {
++					const char *name = sceShaccCgGetParameterName(param);
++					if (!name || strlen(name) >= sizeof(((block_uniform *)0)->name))
++						ok = GL_FALSE; /* compile_shader refuses this shader too */
++				}
++				param = sceShaccCgGetNextParameter(param);
++			}
++			if (ok) {
++				candidate.semantics = s.semantics;
++#ifdef HAVE_GLSL_TEXTURE_SIZE
++				candidate.sized_samplers_num = s.sized_samplers_num;
++				vgl_fast_memcpy(candidate.sized_samplers, s.sized_samplers, sizeof(candidate.sized_samplers));
++#endif
++				vgl_cache_compiled_shader(&candidate, GL_FALSE, fname);
++				SceIoStat st;
++				result = sceIoGetstat(fname, &st) >= 0 && st.st_size > 0 ? 1 : 0;
++			}
++		}
++	}
++	discard_shader_candidate(&candidate);
++#ifdef HAVE_SHARK_LOG
++	if (shark_log)
++		vgl_free(shark_log);
++	shark_log = NULL;
++#endif
++	shark_clear_output();
++	vgl_compiler_leave();
++	vgl_free(s.source);
++	return result;
++#else
++	return -1;
++#endif
++}
++
+ void reset_custom_shaders(void) {
+ #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
+ 	sceClibMemset(&vertex_layout_cache, 0, sizeof(vertex_layout_cache));
+@@ -2494,9 +2661,12 @@ void glCompileShader(GLuint handle) {
+ 		return;
+ 
+ 	// If vitaShaRK is not enabled, we try to initialize it
++	vgl_compiler_enter(); // 1.3 ASYNC_SHADERS (0027): a worker may be starting or using the compiler
+ 	if (!is_shark_online && !start_shader_compiler()) {
++		vgl_compiler_leave();
+ 		SET_GL_ERROR(GL_INVALID_OPERATION)
+ 	}
++	vgl_compiler_leave();
+ 	
+ 	// If we use VGL_MODE_POSTPONED, we compile shaders in glLinkProgram
+ 	if (s->is_glsl && glsl_sema_mode == VGL_MODE_POSTPONED)
+@@ -2524,10 +2694,12 @@ void glCompileShader(GLuint handle) {
+ 	}
+ #endif
+ 
++	vgl_compiler_enter(); // 1.3 ASYNC_SHADERS (0027): the translator's and the compiler's state are global
+ 	if (s->is_glsl) {
+ 		glsl_translator_process(s);
+ 	}
+ 	vgl_compile_shader(s, GL_FALSE);
++	vgl_compiler_leave();
+ }
+ 
+ void glDeleteShader(GLuint shad) {
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index b7967d4..943eaef 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1307,6 +1307,9 @@ void vglSetShaderAssociationPath(const char *path);
+ void vglSetShaderCachePath(const char *path);
+ void vglSetShaderPackLookup(const void *(*fn)(int fragment, uint64_t hash, uint32_t *size)); // W5 BOOT: in-memory compiled shaders, asked first (NULL = none)
+ void vglSetShaderSeedPath(const char *path); // W5 SEED: read-only second shader cache folder (<path>/{v,f}/HH/hash.gxp), tried when the first has no file
++int vglShaderCompilerLockInit(void); // 1.3 ASYNC_SHADERS (0027): creates the compiler lock every compile then holds (0 = ok)
++int vglShaderCacheProbe(GLenum type, const char *const *parts, int count); // 1.3 (0027): 1 = the pack / cache / seed has this text's compiled form
++int vglCompileShaderToCache(GLenum type, const char *const *parts, int count); // 1.3 (0027): compile into the cache, any thread (1 done, 2 cached, 0 failed, <0 no compiler)
+ 
+ // Overloads the default vitaGL boot splashscreen with a custom one. Not compatible with NO_SPLASHSCREEN=1.
+ void vglSetupCustomSplashscreen(vglSplashCallback init_callback, vglSplashCallback term_callback, vglSplashCallback main_callback, GLboolean clear_screen);

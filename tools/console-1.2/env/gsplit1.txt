@@ -1,0 +1,13 @@
+# console-1.2 run gsplit1: Game-thread split lines
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_GSPLIT is a diagnostic of logging builds, off by default (not in the player build's plan). Every 300 pictures a [gsplit] line says where the game thread spent a picture: the simulation step's parts (ai, physics, pose), the render task's parts (characters, stadium, crowd, particles, hud), the frame send, waits (blocked, not CPU), and a 1 ms sampler of the phase the thread was in; sum against the thread's CPU time. The markers cost tens of clock reads a picture (about 0.1 ms on the console, estimate): compare the frame time with the tour before reading the split as the unobserved one.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=1

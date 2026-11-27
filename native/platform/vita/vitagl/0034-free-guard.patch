@@ -1,0 +1,221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 15:00:00 -0500
+Subject: [PATCH] free guard (vglSetFreeGuard, vglGetFreeGuardStats, vglFreeGuardTake): texture and framebuffer deletes held back some presents, deletes of a block a scene drew into recently reported once per call site; collector list peaks
+
+---
+
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index 3408e35..b19005d 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -252,6 +252,8 @@ void glGenRenderbuffers(GLsizei n, GLuint *ids) {
+ 
+ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
+ 	THREAD_SAFE()
++	if (vgl_fg_on && !vgl_fg_flushing && vgl_fg_delete(1, n, ids, __builtin_return_address(0)))
++		return; // 0034: the guard took the names and deletes them some presents later
+ 	VGL_LC_SYNC(); // (the restore reads the framebuffer in use)
+ 
+ #ifndef SKIP_ERROR_HANDLING
+diff --git a/source/gxm.c b/source/gxm.c
+index 2eed6c6..9b2d254 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -199,6 +199,113 @@ void vglGetSceneCensus(vglSceneCensus *out, int reset) {
+ 		vgl_memset(&scn_c, 0, sizeof(scn_c));
+ 	}
+ }
++
++// 0034 free guard (see vitaGL.h)
++int vgl_fg_on = 0, vgl_fg_flushing = 0;
++#define FG_RING 256
++#define FG_SITES 32
++#define FG_EVENTS 32
++static struct { uint8_t kind; uint32_t id; uint32_t due; } fg_ring[FG_RING];
++static uint32_t fg_ring_n = 0;
++static uint32_t fg_hold = 0;
++static uintptr_t fg_site[FG_SITES];
++static uint8_t fg_site_kind[FG_SITES];
++static vglFreeGuardEvent fg_events[FG_EVENTS];
++static uint32_t fg_ev_head = 0, fg_ev_tail = 0;
++static vglFreeGuardStats fg_stats;
++
++void vglSetFreeGuard(int presents) {
++	fg_hold = presents > 0 ? (uint32_t)presents : 0;
++	vgl_fg_on = fg_hold ? 1 : 0;
++}
++void vglGetFreeGuardStats(vglFreeGuardStats *out) {
++	*out = fg_stats;
++}
++int vglFreeGuardTake(vglFreeGuardEvent *out) {
++	if (fg_ev_tail == fg_ev_head)
++		return 0;
++	*out = fg_events[fg_ev_tail % FG_EVENTS];
++	++fg_ev_tail;
++	return 1;
++}
++static void fg_report(int kind, uint32_t id, uint32_t reason, uint32_t age, void *caller) {
++	for (uint32_t i = 0; i < fg_stats.sites; i++)
++		if (fg_site[i] == (uintptr_t)caller && fg_site_kind[i] == kind)
++			return;
++	if (fg_stats.sites < FG_SITES) {
++		fg_site[fg_stats.sites] = (uintptr_t)caller;
++		fg_site_kind[fg_stats.sites++] = (uint8_t)kind;
++	}
++	if (fg_ev_head - fg_ev_tail < FG_EVENTS) {
++		vglFreeGuardEvent *e = &fg_events[fg_ev_head++ % FG_EVENTS];
++		e->kind = kind; e->id = id; e->reason = reason; e->age = age; e->caller = (uint32_t)(uintptr_t)caller; e->frame = vgl_framecount;
++	}
++}
++// Called by glDeleteTextures / glDeleteFramebuffers with the guard on. 1: the names were taken (deleted later); 0: do it now (ring full).
++int vgl_fg_delete(int kind, GLsizei n, const GLuint *ids, void *caller) {
++	if (n <= 0 || !ids)
++		return 0;
++	if (fg_ring_n + (uint32_t)n > FG_RING) {
++		++fg_stats.ring_full;
++		return 0;
++	}
++	for (GLsizei j = 0; j < n; j++) {
++		const GLuint id = ids[j];
++		uint32_t reason = 0, age = 0;
++		texture *tex = NULL;
++		if (kind == 0) {
++			if (id > 0 && id < TEXTURES_NUM && texture_slots[id].status == TEX_VALID) {
++				tex = &texture_slots[id];
++				if (active_write_fb && active_write_fb->tex == tex) reason |= 2;
++				if (active_read_fb && active_read_fb->tex == tex) reason |= 2;
++			}
++		} else {
++			framebuffer *fb = (framebuffer *)id;
++			if (fb && fb->active) {
++				tex = fb->tex;
++				if (fb == active_write_fb || fb == active_read_fb) reason |= 2;
++			}
++		}
++		if (tex && tex->fg_rt_frame && vgl_framecount + 1 - tex->fg_rt_frame <= FRAME_PURGE_FREQ) {
++			reason |= 1;
++			age = vgl_framecount + 1 - tex->fg_rt_frame;
++		}
++		++fg_stats.deletes;
++		if (reason) {
++			++fg_stats.referenced;
++			fg_report(kind, id, reason, age, caller);
++		}
++		fg_ring[fg_ring_n].kind = (uint8_t)kind;
++		fg_ring[fg_ring_n].id = id;
++		fg_ring[fg_ring_n++].due = vgl_framecount + fg_hold;
++		++fg_stats.postponed;
++	}
++	return 1;
++}
++// vglSwapBuffers: the deletes that are due
++static void fg_flush(void) {
++	if ((uint32_t)frame_elem_purge_idx > fg_stats.purge_peak)
++		fg_stats.purge_peak = (uint32_t)frame_elem_purge_idx;
++	if ((uint32_t)frame_rt_purge_idx > fg_stats.rt_purge_peak)
++		fg_stats.rt_purge_peak = (uint32_t)frame_rt_purge_idx;
++	if (!fg_ring_n)
++		return;
++	vgl_fg_flushing = 1;
++	uint32_t keep = 0;
++	for (uint32_t i = 0; i < fg_ring_n; i++) {
++		if ((int32_t)(fg_ring[i].due - vgl_framecount) <= 0) {
++			GLuint id = fg_ring[i].id;
++			if (fg_ring[i].kind == 0)
++				glDeleteTextures(1, &id);
++			else
++				glDeleteFramebuffers(1, &id);
++		} else {
++			fg_ring[keep++] = fg_ring[i];
++		}
++	}
++	fg_ring_n = keep;
++	vgl_fg_flushing = 0;
++}
+ #ifdef HAVE_PTHREAD
+ pthread_t gc_thread;
+ #else
+@@ -858,6 +965,8 @@ GLboolean scene_reset(void) {
+ 			}
+ 			rt_applied = vgl_rt_scene_begin(active_write_fb->depthbuffer_ptr, active_write_fb->width, active_write_fb->height);
+ 			scn_begin(active_write_fb->target, 0);
++			if (vgl_fg_on && active_write_fb->tex)
++				active_write_fb->tex->fg_rt_frame = vgl_framecount + 1; // 0034
+ 			vgl_mb_scene_begin(active_write_fb->depthbuffer_ptr, rt_applied); // 1.3 MASK_BG (tests.c)
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ 			render_target *fbo_rt = (render_target *)active_write_fb->target;
+@@ -1016,6 +1125,8 @@ void vglSwapBuffers(GLboolean has_commondialog) {
+ #endif
+ 
+ 	scn_frame_end();
++	if (vgl_fg_on)
++		fg_flush(); // 0034
+ 	vgl_framecount++;
+ #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+ #ifdef HAVE_DEBUG_INTERFACE
+diff --git a/source/shared.h b/source/shared.h
+index 7a84120..12aca61 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -215,6 +215,7 @@ typedef enum {
+ 
+ // Texture object struct
+ typedef struct texture {
++	uint32_t fg_rt_frame; // 0034 free guard: frame + 1 of the last scene that drew into this texture (0: never); written only with the guard on
+ #ifndef TEXTURES_SPEEDHACK
+ 	uint32_t last_frame;
+ #endif
+@@ -920,6 +921,9 @@ extern uint16_t *default_line_strips_idx_ptr; // sceGxm mapped progressive indic
+ extern int garbage_collector(unsigned int args, void *arg); // Garbage collector function
+ #endif
+ extern SceUID gc_mutex[2]; // Garbage collector mutex
++// 0034 free guard (MSC_VGX_FREE_GUARD, off by default): see gxm.c
++extern int vgl_fg_on, vgl_fg_flushing;
++int vgl_fg_delete(int kind, GLsizei n, const GLuint *ids, void *caller);
+ extern int vgl_gc_failed(void);
+ extern int vgl_gc_recover(void);
+ extern int vgl_gc_retry_pause(void);
+diff --git a/source/textures.c b/source/textures.c
+index f8def6f..8cb968b 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -1803,6 +1803,8 @@ void glBindTexture(GLenum target, GLuint texture) {
+ 
+ void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
+ 	THREAD_SAFE()
++	if (vgl_fg_on && !vgl_fg_flushing && vgl_fg_delete(0, n, gl_textures, __builtin_return_address(0)))
++		return; // 0034: the guard took the names and deletes them some presents later
+ 
+ #ifndef SKIP_ERROR_HANDLING
+ 	// Error handling
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 4887cf4..f3a075a 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1148,6 +1148,25 @@ typedef struct {
+ } vglSceneCensus;
+ void vglSceneCensusSetup(int on);
+ void vglGetSceneCensus(vglSceneCensus *out, int reset);
++
++// 0034 free guard (lab): with vglSetFreeGuard(presents > 0) every glDeleteTextures / glDeleteFramebuffers is held back that many presents (vglSwapBuffers deletes it then), and a delete
++// of a texture that a scene drew into within the last FRAME_PURGE_FREQ presents (vitaGL frees such a block at once: only a texture that was SAMPLED recently is deferred) or of the colour
++// texture of the framebuffer that is bound is reported as an event (vglFreeGuardTake), once per call site (the return address of the delete) and kind. Off (0, the default) it changes nothing.
++typedef struct {
++	uint32_t deletes, postponed, referenced, ring_full, sites;
++	uint32_t purge_peak, rt_purge_peak;   // most elements one picture put on the collector's lists (capacity 16384 and 128: the lists have no bounds check, a longer one writes into the next picture's list)
++} vglFreeGuardStats;
++typedef struct {
++	uint32_t kind;     // 0 texture, 1 framebuffer
++	uint32_t id;
++	uint32_t reason;   // 1 a scene drew into it recently, 2 colour texture of the bound framebuffer, 3 both
++	uint32_t age;      // presents since the scene that drew into it (reason 1, 3)
++	uint32_t caller;   // return address of the delete call (arm-vita-eabi-addr2line on the image)
++	uint32_t frame;    // present count at the delete
++} vglFreeGuardEvent;
++void vglSetFreeGuard(int presents);
++void vglGetFreeGuardStats(vglFreeGuardStats *out);
++int vglFreeGuardTake(vglFreeGuardEvent *out); // 1: an event was returned
+ void vglSetMaskBackground(int mode); // 1.3 MASK_BG (patch 0029; default 0): a scene that does not load its depth/stencil surface and has the scissor test off begins with the background mask set, and the full-target quad that sets it is not drawn. Bit 0: framebuffer-object scenes, bit 1: the display's scene
+ void vglGetMaskBackgroundStats(uint32_t *armed, uint32_t *kept); // 1.3 MASK_BG: scenes begun that way, quads left out
+ // 1.3 MEMFREE (patch 0028): vglMemFree / vgl_mem_get_free_space without walking the heap. The allocator wrappers keep per pool the usable bytes and the count of live blocks;

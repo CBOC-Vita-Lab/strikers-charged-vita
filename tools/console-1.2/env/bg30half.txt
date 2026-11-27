@@ -1,0 +1,14 @@
+# console-1.2 run bg30half: Background at 30, players at 60 (MSC_BG30=2), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group bg30, route tour, version payload 1.3, role ab
+# MSC_BG30=2 (default off until this run says yes; the owner's 14:04 decision makes it the live-play behaviour). Live-play pictures alternate FULL (the background - stadium, crowd, sky, far scenery - is kept in a 960x544 texture) and LIGHT (no background drawn: the kept one is re-projected to the new camera through the pitch plane; players, ball, items, shadows, nets, effects and HUD fresh). Read: [bg30] (renderer: full/light per 600, fallbacks must be 0 or explained, corner motion), [bg30g] (game: kinds, game thread ms a picture by kind, crowd/stadium skips), [lane] fps / game / GPU against d1 (expect a lower GPU and game-thread mean per picture), [present] hold mix, [speed], [hitch], [lat]. By eye: players and ball smooth, no edge smear, no flicker of goal posts over players. A crash or a black background in a light picture is a failure.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_BG30=2
+MSC_FPS=60

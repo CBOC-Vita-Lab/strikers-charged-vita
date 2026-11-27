@@ -10,6 +10,7 @@
 
 #include "np_gx.h"
 #include "np_gx_pipe.h"
+#include "np_gx_seqfill.h"
 #include "vgx_native.h"
 #include "gx_internal.h"
 
@@ -73,6 +74,18 @@ int np_gx_request_dump(const char* png_path) { return vgxn_request_dump(png_path
 const unsigned char* np_gx_last_picture(int* width, int* height) { return vgxn_last_picture(width, height); }
 unsigned int np_gx_stray_pipe_writes(void) { return g_strayPipeWrites + vgxn_dropped_pipe_writes(); }
 void np_gx_pipe_stray(unsigned int) { ++g_strayPipeWrites; }
+void np_gx_pipe_seq16(unsigned int count, unsigned int comps) {
+    vgx::hle::RawCursor& c = vgx::hle::g_rawCur;
+    const unsigned int bytes = count * comps * 2u;
+    if (bytes == 0 || static_cast<unsigned int>(c.end - c.ptr) != bytes) {
+        for (unsigned int i = 0; i < count; ++i)
+            for (unsigned int k = 0; k < comps; ++k) np_gx_raw_write16(i);
+        return;
+    }
+    np_gx_seq16_fill(c.ptr, count, comps);
+    c.ptr = c.end;
+    vgx::hle::FinishRaw();
+}
 
 void np_GXSetArray(int attr, const void* data, unsigned int size, unsigned int stride, int le) {
     vgxn_set_array(attr, data, size, stride, le);
@@ -94,6 +107,27 @@ void np_gx_skin_end(void) { vgxn_ext(3, 0, 0); }
 void np_gx_fx_lowres(unsigned int on) {
     const unsigned int w[1] = {on ? 1u : 0u};
     vgxn_ext(4, w, 1);
+}
+void np_gx_scene(unsigned int cls) {
+    const unsigned int w[1] = {cls};
+    vgxn_ext(5, w, 1);
+}
+void np_gx_hidden(unsigned int on) {
+    const unsigned int w[1] = {on ? 1u : 0u};
+    vgxn_ext(9, w, 1);
+}
+void np_gx_layer(unsigned int cls, unsigned int layer) {
+    static const bool on = vgxn_fg_marks() != 0;
+    if (!on) return;
+    const unsigned int w[1] = {(cls & 0xFFu) | (layer << 8)};
+    vgxn_ext(6, w, 1);
+}
+// 1.3 MSC_BG30 (np/bg30.h; renderer vgx_bg30.h): the kind of the picture being recorded and its camera's view matrix
+void np_gx_bg30(unsigned int kind, const float* view) {
+    unsigned int w[17];
+    w[0] = kind;
+    __builtin_memcpy(w + 1, view, 64);
+    vgxn_ext(8, w, 17);
 }
 void np_gx_diag_tag(unsigned int tag, unsigned int flags) {
     const unsigned int w[2] = {tag, flags};

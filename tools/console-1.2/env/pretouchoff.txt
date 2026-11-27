@@ -1,0 +1,13 @@
+# console-1.2 run pretouchoff: Textures uploaded at their first draw
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route tour, version payload 1.3, role ab
+# MSC_TEX_PRETOUCH=2 is on by default in the player build: the textures a match has loaded (and those a cut-scene's file registers later) are uploaded by the renderer a few a frame while the match loads and in play ahead of their first draw, and kept against the 32 MiB texture budget until the front end is back (host estimate: 31.5 MB held at the end of a match against 20.0 MB without, no upload after kick-off against 92). This run is the A/B: every texture uploaded at its first draw. Against the tour: the [hitch] lines at kick-off, the goals and the Mega Strikes (tex n/K), the texture memory of the [vram] lines, whether any scene shows a texture late.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_TEX_PRETOUCH=0

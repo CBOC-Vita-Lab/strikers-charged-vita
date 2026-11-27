@@ -49,7 +49,7 @@ int npa_begin(NpaCtx* c, void* data, size_t size, NpaResult* res)
     if (data == NULL || size < 8)
     {
         res->status = NPA_ERR_ARG;
-        snprintf(res->msg, sizeof res->msg, "empty or tiny buffer (%zu bytes)", size);
+        snprintf(res->msg, sizeof res->msg, "empty or tiny buffer (%lu bytes)", (unsigned long)size);
         return res->status;
     }
     if (!NPA_HOST_LE)
@@ -89,7 +89,7 @@ int npa_chunk_geom(NpaCtx* c, uint8_t* p, uint8_t* limit, int be, NpaChunk* out)
 
     if (p < c->base || limit > c->end || limit < p || (size_t)(limit - p) < 8)
     {
-        npa_err(c, NPA_ERR_BOUNDS, "chunk header at +0x%zx outside its range", (size_t)(p - c->base));
+        npa_err(c, NPA_ERR_BOUNDS, "chunk header at +0x%lx outside its range", (unsigned long)(p - c->base));
         return NPA_ERR_BOUNDS;
     }
     raw = be ? npa_rd32(p) : npa_hrd32(p);
@@ -100,8 +100,8 @@ int npa_chunk_geom(NpaCtx* c, uint8_t* p, uint8_t* limit, int be, NpaChunk* out)
     pad = (uint32_t)(aligned - unaligned);
     if (pad > size)
     {
-        npa_err(c, NPA_ERR_FORMAT, "chunk 0x%08x at +0x%zx: alignment padding %u exceeds size %u",
-                raw & 0x80FFFFFFu, (size_t)(p - c->base), pad, size);
+        npa_err(c, NPA_ERR_FORMAT, "chunk 0x%08x at +0x%lx: alignment padding %u exceeds size %u",
+                raw & 0x80FFFFFFu, (unsigned long)(p - c->base), pad, size);
         return NPA_ERR_FORMAT;
     }
     dataend = unaligned + size; /* may be beyond limit only for truncated tail padding */
@@ -114,8 +114,8 @@ int npa_chunk_geom(NpaCtx* c, uint8_t* p, uint8_t* limit, int be, NpaChunk* out)
             /* a container may also hang over by the same slack; its children stop at limit */
             if (!(NPA_IS_CONTAINER(raw) && (size_t)(dataend - limit) <= 8))
             {
-                npa_err(c, NPA_ERR_BOUNDS, "chunk 0x%08x at +0x%zx: size 0x%x runs %zu bytes past its range",
-                        raw & 0x80FFFFFFu, (size_t)(p - c->base), size, (size_t)(dataend - limit));
+                npa_err(c, NPA_ERR_BOUNDS, "chunk 0x%08x at +0x%lx: size 0x%x runs %lu bytes past its range",
+                        raw & 0x80FFFFFFu, (unsigned long)(p - c->base), size, (unsigned long)(dataend - limit));
                 return NPA_ERR_BOUNDS;
             }
         }
@@ -138,7 +138,7 @@ int npa_chunks_swap_headers(NpaCtx* c, uint8_t* p, uint8_t* limit, int depth)
     int r;
     if (depth > 12)
     {
-        npa_err(c, NPA_ERR_FORMAT, "chunk tree deeper than 12 levels at +0x%zx", (size_t)(p - c->base));
+        npa_err(c, NPA_ERR_FORMAT, "chunk tree deeper than 12 levels at +0x%lx", (unsigned long)(p - c->base));
         return NPA_ERR_FORMAT;
     }
     while (p + 8 <= limit)
@@ -189,8 +189,8 @@ int npa_swap32_range(NpaCtx* c, uint8_t* p, size_t n, const uint8_t* lo, const u
 {
     if (p < lo || p + n * 4 > hi)
     {
-        npa_err(c, NPA_ERR_BOUNDS, "32-bit run of %zu words at +0x%zx outside +0x%zx..+0x%zx", n,
-                (size_t)(p - c->base), (size_t)(lo - c->base), (size_t)(hi - c->base));
+        npa_err(c, NPA_ERR_BOUNDS, "32-bit run of %lu words at +0x%lx outside +0x%lx..+0x%lx", (unsigned long)n,
+                (unsigned long)(p - c->base), (unsigned long)(lo - c->base), (unsigned long)(hi - c->base));
         return NPA_ERR_BOUNDS;
     }
     npa_swap32_in(p, n);
@@ -202,8 +202,8 @@ int npa_swap16_range(NpaCtx* c, uint8_t* p, size_t n, const uint8_t* lo, const u
 {
     if (p < lo || p + n * 2 > hi)
     {
-        npa_err(c, NPA_ERR_BOUNDS, "16-bit run of %zu values at +0x%zx outside +0x%zx..+0x%zx", n,
-                (size_t)(p - c->base), (size_t)(lo - c->base), (size_t)(hi - c->base));
+        npa_err(c, NPA_ERR_BOUNDS, "16-bit run of %lu values at +0x%lx outside +0x%lx..+0x%lx", (unsigned long)n,
+                (unsigned long)(p - c->base), (unsigned long)(lo - c->base), (unsigned long)(hi - c->base));
         return NPA_ERR_BOUNDS;
     }
     npa_swap16_in(p, n);
@@ -213,15 +213,15 @@ int npa_swap16_range(NpaCtx* c, uint8_t* p, size_t n, const uint8_t* lo, const u
 
 void npa_chunk_swap32(NpaCtx* c, const NpaChunk* k)
 {
-    NPA_EXPECT(c, (k->dsize & 3) == 0, "chunk 0x%x at +0x%zx: payload %u bytes is not a multiple of 4",
-               k->id, (size_t)(k->hdr - c->base), k->dsize);
+    NPA_EXPECT(c, (k->dsize & 3) == 0, "chunk 0x%x at +0x%lx: payload %u bytes is not a multiple of 4",
+               k->id, (unsigned long)(k->hdr - c->base), k->dsize);
     npa_swap32_range(c, k->data, k->dsize / 4, k->data, k->data + k->dsize);
 }
 
 void npa_chunk_swap16(NpaCtx* c, const NpaChunk* k)
 {
-    NPA_EXPECT(c, (k->dsize & 1) == 0, "chunk 0x%x at +0x%zx: payload %u bytes is not a multiple of 2",
-               k->id, (size_t)(k->hdr - c->base), k->dsize);
+    NPA_EXPECT(c, (k->dsize & 1) == 0, "chunk 0x%x at +0x%lx: payload %u bytes is not a multiple of 2",
+               k->id, (unsigned long)(k->hdr - c->base), k->dsize);
     npa_swap16_range(c, k->data, k->dsize / 2, k->data, k->data + k->dsize);
 }
 
@@ -230,7 +230,7 @@ int npa_swap_struct_ex(NpaCtx* c, uint8_t* obj, size_t avail, const NpaStruct* s
     int i;
     if (avail < st->size && !partial)
     {
-        npa_err(c, NPA_ERR_BOUNDS, "%s at +0x%zx needs %u bytes, %zu available", st->name, (size_t)(obj - c->base), st->size, avail);
+        npa_err(c, NPA_ERR_BOUNDS, "%s at +0x%lx needs %u bytes, %lu available", st->name, (unsigned long)(obj - c->base), st->size, (unsigned long)avail);
         return NPA_ERR_BOUNDS;
     }
     for (i = 0; i < st->nflds; i++)
@@ -241,7 +241,7 @@ int npa_swap_struct_ex(NpaCtx* c, uint8_t* obj, size_t avail, const NpaStruct* s
         if (f->size == 0) continue;
         if (partial && (size_t)f->off + (size_t)f->size * f->count > avail)
         {
-            npa_warn(c, "%s: field at +0x%x lies beyond the %zu bytes present (file stores a shorter record than sizeof)", st->name, f->off, avail);
+            npa_warn(c, "%s: field at +0x%x lies beyond the %lu bytes present (file stores a shorter record than sizeof)", st->name, f->off, (unsigned long)avail);
             continue;
         }
         if ((size_t)f->off + (size_t)f->size * f->count > st->size)

@@ -13,8 +13,15 @@
 #if defined(NP_TARGET_VITA)  // the Vita target only (the np Makefile compiles every platform/ source for every target)
 
 #include "platform/sdk/net/vlink.h"
+#include "platform/sdk/net/np_net_census.h"
+#include "platform/sdk/net/np_bind_chain.h"
 #include "platform/sdk/net/np_lan.h"
+#include "platform/sdk/net/np_menu_flow.h"
 #include "platform/sdk/net/vlink_vita_radio.h"
+#include "platform/sdk/net/online/np_online_api.h"
+#include "platform/sdk/net/np_idle_gate.h"
+#include "platform/sdk/net/np_keep_awake.h"
+#include "platform/sdk/dwc/np_online_flow.h"
 
 #include <psp2/apputil.h>
 #include <psp2/kernel/processmgr.h>
@@ -38,18 +45,22 @@ enum class Mode { Adhoc, Wifi };
 
 Mode ChosenMode()
 {
-    const char* mode = std::getenv("MSC_LAN_MODE");
-    return (mode && std::strcmp(mode, "wifi") == 0) ? Mode::Wifi : Mode::Adhoc;
+    return NpMenuLinkMode() == kNpMenuWifi ? Mode::Wifi : Mode::Adhoc;
 }
 
 // ---- ad hoc PDP backend ----------------------------------------------------------------------
 uint32_t AdhocVip(void*)
 {
+    // The address outlives the radio. When the cell goes during a match the game restarts its LAN session on the way back to the lobby (np_lan.cpp EnsureLanSession), and
+    // that is how the player gets out: the lobby stays empty on a dead link. With no address that restart failed, and the fallback from there is the main-menu transition
+    // that crashed in SHNavigation::HideButtons. Every send and receive of a closed radio simply fails.
+    static uint32_t last = 0;
     uint8_t mac[6];
-    if (!np_vita_radio_link_mac(mac)) return 0;
+    if (!np_vita_radio_link_mac(mac)) return last;
     // 10.x.y.z from the low MAC bytes: stable per console, unique between two nearby Vitas.
     uint32_t vip = 0x0A000000u | uint32_t(mac[3]) << 16 | uint32_t(mac[4]) << 8 | mac[5];
     if ((vip & 0xFF) == 0 || (vip & 0xFF) == 0xFF) vip ^= 0x80;
+    last = vip;
     return vip;
 }
 
@@ -75,7 +86,7 @@ struct Wifi {
     bool moduleLoaded = false, netOwned = false, netctlOwned = false;
     void* pool = nullptr;
     int socket = -1;
-    uint16_t port = 41000;
+    uint16_t port = NpNet::kLanDefaultPort;   // the port that bound (the first choice unless it was refused: np_bind_chain.h)
     uint32_t vip = 0;                 // this console's IPv4 (host order)
     uint32_t targets[8] = {};         // broadcast addresses (host order)
     uint16_t targetPorts[8] = {};
@@ -93,7 +104,7 @@ uint32_t ParseIp(const char* text)
 
 void WifiClose(void*)
 {
-    if (g_wifi.socket >= 0) sceNetSocketClose(g_wifi.socket);
+    if (g_wifi.socket >= 0) { sceNetSocketClose(g_wifi.socket); NpNetCensus::Closed(NpNetCensus::LanUdp); }
     g_wifi.socket = -1;
 }
 
@@ -109,8 +120,14 @@ bool WifiOpen()
     // once a frame). The net pool grows by the same amount so the buffer cannot starve the stack. Not measured on a console: off by default.
     const int rcvKiB = [] { const char* v = std::getenv("MSC_LAN_WIFI_RCVBUF"); const int k = v ? std::atoi(v) : 0; return k < 0 ? 0 : (k > 1024 ? 1024 : k); }();
     if (!g_wifi.netOwned) {
-        const int kPool = 256 * 1024 + rcvKiB * 1024;
+        // The stack lives until the game ends and the online transport shares it (sceNetInit then answers EBUSY there): the same 1 MiB as its own start, not less, or
+        // a Same Wi-Fi visit leaves online play's TLS and 128 KiB receive buffer a quarter of the pool.
+        const int kPool = 1024 * 1024 + rcvKiB * 1024;
         g_wifi.pool = std::malloc(kPool);
+        if (!g_wifi.pool) {   // galaxy16 (Galaxy lanfix, mp-perf f3030944): a refused pool is a failed start, not a null memory block handed to the network stack
+            std::fprintf(stderr, "[vlink-vita] sceNetInit: no memory for the %d KiB net pool\n", kPool / 1024);
+            return false;
+        }
         SceNetInitParam param{};
         param.memory = g_wifi.pool;
         param.size = kPool;
@@ -149,6 +166,7 @@ bool WifiOpen()
     }
     const uint32_t netmask = ParseIp(mask.netmask);
     if (!g_wifi.vip) return false;
+    g_wifi.port = NpNet::kLanDefaultPort;   // (a second open starts from the first choice again, not from an earlier fallback)
     if (const char* port = std::getenv("MSC_LINK_PORT")) g_wifi.port = uint16_t(std::atoi(port));
     // Broadcast targets: the subnet broadcast and 255.255.255.255 on our port, plus any extra
     // "ip:port" list in MSC_LINK_BCAST (two emulator instances on one computer use two ports).
@@ -181,6 +199,7 @@ bool WifiOpen()
         g_wifi.socket = -1;
         return false;
     }
+    NpNetCensus::Opened(NpNetCensus::LanUdp);
     int one = 1;
     sceNetSetsockopt(g_wifi.socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_BROADCAST, &one, sizeof one);
     sceNetSetsockopt(g_wifi.socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &one, sizeof one);
@@ -192,16 +211,35 @@ bool WifiOpen()
         sceNetGetsockopt(g_wifi.socket, SCE_NET_SOL_SOCKET, SCE_NET_SO_RCVBUF, &now, &len);
         VLV_LOG("Wi-Fi receive buffer %d KiB asked: %s (0x%08X), now %d bytes\n", rcvKiB, rc >= 0 ? "set" : "refused", uint32_t(rc), now);
     }
-    SceNetSockaddrIn local{};
-    local.sin_len = sizeof local;
-    local.sin_family = SCE_NET_AF_INET;
-    local.sin_port = sceNetHtons(g_wifi.port);
-    local.sin_addr.s_addr = 0;
-    if (sceNetBind(g_wifi.socket, reinterpret_cast<SceNetSockaddr*>(&local), sizeof local) < 0) {
-        VLV_LOG("bind to UDP port %u failed\n", g_wifi.port);
+    // The Vita refuses chosen UDP ports from about 32768 up (EACCES 0x8041010D, measured by the Galaxy port): the default is 25100. When a bind is refused
+    // or taken, 25101..25103 and then the system's own port follow; every console broadcasts to the FIRST port (targets above), and replies go to the
+    // sender's real port, so a console that fell back is still found and still hears answers. MSC_LINK_PORT=<n> changes the first port.
+    struct Ctx { int socket; } ctx = {g_wifi.socket};
+    const uint16_t asked = g_wifi.port;
+    const NpNet::BindResult br = NpNet::BindChain(
+        [](void* c, uint16_t port) -> int {
+            SceNetSockaddrIn local{};
+            local.sin_len = sizeof local;
+            local.sin_family = SCE_NET_AF_INET;
+            local.sin_port = sceNetHtons(port);
+            local.sin_addr.s_addr = 0;
+            return sceNetBind(static_cast<Ctx*>(c)->socket, reinterpret_cast<SceNetSockaddr*>(&local), sizeof local);
+        },
+        &ctx, asked, NpNet::kLanPortTries, true,
+        [](void*, uint16_t port, int rc) { VLV_LOG("bind to UDP port %u failed (0x%08X)\n", unsigned(port), uint32_t(rc)); });
+    if (!br.ok) {
+        VLV_LOG("no UDP port could be bound (first error 0x%08X)\n", uint32_t(br.firstError));
         WifiClose(nullptr);
         return false;
     }
+    g_wifi.port = br.requested;
+    if (!br.requested) {   // the system chose: read it back
+        SceNetSockaddrIn got{};
+        unsigned int gotLen = sizeof got;
+        if (sceNetGetsockname(g_wifi.socket, reinterpret_cast<SceNetSockaddr*>(&got), &gotLen) >= 0) g_wifi.port = sceNetNtohs(got.sin_port);
+    }
+    VLV_LOG("UDP port %u bound (asked %u, %d bind%s tried%s)\n", unsigned(g_wifi.port), unsigned(asked), br.attempts, br.attempts == 1 ? "" : "s",
+            br.requested == 0 ? ", the system's choice" : "");
     VLV_LOG("Wi-Fi link on %s port %u (%d broadcast targets)\n", ip.ip_address, g_wifi.port, g_wifi.targetCount);
     return true;
 }
@@ -274,28 +312,75 @@ bool LinkWatchOn() {
 volatile uint32_t g_powerInfo = 0;
 volatile bool g_resumed = false;
 SceUID g_powerCb = -1;
+volatile bool g_suspending = false;
 int PowerCallback(int, int, int info, void*) {
     g_powerInfo = uint32_t(info);
+    // A10: a suspend notice (when the system sends one before it sleeps): tell the online members now (best effort, the socket may stop working
+    // any moment) and close the stale socket; nothing is trusted after the resume. The callback runs on the game thread (sceKernelCheckCallback).
+    // The LAN side only notes it here (g_suspending) and sends its goodbye from the link watch.
+    if (info & (SCE_POWER_CB_APP_SUSPEND | SCE_POWER_CB_SYSTEM_SUSPEND | SCE_POWER_CB_THERMAL_SUSPEND | SCE_POWER_CB_LOW_BATTERY_SUSPEND)) {
+        g_suspending = true;
+        if (NpNetActive()) NpNetOnLinkLost("the Vita is going to sleep");
+    }
     if (info & (SCE_POWER_CB_APP_RESUME | SCE_POWER_CB_SYSTEM_RESUME | SCE_POWER_CB_SYSTEM_RESUMING | SCE_POWER_CB_APP_RESUMING |
                 SCE_POWER_CB_AFTER_SYSTEM_RESUME))
         g_resumed = true;
     return 0;
 }
+NpKeepAwake::Gate g_keepAwake;   // MSC_MP_KEEP_AWAKE: the power timer is ticked once a second while a session exists (np_keep_awake.h)
+bool KeepAwakeOn() {
+    static const bool on = [] { const char* v = std::getenv("MSC_MP_KEEP_AWAKE"); return !(v && v[0] == '0'); }();   // default 1
+    return on;
+}
+uint64_t KeepAwakeClockUs() { return sceKernelGetProcessTimeWide(); }
+NpIdle::Every g_idleGate;   // idle (no link up) pictures between two looks at the power callback
 uint64_t g_nextWifiLookUs = 0;
 int g_wifiStrikes = 0;
+int g_lastRssi = -1;
 bool g_lossReported = false;
 NpRadioPhase g_lastPhase = NP_RADIO_DOWN;
 
 }  // namespace
 
+extern "C" int np_vita_online_ip_changed(void);   // online/np_udp_vita.cpp
+extern "C" uint32_t NpVitaInputActivity(void);   // np_vita_input.cpp: advances on every poll that saw a button, stick or touch (keep-awake idle limit)
+
 extern "C" void np_vita_lan_frame(void) {
+    // Internet play (online/): the transport is driven from here once a frame (STUN, signaling, punching also run before a game session
+    // exists), and its Wi-Fi watch is the Wi-Fi branch below, extended by an address-change check.
+    const bool onlineUp = NpNetActive() != 0;
+    // Keep the console awake while a LAN or online session, lobby, queue or invite wait exists (both tests are a flag read; no clock outside a session).
+    {
+        const unsigned k = g_keepAwake.Step(KeepAwakeOn(), onlineUp || NpLanActive() || NpOnlineFlowActive(), NpLanInMatch(), NpVitaInputActivity(), KeepAwakeClockUs);
+        if (k & NpKeepAwake::kTick) sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+        if (k & NpKeepAwake::kStarted) std::fprintf(stderr, "[mp] keep awake on\n");
+        // wake14: the Wi-Fi keep-awake filler (vlink.h SetKeepAwake) rests with the power ticks: 10 minutes untouched outside a match
+        if (k & NpKeepAwake::kPaused) VLink::Default().SetKeepAwakeSuspended(true);
+        if (k & (NpKeepAwake::kResumed | NpKeepAwake::kStopped)) VLink::Default().SetKeepAwakeSuspended(false);
+        if (k & NpKeepAwake::kPaused) std::fprintf(stderr, "[mp] keep awake paused (idle)\n");
+        if (k & NpKeepAwake::kResumed) std::fprintf(stderr, "[mp] keep awake resumed (input)\n");
+        if (k & NpKeepAwake::kStopped) std::fprintf(stderr, "[mp] keep awake off (%u ticks)\n", g_keepAwake.ticks);
+    }
+    NpNetPoll();   // also pumps the HTTPS requests that outlive a session (the leave message)
     if (!LinkWatchOn()) return;
-    const bool wifiUp = g_active == Mode::Wifi && g_wifi.socket >= 0;
+    const bool wifiUp = onlineUp || (g_active == Mode::Wifi && g_wifi.socket >= 0);
     NpRadioSnapshot snap{};
     np_vita_radio_snapshot(&snap);
-    const bool radioUp = g_active == Mode::Adhoc && snap.phase != NP_RADIO_DOWN;
+    const bool radioUp = !onlineUp && g_active == Mode::Adhoc && snap.phase != NP_RADIO_DOWN;
+    if (onlineUp) {
+        // a lost online link was rebuilt (phase left LOST = 9): the watch is armed again
+        if (NpNetPhase() != 9) { g_lossReported = false; }
+        else g_lossReported = true;
+    }
     if (!wifiUp && !radioUp) {
         g_lastPhase = snap.phase;
+        // A sleep with no link up is nobody's business: the notice is taken now and forgotten, or it would wait for the next session and end it on its first frame.
+        // (single player pays nothing per picture: the system call is made about once a second, np_idle_gate.h)
+        if (g_powerCb >= 0 && g_idleGate.Due(NpIdle::kIdlePeriodFrames)) {
+            sceKernelCheckCallback();
+            g_suspending = false;
+            g_resumed = false;
+        }
         return;
     }
     // The power callback lives on this (the game) thread: created once, delivered here.
@@ -306,6 +391,11 @@ extern "C" void np_vita_lan_frame(void) {
         if (rc < 0 && g_powerCb >= 0) { sceKernelDeleteCallback(g_powerCb); g_powerCb = -2; }
     }
     if (g_powerCb >= 0) sceKernelCheckCallback();
+    if (g_suspending) {   // the notice came in time: goodbye before the sleep (the firmware does not always deliver it)
+        g_suspending = false;
+        VLV_LOG("suspend notice (power 0x%08X)\n", uint32_t(g_powerInfo));
+        NpLanOnSuspend();
+    }
     if (g_resumed) {
         g_resumed = false;
         VLV_LOG("resumed from sleep (power notice 0x%08X)\n", uint32_t(g_powerInfo));
@@ -327,22 +417,63 @@ extern "C" void np_vita_lan_frame(void) {
     const int rc = sceNetCtlInetGetState(&state);
     if (rc >= 0 && state == SCE_NETCTL_STATE_CONNECTED) {
         g_wifiStrikes = 0;
+        if (onlineUp) {   // A10: signal strength once a second, kept for the log line of a loss (no network name is read or logged)
+            SceNetCtlInfo ri;
+            std::memset(&ri, 0, sizeof ri);
+            g_lastRssi = sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_RSSI_PERCENTAGE, &ri) >= 0 ? int(ri.rssi_percentage) : -1;
+        }
+        if (onlineUp && !g_lossReported && np_vita_online_ip_changed()) {
+            // roamed to another access point / DHCP renewal gave a new address: the socket's NAT mapping and our candidates are stale
+            g_lossReported = true;
+            VLV_LOG("the Wi-Fi address changed during an online session\n");
+            NpLanLinkLost("Wi-Fi address changed");
+        }
         return;
     }
-    if (++g_wifiStrikes == 2 && !g_lossReported) {
+    // (mpbeta27) MSC_NET_WIFI_GRACE_S: how many looks a second apart Wi-Fi may be away before the link is declared lost (default 2, as before; at most 15, below the
+    // transport's own 20-25 s limits). A longer grace lets a short Wi-Fi blip ride on the lockstep's wait ("Waiting for the other player... (N s)") instead of ending
+    // the match at once; whether the address survives such a blip is a console question (run line wifigrace8 in w8/mpbeta27.md).
+    static const int graceLooks = [] { const char* v = std::getenv("MSC_NET_WIFI_GRACE_S"); const int n = v && *v ? std::atoi(v) : 2; return n < 2 ? 2 : (n > 15 ? 15 : n); }();
+    if (++g_wifiStrikes == graceLooks && !g_lossReported) {
         g_lossReported = true;
-        VLV_LOG("Wi-Fi is not connected (state %d, 0x%08X) at two looks a second apart\n", state, uint32_t(rc));
+        VLV_LOG("Wi-Fi is not connected (state %d, 0x%08X) at %d looks a second apart; last signal strength %d%%\n", state, uint32_t(rc), graceLooks, g_lastRssi);
         NpLanLinkLost("Wi-Fi lost");
     }
 }
 
 int NpLanRadioPoll(int request)
 {
+    const int online = NpNetRadioPoll(request);   // internet play: an online session was started through the menu API (or MSC_NET_MODE)
+    if (online != -2) return online;
+    // Online play was chosen but no online session exists (the menu flow was cancelled or failed, or the room is gone): never fall back to the radio.
+    if (NpMenuLinkMode() == kNpMenuOnline) return request ? -1 : 0;
     if (request) {
         g_active = ChosenMode();
         g_stopping = false;
         g_lossReported = false;
         g_wifiStrikes = 0;
+    }
+    // C1: the radio is claimed by one mode at a time. A Same-Wi-Fi session does not start while the ad hoc radio of an earlier Nearby session is
+    // still up or closing (infrastructure Wi-Fi and ad hoc cannot run together), and a Nearby session does not start while the Wi-Fi socket of an
+    // earlier session is open. MSC_LAN_EXCLUSIVE=0 restores the old behaviour.
+    static const bool exclusive = [] { const char* v = std::getenv("MSC_LAN_EXCLUSIVE"); return !(v && v[0] == '0'); }();
+    if (request && exclusive) {
+        if (g_active == Mode::Wifi) {
+            NpRadioSnapshot other{};
+            np_vita_radio_snapshot(&other);
+            if (other.phase != NP_RADIO_DOWN) {
+                if (other.phase != NP_RADIO_CLOSING) np_vita_radio_close();   // any phase; a close already under way is waited for
+                static int logged = -1;
+                if (logged != int(other.phase)) {
+                    logged = int(other.phase);
+                    VLV_LOG("Same Wi-Fi requested while the ad hoc radio is not down (phase %d): closing it, waiting\n", logged);
+                }
+                return 1;
+            }
+        } else if (g_wifi.socket >= 0) {
+            VLV_LOG("Nearby requested while the Wi-Fi socket of an earlier session is open: closing it\n");
+            WifiClose(nullptr);
+        }
     }
     if (g_active == Mode::Wifi) {
         if (g_wifi.socket >= 0) return 2;
@@ -382,6 +513,10 @@ int NpLanRadioPoll(int request)
 
 void NpLanRadioStop()
 {
+    if (NpNetActive()) {
+        NpNetRadioStop();   // leaving multiplayer: the room is left, the members told, the socket closed
+        return;
+    }
     g_stopping = true;
     if (g_active == Mode::Wifi) {
         WifiClose(nullptr);
@@ -393,6 +528,27 @@ void NpLanRadioStop()
             snap.rx_dropped, snap.oversize, int(SCE_NET_ADHOC_PDP_MFS));
     np_vita_radio_close();
     g_failedReported = true;  // a later DOWN after this close is not a new failure
+}
+
+// The online menu's pre-check (np_menu_flow.cpp): is the console on a Wi-Fi network at all? 1 yes, 0 no, -1 cannot tell (the network control layer
+// is not up and could not be started: the connection itself will say).
+extern "C" int NpPlatformWifiUp(void)
+{
+    // (wave 14, Galaxy's 20 Nov crash "Multiplayer menu: SceNetCtl called before the NET module is loaded, pc=0") sceNetCtl* are imports of the NET module: until something has loaded it
+    // the import stub jumps to address 0. This pre-check runs when the online menu opens, before any backend has loaded the module, so it loads it itself; a refusal says nothing about
+    // the Wi-Fi ("cannot tell", -1): the connection attempt decides.
+    if (sceSysmoduleIsLoaded(SCE_SYSMODULE_NET) != SCE_SYSMODULE_LOADED && sceSysmoduleLoadModule(SCE_SYSMODULE_NET) < 0) return -1;
+    if (sceSysmoduleIsLoaded(SCE_SYSMODULE_NET) != SCE_SYSMODULE_LOADED) return -1;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        const int rc = sceNetCtlInit();
+        if (rc < 0 && uint32_t(rc) != 0x80412102u) VLV_LOG("sceNetCtlInit for the online menu failed 0x%08X\n", uint32_t(rc));
+    }
+    int state = 0;
+    const int rc = sceNetCtlInetGetState(&state);
+    if (rc < 0) return -1;
+    return state == SCE_NETCTL_STATE_CONNECTED ? 1 : 0;
 }
 
 const char* NpLanPlayerName()

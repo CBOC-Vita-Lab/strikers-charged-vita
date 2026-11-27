@@ -1,0 +1,6 @@
+# One test name a line (the script name without .sh), then a reason after #. A SKIP is printed by tools/run_host_tests.sh and never counted as a pass.
+run_tls13_transform_test   # needs arguments: an Mbed TLS host32 prefix, its source tree and a new output folder (tools/https/run_tls13_transform_test.sh PREFIX SOURCE NEW_OUT)
+run_fs_tests   # needs BIN= (the built test_framesend binary, and RUN= for qemu): platform/vita/tests/run_fs_tests.sh
+run_jobs_tests   # needs BIN= (the built test_jobs binary): platform/vita/tests/run_jobs_tests.sh
+tests__run_tests   # needs BIN= (the built test_harness binary, RUN= for qemu): native/platform/harness/tests/run_tests.sh
+run_gxcensus_test   # needs GXCENSUS_EXE or GXCENSUS_BUILD=1 (a prebuilt census binary); the script says so itself and exits SKIP

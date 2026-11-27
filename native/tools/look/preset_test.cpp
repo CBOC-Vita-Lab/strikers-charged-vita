@@ -20,6 +20,11 @@ int main() {
     env["MSC_VITA_RENDER"] = "800x448"; // a key the file sets itself wins
     CHECK(np_picture::Expand("performance", isSet, set) == 1 && env["MSC_VITA_RENDER"] == "800x448" && env["MSC_PERFORMANCE_MODE"] == "1");
     env.clear();
+    CHECK(np_picture::Expand("full", isSet, set) == 3 && env["MSC_PICTURE_HOLD"] == "full" && env["MSC_FX_GOV"] == "1");
+    env.clear();
+    env["MSC_PICTURE_HOLD"] = "native"; // a key the file sets itself wins
+    CHECK(np_picture::Expand("hold", isSet, set) == 2 && env["MSC_PICTURE_HOLD"] == "native");
+    env.clear();
     CHECK(np_picture::Expand("default", isSet, set) == 0 && env.empty());
     CHECK(np_picture::Expand("nonsense", isSet, set) == -1 && env.empty());
     CHECK(np_picture::Expand("", isSet, set) == -1);

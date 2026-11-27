@@ -71,6 +71,20 @@ It never connects to your Vita, uploads game data or replaces existing
 folders. To retry after an interruption, choose a new folder with
 `--output "prepared-game-2"`. Keep your original dump.
 
+### Your own game's art on the home screen (optional, on by default)
+
+The package ships with plain placeholder pictures, because the game's own art
+cannot be part of a public download. After it prepares your disc, the helper
+therefore also makes a copy of `Strikers-Charged-Vita.vpk` that uses **your
+disc's** logo and start-screen picture for the home-screen bubble, the
+LiveArea pages (background, START, Settings) and the loading screen:
+`prepared-game/Strikers-Charged-Vita-with-game-art.vpk`. Install that file
+instead of the plain VPK; it is the same game and the same executable. Your
+original package is not changed and nothing leaves your computer. This step
+needs Pillow (`python3 -m pip install pillow`); without it, or with
+`--no-art`, you simply get the plain package. If the step has a problem it
+says so and carries on.
+
 ## Optional: Check An Existing Extraction
 
 The SHA-256 of `sys/main.dol` should be:

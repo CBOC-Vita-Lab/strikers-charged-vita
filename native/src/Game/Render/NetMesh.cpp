@@ -25,6 +25,8 @@
 
 #include <math.h>
 #include <string.h>
+extern unsigned gNpNetStaticEpoch;   // MSC_SIM26_NETGRAB (defined below)
+extern unsigned gNpNetDirtyGen[2];   // int28 (defined below)
 
 unsigned short s_DetMeshType = 0xFFFF;
 float NetMesh::s_fReboundForceCoefficient = 6.0f;
@@ -130,6 +132,7 @@ void NetMesh::Allocate(
     int numParticles, int numDistanceConstraints, int numPositionConstraints)
 {
     unsigned long vectorBytes = numParticles * sizeof(nlVector3);
+    gNpNetStaticEpoch++;   // MSC_SIM26_NETGRAB
     m_v3Position = (nlVector3*)nlMalloc(vectorBytes, 8, false);
     m_v3PrevPosition = (nlVector3*)nlMalloc(vectorBytes, 8, false);
     m_v3RestPosition = (nlVector3*)nlMalloc(vectorBytes, 8, false);
@@ -202,6 +205,9 @@ void NetMesh::Reset(bool usePhysicsBall)
         mbBallIsInsideNet = false;
         mfMotion = 0.0f;
         mJolt = 0.0f;
+#ifdef NP_NATIVE
+        ++gNpNetDirtyGen[mbPositiveEnd ? 0 : 1];
+#endif
 
         DebugWriteCache* output = gNetworkSyncState->GetWriteCache();
         if (output != 0)
@@ -366,6 +372,9 @@ void NetMesh::Update(float dt, const nlVector3& ballPosition,
     bool appliedForces = false;
     if (mbIsActive || s_bAlwaysActive)
     {
+#ifdef NP_NATIVE
+        ++gNpNetDirtyGen[mbPositiveEnd ? 0 : 1];
+#endif
         appliedForces = true;
         AddForcesToBall(ballPosition, sphere);
         AccumForces(this, newPos);
@@ -665,6 +674,9 @@ void NetMesh::Initialize(unsigned long netMeshDrawableObjectID)
     }
 
     UpdateUntilRelaxed();
+#ifdef NP_NATIVE
+    ++gNpNetDirtyGen[mbPositiveEnd ? 0 : 1];
+#endif
     mbInitialized = true;
 }
 
@@ -709,9 +721,14 @@ void NetMesh::UpdateActivity(const nlVector3& ballPosition,
     }
 }
 
+// MSC_SIM26_NETGRAB (DrawableNetMesh::Grab): bumped by every write of a net's tri-strip indices or texture coordinates (they are written only while loading)
+unsigned gNpNetStaticEpoch = 1;
+unsigned gNpNetDirtyGen[2] = { 1, 1 };
+
 void NetMesh::SetTriStripIndices(
     int numIndices, const unsigned short* indices)
 {
+    gNpNetStaticEpoch++;
     m_NumTriStripIndices = numIndices;
     unsigned long size = numIndices * sizeof(unsigned short);
     m_TriStripIndices = (u16*)nlMalloc(size, 8, false);

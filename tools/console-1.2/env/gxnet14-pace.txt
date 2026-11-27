@@ -1,0 +1,13 @@
+# console-1.2 run gxnet14-pace: Client obeys the service's pacing hints (MSC_NET_PACE_HINTS=1) under a busy server (MANUAL, online)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route onconn, version payload 1.3, role manual
+# gxnet14.md: does the client obey nextWaitSec / nextPollMs under a busy server? Read the request-spacing lines in the log. Decides a default (timing).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/on-conn.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_NET_PACE_HINTS=1

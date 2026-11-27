@@ -22,7 +22,7 @@ VSYS := $(VITASDK)/arm-vita-eabi
 GXXV := 15.2.0
 
 TARGET := --target=armv7a-none-eabihf -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb \
-          -fsigned-char -fshort-enums -femulated-tls -fno-pic -munaligned-access \
+          -fsigned-char -fshort-enums -femulated-tls -fno-pic -munaligned-access -fomit-frame-pointer \
           -D__vita__ -D__USES_INITFINI__ -U_GNU_SOURCE \
           -Wno-builtin-macro-redefined \
           -U__WINT_TYPE__ '-D__WINT_TYPE__=unsigned int' \

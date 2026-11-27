@@ -1,10 +1,13 @@
 // vgx - GX renderer for the Mario Strikers Charged Vita port.
 // Shared small helpers. No GL and no runtime (HLE) headers in here.
 #pragma once
+#include <atomic>
+#include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "vgx_ab.h"   // MSC_AB (wave 15): the in-run A/B harness; EnvInt answers its override
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #endif
@@ -144,9 +147,48 @@ bool LogEnabled();
 #define VGX_LOG_N(n, ...) do { static int vgx_cnt_ = 0; if (vgx_cnt_ < (n)) { ++vgx_cnt_; std::fprintf(stderr, "[vgx] " __VA_ARGS__); } } while (0)
 
 inline long EnvInt(const char* name, long dflt) {
+    if (long ov; ab::Lookup(name, &ov)) return ov;   // (MSC_AB, vgx_ab.h: one relaxed load while MSC_AB is unset)
     const char* v = std::getenv(name);
     return (v && *v) ? std::strtol(v, nullptr, 0) : dflt;
 }
+
+// ---- switches read once, without a barrier (1.3, MSC_VGX_KNOBS; Galaxy's GXV_FE_KNOBS / GXV_HOT_KNOBS)
+// A switch kept as a function-local `static const int x = EnvInt(...)` is a guarded static: every call loads the guard byte and, on the
+// console's ARMv7 (clang, arm-vita-eabi), follows it with `dmb ish`, the acquire the guard needs. A barrier waits until every memory access
+// before it has completed (the player's stores into the record chunks, the vertex and uniform arenas, the command list). On Galaxy's
+// console this was some 40,000 barriers a picture, and removing them took the lit hub from 26.4 to 28.3 fps.
+// VGX_KNOB(expr) is the value of `expr` (an int-sized value read from the environment, the same on every thread), worked out at the first
+// call and kept in a constant-initialised atomic word (no guard), read with a relaxed load: one load, no barrier. Two threads that both find
+// it unset both work it out (from the same environment) and store the same whole word.
+//   MSC_VGX_KNOBS=1 (default): as above;  0: each read is followed by an acquire fence, the barrier the guarded static had (same values;
+//   only for measuring the barriers on the console).
+namespace knob {
+constexpr int32_t kUnset = INT32_MIN; // never a switch's value (a switch with it would be worked out on every read)
+// (asked at each knob's first read and not kept: a knob read before the environment file is applied must not decide it for the rest)
+inline __attribute__((noinline)) bool Fenced() { return EnvInt("MSC_VGX_KNOBS", 1) == 0; }
+template <class F> __attribute__((noinline)) int32_t Init(std::atomic<int32_t>& k, std::atomic<int32_t>& kf, F f) {
+    const int32_t v = static_cast<int32_t>(f());
+    if (v != kUnset) (Fenced() ? kf : k).store(v, std::memory_order_relaxed);
+    ab::Register(k, kf, +f);   // (MSC_AB: so a flip can work the expression out again; nothing else reads the registry)
+    return v;
+}
+template <class F> inline __attribute__((always_inline)) int32_t Read(std::atomic<int32_t>& k, std::atomic<int32_t>& kf, F f) {
+    const int32_t v = k.load(std::memory_order_relaxed);
+    if (__builtin_expect(v != kUnset, 1)) return v;
+    const int32_t w = kf.load(std::memory_order_relaxed);
+    if (w != kUnset) {
+        std::atomic_thread_fence(std::memory_order_acquire); // (MSC_VGX_KNOBS=0: the guarded static's barrier)
+        return w;
+    }
+    return Init(k, kf, f);
+}
+} // namespace knob
+static_assert(knob::kUnset == ab::kKnobUnset, "vgx_ab.h keeps its own copy of the knob's unset word");
+#define VGX_KNOB(...) \
+    ([]() -> int32_t { \
+        static std::atomic<int32_t> vgx_knob_{::vgx::knob::kUnset}, vgx_knob_fenced_{::vgx::knob::kUnset}; \
+        return ::vgx::knob::Read(vgx_knob_, vgx_knob_fenced_, [] { return static_cast<int32_t>(__VA_ARGS__); }); \
+    }())
 
 // Wave 5 (GXD) front-end savings, each behind a bit of MSC_VGX_GXD=<mask> (default: all on; 0: the wave-4 code paths, for
 // A/B runs of one binary; the frame hash of every combination must be equal unless the bit's comment says otherwise).
@@ -166,6 +208,11 @@ enum : uint32_t {
     GXD_DLFAST = 1u << 10,   // display-list cache: a hit whose write generations were read after the last write notification does not read them again
     GXD_LOOPS_NEON = 1u << 11, // per-vertex loops outside the decoder (atlas redirect: coordinate range check and remap) with NEON
     GXD_RECFAST = 1u << 12,  // recorder: single-word XF register writes encoded inline, matrix loads (position / texture / normal) copied once, from the caller's matrix into the record
+    GXD_MERGESER = 1u << 13, // 1.2 (Galaxy GXV_MERGEFAST): the draw merge test skips the render state / texture comparison while neither was built again since the record it merges into was made
+    GXD_DECFILL = 1u << 14,  // 1.2 (Galaxy WP-Z idea): the decoder's default stores (position z / w, texture-matrix indices) in loops chosen once per call, not tested for every vertex
+    GXD_RSFAST = 1u << 15,   // 1.2 (Galaxy e90cc10): ResolveState leaves at once when nothing it builds from was written (dirty flags read as three words)
+    GXD_XFWORD = 1u << 16,   // 1.2 (Galaxy e90cc10): single XF register / matrix words written through WriteXFWord inline (no call per word)
+    GXD_TEXNEON = 1u << 17,  // 1.2 (Galaxy): LA88 texture decode (I4, I8, IA4, IA8 stored as luminance-alpha) of whole tiles with NEON
     GXD_VERIFY = 1u << 30,   // diagnostic: every memo / shortcut also computes the long way and reports a difference (never on by default)
 };
 // -DVGX_PROFNOINLINE (profile builds, tools/gxd/build.sh ... EXTRA=-DVGX_PROFNOINLINE): the stages of ResolveState and the like stay functions of their
@@ -175,6 +222,9 @@ enum : uint32_t {
 #else
 #define GXD_NI
 #endif
+// (the default mask: every bit but the two that the 1.2 instruction counts did not pay for in this tree: MERGESER (+0.01 % of the front-end thread) and
+//  RSFAST (+0.15 %: the cached resolution is already cheap, and the extra test misses more often than it hits); both stay available for the A/B)
+constexpr uint32_t kGxdDefault = 0x3FFFFFFFu & ~(GXD_MERGESER | GXD_RSFAST);
 extern uint32_t g_gxd;
 void GxdInit();
 inline bool Gxd(uint32_t bit) { return (g_gxd & bit) != 0; }

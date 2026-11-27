@@ -1,6 +1,9 @@
 #include "NL/nlDLListContainer.inl"
 #include "NL/nlPrint.h"
 #include "Game/Render/ImpostorSprite.h"
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 #include "Game/Render/ImpostorCharacter.h"
 #include "Game/Sys/debug.h"
 
@@ -16,6 +19,10 @@
 #include "NL/nlString.h"
 #include "NL/platvmath.h"
 #include "Game/SharedStaticStorage.h"
+#ifdef NP_NATIVE
+#include "np/overlap.h"
+#include "np/crowdquad.h"
+#endif
 
 
 float gImpostorAngleJitterDegrees = 10.0f;
@@ -102,6 +109,12 @@ ImpostorSprite::ImpostorSprite(
     , mAngle(0)
     , mNumRenderSlots(0)
     , mUseIntensityAlpha(false)
+    , mNearPx(0.0f)
+    , mNearFrame(-1)
+    , mSizedStep(0)
+    , mSeenLast(false)
+    , mBlankCaptured(false)
+    , mViewPrepared(false)
 {
     mEnabled = ImpostorManager::GetInstance()->mEnabled;
     mViewInterface =
@@ -204,7 +217,7 @@ void ImpostorSprite::UpdateViewport()
     view->m_Viewport.width = width;
     view->m_Viewport.height = height;
 
-    bool enabled = mEnabled && !mCaptureDisabled;
+    bool enabled = mEnabled && !mCaptureDisabled && !mCaptureSuspended;
     mView->m_Target =
         enabled ? GLViewTarget_Mode9 : GLViewTarget_None;
 }
@@ -276,7 +289,7 @@ void ImpostorSprite::CreateRenderTarget(const char* name)
     activeView->m_Viewport.y = 0;
     activeView->m_Viewport.width = activeWidth;
     activeView->m_Viewport.height = activeHeight;
-    bool enabled = mEnabled && !mCaptureDisabled;
+    bool enabled = mEnabled && !mCaptureDisabled && !mCaptureSuspended;
     mView->m_Target =
         enabled ? GLViewTarget_Mode9 : GLViewTarget_None;
 }
@@ -365,6 +378,62 @@ int ImpostorSprite::Render(GLView* target, Impostor* impostors, bool cached, boo
         nlVec3Scale(right, aspect);
 
         int* slots = mRenderSlots;
+#ifdef NP_NATIVE
+        if (hasQuads && NpCrowdQuadFast())
+        {
+            // MSC_CROWD_QUADFAST: the same quads, the per-sprite arithmetic that did not depend on the sprite done once (np/crowdquad.h); the texture coordinates
+            // are the constants (short)(u * 1024) of u, v in {0, 1}
+            static float sSin, sCos;
+            static bool sHaveSinCos;
+            if (!sHaveSinCos)
+            {
+                nlSinCos(&sSin, &sCos, DegreesToAngle(0.0f));
+                sHaveSinCos = true;
+            }
+            NpQuadBasis basis;
+            NpQuadBasisInit(basis, right, up, sSin, sCos);
+            const float sizeScale = ImpostorManager::GetInstance()->GetImpostorSizeScale();
+#if defined(__ARM_NEON)
+            static const int16_t kQuadUv[8] = { 1024, 0, 0, 0, 0, 1024, 1024, 1024 };
+            const int16x8_t vUv = vld1q_s16(kQuadUv);
+            const float32x4_t vScale64 = vdupq_n_f32(64.0f);
+#endif
+            for (i = 0; i < count; ++i)
+            {
+#if defined(__ARM_NEON)
+                if (i + 2 < count) __builtin_prefetch(&impostors[slots[i + 2]], 0, 1);
+#endif
+                impostor = &impostors[slots[i]];
+                float c[12];
+                NpQuadCorners(c, impostor->mPosition, sizeScale * impostor->GetWidth(), sizeScale * impostor->GetHeight(), basis);
+                short* t = writer->texcoord;
+                short* p = writer->position;
+                u32* col = writer->colour;
+                u32 packed;
+                memcpy(&packed, &impostor->mColour, sizeof(packed));
+#if defined(__ARM_NEON)
+                vst1q_s16(t, vUv);
+                const int16x4_t p0 = vmovn_s32(vcvtq_s32_f32(vmulq_f32(vld1q_f32(c + 0), vScale64)));
+                const int16x4_t p1 = vmovn_s32(vcvtq_s32_f32(vmulq_f32(vld1q_f32(c + 4), vScale64)));
+                const int16x4_t p2 = vmovn_s32(vcvtq_s32_f32(vmulq_f32(vld1q_f32(c + 8), vScale64)));
+                vst1_s16(p + 0, p0);
+                vst1_s16(p + 4, p1);
+                vst1_s16(p + 8, p2);
+                vst1q_u32(col, vdupq_n_u32(packed));
+#else
+                t[0] = 1024; t[1] = 0; t[2] = 0; t[3] = 0; t[4] = 0; t[5] = 1024; t[6] = 1024; t[7] = 1024;
+                for (int k = 0; k < 12; ++k)
+                    p[k] = (short)(c[k] * 64.0f);
+                col[0] = packed; col[1] = packed; col[2] = packed; col[3] = packed;
+#endif
+                writer->texcoord = t + 8;
+                writer->position = p + 12;
+                writer->colour = col + 4;
+                ++rendered;
+            }
+            count = 0;
+        }
+#endif
         for (i = 0; i < count; ++i)
         {
             impostor = &impostors[slots[i]];

@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cerrno>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -28,6 +29,10 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#if defined(__vita__) || defined(__VGX_VITA__)
+extern "C" FILE* np_boot_fopen(const char* path, const char* mode, const char* what) __attribute__((weak));   // platform/vita/include/np_boot_io.h
+#endif
 
 namespace vgx::hdtex {
 
@@ -60,8 +65,9 @@ struct PackEntry {
 #pragma pack(pop)
 static_assert(sizeof(PackHeader) == 32 && sizeof(PackEntry) == 32, "pack layout");
 
-void (*g_log)(const char*, ...) = nullptr;
+void (*g_log)(const char*, ...) __attribute__((format(printf, 1, 2))) = nullptr;
 int g_mode = 0; // 0 off, 1 replace, 2 dry run
+int g_requested = 1; // MSC_HDTEX as read (the run header: a missing pack leaves g_mode 0 without the switch being off)
 FILE* g_file = nullptr;
 std::vector<PackEntry> g_index;
 std::vector<uint64_t> g_shapes; // sorted ShapeKey()s of the originals: the filter in front of the hash
@@ -267,9 +273,20 @@ int Replace(const TexReplaceQuery& q, TexUpload& up, uint32_t* wait) {
 
 } // namespace
 
-void Install(void (*log)(const char* fmt, ...)) {
+// 1.3: an eye frame of the blink, by the pack's name list ("<folder>/<c>_eye0 <file>:<index>:<hash> ..."). Character.cpp MakeBlinker: <c>/<c>_eye0, 1, 2. Not `eyegray` and
+// the like: a digit and the end of the name must follow.
+bool IsEyeFrameName(const char* names) {
+    for (const char* p = names; (p = std::strstr(p, "_eye")) != nullptr; p += 4) {
+        const char d = p[4], end = d ? p[5] : '\0';
+        if (d >= '0' && d <= '9' && (end == ' ' || end == '\0')) return true;
+    }
+    return false;
+}
+
+void Install(void (*log)(const char* fmt, ...) __attribute__((format(printf, 1, 2)))) {
     g_log = log;
     g_mode = static_cast<int>(EnvInt("MSC_HDTEX", 1));
+    g_requested = g_mode;
     if (g_mode <= 0) {
         Note("hdtex: off (MSC_HDTEX=0)");
         return;
@@ -282,6 +299,11 @@ void Install(void (*log)(const char* fmt, ...)) {
 #endif
     const uint64_t t0 = NowNs();
     FILE* f = std::fopen(path, "rb");
+#if defined(__vita__) || defined(__VGX_VITA__)
+    // (11 Nov) A file that is there but would not open (the console's fopen shares a stream slot when two threads open at once; the platform now locks that) is tried again for up
+    // to 3 s, not silently given up for the whole session. np_boot_fopen is the platform's (np_boot_io.h); weak: a build without it keeps the single try.
+    if (!f && errno != ENOENT && np_boot_fopen) f = np_boot_fopen(path, "rb", "HD texture pack");
+#endif
     if (!f) {
         Note("hdtex: no pack at %s: textures as the game has them", path);
         g_mode = 0;
@@ -308,12 +330,21 @@ void Install(void (*log)(const char* fmt, ...)) {
         g_mode = 0;
         return;
     }
+    // 1.3 MSC_HDTEX_FACES=0 (default): the eye frames stay the game's own, whatever the pack holds. The blink is a swap of three textures (Blinker.cpp), so they are hit by key as
+    // any other, but the closed ones are on screen for one or two pictures: their first upload comes in the blink and shows the original while the read runs (async), they ask
+    // for budget after everything else on screen (so they are the ones refused), and each was upscaled alone. An open HD eye then flicks to another picture at every blink. The
+    // Galaxy port kept the originals of its eye textures after its pack broke blinking. =1: replace them as 1.1 and 1.2 did. Works on a pack already built.
+    if (EnvInt("MSC_HDTEX_FACES", 0) == 0) {
+        const size_t before = g_index.size();
+        g_index.erase(std::remove_if(g_index.begin(), g_index.end(), [](const PackEntry& e) { return IsEyeFrameName(NameOf(e)); }), g_index.end());
+        if (g_index.size() != before) Note("hdtex: %u eye frames left as the game has them (MSC_HDTEX_FACES=1 replaces them)", static_cast<unsigned>(before - g_index.size()));
+    }
     for (const PackEntry& e : g_index) g_shapes.push_back(ShapeKey(e.origFmt, e.origW, e.origH));
     std::sort(g_shapes.begin(), g_shapes.end());
     g_shapes.erase(std::unique(g_shapes.begin(), g_shapes.end()), g_shapes.end());
     g_budget = static_cast<uint64_t>(EnvInt("MSC_HDTEX_BUDGET", 8)) << 20;   // (Strikers: 8 MiB; graphics memory is tight)
     SetReplacedTextureBudget(g_budget);
-    g_mipFilter = EnvInt("MSC_HDTEX_TRILINEAR", 0) ? FILT_LIN_MIP_LIN : FILT_LIN_MIP_NEAR;
+    g_mipFilter = EnvInt("MSC_HDTEX_TRILINEAR", 1) ? FILT_LIN_MIP_LIN : FILT_LIN_MIP_NEAR;
     g_logLeft = EnvInt("MSC_HDTEX_LOG", 48);
     // (default: the whole pack is read here when it is small, so that no texture's first use
     // during play waits on the memory card)
@@ -334,6 +365,9 @@ void Install(void (*log)(const char* fmt, ...)) {
          h.fileSize >> 10, (NowNs() - t0) / 1e6, g_preload.empty() ? (g_async ? ", data read on first use by a reader thread" : ", data read on first use") : ", whole pack preloaded",
          static_cast<unsigned long long>(g_budget >> 20), g_mode == 2 ? "; DRY RUN (MSC_HDTEX=2): originals uploaded" : "");
 }
+
+int Requested() { return g_requested; }
+int Mode() { return g_mode; }
 
 void GetCounters(Counters& c) {
     c.hashed = g_hashed.load(std::memory_order_relaxed);

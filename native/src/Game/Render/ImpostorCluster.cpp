@@ -9,6 +9,9 @@
 #include "Game/TweakValueInt.h"
 #include "Game/TweakValueFloat.h"
 #include "Game/SharedStaticStorage.h"
+#ifdef NP_NATIVE
+#include "np/scenecut.h"
+#endif
 
 static TweakValueInt siBackgroundRed(
     "siBackgroundRed", "/Render/Impostor/Cluster", 122);
@@ -29,6 +32,12 @@ ImpostorCluster::ImpostorCluster(const char* name,
     , mName(name)
 {
     mIsCluster = true;
+#ifdef NP_NATIVE
+    if (NpCrowdClusterFlag())   // MSC_CROWD_CLUSTERFLAG: AddCharacter ran in the base constructor, before this flag was set
+    {
+        ImpostorManager::GetInstance()->mHasClusters = true;
+    }
+#endif
 }
 
 unsigned long ImpostorCluster::GetTexture()

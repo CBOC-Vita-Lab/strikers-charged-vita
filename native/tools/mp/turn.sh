@@ -4,8 +4,8 @@
 # Each pair gets its own UDP port base (41000 + 20 * index). Env: BIN (executable), QEMU=1 (armhf under qemu-arm: run ONE pair per turn).
 # Summary per pair on stdout; details in build/np/NPM2/pairs/NAME/{result.json,peer0/runtime.log,peer1/runtime.log}
 cd "$(dirname "$0")/../.."
-BIN=${BIN:-/home/claude/msc/build/np/NPM2/host32/np-host32-full-null}
-P=${PAIRS:-/home/claude/msc/build/np/NPM2/pairs}   # PAIRS=<dir>: where the pair directories go
+BIN=${BIN:-/work/msc/build/np/NPM2/host32/np-host32-full-null}
+P=${PAIRS:-/work/msc/build/np/NPM2/pairs}   # PAIRS=<dir>: where the pair directories go
 mkdir -p $P
 i=0; pids=()
 for spec in "$@"; do

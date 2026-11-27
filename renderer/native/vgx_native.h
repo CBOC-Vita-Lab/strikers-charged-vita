@@ -95,6 +95,8 @@ int vgxn_pipe_write32(unsigned int v);
 // ------------------------------------------------- extension records (W5 SKIN, src/vgx_ext.h)
 // A command the GX API has not got, recorded in command order: `kind` (EXT_*), `n` payload words.
 void vgxn_ext(unsigned int kind, const unsigned int* words, unsigned int n);
+// W12 FG: does the renderer want the layer markers (np_gx_layer; MSC_DYNRES_FG or the census)? Read once.
+int vgxn_fg_marks(void);
 
 // -------------------------------------------------------------- textures
 typedef struct vgxn_tex {

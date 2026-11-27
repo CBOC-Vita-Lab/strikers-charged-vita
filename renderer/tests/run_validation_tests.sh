@@ -4,11 +4,12 @@
 #   tests/run_validation_tests.sh     SANITIZE=1 CXX=g++ tests/run_validation_tests.sh
 set -euo pipefail
 VGX=$(cd "$(dirname "$0")/.." && pwd)
-MSC=${MSC:-/home/claude/msc}
+MSC=${MSC:-/work/msc}
+XXH="$MSC/deps/xxHash"; [[ -f "$XXH/xxhash.h" ]] || XXH="$(cd "$(dirname "$0")/.." && pwd)/third_party"   # (no deps/xxHash on this box: the repo copy)
 BUILD=${TEST_BUILD:-$MSC/build/cxr/tests}
 CXX=${CXX:-clang++}
 mkdir -p "$BUILD"
-FLAGS=(-std=c++20 -O2 -g -Wall -Wextra -Wno-unused-parameter -I"$VGX/src" -I"$MSC/deps/xxHash")
+FLAGS=(-std=c++20 -O2 -g -Wall -Wextra -Wno-unused-parameter -I"$VGX/src" -I"$XXH")
 if [[ ${SANITIZE:-0} == 1 ]]; then FLAGS+=(-fsanitize=address,undefined -fno-omit-frame-pointer); fi
 "$CXX" "${FLAGS[@]}" "$VGX/tests/validate.cpp" -o "$BUILD/validate"
 "$BUILD/validate"

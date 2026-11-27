@@ -79,15 +79,24 @@ static unsigned char useAsyncLoading = true;
 }
 
 
+static NisPlayer* sNisPlayerInstance;
+
 NisPlayer* NisPlayer::Instance()
 {
-    static NisPlayer* instance;
+    NisPlayer*& instance = sNisPlayerInstance;
     if (instance == 0)
     {
         instance = new NisPlayer;
     }
     return instance;
 }
+
+#ifdef NP_NATIVE
+NisPlayer* NisPlayer::InstanceIfAny()
+{
+    return sNisPlayerInstance;
+}
+#endif
 
 NisPlayer::NisPlayer()
     : InterpreterCore(100)
@@ -1265,6 +1274,9 @@ void OnNisDictionaryLoaded(void* data, unsigned long size, void* userData)
     {
         player->ParseDictionary((char*)data);
         player->mLoadedAssetMask |= 16;
+#ifdef NP_NATIVE
+        player->PrefetchMatchFiles();   // (does nothing until a match is set up; the dictionary may arrive after the line-ups are known)
+#endif
     }
 }
 

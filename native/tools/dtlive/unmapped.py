@@ -7,7 +7,7 @@ tab = open(out + '/dtl_tables.inc', errors='replace').read()
 mapped = set(int(m.group(1), 16) for m in re.finditer(r'\{ 0x([0-9A-F]{8})u, \d+, "[^"]*", \d \}', tab))
 mapped |= set(int(m.group(1), 16) for m in re.finditer(r'\{ 0x([0-9A-F]{8})u, \d+, "[^"]+" \}', tab))
 syms = []
-for l in open('/home/claude/research/decomp/mscharged-decomp/config/R4QE01/symbols.txt'):
+for l in open('/work/research/decomp/mscharged-decomp/config/R4QE01/symbols.txt'):
     m = re.match(r'^(\S+) = \.(data|bss|sdata|sbss|sbss2):0x([0-9A-Fa-f]+); // (.*)$', l.strip())
     if m:
         sz = re.search(r'size:0x([0-9A-Fa-f]+)', m.group(4)); syms.append((int(m.group(3), 16), int(sz.group(1), 16) if sz else 0, m.group(1)))

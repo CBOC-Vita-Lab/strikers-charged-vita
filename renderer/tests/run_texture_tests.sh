@@ -5,11 +5,12 @@
 # Output goes to $TEST_BUILD (default build/tests of this checkout's parent build dir). xxhash.h comes from deps/xxHash.
 set -euo pipefail
 VGX=$(cd "$(dirname "$0")/.." && pwd)
-MSC=${MSC:-/home/claude/msc}
+MSC=${MSC:-/work/msc}
+XXH="$MSC/deps/xxHash"; [[ -f "$XXH/xxhash.h" ]] || XXH="$(cd "$(dirname "$0")/.." && pwd)/third_party"   # (no deps/xxHash on this box: the repo copy)
 BUILD=${TEST_BUILD:-$MSC/build/cxr/tests}
 CXX=${CXX:-clang++}
 mkdir -p "$BUILD"
-FLAGS=(-std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -I"$VGX/src" -I"$MSC/deps/xxHash")
+FLAGS=(-std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -I"$VGX/src" -I"$XXH")
 if [[ ${SANITIZE:-0} == 1 ]]; then FLAGS+=(-fsanitize=address,undefined -fno-omit-frame-pointer); fi
 "$CXX" "${FLAGS[@]}" -I"$VGX/src/glstub" "$VGX/tests/texture_gl.cpp" "$VGX/src/vgx_shadergen.cpp" -o "$BUILD/texture_gl"
 "$BUILD/texture_gl"
@@ -20,4 +21,5 @@ env -u MSC_VGX_LA88 MSC_VGX_DXT1=0 "$BUILD/texture_la88" default
 MSC_VGX_LA88=0 MSC_VGX_DXT1=0 "$BUILD/texture_la88" default
 MSC_VGX_LA88=1 MSC_VGX_DXT1=0 "$BUILD/texture_la88" compact
 MSC_VGX_LA88=1 MSC_VGX_DXT1=0 MSC_VGX_VITA=1 "$BUILD/texture_la88" compact
+MSC_VGX_LA88=2 MSC_VGX_DXT1=0 "$BUILD/texture_la88" i8
 echo "texture tests: all passed"

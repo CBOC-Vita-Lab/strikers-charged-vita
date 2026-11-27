@@ -1,0 +1,13 @@
+# console-1.2 run gxd13v: Front-end draw merge by state serial (MSC_VGX_GXD bit 13 on) with every shortcut verified (bit 30), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group exact, route tour, version payload 1.3, role ab
+# exact17: GXD_MERGESER (Galaxy GXV_MERGEFAST) is OFF (+0.01 percent instructions on the host's armhf count: no gain expected), exact by construction. Bit 30 (GXD_VERIFY) runs every front-end shortcut and the plain code and reports a disagreement: the count at exit must be 0 (the first 8 are logged). Not a timing run; the front-end ms against d1 only says what the verify costs.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_GXD=2147450879

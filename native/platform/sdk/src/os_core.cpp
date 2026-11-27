@@ -5,6 +5,7 @@
 #include <revolution/os.h>
 #include <revolution/base.h>
 
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,10 @@
 #include <unistd.h>
 
 #include "np_internal.h"
+
+extern "C" int VgxQuiesceForExit(unsigned ms) __attribute__((weak));   // renderer/src/vgx_play.cpp (null without a renderer)
+// 1.2: the reason of a fatal path survives a quiet build (np/fatal.h; the platform's basic log). Weak: the SDK layer alone has no sink.
+extern "C" void NpFatalNote(const char* kind, const void* caller, const char* detail) __attribute__((weak));
 
 static NpSdkConfig g_cfg;
 static int g_cfg_set = 0;
@@ -76,6 +81,19 @@ void NpSdk_ConfigDefaults(NpSdkConfig* c) {
     if (const char* b = getenv("NP_MEM2_BASE")) c->mem2_base = (uint32_t)strtoul(b, 0, 16);
 #endif
     c->language = env_int("NP_LANG", 1);
+    // MSC_LANGUAGE=en|es|fr (STR-004): the language of the Wii system menu as the game reads it (SCGetLanguage). The USA disc carries the North
+    // American Spanish and French text tables, fonts and menu pictures (art/fe/naspanish*.loc, nafrench*.loc, spafonttext18, ...), and the game's
+    // own selection (main.cpp Initialize, GAME_REGION_US) maps system language 3 to NAFrench, 4 to NASpanish and everything else to English. It only
+    // changes text and pictures of the menus; the simulation does not see it. Unset: English, as before. NP_LANG (the SDK's number) still works
+    // when MSC_LANGUAGE is not set.
+    if (const char* l = getenv("MSC_LANGUAGE")) {
+        // (case does not matter: es, ES, Es, sp, Spanish, fr, FR, French, en, EN, English)
+        const int a = l[0] ? tolower((unsigned char)l[0]) : 0, b = (l[0] && l[1]) ? tolower((unsigned char)l[1]) : 0;
+        if ((a == 'e' && b == 's') || (a == 's' && b == 'p')) c->language = 4;
+        else if (a == 'f' && b == 'r') c->language = 3;
+        else if (a == 'e' && b == 'n') c->language = 1;
+        else if (l[0]) fprintf(stderr, "[lang] MSC_LANGUAGE=%s is not en, es or fr: ignored\n", l);
+    }
     c->widescreen = env_int("NP_WIDESCREEN", 1);
     c->progressive = env_int("NP_PROGRESSIVE", 1);
     c->eurgb60 = env_int("NP_EURGB60", 1);
@@ -97,6 +115,11 @@ static void* arena_map(uint32_t size, uintptr_t base, const char* what) {
     void* p = np_mem_map(base, size);
     if (!p) {
         np_log("os", "cannot map %u MiB for %s", size >> 20, what);
+        if (NpFatalNote) {
+            char text[120];
+            snprintf(text, sizeof text, "cannot map %u MiB for %s", size >> 20, what);
+            NpFatalNote("arena", __builtin_return_address(0), text);
+        }
         abort();
     }
     if (base && (uintptr_t)p != base) {
@@ -175,6 +198,7 @@ void* OSGetStackPointer(void) { return __builtin_frame_address(0); }
 // ---------------------------------------------------------------------------------------------
 // Reporting and fatal errors
 
+void OSVReport(const char* fmt, va_list ap) __attribute__((format(printf, 1, 0)));
 void OSVReport(const char* fmt, va_list ap) {
     char line[1024];
     vsnprintf(line, sizeof(line), fmt, ap);
@@ -182,15 +206,28 @@ void OSVReport(const char* fmt, va_list ap) {
     while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
     np_log("game", "%s", line);
 }
+void OSReport(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void OSReport(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     OSVReport(fmt, ap);
     va_end(ap);
 }
+void OSPanic(const char* file, int line, const char* fmt, ...) __attribute__((format(printf, 3, 4)));
 void OSPanic(const char* file, int line, const char* fmt, ...) {
     va_list ap;
     np_log("os", "PANIC at %s:%d", file ? file : "?", line);
+    if (NpFatalNote) {
+        char text[300];
+        int n = snprintf(text, sizeof text, "%s:%d", file ? file : "?", line);
+        if (n > 0 && fmt && (size_t)n + 3 < sizeof text) {
+            text[n++] = ' ';
+            va_start(ap, fmt);
+            vsnprintf(text + n, sizeof text - (size_t)n, fmt, ap);
+            va_end(ap);
+        }
+        NpFatalNote("OSPanic", __builtin_return_address(0), text);
+    }
     va_start(ap, fmt);
     OSVReport(fmt, ap);
     va_end(ap);
@@ -200,6 +237,7 @@ void OSFatal(GXColor fg, GXColor bg, const char* msg) {
     (void)fg;
     (void)bg;
     np_log("os", "OSFatal: %s", msg ? msg : "(null)");
+    if (NpFatalNote) NpFatalNote("OSFatal", __builtin_return_address(0), msg ? msg : "(null)");
     abort();
 }
 
@@ -226,6 +264,7 @@ static void do_quit(int reason) {
     if (g_quit_hook) {
         g_quit_hook(reason);
     } else {
+        if (VgxQuiesceForExit) VgxQuiesceForExit(200);   // the renderer's back end finishes its picture before the process goes (renderer/src/vgx_play.cpp; null without a renderer)
         fflush(0);
         exit(0);
     }

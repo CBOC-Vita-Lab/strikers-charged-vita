@@ -1,0 +1,13 @@
+# console-1.2 run pgo-on-wg-c: PGO A/B: r15 PGO eboot at The Dump, run c
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r15, route worstgpu, version payload 1.3, role ab
+# pgo10/pgo15: the same env as worstgpu1, only the eboot differs (session.sh eswap installs the executable alone). Judge by the sim time, [fps] slip, [hitch] counts and [lat] p50/p95; watch the first 60 s for a crash (a PGO build once exposed a crash 25-45 s in).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+# (no switch)

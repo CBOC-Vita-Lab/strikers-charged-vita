@@ -23,6 +23,10 @@
 #include "Game/NetworkInput.h"
 
 #include <string.h>
+#ifdef NP_NATIVE
+// NP (1.3 ranked, platform/sdk/dwc/np_dwc_match.cpp): the result of a ranked match to the service's persistent result queue
+extern "C" void NpRankedMatchResult(int result, int localIsHome, int homeScore, int awayScore) __attribute__((weak));
+#endif
 
 static int sLeaderboardJobs[5] = { NET_STATS_GET_DAILY_NEARBY, NET_STATS_GET_DAILY_TOP, NET_STATS_GET_SEASON_NEARBY, NET_STATS_GET_SEASON_TOP, NET_STATS_GET_FRIENDS };
 
@@ -1244,6 +1248,12 @@ void NetworkStatsManager::CalculateAndReportGameResult(int result)
     }
     if (IsOnlineRankedMatch())
     {
+#ifdef NP_NATIVE
+        if (NpRankedMatchResult != 0)
+        {
+            NpRankedMatchResult(result, playingSide == 0, homeScore, awayScore);   // before the puts below: they wait for the match to be final
+        }
+#endif
         ReportGameResult(result, &home, &away, playingSide == 0,
             homeScore, awayScore, 0);
     }

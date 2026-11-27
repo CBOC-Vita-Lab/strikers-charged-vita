@@ -1,0 +1,15 @@
+# console-1.2 run gsvice16: Goal scenario at Vice (route fb-vice-goal): goal, celebration and replay in the first minute, split lines on
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r16, route gsvice, version payload 1.3, role ab
+# route16 + logs16: the test-only `score` command puts a goal into the first minute, so the held scenes (celebration, replay) are measured with the held-scene hitch budget (MSC_HITCH_LINES=1500; [hitch] lines of the held class after picture 3000) and the game-thread split lines. Fast boot only.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was fb-vice-goal.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-vice-goal.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=2
+MSC_HITCH_LINES=1500

@@ -3,6 +3,10 @@
 
 #include "Game/InterpreterCore.h"
 
+#ifdef NP_NATIVE
+extern "C" void NpLoadStep(const char* comment);
+#endif
+
 class GLResourcePool;
 struct AudioResourceLoadOwner;
 struct EventConnection;
@@ -67,7 +71,13 @@ public:
     static AsyncLoadingManager* Instance();
     GLResourcePool* GetPersistentResourcePool();
     void LoadTrophyTemplates();
-    void SetLoadingComment(const char* comment) { mLoadingComment = comment; }
+    void SetLoadingComment(const char* comment)
+    {
+        mLoadingComment = comment;
+#ifdef NP_NATIVE
+        NpLoadStep(comment);   // 1.3 MSC_LOAD_TRACE (np_fps.cpp): the [load] timeline
+#endif
+    }
 
     /* 0x28 */ void* mByteCode;
     /* 0x2C */ u32 mSequenceState;

@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 18:00:00 -0500
+Subject: [PATCH] glDeleteFramebuffers ignores a framebuffer that is not active and clears its target and depth pointers (no double free of the depth surface)
+
+---
+
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index 360183c..3408e35 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -261,7 +261,9 @@ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
+ #endif
+ 	while (n > 0) {
+ 		framebuffer *fb = (framebuffer *)ids[--n];
+-		if (fb) {
++		// 0032: a framebuffer that is not active was deleted already (a stale or repeated name): its render target and depth surface went to the
++		// garbage collector then, and a second delete queued both again (a double free when the collector ran)
++		if (fb && fb->active) {
+ 			// Check if the framebuffer is currently bound
+ 			if (fb == active_read_fb) {
+ 				active_read_fb = NULL;
+@@ -286,6 +288,9 @@ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
+ 				mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+ 			}
+ #endif
++			fb->target = NULL;
++			fb->depthbuffer_ptr = NULL;
++			fb->depthbuffer_state = DEPTHBUFFER_MISSING;
+ 		}
+ 	}
+ }

@@ -37,10 +37,19 @@ public:
     void UpdateCharacters(float blendTime, const char* name);
     void UpdateAnimations(float dt);
     void UpdateSprites();
+    void PoseCapturedModels();              // MSC_POSE_JOBS bit 1: the poses of the models UpdateSprites will draw, made on the job lanes
     void UpdatePositions(const nlVector3* direction, const nlVector3* up);
     void StaggerAnimations();
     void SetEnabled(bool enable);
     void SetUpdatePeriod(int period);
+    void SetUpdateThrottle(int throttle);   // W12 FG: 1 (default) .. 4: the sprites update that many times less often (the renderer's crowd step)
+    void UpdateSpritesWithFloor(int floor); // MSC_CROWD_REFRESH, MSC_CROWD_REPLAY, MSC_MENU_LOD: UpdateSprites at that throttle or more; the throttle others see is left as it was
+    // MSC_CROWD_SIZED (np/crowdcut.h)
+    void SetSizedMode(bool on);             // before UpdatePositions: this picture's sprites are chosen by the size of their figures
+    void MeasureSizes(GLView* view);        // after the first visibility pass: the nearest figure of every sprite
+    void UpdateSpritesSized();              // in place of UpdateSprites
+    void SetCrowdGov(int level, GLView* view);   // MSC_CROWD_GOV: the level for the next UpdateSpritesWithFloor only (the gameplay camera); measures the sprites' size classes and moves each sprite's own level
+    void SetSkipClusters(bool skip);        // MSC_CROWD_CLUSTER_LAZY: UpdateSprites stops at the cluster as it does under the gameplay camera
 
     /* 0x00 */ u8 mEnabled;
     /* 0x01 */ u8 mPadding001[3];

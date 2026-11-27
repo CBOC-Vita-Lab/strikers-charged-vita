@@ -7,6 +7,9 @@
 #include "NL/gl/glMemory.h"
 #include "NL/gl/glPlat.h"
 #include "Game/SharedStaticStorage.h"
+#ifdef NP_NATIVE
+#include "np/cpu24.h"
+#endif
 
 GLColourMeshWriter::GLColourMeshWriter()
     : count(0)
@@ -96,11 +99,15 @@ bool GLColourMeshWriter::End()
     {
         glplatFinalizePacket(&model->packets[i], resource != 0, resource);
     }
+#ifdef NP_NATIVE
+    NpCpu24StoreStreams(model->packets->streams, model->packets->numStreams, count);   // MSC_CPU24_NOTIFY
+#else
     for (int i = 0; i < model->packets->numStreams; ++i)
     {
         glModelStream* stream = &model->packets->streams[i];
         DCStoreRangeNoSync(stream->address, count * stream->stride);
     }
+#endif
     PPCSync();
     return true;
 }

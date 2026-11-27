@@ -18,8 +18,8 @@ int glFontGetScreenHeight(GLView* renderView);
 
 int glFontPrint(void* renderView, eGLView view, int x, int y, const nlColour& colour, const char* str);
 int glFontPrint(void* renderView, eGLView view, int x, int y, const char* str);
-int glFontPrintf(void* renderView, int x, int y, const char* format, ...);
-int glFontPrintf(void* renderView, int x, int y, const nlColour& colour, const char* format, ...);
-int glFontPrintf(void* renderView, eGLView view, int x, int y, const nlColour& colour, const char* format, ...);
+int glFontPrintf(void* renderView, int x, int y, const char* format, ...) __attribute__((format(printf, 4, 5)));
+int glFontPrintf(void* renderView, int x, int y, const nlColour& colour, const char* format, ...) __attribute__((format(printf, 5, 6)));
+int glFontPrintf(void* renderView, eGLView view, int x, int y, const nlColour& colour, const char* format, ...) __attribute__((format(printf, 6, 7)));
 
 #endif // NL_GL_GLFONT_H

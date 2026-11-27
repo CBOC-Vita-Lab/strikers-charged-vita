@@ -152,8 +152,15 @@ GLboolean prim_is_non_native = GL_FALSE; // Flag for when a primitive not suppor
 		break; \
 	}
 
+static inline __attribute__((always_inline)) void convert_16_to_8bit_indices(uint16_t *restrict dst, const uint8_t *restrict src, int32_t count) {
+	for (int32_t i = 0; i < count; i++) {
+		dst[i] = src[i];
+	}
+}
+
 void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifdef HAVE_DLISTS
 	// Enqueueing function to a display list if one is being compiled
@@ -169,7 +176,8 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 #endif
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 	GLboolean is_draw_legal = GL_TRUE;
 
 	if (cur_program != 0)
@@ -180,9 +188,7 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 		_glDrawArrays_FixedFunctionIMPL(first, count);
 	}
 
-#ifndef SKIP_ERROR_HANDLING
-	if (is_draw_legal)
-#endif
+	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
 	{
 		uint16_t *ptr;
 		switch (mode) {
@@ -218,6 +224,7 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 
 void glMultiDrawArrays(GLenum mode, const GLint *first, const GLsizei *count, GLsizei drawcount) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifndef SKIP_ERROR_HANDLING
 	if (drawcount < 0) {
@@ -225,7 +232,8 @@ void glMultiDrawArrays(GLenum mode, const GLint *first, const GLsizei *count, GL
 	}
 #endif
 
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 	
 	GLint lowest = 0x7FFFFFFF;
 	GLsizei highest = 0, highest_count = 0;
@@ -277,6 +285,7 @@ void glMultiDrawArrays(GLenum mode, const GLint *first, const GLsizei *count, GL
 
 void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei primcount) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifndef SKIP_ERROR_HANDLING
 	if (phase == MODEL_CREATION) {
@@ -289,12 +298,11 @@ void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei prim
 #endif
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 	GLboolean is_draw_legal = _glDrawArrays_CustomShadersIMPL(first, count, GL_TRUE);
 
-#ifndef SKIP_ERROR_HANDLING
-	if (is_draw_legal)
-#endif
+	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
 	{
 		uint16_t *ptr;
 		switch (mode) {
@@ -330,6 +338,7 @@ void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei prim
 
 void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_indices) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifdef HAVE_DLISTS
 	// Enqueueing function to a display list if one is being compiled
@@ -348,7 +357,8 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_in
 
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 	GLboolean is_draw_legal = GL_TRUE;
 
 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
@@ -357,10 +367,7 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_in
 	// sceGxm doesn't support 8bit indices natively, so we internally convert to 16bit
 	if (type == GL_UNSIGNED_BYTE) {
 		uint16_t *idx16 = gpu_alloc_mapped_temp(count * sizeof(uint16_t));
-		uint8_t *idx8 = (uint8_t *)src;
-		for (GLsizei i = 0; i < count; i++) {
-			idx16[i] = idx8[i];
-		}
+		convert_16_to_8bit_indices(idx16, (const uint8_t *)src, count);
 		src = idx16;
 	}
 	
@@ -372,9 +379,7 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_in
 		_glDrawElements_FixedFunctionIMPL(src, count, 0, 0, type != GL_UNSIGNED_INT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
 	}
 
-#ifndef SKIP_ERROR_HANDLING
-	if (is_draw_legal)
-#endif
+	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
 	{
 		if (type == GL_UNSIGNED_SHORT) {
 			setup_elements_indices(uint16_t);
@@ -392,6 +397,7 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_in
 
 void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_indices, GLint baseVertex) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifndef SKIP_ERROR_HANDLING
 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
@@ -405,7 +411,8 @@ void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLv
 
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 	GLboolean is_draw_legal = GL_TRUE;
 
 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
@@ -418,9 +425,7 @@ void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLv
 		_glDrawElements_FixedFunctionIMPL(src, count, 0, baseVertex, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
 	}
 
-#ifndef SKIP_ERROR_HANDLING
-	if (is_draw_legal)
-#endif
+	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
 	{
 		if (type == GL_UNSIGNED_INT) {
 			setup_elements_indices(uint32_t);
@@ -437,6 +442,7 @@ void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLv
 
 void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *gl_indices) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifndef SKIP_ERROR_HANDLING
 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
@@ -452,7 +458,8 @@ void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, G
 
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 	GLboolean is_draw_legal = GL_TRUE;
 
 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
@@ -465,9 +472,7 @@ void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, G
 		_glDrawElements_FixedFunctionIMPL(src, count, end + 1, 0, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
 	}
 
-#ifndef SKIP_ERROR_HANDLING
-	if (is_draw_legal)
-#endif
+	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
 	{
 		if (type == GL_UNSIGNED_INT) {
 			setup_elements_indices(uint32_t);
@@ -484,6 +489,7 @@ void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, G
 
 void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, void *gl_indices, GLint baseVertex) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifndef SKIP_ERROR_HANDLING
 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
@@ -497,7 +503,8 @@ void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsize
 
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 	GLboolean is_draw_legal = GL_TRUE;
 
 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
@@ -510,9 +517,7 @@ void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsize
 		_glDrawElements_FixedFunctionIMPL(src, count, end + baseVertex + 1, baseVertex, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
 	}
 
-#ifndef SKIP_ERROR_HANDLING
-	if (is_draw_legal)
-#endif
+	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
 	{
 		if (type == GL_UNSIGNED_INT) {
 			setup_elements_indices(uint32_t)
@@ -529,6 +534,7 @@ void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsize
 
 void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void *gl_indices, GLsizei primcount) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifndef SKIP_ERROR_HANDLING
 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
@@ -544,15 +550,14 @@ void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void
 
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 
 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
 	uint16_t *src = gpu_buf ? (uint16_t *)((uint8_t *)gpu_buf->ptr + (uint32_t)gl_indices) : (uint16_t *)gl_indices;
 	GLboolean is_draw_legal = _glDrawElements_CustomShadersIMPL(src, count, 0, 0, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INSTANCE_16BIT : SCE_GXM_INDEX_SOURCE_INSTANCE_32BIT);
 
-#ifndef SKIP_ERROR_HANDLING
-	if (is_draw_legal)
-#endif
+	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
 	{
 		if (type == GL_UNSIGNED_INT) {
 			setup_elements_indices(uint32_t);
@@ -569,6 +574,7 @@ void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void
 
 void vglDrawObjects(GLenum mode, GLsizei count) {
 	THREAD_SAFE()
+	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
 
 #ifdef ENABLE_LEGACY_PIPELINE
 #ifndef SKIP_ERROR_HANDLING
@@ -581,7 +587,8 @@ void vglDrawObjects(GLenum mode, GLsizei count) {
 
 	SceGxmPrimitiveType gxm_p;
 	gl_primitive_to_gxm(mode, gxm_p, count);
-	scene_reset();
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: nothing is submitted
 
 	texture_unit *tex_unit = &texture_units[0];
 	if (cur_program != 0) {

@@ -1,3 +1,4 @@
+#include "np/hot_knob.h"
 #include "np/touch_diag.h"
 #include <atomic>
 #include <cstdio>
@@ -186,7 +187,7 @@ void SampleSystem(uint64_t now) {
     NpDiagEvent(NPD_THREAD_SAMPLE_COST,0,NpDiagFrame(),now,NpDiagNow(),0,0,0);
 }
 }
-extern "C" int NpDiagEnabled(){static const bool on=[]{const char* p=getenv("MSC_TOUCH_DIAG");return p&&!strcmp(p,"1");}();return on;}
+extern "C" int NpDiagEnabled(){return NP_HOT_KNOB(bool,[]{const char* p=getenv("MSC_TOUCH_DIAG");return p&&!strcmp(p,"1");}());} // (1.3: no guard barrier, np/hot_knob.h)
 extern "C" int NpDiagActive(){Bank* b=active.load(std::memory_order_acquire);return b&&b->state.load(std::memory_order_relaxed)==1;}
 extern "C" uint64_t NpDiagNow(){
 #if defined(__linux__)

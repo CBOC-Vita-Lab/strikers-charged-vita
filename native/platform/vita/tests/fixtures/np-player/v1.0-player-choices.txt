@@ -1,0 +1,7 @@
+# ---- Settings screen (LiveArea > Settings): the lines below are written by it; the rest of this file is kept ----
+MSC_VITA_UPSCALE=sharp+
+MSC_VITA_SHARPEN=0.35
+NP_WIDESCREEN=0
+MSC_CONTROLS=classic
+NP_POINTER_SPEED=1.5
+# ---- end of the Settings screen's lines ----

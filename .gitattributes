@@ -1,0 +1,4 @@
+# A blank unified-diff context record contains one required prefix space.
+dependencies/mbedtls/patches/0001-tls13-transform-cleanup.patch whitespace=-blank-at-eol
+# Unified-diff context prefixes precede existing source tabs.
+native/platform/vita/vitagl/0016-full-frame-gpu-timing-validity.patch whitespace=-space-before-tab

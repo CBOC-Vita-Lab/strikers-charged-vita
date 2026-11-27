@@ -1,0 +1,14 @@
+# console-1.2 run crowdgtoff: Crowd game-thread cuts off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_CROWD_GT=5 is on by default in the player build (w8/gt10.md: the crowd sprites' view matrices are made where a sprite is captured and not for every sprite on every picture (bit 1); no view for a captured sprite with nothing to show (bit 4)). Host: det trace and every frame hash identical to MSC_CROWD_GT=0. This run is the A/B: the old path. Against the tour: the [gsplit] crowd-pos / crowd-sprites ms in open play (r11 had 0.63 and 1.14 at Vice). Bit 2 (the sprites of one texture captured on the same picture, one pose per refresh) is a separate opt-in run, crowdgtpose1.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CROWD_GT=0

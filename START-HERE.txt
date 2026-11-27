@@ -1,4 +1,4 @@
-MARIO STRIKERS CHARGED FOR PS VITA - VERSION 1.1
+MARIO STRIKERS CHARGED FOR PS VITA - VERSION 1.3
 ================================================
 
 Thanks for downloading! This is a native PS Vita version of Mario Strikers
@@ -49,4 +49,5 @@ HAVE FUN
 Controls: CONTROLS.md
 What's new: CHANGELOG.md
 Known issues: KNOWN-ISSUES.md
-Press PS during play and tap Settings in the LiveArea to change options.
+Pause a match and pick VITA SETTINGS (or OPTIONS > VITA SETTINGS in the main menu) to change options.
+If a setting ever stops the game from starting, hold L + R while it starts (SAFE START) to reset the settings.

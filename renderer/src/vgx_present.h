@@ -52,6 +52,15 @@ void Throttle();
 using VblankCountFn = uint32_t (*)();
 void SetVblankSource(VblankCountFn fn);
 
+// MSC_PRESENT_SYNC (independent of MSC_VGX_PRESENT; vgx_present_sched.h PresentSync, policy in np_fps.cpp NpFpsPresentSyncMode): the display callback, once per picture.
+// SyncTarget(earliest vblank the picture can be on, its frame number): the vblank to show it on, `earliest` when the switch is off or the frame has no stamp.
+// SyncShown(vblank it is on, a wait was made). A "[present]" line every 5 s while measuring or aligned.
+//   MSC_PRESENT_SYNC=0|1|2       off | measure only | hold each picture to its game time. Unset: 2 under MSC_FPS_BETWEEN=pace while it is in force, else 1.
+//   MSC_PRESENT_SYNC_MIN/_MAX/_LAT=<vblanks> [1/6/4]   L's range and start. A picture later than MAX is shown when ready.
+//   MSC_PRESENT_SYNC_RAISE=<n> [4]   late pictures of the last 32 that raise L by one (more: lower latency, more judder)
+uint32_t SyncTarget(uint32_t earliest, uint64_t frameTag);
+void SyncShown(uint32_t shown, bool waited);
+
 // The picture of the previous tick is to be shown again (set by the host that presents: a retained copy of the last picture).
 using RepeatHook = void (*)();
 void SetRepeatHook(RepeatHook hook);

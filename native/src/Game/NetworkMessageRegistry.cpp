@@ -1,6 +1,7 @@
 #include "Game/NetworkMessageRegistry.h"
 #include "Game/Sys/debug.h"
 #include "NL/nlMemory.h"
+#include "platform/sdk/net/np_lan.h"  // np (STR-144)
 
 
 MessageRegistry* gNetworkMessageRegistry;
@@ -24,6 +25,10 @@ int MessageRegistry::Serialize(
 void MessageRegistry::Dispatch(
     int source, u8* buffer, unsigned long size)
 {
+    if (buffer == 0 || size < sizeof(u8))
+    {
+        return;   // np (STR-144): an empty datagram carries no type byte
+    }
     NetworkMessageSerializer serializer(NETWORK_SERIALIZE_READ, buffer, size);
     u8 type = 0;
     memcpy(&type, serializer.mPosition, sizeof(type));
@@ -39,6 +44,13 @@ void MessageRegistry::Dispatch(
     }
 
     NetworkMessage* message = factory->Create(&serializer);
+    if (serializer.mFailed)
+    {
+        // np (STR-144): the message claims more than the datagram holds. Nothing from it is delivered.
+        NpLanLog("malformed network message type %d (%lu bytes) discarded\n", type, size);
+        delete message;
+        return;
+    }
     message->mSource = source;
     NetworkMessageReceiver* receiver = mReceivers[type];
     if (receiver != 0)

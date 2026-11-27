@@ -1,0 +1,16 @@
+# console-1.2 run r30-rep: Replay lanes split
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route crep, version payload 1.3, role ab
+# held30 task 1: the replay's [lane] split (game / send / fe / be cpu and wall / gpu) next to the goal cut-scene's, with the back end's phase split ([beph] wall vs cpu per phase, scenes and draws a picture). The host census finds a replay picture no heavier than the cut-scene's (same scenes, fewer draws), the console (s29-int4) has the replay at p50 46.9 against 35.3: read which lane differs (expect GPU 30-36 and fe 22-27 in the replay window against 25-30 / 22 in the cut-scene) and whether be wall minus cpu (the wait behind the GPU) is larger in the replay.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_BEPH=1
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500
+MSC_GSPLIT=2

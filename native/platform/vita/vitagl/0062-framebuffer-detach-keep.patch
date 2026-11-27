@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 14:00:00 -0500
+Subject: [PATCH] nxgl25 (MSC_VITA_FBO_KEEP): glFramebufferTexture2D(colour, texture 0) keeps the framebuffer object width, height, render target and depth surface (vglSetFramebufferDetachKeep, default off); gxm.c scene_reset refuses an object with no colour texture
+
+---
+diff --git a/source/shared.h b/source/shared.h
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -1447,6 +1447,7 @@
+ }
+ 
+ extern uint32_t vgl_tiled_read_refused; // 0057 (textures.c)
++extern GLboolean vgl_fb_detach_keep; // 0062 (framebuffers.c): detaching the colour texture (id 0) keeps the object's size, render target and depth surface
+ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(framebuffer *fb, GLenum attachment, texture *tex, GLuint tex_id) {
+ 	VGL_LC_SYNC(); // (LAZY_CLEAR: the restore reads the size of the framebuffer in use)
+ 	// Extracting texture data
+@@ -1456,6 +1457,20 @@
+ 	// Detecting requested attachment
+ 	switch (attachment) {
+ 	case GL_COLOR_ATTACHMENT0:
++		// 0062: detaching (texture id 0) used to read the sizes of texture slot 0 into fb->width / fb->height (and stride, data, format) BEFORE the id was looked at, and to drop the render target at once; the
++		// next attach then found a "different size" and dropped the depth surface too. With vgl_fb_detach_keep the detach only lets go of the texture: width, height, target and depth surface stay, and a later
++		// attach of a texture of the same size (the samples are the object's own) takes them back; a different size drops them as before. The object has no colour surface to draw into until then (gxm.c scene_reset).
++		if (tex_id == 0 && vgl_fb_detach_keep) {
++			if (fb->tex) {
++				fb->tex->ref_counter--;
++				if (fb->tex->dirty && fb->tex->ref_counter == 0) {
++					gpu_free_texture(fb->tex);
++				}
++			}
++			fb->tex = NULL;
++			if (in_use_framebuffer == fb) dirty_framebuffer = GL_TRUE; // nxr6b: the scene running into this object has lost its colour surface: the next draw must go through scene_reset (which refuses it: no colour texture)
++			return;
++		}
+ 		vglGetTexSizes(&tex->gxm_tex, &fb->width, &fb->height);
+ 		// 0057: a tiled texture (vglTexMakeTiledTarget) is a tiled colour surface, rows of VGL_ALIGN(width, 32) texels
+ 		const int tiled_rt = sceGxmTextureGetType(&tex->gxm_tex) == SCE_GXM_TEXTURE_TILED;
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -198,6 +198,15 @@
+  * ------------------------------
+  */
+ 
++// 0062 (MSC_VITA_FBO_KEEP): see _glFramebufferTexture2D (shared.h). Off (default in the library): the detach drops the render target as before.
++GLboolean vgl_fb_detach_keep = GL_FALSE;
++void vglSetFramebufferDetachKeep(GLboolean on) {
++	vgl_fb_detach_keep = on ? GL_TRUE : GL_FALSE;
++}
++GLboolean vglGetFramebufferDetachKeep(void) {
++	return vgl_fb_detach_keep;
++}
++
+ inline __attribute__((always_inline)) void glGenFramebuffers(GLsizei n, GLuint *ids) {
+ 	THREAD_SAFE()
+ 
+diff --git a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -1198,8 +1198,14 @@
+ 			if (r && vgl_robust_scenes)
+ 				return scene_reset_failed();
+ 		} else {
++			// 0062: an object whose colour texture was detached (vglSetFramebufferDetachKeep) has nothing to draw into: no scene, whether or not the robust scenes are on (nxr6b: with them off the
++			// code logged and fell through to sceGxmBeginScene with the colour surface of the freed texture; a scene that cannot start is the only answer, and it is what the robust mode does)
++			if (!active_write_fb->tex) {
++				vgl_log("%s:%d Scene reset failed: framebuffer 0x%08X has no colour texture.\n", __FILE__, __LINE__, active_write_fb);
++				return scene_reset_failed();
++			}
+ 			// Double check that colorsurface and target texture are synced
+-			if (sceGxmColorSurfaceGetData(&active_write_fb->colorbuffer) != active_write_fb->tex->data) {
++			else if (sceGxmColorSurfaceGetData(&active_write_fb->colorbuffer) != active_write_fb->tex->data) {
+ 				_glFramebufferTexture2D(active_write_fb, GL_COLOR_ATTACHMENT0, active_write_fb->tex, 1);
+ 			}
+ 			
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1428,6 +1428,10 @@
+ GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples); // 1, 2 or 4 samples a pixel for this framebuffer object alone (framebuffers.c)
+ GLboolean vglFramebufferNoDepth(GLuint fb_id, GLint on); // 0038: 1: this framebuffer object's scenes get no depth/stencil memory (tile memory only: nothing loaded or stored; for objects whose scenes never test or write depth). 0: as before. GL_FALSE for an unknown object
+ void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes); // 0038: depth/stencil memory (KiB) of the live framebuffer objects that have a surface, how many have one, how many run without (nodepth), scenes begun without
++// 0062 (MSC_VITA_FBO_KEEP): glFramebufferTexture2D(GL_COLOR_ATTACHMENT0, texture 0) keeps the framebuffer object's width, height, render target and depth surface (default off: it dropped them, and read
++// the sizes of texture slot 0 into the object). A later attach of a texture of the same size takes them back, a different size makes them again. Dropped at glDeleteFramebuffers as always.
++void vglSetFramebufferDetachKeep(GLboolean on);
++GLboolean vglGetFramebufferDetachKeep(void);
+ void vglSetRenderTargetPool(uint32_t count, uint32_t kib); // 0039: keep up to `count` framebuffer render targets (and `kib` KiB of driver memory, 0: no cap) for the next object of the same shape; 0: off (gxm.c)
+ void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now); // 0039: reused, newly made, kept by the collector, let go, kept now, KiB kept now
+ void vglBackendTimingTake(uint32_t *calls, uint64_t *us, uint32_t *max_us); // 0040: [0] shader registrations, [1] glLinkProgram calls, [2] first vglDrawElementsDirect draws of linked programs: count, total and longest microseconds since the last call (arrays of 3), then reset (gxm.c)

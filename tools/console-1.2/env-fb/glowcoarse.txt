@@ -1,0 +1,14 @@
+# console-1.2 run glowcoarse: Glow chain in 4 passes
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route replay, version payload 1.3, role ab
+# gpu25: the game's own 4-pass glow route (MSC_FX_GLOW_COARSE=1; OFF by default). 2 of the 13-15 scenes of every walk-out / cut-scene picture that has the glow go away (host scene log, w8/gpu25.md); estimate gpu -2 ms and be -2 to -3 ms a picture. Compare [beph] scenes a picture (13-15 without, 11-13 with), [lane] gpu and be ms in the walk-out and a goal replay, and the [glow] counter line. Picture: host crops show a faint darker halo around characters in the walk-out; the owner judges it on the console.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was replay.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FX_GLOW_COARSE=1

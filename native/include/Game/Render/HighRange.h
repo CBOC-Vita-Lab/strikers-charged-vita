@@ -45,6 +45,16 @@ void InitializeHighRange(HighRange*);
 void SetHighRangeTargetsEnabled(HighRange*, int);
 void CompositeHighRange(HighRange*);
 void RenderHighRangeChain(HighRange*);
+// MSC_HELD_GLOW_HALF (np/scenecut.h): called once a picture with whether a held scene is on; true when this picture's glow chain is not drawn (its views are switched off)
+int HighRangeHeldSkip(int held);
+// MSC_GLOW_HALF_PLAY (pace13): the same in live play, while the renderer's ladder step is in force (or always with =2); `live` is live play (not a replay / cut-scene)
+int HighRangeLiveSkip(int live);
+void HighRangeChainOff(HighRange*);
+void HighRangeChainDrawn();
+// MSC_HELD_GLOW_STAGGER (gem2a): see HighRange.cpp
+bool HighRangeStaggerOn(int held);
+bool HighRangeChainStagger(HighRange*, int skipped);
+void HighRangeChainFull();
 void RenderHighRangePass(HighRange*, int, int);
 HighRangeTweaks* GetHighRangeTweaks();
 

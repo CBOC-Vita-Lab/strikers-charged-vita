@@ -1,0 +1,18 @@
+# console-1.2 run timing0: Pacing and pipeline items off together: queue depth, vblank priority, core 0, pace by vblank, bounded slip
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group timing, route tour, version payload 1.3, role ab
+# Screening run for the five pacing items at once (all on in the default). The Galaxy port found that its own pipeline switches, all on by default, cost it frames: the Observatory went from 38.1 to 40.6 fps with them off. Whether the same holds here is open and only a console can say: compare the frame time p50/p95 and the late-frame count with d1/d2. Only if it differs from the noise do the single runs pay off (core0off is in the session as the first of them; the others are tier 2).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_QUEUE_FIXED30=0
+MSC_VITA_PRIO_VBLANK=0
+MSC_VITA_CORE0_ALONE=0
+MSC_PACE_VBLANK=0
+MSC_SLIP=0

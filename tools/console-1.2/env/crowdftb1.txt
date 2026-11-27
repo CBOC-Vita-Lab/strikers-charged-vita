@@ -1,0 +1,13 @@
+# console-1.2 run crowdftb1: Celebration crowd near to far
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group gpu, route tour, version payload 1.3, role ab
+# MSC_VGX_CROWDFTB is OFF in the plan since 13 Nov (interim, review9: one-pixel rim differences in celebrations, proven on one stadium). This run turns it on: when the crowd's fill passes 15 screens, as in a goal celebration, its draws and quads go near to far so the depth test rejects covered sprites (model: 25 to 31 percent fewer shaded crowd fragments). Judge the celebration crowd's look and the celebration frame time against the reference.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_CROWDFTB=1

@@ -1,0 +1,73 @@
+# The online screens of the port on the host (MSC_ONLINE=1, MSC_ONLINE_API=fake, MSC_ONLINE_FAKE_ROSTER=big): the first-time notice, the hub,
+# every ranking tab, scrolling, and (with MSC_ONLINE_FAKE_FAIL=transport MSC_ONLINE_FAKE_FAIL_FROM=60) the game's own error dialog when
+# the service stops answering. Run with MSC_DUMP_FRAMES=100 for one picture per 100 frames.
+# Scene ids: 1 main menu, 10 popup, 40 online hub, 46 ranking, 51 login.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+press 100
+wait scene == 10 600
+log STATE first-time notice shown
+idle 150
+mash 100 30 scene != 10
+wait scene == 40 3000
+log STATE online hub
+idle 250
+# Leaderboard: the pad moves the pointer between the hub's buttons (right, down) and Cross presses it.
+vpress right 3 20
+vpress down 3 20
+vpress cross 3 120
+if scene != 46
+log pad route did not reach the ranking: pushing the scene
+scene 46 0
+endif
+idle 300
+log STATE ranking tab 1
+# scrolling: down arrow presses on the first tab
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+vpress down 3 10
+idle 120
+log STATE scrolled
+# the five tabs with R; one picture per tab
+vpress r 3 200
+log STATE ranking tab 2
+vpress r 3 200
+log STATE ranking tab 3
+vpress r 3 200
+log STATE ranking tab 4
+vpress r 3 200
+log STATE ranking tab 5
+vpress r 3 200
+log STATE ranking tab 1 again
+# the service goes away at 60 s: the next refresh ends in the game's own error dialog
+idle 1700
+log STATE after the outage
+vpress cross 3 200
+idle 400
+log STATE end
+exit

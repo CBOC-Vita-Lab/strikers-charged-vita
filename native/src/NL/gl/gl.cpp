@@ -1,3 +1,6 @@
+#include <string.h>
+#include "np/gsplit.h"
+#include "np/stall.h"   // MSC_STALL_TIMERS (stall10)
 #include "NL/gl/gl.h"
 #include "NL/gl/glFont.h"
 
@@ -102,12 +105,79 @@ bool glIsFrameActive()
 extern "C" void NpSkinLaneWait(void) __attribute__((weak));
 #endif
 
+#ifdef NP_NATIVE
+extern "C" int NpDiscardRehearseEvery(void) __attribute__((weak));   // Game/InputManager.cpp: MSC_DISCARD_REHEARSE (every Nth discarded GameBegin frame is sent hidden)
+extern "C" void np_gx_hidden(unsigned int on) __attribute__((weak));   // platform/gx: the frame being recorded is executed but never presented
+extern "C" int NpDiscardFastAllowed(void) __attribute__((weak));   // Game/InputManager.cpp: MSC_DISCARD_FAST and not a LAN / online / recorded game
+
+// The runs of discarded frames (stall10): how many in a row, how long, who asked, how many were not paced. One line when a run ends (with MSC_STALL_TIMERS=1 or MSC_DISCARD_FAST=1).
+namespace
+{
+struct DiscardRun
+{
+    unsigned frames, fast, runs, totalFrames, totalFast, rehearsed, totalRehearsed;
+    unsigned long long startUs, totalUs;
+    const char* why;
+    unsigned startState;
+};
+DiscardRun sDiscard = {0, 0, 0, 0, 0, 0, 0, 0, 0, "other", 0};
+}
+static int NpDiscardFastOn()
+{
+    return &NpDiscardFastAllowed != 0 && NpDiscardFastAllowed() != 0;
+}
+static void NpDiscardWhy(const char* why)
+{
+    sDiscard.why = why;
+}
+// MSC_DISCARD_REHEARSE: is this discarded frame one that is sent hidden? Only the walk-out's wait ("GameBegin"), every Nth frame of the run, and only where np_gx_hidden exists.
+static int NpDiscardRehearseNow()
+{
+    if (&NpDiscardRehearseEvery == 0 || &np_gx_hidden == 0) return 0;
+    const int n = NpDiscardRehearseEvery();
+    if (n == 0 || sDiscard.why == 0 || strncmp(sDiscard.why, "GameBegin", 9) != 0) return 0;
+    if (strcmp(sDiscard.why, "GameBegin hold") == 0) return 1;   // MSC_LOADHOLD: the walk-out's own first frames
+    return (sDiscard.frames % (unsigned)n) == 1 % (unsigned)n ? 1 : 0;   // (frames was counted by NpDiscardNote: 1 is the run's first)
+}
+static void NpDiscardNoteFast()
+{
+    ++sDiscard.fast;
+    ++sDiscard.totalFast;
+}
+static void NpDiscardNote(bool discarded)
+{
+    if (discarded)
+    {
+        if (sDiscard.frames == 0)
+        {
+            sDiscard.startUs = np::stall::NowUs();
+            sDiscard.startState = np::stall::State();
+        }
+        ++sDiscard.frames;
+        ++sDiscard.totalFrames;
+        return;
+    }
+    if (sDiscard.frames == 0) return;
+    const unsigned long long us = np::stall::NowUs() - sDiscard.startUs;
+    ++sDiscard.runs;
+    sDiscard.totalUs += us;
+    if (np::stall::On() || sDiscard.fast != 0 || sDiscard.rehearsed != 0)
+        fprintf(stderr, "[discard] run %u: %u frames discarded in %.1f ms (%.1f ms a frame), %u of them not paced (MSC_DISCARD_FAST), %u sent hidden (MSC_DISCARD_REHEARSE), asked by \"%s\", task state 0x%x -> 0x%x; all runs so far: %u frames, %u not paced, %.1f ms\n",
+                sDiscard.runs, sDiscard.frames, us / 1000.0, us / 1000.0 / sDiscard.frames, sDiscard.fast, sDiscard.rehearsed, sDiscard.why, sDiscard.startState, np::stall::State(), sDiscard.totalFrames, sDiscard.totalFast, sDiscard.totalUs / 1000.0);
+    sDiscard.frames = 0;
+    sDiscard.fast = 0;
+    sDiscard.rehearsed = 0;
+}
+#endif
+
 void glSendFrame()
 {
 #ifdef NP_NATIVE
+    NP_STALL_ARG("glSendFrame (arg: frames to discard)", gl_nDiscard);   // MSC_STALL_TIMERS (stall10)
     // NP (helper lane): the software-skinned arrays the send binds are finished first (ShaderSkinMesh.cpp)
     if (&NpSkinLaneWait != 0)
     {
+        NP_GS(NPGS_WAIT_JOIN);
         NpSkinLaneWait();
     }
 #endif
@@ -120,11 +190,38 @@ void glSendFrame()
 #endif
     if (gl_nDiscard > 0)
     {
+#ifdef NP_NATIVE
+        // MSC_DISCARD_FAST (stall10): a discarded frame is thrown away, but the game paces it at one retrace each (the original game waited for the screen to catch up): the
+        // loader that waits behind these frames (the front end's scenes at the end of loading, the walk-out's NIS) needs a count of frames, not of retraces. Not in a LAN / online / recorded game.
+        NpDiscardNote(true);
+        if (NpDiscardRehearseNow())
+        {
+            // MSC_DISCARD_REHEARSE (stall10): this frame goes to the renderer as a hidden one, the plain way (not forked: the hidden mark is recorded in the frame's own stream, here on the game thread)
+            ++sDiscard.rehearsed;
+            ++sDiscard.totalRehearsed;
+            np_gx_hidden(1);
+            glplatSendFrame();
+            gl_nDiscard -= 1;
+            gl_ViewReset();
+            gl_state = 0;
+            gl_frameCounter += 1;
+            return;
+        }
+        if (NpDiscardFastOn())
+        {
+            glplatAbortFrameFast();
+            NpDiscardNoteFast();
+        }
+        else
+#endif
         glplatAbortFrame();
         gl_nDiscard -= 1;
     }
     else
     {
+#ifdef NP_NATIVE
+        NpDiscardNote(false);
+#endif
 #ifdef NP_NATIVE
         gl_sendFrameCounter = gl_frameCounter;
         if (glplatSendFrameForked())
@@ -145,6 +242,14 @@ void glSendFrame()
 
 void glDiscardFrame(int nFrames)
 {
+    glDiscardFrameWhy(nFrames, "other");
+}
+
+void glDiscardFrameWhy(int nFrames, const char* why)
+{
+#ifdef NP_NATIVE
+    NpDiscardWhy(why);
+#endif
     if (nFrames > gl_nDiscard)
         gl_nDiscard = nFrames;
 }

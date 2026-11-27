@@ -1,6 +1,6 @@
 // Host test for include/port/chunk_endian.h against real game files (reads the owner's extracted disc,
 // nothing is written or copied).  Build/run:
-//   g++ -O1 -I<np>/include -o /tmp/ce tests/chunk_endian_test.cpp && /tmp/ce /home/claude/msc/game/files
+//   g++ -O1 -I<np>/include -o /tmp/ce tests/chunk_endian_test.cpp && /tmp/ce /work/msc/game/files
 // For every file with one of the chunk extensions: count chunks by an independent big-endian walk, swap
 // with port_chunk_swap_tree, walk again in host order the way nlChunk does, require equal counts.
 #include <stdio.h>

@@ -1,5 +1,8 @@
 #include "NL/nlDLListContainer.inl"
+#include "np/gsplit.h"
 #include "Game/Task/ParticleUpdateTask.h"
+
+#include "Game/Render/Amortize.h"
 
 #include "Game/Effects/EmissionManager.h"
 #include "Game/SharedStaticStorage.h"
@@ -44,6 +47,7 @@ void ParticleUpdateTask::Run(float dt)
     if (mUpdateEnabled && update)
     {
         EmissionManager* manager = EmissionManager::Instance();
+        NP_GS(NPGS_P_UPDATE);
         manager->Update(dt * mTimeScale);
     }
 
@@ -55,6 +59,10 @@ void ParticleUpdateTask::Run(float dt)
     if (mRenderEnabled && render)
     {
         EmissionManager* manager = EmissionManager::Instance();
+#ifdef NP_NATIVE
+        AmortizeHazeBeginFrame();   // MSC_FX_HAZE_CACHE
+#endif
+        NP_GS(NPGS_P_RENDER);
         manager->Render();
     }
 }

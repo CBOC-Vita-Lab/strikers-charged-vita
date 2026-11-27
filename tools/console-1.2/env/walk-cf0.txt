@@ -1,0 +1,14 @@
+# console-1.2 run walk-cf0: Walk-out and goal cut-scene, A side (defaults), Vice; its first two [lane] windows also read the kick-off (kick-d1)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route tour, version payload 1.3, role ab
+# walk15.md: A side of the crowd cluster flag: `[lane]` gpu / fe / be in the walk-out window and the goal windows, `[head]` cut-scene p50, `[hitch]` counts. The first two `[lane]` windows after kick-off: fps against r11's 26-28 (Vice).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_CROWD_CLUSTERFLAG=0

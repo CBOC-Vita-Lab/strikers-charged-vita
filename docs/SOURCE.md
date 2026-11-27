@@ -1,5 +1,31 @@
 # Source Record
 
+Versions are plain numbers: the game's `APP_VER` is `02.00` for 2.0, `cboc-release.json` says `"version": "2.0"`,
+and the release is tagged `v2.0`. Every release is one VPK, `Strikers-Charged-Vita.vpk`, with Settings inside the
+game (the in-game Settings screen, opened from the pause menu's VITA SETTINGS or OPTIONS > VITA SETTINGS, title ID `MSCN00003`).
+
+## Version 2.0 (`strikers-v2.0`)
+
+| Item | Value |
+| --- | --- |
+| Package | `Strikers-Charged-Vita.vpk` |
+| Title ID | `MSCN00003` (same app as every earlier release; installs as an update) |
+| `APP_VER` | `02.00` |
+| Executable SHA-256 | `d7bcec2fbab91f232586e453c45462bce27bf1b24c8cdc19562f6d138fe280f7` |
+| VPK SHA-256 | `4d7793aa583f38a30c09c4278e0f48c1a5a393c669add18239e257c1fbfc743f` |
+| Shader pack | `shadercache/874a13e0.pack` (4,281 compiled Vita shaders) + `vgx_shaderlist.bin` (`core33`: 830 marked boot programs, 238 `pal60` keys) |
+| Player build flags | `NP_PLAYER=1 NP_LOGGING=0 NP_APP_VER=02.00 NP_PGO_ALL=1`, ThinLTO `-O2` + fresh ARMv7 NEON PGO |
+| Toolchain | VitaSDK GCC 15.2.0, Clang 18.1.3 |
+
+2.0 is the major release that follows 1.1. 1.2 was distributed briefly and then withdrawn, so 2.0 carries both:
+the 1.2 changes (the Settings pages, online play beta, the adaptive picture work, the third-party notices) and the
+2.0 smoothness work, full-game shader pack (`pack33`), fresh ARMv7 NEON PGO profile, Mega Strike fixes, and Spanish and French for the port's own menus and messages.
+The package was made with `tools/repack-release.py --app-version 02.00 --shadercache <pack33>` with LiveArea `template.xml` upgraded to `content-rev="5"` (no Settings tile).
+`appUpdateFrom` lists the 1.1 executable (`8d58eea7...`), so 1.1 updates in place while preserving game files, saves and settings.
+
+Verification for this release: host tests (`tests/`, including `test_livearea_art_cpp.py` and `test_bootart_cpp.py`, SDK unit tests, native settings & runtime suites, `verify_vpk.py`, `public_scan.py`),
+Vita3K runs, and physical PS Vita installation, read-back SHA-256 verification, first-boot on-device loading screen (`vita_bootart.cpp`) and LiveArea/bubble (`vita_livearea_art.cpp`) generation, full-game shader compilation & warm-up, Mega Strike/Save A/B testing, and live playtesting.
+
 ## Version 1.1 (`strikers-v1.1`)
 
 | Item | Value |
@@ -15,9 +41,8 @@ The executable was built from this tree with the command in
 [Building](BUILDING.md). The package was made with
 `tools/repack-release.py` from the previous release's VPK, so the startup
 shader cache, LiveArea images and `param.sfo` are byte-identical to
-`strikers-settings-20261019`. Only `eboot.bin` and `licenses/` come from the
-new build. [RELEASE.json](RELEASE.json) lists the members that were carried
-over.
+the October 19, 2026 update of 1.0. Only `eboot.bin` and `licenses/` come from the
+new build.
 
 The source is the previous release plus the performance-test line developed on
 18-23 Oct (shader cache, allocation recovery, input, diagnostics), the Mega
@@ -30,18 +55,18 @@ its hash.
 Verification for this release: host tests (`tests/` and the SDK unit tests),
 Vita3K runs of start-up, menus, the Strikers 101 Mega Saves lesson and
 Options > Visual, and desktop-harness runs of menus, a match and Mega Saves for
-the rendering and frame-rate changes. It has **not** been run on a physical Vita yet; see
-[Known Issues](../KNOWN-ISSUES.md).
+the rendering and frame-rate changes. It had **not** been run on a physical Vita
+before release.
 
-## Previous release `strikers-settings-20261019`
+## Version 1.0 and its October updates
 
 | Item | Value |
 | --- | --- |
-| Package | `Strikers-settings-20261019.vpk` |
-| Executable SHA-256 | `0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4` |
-| VPK SHA-256 | `43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a` |
+| Package | One VPK of the same app, `MSCN00003` (published then under a dated file name; from 1.1 on it is `Strikers-Charged-Vita.vpk`). The Settings update added the LiveArea Settings button to the game itself |
+| Executable SHA-256 (October 19 update) | `0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4` |
+| VPK SHA-256 (October 19 update) | `43543e5bce2f162f6678bc2baacbdcbeb03a4593493c0e401a5ad6534623400a` |
 
 That executable was installed on a physical Vita through a guarded
 executable-only update and read back. Saves and settings were preserved, and
-LiveArea Settings opened, returned and reopened. The tree at tag
-`strikers-settings-20261019` is its source.
+LiveArea Settings opened, returned and reopened. Its source is the commit history
+up to October 19, 2026.

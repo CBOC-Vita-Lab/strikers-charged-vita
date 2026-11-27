@@ -1,0 +1,14 @@
+# console-1.2 run scn-on-v: Held moments with the held-scene governor and the fill governor's hold (defaults), Vice tour
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group s30, route tour, version payload 1.3, role ab
+# scenes30: B side (plan defaults). Read per moment the `[head]` lines of walk-out, celebration, mega, mega-cut, replay: late % (target under 5 %: each picture shown 2 refreshes), GPU p95 and 'over 33.4 ms ... GPU' counts; `[heldgov]` lines (level moves, pictures at each level per scene, GPU mean at the end of each scene); `[vgx] fill governor` lines (moves to 0 while the GPU is over 33.4 ms should be gone: the console showed 18 in walk-outs before); `[present]` hold mix. Look: far crowd rows, players' shadow shapes and the glow haze in the walk-out and the goal celebration (they change only while the governor is engaged).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500

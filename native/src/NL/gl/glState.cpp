@@ -1,4 +1,5 @@
 #include "NL/gl/glState.h"
+#include "NL/gl/glStateBits.h"
 
 #include "NL/gl/gl.h"
 #include "NL/gl/glMatrix.h"
@@ -282,48 +283,15 @@ u32 glGetTexture(const char* textureName)
 
 u32 glGetRasterState(unsigned long raster, eGLState state)
 {
-    gl_StateBitfield* p = &packed_raster[state];
-    s32 numBits = p->numBits;
-    unsigned long out = 0;
-
-    for (s32 i = 0; i < numBits; i++)
-    {
-        if (raster & (1u << (i + p->startBit)))
-        {
-            out |= (1u << i);
-        }
-    }
-
-    return out;
+    const gl_StateBitfield* p = &packed_raster[state];
+    return glStateBitsGet(raster, p->startBit, p->numBits);
 }
 
 u32 glSetRasterState(eGLState state, unsigned long value)
 {
-    gl_StateBitfield* p = &packed_raster[state];
-    s32* pn = &p->numBits;
-    unsigned long out = 0;
-    s32 i;
-
-    for (i = 0; i < *pn; i++)
-    {
-        if (_state.m_State & (1u << (i + p->startBit)))
-        {
-            out |= (1u << i);
-        }
-    }
-
-    for (i = 0; i < *pn; i++)
-    {
-        if (value & (1u << i))
-        {
-            _state.m_State = _state.m_State | (1u << (i + p->startBit));
-        }
-        else
-        {
-            _state.m_State = _state.m_State & ~(1u << (i + p->startBit));
-        }
-    }
-
+    const gl_StateBitfield* p = &packed_raster[state];
+    const unsigned long out = glStateBitsGet(_state.m_State, p->startBit, p->numBits);
+    _state.m_State = glStateBitsPut(_state.m_State, p->startBit, p->numBits, value);
     return out;
 }
 

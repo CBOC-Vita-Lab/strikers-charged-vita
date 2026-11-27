@@ -23,7 +23,7 @@ def main(path, every=1):
             shader = line
         elif 'renderer start-up' in line or 'full screen:' in line or 'MSC_VITA_RENDER' in line:
             surface.append(line)
-        elif re.search(r'run ended|RUN ENDED|CRASH|STALL|fatal|FATAL|reached MSC_MAX_FRAMES|script exit|\[script\] .*(TIMEOUT|exit)', line):
+        elif re.search(r'run ended|RUN ENDED|CRASH|STALL|fatal|FATAL|reached MSC_MAX_FRAMES|script exit|EXIT STUCK|\[exit\] step|\[script\] .*(TIMEOUT|exit)', line):
             end.append(line)
     print('== start-up'); [print('  ' + l[:200]) for l in surface]
     print('== script / state timeline'); [print('  ' + l[:160]) for l in script if 'STATE' in l or 'TIMEOUT' in l or 'end' in l or 'first run' in l or 'confirmed' in l]

@@ -1,0 +1,13 @@
+# console-1.2 run core0off: Threads may run on core 0 again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group timing, route tour, version payload 1.3, role ab
+# Single run of one timing0 item, the first to pay off: MSC_VITA_CORE0_ALONE moves the library threads (audio, file, network) off core 0 so the game thread has it alone, the largest scheduling change of the five. If timing0 beats the noise and this run does too, core 0 is the cause; if only timing0 does, run the tier-2 singles.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_CORE0_ALONE=0

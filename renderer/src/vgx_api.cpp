@@ -521,6 +521,18 @@ void GXSetPixelFmt(GXPixelFmt fmt, GXZFmt16 zfmt) {
 }
 void GXSetDstAlpha(GXBool enable, u8 alpha) { rec::BP(0x42, alpha | ((enable ? 1u : 0u) << 8)); }
 void GXSetFog(GXFogType type, f32 startz, f32 endz, f32 nearz, f32 farz, GXColor color) {
+    // MSC_REC_FAST: the last arguments and the register words made from them (the stream is the five BP records either way: 190 calls a picture, 370 instructions each)
+    static struct { uint32_t t, s, e, n, f, w[4]; bool ok; } memo;
+    const uint32_t ks = f2u(startz), ke = f2u(endz), kn = f2u(nearz), kf = f2u(farz);
+    if (rec::g_recFast && memo.ok && ((memo.t == static_cast<uint32_t>(type) && memo.s == ks && memo.e == ke && memo.n == kn && memo.f == kf) || rec::g_recBreak == 2)) {
+        ++rec::g_recCnt[2];
+        rec::BP(0xEE, memo.w[0]);
+        rec::BP(0xEF, memo.w[1]);
+        rec::BP(0xF0, memo.w[2]);
+        rec::BP(0xF1, memo.w[3]);
+        rec::BP(0xF2, color.b | (static_cast<uint32_t>(color.g) << 8) | (static_cast<uint32_t>(color.r) << 16));
+        return;
+    }
     const uint32_t fsel = static_cast<uint32_t>(type) & 7;
     const bool ortho = (static_cast<uint32_t>(type) & 8) != 0;
     float a, c;
@@ -549,10 +561,14 @@ void GXSetFog(GXFogType type, f32 startz, f32 endz, f32 nearz, f32 farz, GXColor
         bShift = static_cast<uint32_t>(expn + 1);
         c = C;
     }
-    rec::BP(0xEE, f2u(a) >> 12);
-    rec::BP(0xEF, bMant & 0xFFFFFF);
-    rec::BP(0xF0, bShift & 0x1F);
-    rec::BP(0xF1, (f2u(c) >> 12) | ((ortho ? 1u : 0u) << 20) | (fsel << 21));
+    memo.t = static_cast<uint32_t>(type); memo.s = ks; memo.e = ke; memo.n = kn; memo.f = kf;
+    memo.w[0] = f2u(a) >> 12; memo.w[1] = bMant & 0xFFFFFF; memo.w[2] = bShift & 0x1F; memo.w[3] = (f2u(c) >> 12) | ((ortho ? 1u : 0u) << 20) | (fsel << 21);
+    memo.ok = true;
+    ++rec::g_recCnt[3];
+    rec::BP(0xEE, memo.w[0]);
+    rec::BP(0xEF, memo.w[1]);
+    rec::BP(0xF0, memo.w[2]);
+    rec::BP(0xF1, memo.w[3]);
     rec::BP(0xF2, color.b | (static_cast<uint32_t>(color.g) << 8) | (static_cast<uint32_t>(color.r) << 16));
 }
 
@@ -659,6 +675,7 @@ void GXSetCopyClamp(GXFBClamp) {}
 void GXClearBoundingBox(void) {}
 void GXCopyDisp(void*, GXBool clear) { rec::CopyDisp(clear != GX_FALSE); }
 void GXCopyTex(void* dest, GXBool clear) { rec::CopyTex(dest, clear != GX_FALSE); }
+extern "C" void VgxNextCopyClearOnly(void) { rec::NextCopyClearOnly(); }   // nxr4b (MSC_GLOW_L0OFF=2): the game, just before a GXCopyTex: nothing reads this copy, keep only its clear
 void GXDestroyCopyTex(void* dest) { rec::DestroyCopy(dest); }
 
 // -------------------------------------------------------------------- VI

@@ -16,6 +16,8 @@
 #include "NL/gl/glState.h"
 #include "NL/nlString.h"
 #include "NL/platvmath.h"
+#include "platform/sdk/net/np_lan.h"
+#include "platform/sdk/net/np_settings_help.h"
 
 static nlFloatColour s_currentAssetColour;
 static const nlVector3 s_quadPositions[4] = {
@@ -25,6 +27,7 @@ static const nlVector3 s_quadPositions[4] = {
     { 50.0f, 50.0f, 0.0f },
 };
 FEScene* FERender::m_pRenderScene;
+FEScene* FERender::m_pLastScene;
 
 RenderImageCallback g_pfnRenderImage;
 static const unsigned long grabTex = nlStringLowerHash("target/grab_texture");
@@ -241,7 +244,22 @@ void FERender::RenderScene(FEScene* scene)
             }
         }
     }
+    NpSettingsHelpRender(scene, (GLView*)scene->m_uRenderView, scene->m_matView);   // np (set18): the VITA SETTINGS help line, in the panel's own view
+    m_pLastScene = scene;   // np
     m_pRenderScene = 0;
+}
+
+// np: the online banner (a warning of the transport during a match; never a popup, never waits for anything): once per frame, drawn on top of the
+// scenes with the view and matrix of the one drawn last. Nothing outside an online session.
+void FERender::RenderNotice()
+{
+    FEScene* scene = m_pLastScene;
+    m_pLastScene = 0;
+    if (scene == 0)
+    {
+        return;
+    }
+    NpNoticeRender((GLView*)scene->m_uRenderView, scene->m_matView);
 }
 
 unsigned char FERender::RenderImageInstance(const TLImageInstance* pTLImageInstance, const nlMatrix4& matrix)

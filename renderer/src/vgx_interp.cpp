@@ -24,6 +24,7 @@
 // MSC_VGX_INTERP_TEXM (a matrix that selects a cell of an atlas must not pass through the
 // cells between).
 #include "vgx_interp.h"
+#include "vgx_workload.h"
 #include "vgx_shadergen.h"
 
 #include <algorithm>
@@ -976,7 +977,7 @@ bool Begin(CmdBuf& buf, bool wantPairs) {
                                  static_cast<unsigned>(i), buf.draws[i].vbuf, buf.draws[i].idxOffset, buf.draws[i].idxCount, buf.draws[i].vsId, buf.draws[i].fsId);
         {
             // MSC_VGX_INTERP_DUMP=<frame>: every draw of that frame with what it was paired with.
-            static const long dumpFrame = EnvInt("MSC_VGX_INTERP_DUMP", -1);
+            const long dumpFrame = static_cast<long>(VGX_KNOB(EnvInt("MSC_VGX_INTERP_DUMP", -1)));
             if (dumpFrame >= 0 && static_cast<uint64_t>(dumpFrame) == buf.frame) {
                 for (size_t i = 0; i < buf.draws.size(); ++i) {
                     const DrawRec& d = buf.draws[i];
@@ -1053,6 +1054,8 @@ const char* ReasonText(uint8_t r) {
 }
 
 void Submit(CmdBuf& buf) {
+    workload::BackendScope lane; // (MSC_VGX_WORKLOAD_PROBE: the back-end thread's cost of a picture, whatever the mode)
+    workload::LateScope lateLane; // (lessons17, MSC_LATE_CAUSE: this picture's back-end CPU and the newest GPU time, for the "[late]" line)
     Init();
     if (g_p.mode == 0) {
         backend::Execute(buf);

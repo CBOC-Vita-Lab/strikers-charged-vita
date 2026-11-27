@@ -1,0 +1,17 @@
+# console-1.2 run samp-dump-walkout: On-console sampler: The Dump walk-out only (NEEDS CapUnlocker)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w18, route gsdump, version payload 1.3, role ab
+# gxp17.md: the walk-out is about 18 s: .bin #1 and #2 only, then quit; the walk-out is the lane-bound scene (50 ms). NEEDS CapUnlocker.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was fb-dump-goal.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump-goal.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_SAMPLER=1
+MSC_SAMPLER_TAG=dump-walkout
+MSC_SAMPLER_SECS=10

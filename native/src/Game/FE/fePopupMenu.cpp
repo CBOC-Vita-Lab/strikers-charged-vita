@@ -196,7 +196,23 @@ static const PopupEntry PopupEntries[] = {
     { 0, "POPUP_DELETED_MII", { "POPUP_OK", 0, 0, 0 }, 0 },
     { 0, "POPUP_LOW_BATTERY", { "POPUP_OK", 0, 0, 0 }, 0 },
     { 0, "POPUP_E3_THANKS_FOR_PLAYING", { "POPUP_OK", 0, 0, 0 }, 0 },
+    { 0, 0, { "NP_BUTTON_0", "NP_BUTTON_1", "NP_BUTTON_2", 0 }, 0 },   // POPUP_NP_TEXT: texts come from NpPopup* below (never looked up)
 };
+
+// np: the text popup's request (platform/sdk/net/np_menu_ui.cpp fills it just before Create)
+const unsigned short* NpPopupMessage();
+const unsigned short* NpPopupOption(int index);
+int NpPopupOptionCount();
+int NpPopupHighlight();
+bool NpPopupWide();
+// np: the connection-lost message of an online session says why and that the match cannot be resumed (null/empty = the game's own text)
+const unsigned short* NpPopupConnectionLostText();
+// np: why the lobby found no game to join, when a console with another version or rules was refused (null/empty = the game's own text)
+const unsigned short* NpPopupNoGamesText();
+// np (mpbeta27): the sync-error popup in plain words, and that a report will be offered (null/empty = the game's own text)
+const unsigned short* NpPopupSyncErrorText();
+// np (int34): why the online service refused the chosen name (reserved, taken, not allowed, format; null/empty = the game's own text)
+const unsigned short* NpPopupBadNameText();
 
 FEPopupMenu::FEPopupMenu()
     : mMenuDisplayed(false)
@@ -633,6 +649,15 @@ void FEPopupMenu::Create(ePopupMenu type, Function<FnVoidVoid> option1,
     }
     case POPUP_NEW_TOURNAMENT:
         break;
+    case POPUP_NP_TEXT:
+    {
+        mPopup.pMessage = new (8, false) WStr(NpPopupMessage());
+        mPopup.numOptions = NpPopupOptionCount();
+        for (int optionIndex = 0; optionIndex < 3; ++optionIndex)
+            mPopup.pOptionLabels[optionIndex] = optionIndex < mPopup.numOptions ? new (8, false) WStr(NpPopupOption(optionIndex)) : 0;
+        mWideMessageBox = NpPopupWide();
+        break;
+    }
     default:
         switch (type)
         {
@@ -656,6 +681,46 @@ void FEPopupMenu::Create(ePopupMenu type, Function<FnVoidVoid> option1,
         }
         }
         mPopup.pMessage = popupEntry->mMessage ? new (8, false) WStr(g_pLocalization->GetString(popupEntry->mMessage)) : 0;
+        if (type == POPUP_NETWORK_NO_GAMES_TO_JOIN)
+        {
+            const unsigned short* refused = NpPopupNoGamesText();
+            if (refused != 0 && refused[0] != 0)
+            {
+                delete mPopup.pMessage;
+                mPopup.pMessage = new (8, false) WStr(refused);
+                mWideMessageBox = true;
+            }
+        }
+        if (type == POPUP_NETWORK_SYNC_ERROR)
+        {
+            const unsigned short* sync = NpPopupSyncErrorText();
+            if (sync != 0 && sync[0] != 0)
+            {
+                delete mPopup.pMessage;
+                mPopup.pMessage = new (8, false) WStr(sync);
+                mWideMessageBox = true;
+            }
+        }
+        if (type == POPUP_NETWORK_LOGINBADNAME)
+        {
+            const unsigned short* bad = NpPopupBadNameText();
+            if (bad != 0 && bad[0] != 0)
+            {
+                delete mPopup.pMessage;
+                mPopup.pMessage = new (8, false) WStr(bad);
+                mWideMessageBox = true;
+            }
+        }
+        if (type == POPUP_NETWORK_CONNECTION_LOST)
+        {
+            const unsigned short* lost = NpPopupConnectionLostText();   // online session: why the link ended, and that a match cannot be resumed
+            if (lost != 0 && lost[0] != 0)
+            {
+                delete mPopup.pMessage;
+                mPopup.pMessage = new (8, false) WStr(lost);
+                mWideMessageBox = true;
+            }
+        }
         mPopup.numOptions = 0;
         for (int optionIndex = 0; optionIndex < 3; ++optionIndex)
         {
@@ -675,7 +740,18 @@ void FEPopupMenu::Create(ePopupMenu type, Function<FnVoidVoid> option1,
     mBackCallback = option4;
     mMenuCreated = true;
     mType = type;
-    mHighlightedOption = popupEntry->mInitialHighlight;
+    mHighlightedOption = (type == POPUP_NP_TEXT) ? NpPopupHighlight() : popupEntry->mInitialHighlight;
+}
+
+void FEPopupMenu::NpSetMessage(const unsigned short* text)
+{
+    if (!mMenuCreated || mPresentation == 0 || mPopup.pMessage == 0)
+        return;
+    typedef BasicString<unsigned short, Detail::TempStringAllocator> WStr;
+    delete mPopup.pMessage;
+    mPopup.pMessage = new (8, false) WStr(text);
+    TLTextInstance* pText = FEFinder<TLTextInstance, 3>::Find<FEPresentation>(mPresentation, "Slide1", "Layer", "Message");
+    pText->SetString(mPopup.pMessage->begin());
 }
 
 void FEPopupMenu::CentrePopup(float totalHeight, float topOfMessageBox)

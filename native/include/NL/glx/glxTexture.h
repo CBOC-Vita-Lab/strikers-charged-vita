@@ -69,6 +69,8 @@ public:
         m_Levels = 0;
         m_MaxLevel = 0;
         m_Format = GXTex_Num;
+        m_NpFloorBaked = 0;
+        m_NpNoTouch = 0;
         m_nPaletteEntries = 0;
         m_bMissingTexture = false;
         m_SwizzledData = 0;
@@ -97,7 +99,8 @@ public:
     /* 0x02 */ u16 m_Height;
     /* 0x04 */ u8 m_Levels;
     /* 0x05 */ u8 m_MaxLevel;
-    /* 0x06 */ u8 _pad06[2];
+    /* 0x06 */ u8 m_NpFloorBaked;   // MSC_FLOOR_BAKE (np/floorbake.h): this diffuse holds the average of its reflection
+    /* 0x07 */ u8 m_NpNoTouch;      // MSC_TEX_PRETOUCH: made by CreateWithMemory (a render target's or a Mii icon's memory): its contents are drawn into, not loaded; never shown to the renderer ahead of use
     /* 0x08 */ eGXTextureFormat m_Format;
     /* 0x0C */ s16 m_nPaletteEntries;
     /* 0x0E */ u16 m_TextureIndex;

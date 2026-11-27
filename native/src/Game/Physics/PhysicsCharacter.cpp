@@ -1,5 +1,6 @@
 #include "NL/nlDLListContainer.inl"
 #include "Game/Physics/PhysicsCharacter.h"
+#include "np/physpose.h"
 #include "Game/Physics/PhysicsEventQueue.h"
 
 #include "Game/AI/Fielder.h"
@@ -557,7 +558,7 @@ static inline float Clamp(float value, float low, float high)
     return value <= high ? value : high;
 }
 
-void PhysicsCharacter::PostUpdate()
+void PhysicsCharacter::PostUpdatePre()
 {
     PhysicsObject::PostUpdate();
 
@@ -595,6 +596,12 @@ void PhysicsCharacter::PostUpdate()
     characterPosition.y = position.y;
     characterPosition.z = 0.0f;
     SetCharacterPosition(characterPosition);
+}
+
+void PhysicsCharacter::PostUpdate()
+{
+    if (!NpPhysPosePending(m_pAICharacter))
+        PostUpdatePre();
     m_pAICharacter->PostPhysicsUpdate();
 
     if (m_bSupportingBallThisFrame)

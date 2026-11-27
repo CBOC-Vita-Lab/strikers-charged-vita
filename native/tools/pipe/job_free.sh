@@ -5,9 +5,9 @@
 #   thread, MSC_FS_FREEGATE=2      such a free is kept until the join
 # each compared with the reference (simulation digests, renderer frame hashes, [nav] lines) and reported per scene (main thread, job, critical path).
 #   tools/heavy.sh -t 650 env V=a7 SRC=<snapshot> BUILD=1 tools/pipe/job_free.sh
-cd /home/claude/msc/npw/W5PIPE || exit 1
+cd /work/msc/npw/W5PIPE || exit 1
 V=${V:-a7}
-B=/home/claude/msc/build/np/W5PIPE
+B=/work/msc/build/np/W5PIPE
 [ -n "$BUILD" ] && { TAILN=6 tools/pipe/build.sh $V ${BUILDVARS:-OPT=-O2 NOPIC=1 LTO=none} || exit 1; }
 export MAXF=${MAXF:-3500}
 H="MSC_FS_FREEHIST=1"

@@ -320,25 +320,36 @@ void NetworkSocket::Update(float)
             }
         }
 
-        if (TransportSocketIsOpen(&mDirectSocket))
-        {
-            int received;
-            do
-            {
-                u32 address;
-                u16 port;
-                received = TransportSocketReceiveFrom(&mDirectSocket, mPacketBuffer,
-                    sizeof(mPacketBuffer), &address, &port);
-                if (received > 0)
-                {
-                    mReliableSocket.ReceiveDatagram(mPacketBuffer, received,
-                        (u8*)&address, port);
-                }
-            } while (received > 0);
-        }
+        ReceiveOnly();
     }
 
     mReliableSocket.Update();
+}
+
+// delay19 (MSC_LAN_DRAIN / MSC_LAN_RETRY_US): the receive loop of Update() alone. It hands every datagram that has already arrived to the reliable
+// socket and sends nothing of its own on the frame clock, so it is safe to repeat in a frame; Update() (frame-counted transport state, a stand-alone ack
+// per call) must run once a frame only. Returns the datagrams read.
+int NetworkSocket::ReceiveOnly()
+{
+    int count = 0;
+    if (mInitialized && mDirectMode && TransportSocketIsOpen(&mDirectSocket))
+    {
+        int received;
+        do
+        {
+            u32 address;
+            u16 port;
+            received = TransportSocketReceiveFrom(&mDirectSocket, mPacketBuffer,
+                sizeof(mPacketBuffer), &address, &port);
+            if (received > 0)
+            {
+                mReliableSocket.ReceiveDatagram(mPacketBuffer, received,
+                    (u8*)&address, port);
+                ++count;
+            }
+        } while (received > 0);
+    }
+    return count;
 }
 
 void NetworkSocket::ReceiveUnreliable(

@@ -1,0 +1,16 @@
+# console-1.2 run samp-dump-play: On-console sampler: The Dump, 2 minutes of open play after kick-off (NEEDS CapUnlocker)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w18, route worstgpu, version payload 1.3, role ab
+# gxp17.md: copy the unstripped mscharged-np.elf of the SAME build and sampler-*.bin, `python3 -I tools/console-1.2/sampler_report.py mscharged-np.elf sampler-*.bin --top 40`: run/wait split, subsystems, top 40, `stopped it x %` (overhead, expect 2-3 %). NEEDS CapUnlocker.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_SAMPLER=1
+MSC_SAMPLER_TAG=dump-play
+MSC_SAMPLER_SECS=20

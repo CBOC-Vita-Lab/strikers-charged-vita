@@ -1,0 +1,14 @@
+# console-1.2 run bp0: Back-pressure before the pad off (wave 10 frames-in-flight limit)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group pacing, route tour, version payload 1.3, role ab
+# MSC_LAT_BP=0 (default since pacing11: 1). Held 30 at r9: pad -> shown p50 110 ms, of which about 33 ms is a finished picture waiting a whole 30 Hz interval for its flip behind a picture queued ahead of it, and 160-200 ms in heavy moments because the depth 2 limit stood aside or switched itself off. With it on a picture starts only when at most 1 earlier picture is unshown (depth found from the cadence, 1-4). Read the [lat] pad->shown lines and presented->handed (expect about 70-75 ms steady 30), the [fps] back-pressure lines (depth, waits, raises taken back), and that [lane] fps and the [present] hold mix are the same as the run without this one. Any lost frame rate or a new 2-refresh mix in heavy moments is a failure of the depth control, not of this run.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LAT_BP=0

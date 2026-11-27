@@ -5,8 +5,8 @@
 # out/core.shl  = the eager tier: front-end + base + every key used by at least 10 % of the match runs (tiers.py)
 set -e
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
-R=/home/claude/msc/build/np/W5SEED
-OLD=/home/claude/msc/build/np/W5INT/seed/shadercache/vgx_shaderlist.bin
+R=/work/msc/build/np/W5SEED
+OLD=/work/msc/build/np/W5INT/seed/shadercache/vgx_shaderlist.bin
 OUT=${1:?out dir}
 mkdir -p $OUT
 cd $HERE

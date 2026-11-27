@@ -1,0 +1,2 @@
+# Names that tools/check_env_file.py accepts as having a reader although no source file names them as a string literal (one name, or PREFIX*, a reason after #).
+# Empty on purpose: the repository's console env files all pass without it. Add a line here ONLY with the reason (a name built at run time, a reader in the emulator or a console tool).

@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 enum { VGXN_ROLE_COLLECTOR = 0, VGXN_ROLE_DISPLAY_QUEUE = 1, VGXN_ROLE_PLAYER = 2, VGXN_ROLE_RENDER = 3 };
+enum { VGXN_ROLE_PLAN = 0x100 };   // (1.3) or-ed into a role for core_mask: the plan's mask without the fourth core (where to go when the system refuses it)
 
 typedef struct vgxn_vita_services {
     unsigned int size;                                  // sizeof(vgxn_vita_services)
@@ -26,6 +27,18 @@ typedef struct vgxn_vita_services {
     void (*boot_progress)(int kind, unsigned done, unsigned total);   // VGXN_BOOT_*: seed copy, shader warm-up, presents
 } vgxn_vita_services;
 enum { VGXN_BOOT_SEED_COPY = 1, VGXN_BOOT_WARMUP = 2, VGXN_BOOT_PRESENT = 3 };
+
+// (1.3) Why vgxn_init returned 0, for the platform's fatal screen: one of VGXN_START_* (0 when the start did not fail). The renderer's own text is in the log.
+enum {
+    VGXN_START_NONE = 0,
+    VGXN_START_NO_COMPILER = 1,      // the shader compiler module (libshacccg.suprx) is not in ur0:data
+    VGXN_START_NO_MEMORY_POOL = 2,   // vitaGL started without any memory pool
+    VGXN_START_VIDEO_MEMORY = 3,     // vitaGL could not allocate its video memory pool
+    VGXN_START_SHADER_TEST = 4,      // run-time shader compilation does not work
+    VGXN_START_BACKEND = 5,          // the GL back end did not initialise
+    VGXN_START_THREAD = 6            // the render thread could not be created
+};
+int vgxn_vita_start_failure(void);
 
 // Before vgxn_init. The structure is copied.
 void vgxn_vita_set_services(const vgxn_vita_services* services);

@@ -4,12 +4,12 @@
 # 1. gen_dtl.py from the symbols of the plain executable  2. dtl.cpp + generated translation  3. relink with dtl.o
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd); NP=$(cd "$HERE/../.." && pwd)
-BR=${1:-/home/claude/msc/build/np/NPG2}
+BR=${1:-/work/msc/build/np/NPG2}
 D=$BR/dtl; mkdir -p $D/out
 EXE=$BR/host32/np-host32-full-null
 RT=$D/rt
 if [ ! -d $RT ]; then
-  cp -r /home/claude/msc/one/port/runtime/include $RT
+  cp -r /work/msc/one/port/runtime/include $RT
   sed -i 's/defined(__x86_64__)/(defined(__x86_64__) || defined(__i386__))/g' $RT/isa/*.h $RT/*.h
 fi
 [ -f $NP/tools/difftest/index.pkl ] || python3 $NP/tools/difftest/mkindex.py

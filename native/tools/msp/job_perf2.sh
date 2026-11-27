@@ -3,8 +3,8 @@
 #   pp1  default (frame pacing on, Performance Mode off)       pp0  MSC_FRAME_PACING=0 (what the pacing hooks cost)       pm1f  Performance Mode on
 #   tools/heavy.sh -t 900 env FS=nofork tools/msp/job_perf2.sh
 NP=$(cd "$(dirname "$0")/../.." && pwd); cd $NP || exit 1
-B=${BUILD_ROOT:-/home/claude/msc/build/np/MSP}
-NAV=${NAV:-/home/claude/msc/tools/scripts/nav_match60.txt}
+B=${BUILD_ROOT:-/work/msc/build/np/MSP}
+NAV=${NAV:-/work/msc/tools/scripts/nav_match60.txt}
 run() {  # run <tag> [VAR=value ...]
   local t=$1; shift
   TMO=${RUNT:-330} tools/msp/perf_run.sh $t ${MAXF:-4400} MSC_INPUT_SCRIPT=$NAV MSC_VIRTUAL_TIME=1 MSC_VIRTUAL_FRAME_US=${FRAME_US:-33000} MSC_FRAMESEND=${FS:-nofork} "$@" 2>&1 | tail -3

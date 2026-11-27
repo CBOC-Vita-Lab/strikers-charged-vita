@@ -4,7 +4,7 @@
 #   make -C platform/vita TARGET=armhf check       # the same under qemu-arm (run through tools/heavy.sh)
 #   make -C platform/vita tsan                     # x86-64 with ThreadSanitizer
 TARGET ?= x86_64
-OUT    ?= /home/claude/msc/build/np/NPV/vita-host
+OUT    ?= /work/msc/build/np/NPV/vita-host
 HERE   := $(dir $(lastword $(MAKEFILE_LIST)))
 B      := $(OUT)/$(TARGET)
 HARN   := $(HERE)../harness
@@ -21,7 +21,7 @@ RUN :=
 else ifeq ($(TARGET),armhf)
 CXX := arm-linux-gnueabihf-g++
 FLAGS := $(COMMON) -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb
-RUN := /home/claude/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf
+RUN := /work/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf
 else
 $(error TARGET must be x86_64, host32 or armhf)
 endif
@@ -43,6 +43,27 @@ $(JOBSBIN): $(B)/test_jobs.o $(B)/np_jobs.o $(B)/np_vclock.o
 	$(CXX) $(FLAGS) $^ -o $@ -pthread -ldl
 check: $(JOBSBIN)
 	RUN="$(RUN)" BIN=$(JOBSBIN) $(HERE)tests/run_jobs_tests.sh
+# the console audio output thread (np_vita_audio.cpp) on fakes of sceAudioOutOutput: three rotating buffers, none rewritten while it plays (STR-133)
+AOBIN := $(B)/test_audio_out
+$(AOBIN): $(HERE)tests/test_audio_out.cpp $(HERE)src/np_vita_audio.cpp $(HERE)src/vita_audio_queue.h
+	@mkdir -p $(B)
+	$(CXX) $(FLAGS) -Wno-address -I$(HERE)tests/fake_audio -I$(HERE)../sdk/tests/fake_sce $< -o $@ -pthread
+aocheck: $(AOBIN)
+	$(RUN) $(AOBIN)
+# the output queue's policies on a simulated clock: soft gaps, recovery, latency per pace slack (test_audio_queue.cpp)
+AQBIN := $(B)/test_audio_queue
+$(AQBIN): $(HERE)tests/test_audio_queue.cpp $(HERE)src/vita_audio_queue.h
+	@mkdir -p $(B)
+	$(CXX) $(FLAGS) $< -o $@
+aqcheck: $(AQBIN)
+	$(RUN) $(AQBIN)
+# streamed music that survives a long game frame or a late read (AudioStreamKeep.h)
+SKBIN := $(B)/test_stream_keep
+$(SKBIN): $(HERE)tests/test_stream_keep.cpp $(HERE)../../include/Game/Audio/AudioStreamKeep.h
+	@mkdir -p $(B)
+	$(CXX) $(FLAGS) $< -o $@
+skcheck: $(SKBIN)
+	$(RUN) $(SKBIN)
 # the frame-send worker (np_framesend.cpp): its unit tests in the four modes (make fscheck; make TARGET=x86_64 fstsan for ThreadSanitizer)
 FSBIN := $(B)/test_framesend
 $(B)/np_framesend.o: $(HERE)src/np_framesend.cpp $(HERE)include/np_framesend.h
@@ -60,7 +81,32 @@ fstsan:
 	g++ $(COMMON) -fsanitize=thread -O1 $(HERE)tests/test_framesend.cpp $(HERE)src/np_framesend.cpp $(HARN)/src/np_vclock.cpp -o $(OUT)/tsan/test_framesend -pthread -ldl
 	cd $(OUT)/tsan && for m in thread serial inline off; do MSC_FRAMESEND=$$m ./test_framesend > tsanfs_$$m.log 2>&1 && echo "tsan frame send $$m: clean" || { echo "tsan frame send $$m: REPORT"; head -30 tsanfs_$$m.log; }; done
 	cd $(OUT)/tsan && MSC_FRAMESEND=thread MSC_SKIN_LANE=1 ./test_framesend > tsanfs_lane.log 2>&1 && echo "tsan helper lane: clean" || { echo "tsan helper lane: REPORT"; head -30 tsanfs_lane.log; }
+	cd $(OUT)/tsan && MSC_FRAMESEND=thread MSC_SKIN_LANE=1 MSC_SEM_MAX1=1 ./test_framesend > tsanfs_lane2.log 2>&1 && echo "tsan helper lane, semaphore maximum 1: clean" || { echo "tsan helper lane max1: REPORT"; head -30 tsanfs_lane2.log; }
+	cd $(OUT)/tsan && MSC_FRAMESEND=thread MSC_SKIN_LANE=1 MSC_LANE_FREEZE_MS=300 ./test_framesend > tsanfs_lane3.log 2>&1 && echo "tsan helper lane, stalled lane thread: clean" || { echo "tsan helper lane frozen: REPORT"; head -30 tsanfs_lane3.log; }
 	cd $(OUT)/tsan && for m in thread serial; do MSC_FRAMESEND=$$m MSC_FS_FREEGATE=2 ./test_framesend > tsanfs2_$$m.log 2>&1 && echo "tsan frame send $$m freegate=2: clean" || { echo "tsan frame send $$m freegate=2: REPORT"; head -30 tsanfs2_$$m.log; }; done
+# np_sim's kick / sleep / join hand-shake (include/np/simwake17.h, simfix20): 300000 kicks with spinUs=0 (np_sim always sleeps); no join may wait LIMIT_MS (default 50; raise it
+# on a loaded box, scheduler noise) and a lost wake-up (STALL, 500 ms) fails. simwakemut: the OLD ordering with a delay between the load and the store (compile-time mutant, must STALL = fail);
+# simwakemut2: the same reordering with the join's re-signal (must pass: the re-signal repairs it). simwaketsan: the fixed code under ThreadSanitizer.
+SWSRC := $(HERE)tests/test_simwake.cpp $(HERE)../../include/np/simwake17.h
+SWFLAGS := $(FLAGS) -I$(HERE)../../include
+LIMIT_MS ?= 50
+$(B)/test_simwake: $(SWSRC)
+	@mkdir -p $(B)
+	$(CXX) $(SWFLAGS) $< -o $@ -pthread
+$(B)/test_simwake_mutold: $(SWSRC)
+	@mkdir -p $(B)
+	$(CXX) $(SWFLAGS) -DNP_SIMWAKE_MUTANT_REORDER=40 -DNP_SIMWAKE_MUTANT_NORESIGNAL=1 $< -o $@ -pthread
+$(B)/test_simwake_mutres: $(SWSRC)
+	@mkdir -p $(B)
+	$(CXX) $(SWFLAGS) -DNP_SIMWAKE_MUTANT_REORDER=40 $< -o $@ -pthread
+simwakecheck: $(B)/test_simwake
+	$(RUN) $(B)/test_simwake 300000 $(LIMIT_MS)
+simwakemut: $(B)/test_simwake_mutold $(B)/test_simwake_mutres
+	@if $(RUN) $(B)/test_simwake_mutold 20000 $(LIMIT_MS); then echo "simwakemut: the old ordering was NOT caught"; exit 1; else echo "simwakemut: the old ordering is caught (STALL, as it must)"; fi
+	$(RUN) $(B)/test_simwake_mutres 20000 $(LIMIT_MS)
+simwaketsan:
+	@mkdir -p $(OUT)/tsan
+	g++ $(COMMON) -I$(HERE)../../include -fsanitize=thread -O1 $(HERE)tests/test_simwake.cpp -o $(OUT)/tsan/test_simwake -pthread && $(OUT)/tsan/test_simwake 100000 $(LIMIT_MS) && echo "tsan simwake: clean"
 neon: $(NEONBIN)
 	$(RUN) $(NEONBIN)
 tsan:
@@ -73,7 +119,7 @@ tsan:
 # overrides NPB's weak one). Compile flags follow NPB's Makefile (no exceptions/RTTI are required of
 # these files, they are compiled with the plain host flags).
 #   make -C platform/vita TARGET=host32 hostlib      -> $(OUT)/host32/libnpplat.a
-HOSTSRC := np_vita_audio np_vita_input vita_threads np_jobs np_host_platform np_port_parallel np_framesend
+HOSTSRC := np_vita_audio np_vita_input vita_threads np_jobs np_host_platform np_port_parallel np_framesend np_settings np_settings_guard
 HARNSRC := np_harness np_vclock np_harness_game np_wrap_swap
 HOBJS := $(patsubst %,$(B)/h_%.o,$(HOSTSRC)) $(patsubst %,$(B)/hh_%.o,$(HARNSRC))
 $(B)/h_%.o: $(HERE)src/%.cpp $(HERE)include/np_vita.h
@@ -94,4 +140,4 @@ $(B)/libnpplat.a: $(HOBJS)
 	@echo "built $@ ($(words $(HOBJS)) objects)"
 clean:
 	rm -rf $(B)
-.PHONY: check neon tsan fscheck fstsan hostlib clean
+.PHONY: check neon tsan fscheck fstsan simwakecheck simwakemut simwaketsan hostlib clean

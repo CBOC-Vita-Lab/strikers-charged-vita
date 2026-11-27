@@ -21,13 +21,15 @@ struct List {
     std::vector<std::string> vs, fs;
     std::vector<std::pair<uint32_t, uint32_t>> prog;          // ids into vs / fs
     std::vector<std::array<uint32_t, 4>> var;                  // vs, fs, layout, blend
+    std::vector<std::pair<uint32_t, uint32_t>> marks;         // record 5 (MSC_VGX_WARM_ORDER): programs a match drew, ids into vs / fs
     bool ok = false;
 };
 
 inline uint32_t Rd32(const uint8_t* p) { uint32_t v; std::memcpy(&v, p, 4); return v; }
 
 // Parses a list file's bytes. ok = false when the magic is wrong, a record is cut off, or an id is out of range.
-inline List Parse(const uint8_t* d, size_t n) {
+// allowMarks = false (MSC_SEED_MARKS=0) is the parser as it was before nxboot25: a list with a record 5 is refused.
+inline List Parse(const uint8_t* d, size_t n, bool allowMarks = true) {
     List L;
     if (n < 24 || std::memcmp(d, "VGXSHL01", 8) != 0) return L;
     L.vsSize = Rd32(d + 8);
@@ -58,6 +60,12 @@ inline List Parse(const uint8_t* d, size_t n) {
             if (v >= L.vs.size() || f >= L.fs.size()) return L;
             L.var.push_back({v, f, Rd32(d + p + 8), Rd32(d + p + 12)});
             p += 16;
+        } else if (t == 5 && allowMarks) {   // (a program a match drew: the Vita plan has written these since MSC_VGX_WARM_ORDER=1; the package's list holds them)
+            if (p + 8 > n) return L;
+            const uint32_t v = Rd32(d + p), f = Rd32(d + p + 4);
+            if (v >= L.vs.size() || f >= L.fs.size()) return L;
+            L.marks.emplace_back(v, f);
+            p += 8;
         } else {
             return L;
         }
@@ -79,6 +87,7 @@ inline std::string Merge(const List& first, const List& second, unsigned* added 
     std::vector<std::pair<uint32_t, uint32_t>> prog;
     std::vector<std::array<uint32_t, 4>> var;
     std::unordered_map<std::string, bool> varSeen;
+    std::unordered_map<uint64_t, bool> markSeen;
     unsigned fromSecond = 0;
     for (int w = 0; w < 2; ++w) {
         const List* L = in[w];
@@ -103,6 +112,7 @@ inline std::string Merge(const List& first, const List& second, unsigned* added 
             std::string key(reinterpret_cast<const char*>(m.data()), 16);
             if (varSeen.emplace(key, true).second) { var.push_back(m); fromSecond += (w == 1); }
         }
+        for (const auto& mk : L->marks) markSeen.emplace((static_cast<uint64_t>(mapV[mk.first]) << 32) | mapF[mk.second], true);   // (a union; not counted as records)
     }
     if (added) *added = fromSecond;
     std::string out("VGXSHL01", 8);
@@ -114,6 +124,8 @@ inline std::string Merge(const List& first, const List& second, unsigned* added 
     for (const auto& k : fs) { Put32(out, 2); out += k; }
     for (const auto& pr : prog) { Put32(out, 3); Put32(out, pr.first); Put32(out, pr.second); }
     for (const auto& t : var) { Put32(out, 4); for (int i = 0; i < 4; ++i) Put32(out, t[i]); }
+    // the marks last, in the programs' order and only for listed programs (what tools/seed/shl.py merge writes)
+    for (const auto& pr : prog) if (markSeen.count((static_cast<uint64_t>(pr.first) << 32) | pr.second)) { Put32(out, 5); Put32(out, pr.first); Put32(out, pr.second); }
     return out;
 }
 

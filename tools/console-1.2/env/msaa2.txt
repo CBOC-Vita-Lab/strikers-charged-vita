@@ -1,0 +1,14 @@
+# console-1.2 run msaa2: Anti-aliasing 2x only (older ladder)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# The 1.2 row's 2X ONLY choice (removed from the 1.3 row) with FULL PICTURE OFF: the older ladder without its 4x rung (that ladder has 4x then 2x). With the full picture on (the default) the default is 2 samples: see aa0, aa2, aa4, aa864.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD=0
+MSC_VGX_MSAA=2

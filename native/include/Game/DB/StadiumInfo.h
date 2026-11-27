@@ -38,6 +38,7 @@ struct StadiumInfo
     /* 0x37 */ bool unknown_0x37;
 };
 
+int GetStadiumCount();   // native port: the table size, for range checks of indices that came off the wire
 const char* GetStadiumName(int stadium);
 int GetStadiumUnknown0x14(int stadium);
 bool IsStadiumEnabled(int stadium);

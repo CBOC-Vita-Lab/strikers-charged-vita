@@ -1,0 +1,14 @@
+# console-1.2 run rtpool1: Render-target pool of 8 (MSC_VGX_RT_POOL=8), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r16, route worstgpu, version payload 1.3, role ab
+# vgl16 (vitaGL 0039): render targets of a size left over are reused instead of deleted and made again. Read the [rtpool] reuse lines and the [hitch] target ms; [mem] FAILED must not rise.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_RT_POOL=8

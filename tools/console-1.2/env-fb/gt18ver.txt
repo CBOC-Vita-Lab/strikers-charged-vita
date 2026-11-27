@@ -1,0 +1,18 @@
+# console-1.2 run gt18ver: Quaternion blend both ways with the console verify (MSC_GT18_QUAT=2)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w18, route tour, version payload 1.3, role ab
+# gt18: both ways run, the original's answer is used and a difference is counted. The `[gt18] QUAT verify: checked N, mismatches M` line (every 262,144 calls) must say mismatches 0 with checked counting up; any other number means the new code gives other bits on the Vita's FPU and the plan key goes back to 0. Slower: NOT a timing run.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_HEAD_STAT=1
+MSC_GSPLIT=2
+MSC_FX_STAT=1
+MSC_GT18_QUAT=2

@@ -9,16 +9,23 @@
 #   make TARGET=host32 SUBSET=src/NL  # restrict to one directory (any prefix of a source path)
 #   make TARGET=host32 stubs          # regenerate platform/stubs/sdk_stubs.c from a link attempt
 # Wrap any run of more than ~10 files in tools/heavy.sh (see docs/build.md); use -j2 at most.
-# Outputs go to /home/claude/msc/build/np/<target>/ only (override with BUILD_ROOT=...).
+# Outputs go to /work/msc/build/np/<target>/ only (override with BUILD_ROOT=...).
 
 TARGET     ?= host32
 .DEFAULT_GOAL := all
-BUILD_ROOT ?= /home/claude/msc/build/np
+BUILD_ROOT ?= /work/msc/build/np
 OUT        := $(BUILD_ROOT)/$(TARGET)
 OPT        ?= -O2
 DEBUG      ?= -g1
 WARN       ?= -w
 SUBSET     ?= src
+
+# NP_PGO_ALL=1 (record and use): the profile also covers the renderer library and the GX glue (VGX_PGO=1) and the platform layer, the
+# objects of $(OUT)/pobj (NP_PGO_PLAT=1). Not vitaGL: dependencies/Makefile.vitadeps builds it with VitaSDK's GCC, which has no clang profile.
+ifeq ($(NP_PGO_ALL),1)
+VGX_PGO      := 1
+NP_PGO_PLAT  := 1
+endif
 
 ARCH_ARM := -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb
 
@@ -52,7 +59,7 @@ else ifeq ($(TARGET),vita)
   ifeq ($(VCOMP),clang)
     CC      := clang
     CXX     := clang++
-    TFLAGS  := --target=armv7a-none-eabihf $(ARCH_ARM) -femulated-tls -fno-pic -munaligned-access \
+    TFLAGS  := --target=armv7a-none-eabihf $(ARCH_ARM) -femulated-tls -fno-pic -munaligned-access -fomit-frame-pointer \
                -D__vita__ -D__USES_INITFINI__ -U_GNU_SOURCE -Wno-builtin-macro-redefined \
                -U__WINT_TYPE__ '-D__WINT_TYPE__=unsigned int' \
                -U__INT_FAST8_TYPE__ -D__INT_FAST8_TYPE__=int -U__INT_FAST16_TYPE__ -D__INT_FAST16_TYPE__=int \
@@ -80,6 +87,8 @@ endif
 INCLUDES := -I. -Iinclude -Isrc/ode -Isrc/zlib -Ilibs/RVL_SDK/include -Iref/RVL_SDK -Ilibs/Runtime/include \
             -idirafter libs/MSL_C/include -idirafter libs/MetroTRK/include
 # NP_PARALLEL=1: the game's PortParallelFor() job sites (RenderSnapshot Grab/Blend) use the job pool of platform/vita/src/np_port_parallel.cpp
+# (wave 9: on by default for TARGET=vita, where it had never been set; whether the sites run in parallel is the run-time switch MSC_SNAP_PAR, default 0)
+NP_PARALLEL ?= $(if $(filter vita,$(TARGET)),1,)
 NPDEF_PAR := $(if $(filter 1,$(NP_PARALLEL)),-DNP_HAVE_PARALLEL=1,)
 DEFS     := $(NPDEF_PAR) $(if $(filter 1,$(NP_DIAG_GPU)),-DNP_DIAG_GPU_WRAPS=1,) -DNP_NATIVE=1 -DNP_DISC_HOST_ORDER=1 -DBUILD_VERSION=0 -DVERSION_R4QE01 -DNDEBUG=1 -DdNODEBUG=1 -DdSINGLE=1
 
@@ -112,6 +121,20 @@ PERF     ?= -fno-math-errno
 # NONEON=1: the C code of the SDK's PSMTXConcat / PSMTX44Concat (A/B of the NEON versions)
 PERFX    := $(PERF) $(if $(filter 1,$(NONEON)),-DNP_NO_NEON,)
 COMMON   += $(PERFX)
+
+# NP_MBEDTLS=<prefix>: the TLS library of the HTTPS client (platform/sdk/net/np_https*), built by tools/build-mbedtls.py into a private prefix
+# per target (<work>/mbedtls/vita or .../host32; docs/ONLINE-TLS.md). With a prefix that has lib/libmbedtls.a the client is linked in; without
+# one (the default: armhf, and any build that has not made the library) np_https is compiled without TLS and answers UNAVAILABLE.
+# The prefix's configuration header is the client profile, so no other define is needed.
+NP_MBEDTLS ?=
+ifneq ($(and $(NP_MBEDTLS),$(wildcard $(NP_MBEDTLS)/lib/libmbedtls.a)),)
+# (only the four np_https objects see the define and the headers, so a build with and without the library shares every other object)
+NP_MBEDTLS_FLAGS := -DNP_HAVE_MBEDTLS=1 -I$(NP_MBEDTLS)/include
+$(OUT)/pobj/platform/sdk/net/np_https.cpp.o $(OUT)/pobj/platform/sdk/net/np_https_%.cpp.o: CXXFLAGS += $(NP_MBEDTLS_FLAGS)
+MBEDTLS_LIBS := $(NP_MBEDTLS)/lib/libmbedtls.a $(NP_MBEDTLS)/lib/libmbedx509.a $(NP_MBEDTLS)/lib/libmbedcrypto.a
+else ifneq ($(NP_MBEDTLS),)
+$(warning NP_MBEDTLS=$(NP_MBEDTLS) has no lib/libmbedtls.a: building np_https without TLS)
+endif
 # AUTOINIT=zero|pattern (NPB3): -ftrivial-auto-var-init for the game and compat objects (clang >= 8, GCC >= 12 incl. VitaSDK's 15.2). zero makes every
 # automatic variable start as 0, i.e. no code can depend on stack garbage (and stack garbage is process layout: the simulation differs between
 # stack positions otherwise); pattern is the opposite probe (0xAA bytes; tools/det/ compares the two). Empty (default): the compiler's behaviour.
@@ -154,7 +177,35 @@ LD       := $(LD) -B$(LLDBIN)   # a dir whose "ld" is ld.lld (the cross g++ driv
 LDTAIL   := $(LDTAIL) -Wl,--thinlto-jobs=2 $(LTOLINK)
 endif
 endif
+# Profile-guided optimisation of the game objects (src/, clang IR PGO; clang targets only; docs/BUILDING.md "PGO"):
+#   NP_CLANG_PGO_GEN=1          instrumented game objects (-fprofile-generate). Only src/ is instrumented. Link the profile runtime for the
+#                               target: armhf adds NP_PGO_RT (libclang_rt.profile-armhf.a, built from compiler-rt's lib/profile) to LDEXTRA.
+#   NP_CLANG_PGO=<file.profdata> game objects compiled with -fprofile-use=<file> (merge raw profiles with llvm-profdata). Functions without a
+#                               profile or whose control flow differs from the recorded one are compiled normally.
+# The profile is keyed by function name and a hash of the function's CFG, so it must be recorded from the same sources (and the same
+# NP_TARGET_* paths where they matter); armhf and the Vita share the ISA flags, so an armhf recording drives the Vita build.
+NP_NOUNDEF := $(if $(filter clang,$(if $(filter vita,$(TARGET)),$(VCOMP),$(if $(filter gcc,$(CCTOOL)),gcc,clang))),-Xclang -no-enable-noundef-analysis,)
+NP_CLANG_PGO_FLAGS := $(if $(filter 1,$(NP_CLANG_PGO_GEN)),-fprofile-generate,)$(if $(NP_CLANG_PGO),-fprofile-use=$(abspath $(NP_CLANG_PGO)) -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date $(NP_CLANG_PGO_WARN),)
+ifneq ($(NP_CLANG_PGO_GEN)$(NP_CLANG_PGO),)
+$(if $(filter clang,$(if $(filter vita,$(TARGET)),$(VCOMP),$(if $(filter gcc,$(CCTOOL)),gcc,clang))),,$(error NP_CLANG_PGO needs clang game objects))
+$(OUT)/obj/%.o: CXXFLAGS += $(NP_CLANG_PGO_FLAGS)
+$(OUT)/obj/%.o: CFLAGS += $(NP_CLANG_PGO_FLAGS)
+ifeq ($(NP_PGO_PLAT),1)
+$(OUT)/pobj/%.o: CXXFLAGS += $(NP_CLANG_PGO_FLAGS)
+$(OUT)/pobj/%.o: CFLAGS += $(NP_CLANG_PGO_FLAGS)
+endif
+endif
+# A profile changes inlining, and the decompiled code has undefined behaviour that an inlined copy can expose (an uninitialised local passed by
+# address: the optimiser drops the path that reads it). Clang then assumes nothing from "noundef" on arguments: game units only (src/).
+$(OUT)/obj/%.o: CXXFLAGS += $(NP_NOUNDEF)
+$(OUT)/obj/%.o: CFLAGS += $(NP_NOUNDEF)
 DEPFLAGS  = -MMD -MP -MF $(@:.o=.d)
+# DEPFIX (22 Nov, dumpcrash): the dependency file must name the object exactly as make does. Under ccache with CCACHE_BASEDIR the compiler is run with a RELATIVE -o, so
+# the .d said "../../game/vita/obj/x.cpp.o: ..." while make's target is $(OUT)/obj/x.cpp.o (absolute): make never joined the two and a changed header rebuilt nothing.
+# s30-base then linked objects of two ages: Nis.cpp.o and others still allocated ImpostorModel with 0x78 bytes after crowd25 made it 0x84, and the constructor wrote
+# 12 bytes past the block (the Dump load crash in the emulator). The target of the .d is rewritten after each compile (not -MT: that would enter the cache key and end
+# the sharing of cache entries between build roots).
+DEPFIX    = [ ! -f $(@:.o=.d) ] || sed -i -e '1s|^[^:]*:|$@:|' $(@:.o=.d)
 # clang folds constructor C1 into C2 and then emits no C1 symbol where the inline definition is only used here;
 # the instances TU must define C1 because other TUs reference it (gcc always emits both). Compiler of the game objects: clang, except the
 # Vita target (VCOMP) and CCTOOL=gcc (NPP: armhf objects with GCC)
@@ -184,11 +235,17 @@ CSIGNED  := $(shell cat tools/char_signed.txt)
 charflag  = $(if $(filter $(addsuffix %,$(CSIGNED)),$1),-fsigned-char,-funsigned-char)
 SRCS     := $(filter $(SUBSET)%,$(SRCS_ALL))
 OBJS     := $(patsubst %,$(OUT)/obj/%.o,$(SRCS))
+# NP_MTX_LTO=1 (Vita, opt-in, default off; armcpu9 item 3): the SDK's leaf maths (platform/sdk/src/mtx_native.c: PSQUAT*, PSMTX*, PSVEC*)
+# compiled by the game's compiler with its flags (ThinLTO bitcode) so the game can inline them; libnpsdk.a keeps its own copy, which the
+# link then does not pull (every symbol it defines is already defined). The SDK on the Vita is built by GCC, which cannot join clang's LTO.
+ifeq ($(TARGET)$(NP_MTX_LTO),vita1)
+OBJS     += $(OUT)/obj/platform/sdk/src/mtx_native.c.o
+endif
 SYNS     := $(patsubst %,$(OUT)/syn/%.ok,$(SRCS))
 STUBS    := platform/stubs/sdk_stubs.c
 # platform code compiled into every executable; other workstreams append their directories here
 # (or pass PLAT_DIRS="... platform/sdk ...") as their branches are merged.
-PLAT_DIRS ?= platform/compat platform/assets platform/sdk/net platform/sdk/input platform/sdk/save
+PLAT_DIRS ?= platform/compat platform/assets platform/sdk/net platform/sdk/input platform/sdk/save platform/sdk/dwc
 PLATSRC  := $(shell find $(PLAT_DIRS) -name '*.c' -o -name '*.cpp' 2>/dev/null | sort) platform/stubs/np_stub_support.c ref/Runtime/NMWException.cpp \
             $(if $(filter vita,$(TARGET)),,platform/harness/src/np_host_main.cpp)
 ifneq ($(WITH_SDK),1)
@@ -208,9 +265,11 @@ syntax: $(SYNS)
 $(OUT)/obj/%.cpp.o: %.cpp
 	@mkdir -p $(dir $@) $(OUT)/log/$(dir $<)
 	@$(CXX) $(CXXFLAGS) $(call charflag,$<) $(EXTRA_DEFS) $(DEPFLAGS) -c $< -o $@ 2> $(OUT)/log/$<.err || { echo "FAIL $<"; head -c 3000 $(OUT)/log/$<.err | grep -m3 error; rm -f $@; exit 1; }
+	@$(DEPFIX)
 $(OUT)/obj/%.c.o: %.c
 	@mkdir -p $(dir $@) $(OUT)/log/$(dir $<)
 	@$(CC) $(CFLAGS) $(call charflag,$<) $(EXTRA_DEFS) $(DEPFLAGS) -c $< -o $@ 2> $(OUT)/log/$<.err || { echo "FAIL $<"; head -c 3000 $(OUT)/log/$<.err | grep -m3 error; rm -f $@; exit 1; }
+	@$(DEPFIX)
 
 $(OUT)/syn/%.cpp.ok: %.cpp
 	@mkdir -p $(dir $@) $(OUT)/log/$(dir $<)
@@ -222,9 +281,11 @@ $(OUT)/syn/%.c.ok: %.c
 $(OUT)/pobj/%.cpp.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -funsigned-char $(EXTRA_DEFS) $(DEPFLAGS) -c $< -o $@
+	@$(DEPFIX)
 $(OUT)/pobj/%.c.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -funsigned-char $(DEPFLAGS) -c $< -o $@
+	@$(DEPFIX)
 
 # The stubs go into an archive that is searched LAST: a real (strong) definition from any other object or
 # library wins because the stub member is only pulled in for symbols that are still undefined.
@@ -254,6 +315,7 @@ EXTRALIBS  += $(SDKLIB)
 FORCE:
 endif
 
+EXTRALIBS += $(MBEDTLS_LIBS)
 ifeq ($(WITH_GX),1)
 EXTRALIBS += $(GX_LIBS)
 LDTAIL    := $(LDTAIL) $(GX_LDLIBS)
@@ -299,7 +361,7 @@ vpk: $(OBJS) $(PLATOBJ) $(STUBLIB) $(EXTRALIBS)
 	env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL $(MAKE) -f platform/vita/Makefile.vpk vpk NP_VBUILD=$(abspath $(VPK_OUT)) \
 	  NP_GAME_OBJS='$(OBJS) $(PLATOBJ)' NP_GAME_LIBS='$(EXTRALIBS) $(STUBLIB) $(GX_LDLIBS)' NP_EXTRA_WRAPS='$(VPK_WRAPS)' \
 	  $(if $(NP_RELEASE),NP_RELEASE=$(NP_RELEASE)) $(if $(NP_PLAYER),NP_PLAYER=$(NP_PLAYER)) $(if $(NP_LOGGING),NP_LOGGING=$(NP_LOGGING)) $(if $(LAB),LAB=$(LAB)) $(if $(NP_TITLE_ID),NP_TITLE_ID=$(NP_TITLE_ID)) \
-	  $(if $(NP_SEED_DIR),NP_SEED_DIR=$(abspath $(NP_SEED_DIR))) $(if $(NP_SHADER_SEED),NP_SHADER_SEED=$(abspath $(NP_SHADER_SEED))) $(if $(NP_LTO),NP_LTO=$(NP_LTO)) $(if $(NP_COMPILER),NP_COMPILER=$(NP_COMPILER)) $(if $(LTOFLAG),NP_CLANG_LTO=$(LTO))
+	  $(if $(NP_SEED_DIR),NP_SEED_DIR=$(abspath $(NP_SEED_DIR))) $(if $(NP_SHADER_SEED),NP_SHADER_SEED=$(abspath $(NP_SHADER_SEED))) $(if $(NP_LTO),NP_LTO=$(NP_LTO)) $(if $(NP_COMPILER),NP_COMPILER=$(NP_COMPILER)) $(if $(LTOFLAG),NP_CLANG_LTO=$(LTO)) $(if $(NP_LTO_OLEVEL),NP_LTO_OLEVEL=$(NP_LTO_OLEVEL))
 endif
 
 -include $(OBJS:.o=.d) $(PLATOBJ:.o=.d) $(STUBOBJ:.o=.d)

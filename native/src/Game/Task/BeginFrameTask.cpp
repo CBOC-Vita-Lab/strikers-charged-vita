@@ -1,6 +1,7 @@
 #include "Game/Task/GameTaskState.h"
 #include "NL/nlDLListContainer.inl"
 #include "Game/Task/BeginFrameTask.h"
+#include "np/gsplit.h"   // MSC_GSPLIT
 #ifdef NP_NATIVE
 #include "np/framesend.h"
 #include "np/framepace.h"
@@ -40,6 +41,10 @@
 #include "types.h"
 #include "Game/Render/Presentation.h"
 #include "Game/Sys/tweak.h"
+#ifdef NP_NATIVE
+extern "C" int NpSmoothWanted(void);   // wave 9 helper smooth (np_smooth.cpp)
+extern "C" void NpSmoothNoteCamera(const float* cam, float aimTime);
+#endif
 
 extern "C" {
 void GXPokeARGB(u16 x, u16 y, u32 color);
@@ -412,7 +417,9 @@ void BeginFrameTask::Run(float dt)
 {
 #ifdef NP_NATIVE
     // MSP (30 fps frame pacing, np/framepace.h): this frame's real length, before the task manager's bounds and dilation.
+    NpGsSeq gsq(NPGS_BF_PACE);   // MSC_GSPLIT: begin-frame parts
     NpPaceBeginFrame(nlTaskManager::m_pInstance->mRealTimeDelta);
+    gsq.Next(NPGS_BF_FPS);   // gt27
     // FPS (W5, np/fps.h): the previous frame's length and costs go to the presentation policy (MSC_FPS=auto decides from them)
     NpFpsBeginFrame(nlTaskManager::m_pInstance->mRealTimeDelta, nlTaskManager::m_pInstance->mCurrentState);
 #endif
@@ -452,6 +459,7 @@ void BeginFrameTask::Run(float dt)
 
     HideLayerView(eCLV_ShadowVolume);
     HideLayerView(eCLV_ShadowVolumeBlend);
+    gsq.Next(NPGS_BF_FILES);
     nlServiceFileSystem();
 
     g_FrameCounter.StartTimer(0);
@@ -472,14 +480,17 @@ void BeginFrameTask::Run(float dt)
         g_FrameCounter.DisplayFrameTicker();
     }
 
+    gsq.Next(NPGS_BF_PRES);
     if (nlTaskManager::m_pInstance->mCurrentState & 0x2001B)
     {
         GetPresentation()->Update(dt);
         NisPlayer::Instance()->Update(dt);
     }
 
+    gsq.Next(NPGS_BF_GLBEGIN);
     glBeginFrame();
 
+    gsq.Next(NPGS_BF_CHARS);
     for (int i = 0; i < 10; i++)
     {
         if (g_pCharacters[i] != NULL)
@@ -488,7 +499,12 @@ void BeginFrameTask::Run(float dt)
         }
     }
 
+    gsq.Next(NPGS_BF_CAMERA);
     cCameraManager::Update(dt);
+#ifdef NP_NATIVE
+    if (NpSmoothWanted()) { extern float lbl_806E14CC; const float cam[3] = {cCameraManager::m_cameraPosition.x, cCameraManager::m_cameraPosition.y, cCameraManager::m_cameraPosition.z}; NpSmoothNoteCamera(cam, lbl_806E14CC); }   // (np_smooth.cpp: the aim is read from the previous picture's snapshot)
+#endif
+    gsq.Next(NPGS_BF_SETUP);
 
     if (!(nlTaskManager::m_pInstance->mCurrentState & 0x18))
     {

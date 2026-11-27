@@ -1,0 +1,16 @@
+# console-1.2 run prop-lava: 1.3 proposed: Lava Pit, items, farthest camera
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 0, group core, route clava, version payload 1.3p, role core
+# The proposed defaults against the current blocks before and after it: decides whether the proposal ships as a unit.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was clava.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-lava.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_CAMERA_ZOOM=1
+MSC_CAMERA_AUTO=0

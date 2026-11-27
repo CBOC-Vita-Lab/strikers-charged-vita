@@ -78,6 +78,9 @@ public:
 
 extern glTextureManager* gTextureManager;
 
+// 1.3 (glTextureMemo.h): the answer of GetTextureIndex for some handle may have changed
+void glTextureLookupChanged();
+
 glTextureManager* glGetTextureManager();
 
 #endif // NL_GL_GL_TEXTURE_MANAGER_H

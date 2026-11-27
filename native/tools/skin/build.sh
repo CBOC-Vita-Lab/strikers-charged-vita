@@ -1,8 +1,8 @@
 #!/bin/bash
 # SKIN (W5): build an executable of the np worktree W5SKIN with the vgx worktree W5SKIN-vgx (one heavy turn; make is incremental, resumable).
 #   tools/heavy.sh -t 1500 tools/skin/build.sh h32null|h32gl|armhf
-# Outputs under /home/claude/msc/build/np/W5SKIN/<target>/ (np-host32-full-null, np-host32-full, np-armhf-full).
-NP=/home/claude/msc/npw/W5SKIN; R=${SKINR:-/home/claude/msc/build/np/W5SKIN}; VGX=${GX_VGX:-/home/claude/msc/npw/W5SKIN-vgx}
+# Outputs under /work/msc/build/np/W5SKIN/<target>/ (np-host32-full-null, np-host32-full, np-armhf-full).
+NP=/work/msc/npw/W5SKIN; R=${SKINR:-/work/msc/build/np/W5SKIN}; VGX=${GX_VGX:-/work/msc/npw/W5SKIN-vgx}
 cd $NP || exit 1
 case "$1" in
   h32null) A="TARGET=host32 OPT=-O1 EXESUF=-full-null GX_BACKEND=null";;

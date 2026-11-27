@@ -11,7 +11,7 @@
 #   speed   perf without LOG_ERRORS and HAVE_SHARK_LOG (the player package once the logs are known to be clean)
 set -eu
 export VITASDK=/opt/vitasdk PATH=/opt/vitasdk/bin:$PATH
-MSC=/home/claude/msc
+MSC=/work/msc
 P=${1:?profile: strict|perf|speed}
 OUT=${2:-$MSC/build/np/VRS/deps-$P}
 BASE="-DHAVE_SHADER_CACHE -DSTORE_DEPTH_STENCIL -DSKIP_SPLASHSCREEN"

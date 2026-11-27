@@ -19,6 +19,12 @@
 #include "NL/gl/glMaterialProgram.h"
 #include "NL/gl/glMatrix.h"
 #include "NL/gl/glState.h"
+#ifdef NP_NATIVE
+#include <stdio.h>
+#include <stdlib.h>
+#include "np/scenecut.h"
+#include "np/livetrades.h"
+#endif
 
 struct BallShadowParams
 {
@@ -164,6 +170,17 @@ extern "C" float fn_80184B08()
     return previous;
 }
 
+#ifdef NP_NATIVE
+unsigned gAmortShadow[2];   // MSC_AMORT_LOG: pictures redrawn in view, out of view
+#endif
+
+#ifdef NP_NATIVE
+static u8 sStalePicture[16];   // MSC_SHADOW_LIVE=flat: set for the character partitions (0..9) while flat shadows are drawn: their picture is not kept up, so it is stale
+static unsigned long sCutFrame = ~0ul;
+static int sCutBudget;
+unsigned gShadowCutStat[3];   // diagnostics (MSC_SHADOW_LIVE_LOG): pictures redrawn at a cut, flat shadows shown while they waited, per frame
+#endif
+
 bool ShouldShadowBeUpdated(const ProjectedShadowParams& params)
 {
     nlVector3 position = params.vPosition;
@@ -189,8 +206,55 @@ bool ShouldShadowBeUpdated(const ProjectedShadowParams& params)
     {
         return 0;
     }
+#ifdef NP_NATIVE
+    gAmortShadow[visible ? 0 : 1]++;
+#endif
     return 1;
 }
+
+#ifdef NP_NATIVE
+// MSC_SHADOW_CUT (np/livetrades.h): the first frames outside live play after flat shadows. A character whose picture is stale is redrawn at most `budget` pictures a frame, those in view first (an
+// invisible one is left stale until it is seen); the others show the flat shadow meanwhile (*flat), so no frame shows a missing or a doubled shadow and the cut does not spend 11 passes at once.
+// budget 0 = all at once (the first 1.3 rule). Returns 1: redraw this picture now.
+bool ShadowPictureDue(const ProjectedShadowParams& params, bool* flat)
+{
+    *flat = false;
+    const int idx = params.nPartitionIndex;
+    if (idx >= 0 && idx < 10 && sStalePicture[idx])
+    {
+        const int budget = NpShadowCutBudget();
+        if (budget <= 0)
+        {
+            sStalePicture[idx] = 0;
+            gShadowCutStat[0]++;
+            if (NpLiveFloat("MSC_SHADOW_LIVE_LOG", 0.0f) > 0.0f) fprintf(stderr, "[shadowcut] f%lu part %d picture redrawn (all at once)\n", (unsigned long)glGetCurrentFrame(), idx);
+            return 1;
+        }
+        nlVector3 position = params.vPosition;
+        position.z += 0.625f * params.fHeight;
+        const bool visible = ClassifySphereInFrustum(GetShadowedView()->m_Interface->GetShadowMatrix(), &position, 2.0f * params.fRadius);
+        const unsigned long frame = (unsigned long)glGetCurrentFrame();
+        if (frame != sCutFrame)
+        {
+            sCutFrame = frame;
+            sCutBudget = budget;
+        }
+        if (visible && sCutBudget > 0)
+        {
+            sCutBudget--;
+            sStalePicture[idx] = 0;
+            gShadowCutStat[0]++;
+            if (NpLiveFloat("MSC_SHADOW_LIVE_LOG", 0.0f) > 0.0f) fprintf(stderr, "[shadowcut] f%lu part %d picture redrawn (budget left %d)\n", frame, idx, sCutBudget);
+            return 1;
+        }
+        *flat = true;
+        gShadowCutStat[1]++;
+        if (NpLiveFloat("MSC_SHADOW_LIVE_LOG", 0.0f) > 0.0f) fprintf(stderr, "[shadowcut] f%lu part %d flat shadow stays (%s)\n", frame, idx, visible ? "budget used" : "out of view");
+        return 0;
+    }
+    return ShouldShadowBeUpdated(params);
+}
+#endif
 
 void RenderShadowProjectionQuad(
     GLView* pView, const ProjectedShadowParams& params)
@@ -367,7 +431,7 @@ void RenderCharacterIntoTexture(const ProjectedShadowParams& params)
 
 static void RenderBlobShadow(const nlVector3& vPosition,
     const nlVector3* pPoints, int index, const int* uvOrder,
-    const nlColour* pColour)
+    const nlColour* pColour, unsigned long textureOverride = 0)
 {
     static int alpha = 0x80;
     static float half_w = 0.625f;
@@ -417,7 +481,7 @@ static void RenderBlobShadow(const nlVector3& vPosition,
     }
     else
     {
-        texture = GetShadowPartitionTexture(index);
+        texture = textureOverride != 0 ? textureOverride : GetShadowPartitionTexture(index);
 
         quad.m_pos[0] = pPoints[0];
         quad.m_pos[1] = pPoints[1];
@@ -612,6 +676,75 @@ void RenderProjectedShadow(const ProjectedShadowParams& params)
         g_ShapeRenderer.DrawSpherePrimitive(mLight, 0.5f, c);
     }
 }
+
+#ifdef NP_NATIVE
+// MSC_SHADOW_LIVE=flat (np/livetrades.h): a player's shadow in live play without a shadow picture. The quad is the one RenderProjectedShadow lays on the pitch (a square around the body's
+// middle, cast along the light), made smaller and drawn with the ball's soft blob texture: an ellipse that lies along the light's direction as the body's shadow does. Same layer view,
+// same height above the pitch (g_AntiFlimmer / coplanar z), same alpha as the picture's shadow, so a cut to a cut-scene (full pictures) changes the shape, not the darkness.
+void RenderFlatShadow(const ProjectedShadowParams& params, bool waiting)
+{
+    nlVector3 vDir;
+    nlVector3 vTemp;
+    nlVector3 p[4];
+    nlVector3 vLight;
+    nlColour colour;
+    static const float widthFrac = NpLiveFloat("MSC_SHADOW_LIVE_W", 0.45f);
+    static const float lengthFrac = NpLiveFloat("MSC_SHADOW_LIVE_L", 0.7f);
+    static const float alphaFrac = NpLiveFloat("MSC_SHADOW_LIVE_A", 1.0f);
+    static const float shiftFrac = NpLiveFloat("MSC_SHADOW_LIVE_S", 0.12f);   // of the quad's half length, toward the feet (negative: away)
+    static const unsigned long texture = glGetTexture("global/ball_shadow");
+
+    if (!waiting)
+    {
+        for (int i = 0; i < 10; i++)   // (every character's picture, drawn this frame or not)
+        {
+            sStalePicture[i] = 1;
+        }
+    }
+    static const int logEvery = (int)NpLiveFloat("MSC_SHADOW_LIVE_LOG", 0.0f);   // diagnostic: one line per player shadow every n frames
+    if (logEvery > 0 && glGetCurrentFrame() % logEvery < 1)
+    {
+        fprintf(stderr, "[shadowlive] f%lu part %d pos (%.2f %.2f %.2f) radius %.3f height %.3f scalar %.2f\n", (unsigned long)glGetCurrentFrame(), params.nPartitionIndex, params.vPosition.x, params.vPosition.y,
+            params.vPosition.z, params.fRadius, params.fHeight, params.fScalar);
+    }
+    if (g_bShadowPositionOverride)
+    {
+        nlVec3Set(vLight, g_fShadowLightOverrideX, g_fShadowLightOverrideY, g_fShadowLightOverrideZ);
+    }
+    else
+    {
+        nlVec3Set(vLight, params.vLight.x, params.vLight.y, params.vLight.z);
+    }
+    nlVec3Set(vDir, -vLight.x, -vLight.y, -vLight.z);
+    nlVec3Scale(vDir, nlRecipSqrt(vDir.GetLengthSq3D(), false));
+
+    vTemp = params.vPosition;
+    vTemp.z += 0.5f * params.fHeight;
+    GetShadowQuad(p, vDir, vTemp, params.fRadius);
+    for (int i = 0; i < 4; i++)
+    {
+        CastDirectional(p[i], vDir);
+        p[i].z = g_AntiFlimmer;
+    }
+    // p0 = c + a - b, p1 = c - a - b, p2 = c - a + b, p3 = c + a + b (GetShadowQuad); the ellipse is a smaller quad of the same axes
+    nlVector3 c, a, b, q[4];
+    nlVec3Set(c, 0.5f * (p[0].x + p[2].x) - shiftFrac * 0.5f * (p[3].x - p[0].x), 0.5f * (p[0].y + p[2].y) - shiftFrac * 0.5f * (p[3].y - p[0].y), p[0].z);
+    nlVec3Set(a, 0.5f * (p[0].x - p[1].x) * widthFrac, 0.5f * (p[0].y - p[1].y) * widthFrac, 0.0f);
+    nlVec3Set(b, 0.5f * (p[3].x - p[0].x) * lengthFrac, 0.5f * (p[3].y - p[0].y) * lengthFrac, 0.0f);
+    nlVec3Set(q[0], c.x + a.x - b.x, c.y + a.y - b.y, c.z);
+    nlVec3Set(q[1], c.x - a.x - b.x, c.y - a.y - b.y, c.z);
+    nlVec3Set(q[2], c.x - a.x + b.x, c.y - a.y + b.y, c.z);
+    nlVec3Set(q[3], c.x + a.x + b.x, c.y + a.y + b.y, c.z);
+
+    float newAntiFlimmer = GetCoPlanarZ();
+    float oldAntiFlimmer = g_AntiFlimmer;
+    g_AntiFlimmer = newAntiFlimmer;
+    *(u32*)&colour = 0;
+    colour.c[3] = (u8)(g_Alpha[0] * params.fScalar * alphaFrac);
+    RenderBlobShadow(params.vPosition, q, params.nPartitionIndex, 0, &colour, texture);
+    g_AntiFlimmer = oldAntiFlimmer;
+}
+#endif
 
 void ClearCharacterShadowsUpdated()
 {
@@ -999,6 +1132,16 @@ void DrawPlanarShadow(const glModel* model, const nlMatrix4& transform,
         BuildPlanarShadowMatrix(packetShadowMatrix, transform);
     }
 
+#ifdef NP_NATIVE
+    {
+        // MSC_SHADOW_PLANE (np/scenecut.h): the flattened mesh takes the height of the culled quad of DrawPlanarShadowBounds, which GX's Z-freeze gives it
+        static const int plane = NpSceneShadowPlaneParse(getenv("MSC_SHADOW_PLANE"));
+        int frozen = 0;
+        for (const glModelPacket* p = model->packets; p < model->packets + model->numPackets; ++p)
+            frozen |= p->indexBuffer != 0;
+        packetShadowMatrix.m43 = NpSceneShadowPlaneZ(plane, frozen, sfCoPlanarZ);
+    }
+#endif
     glModelSetMatrix((glModel*)model, packetShadowMatrix);
     glSetRasterState(GLS_DepthTest, 1);
     glSetCurrentRasterState(glHandleizeRasterState());

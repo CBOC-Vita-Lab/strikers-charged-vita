@@ -3,8 +3,8 @@
 #   tools/heavy.sh -t 590 tools/gxd/h32.sh <variant> <vgx source dir>        -> build/np/W5GXD/h/host32/np-host32-full-null-<variant>
 # Resumable (make is incremental). Libraries of the variant: build/np/W5GXD/h/host32/gx-<variant>.
 V=${1:?variant}; VGX=${2:?vgx dir}; shift 2
-SRC=${SRC:-/home/claude/msc/npw/W5GXD}
-H=${GXDH:-/home/claude/msc/build/np/W5GXD/h}
+SRC=${SRC:-/work/msc/npw/W5GXD}
+H=${GXDH:-/work/msc/build/np/W5GXD/h}
 L=$(dirname $H)
 # no-op marker as in build.sh: touch $L/skip-<variant>
 if [ -e $L/skip-$V ]; then echo "== h32 $V skipped ($L/skip-$V)"; exit 0; fi
@@ -13,7 +13,7 @@ cd $SRC || exit 1
 if [ -f $L/late-$V ]; then
   read BR NV < $L/late-$V
   bash $SRC/tools/gxd/snap.sh $V $BR > /dev/null || exit 1
-  echo "$BR $(git -C ${DEV:-/home/claude/msc/npw/W5GXD-vgx-dev} rev-parse --short $BR)" > $L/late-$V.done
+  echo "$BR $(git -C ${DEV:-/work/msc/npw/W5GXD-vgx-dev} rev-parse --short $BR)" > $L/late-$V.done
   echo $NV > $L/variant-$V; rm -f $L/late-$V
 fi
 [ -f $L/variant-$V ] && V=$(cat $L/variant-$V)

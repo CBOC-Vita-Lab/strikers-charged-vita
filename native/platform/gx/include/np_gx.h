@@ -66,6 +66,20 @@ void np_gx_skin_end(void);
 void np_gx_diag_tag(unsigned int tag, unsigned int flags);
 // FX (np/fx.h): the draws between np_gx_fx_lowres(1) and (0) are additive effect sprites the renderer may draw at a lower resolution.
 void np_gx_fx_lowres(unsigned int on);
+// W12 OVERDRAW: the scene class of the frame being recorded (0 other, 1 match play, 2 replay, 3 cut-scene), for the renderer's census and its
+// per-scene choices. Valid for the frame it is recorded in (the renderer resets it at the frame's end).
+void np_gx_scene(unsigned int cls);
+// MSC_DISCARD_REHEARSE: the frame being recorded is executed by the renderer (display lists, textures, shaders, targets) but its picture is never presented. Valid for the frame it is recorded in.
+void np_gx_hidden(unsigned int on);
+// W12 FG: the draws that follow belong to the layer view `layer` (eCLV) of draw class `cls` (np/fx.h NPFX_*); 0, 0 ends it. Only recorded
+// when the renderer asks for it (MSC_DYNRES_FG, vgxn_fg_marks): nothing otherwise.
+void np_gx_layer(unsigned int cls, unsigned int layer);
+// 1.3 MSC_BG30 (np/bg30.h): the picture being recorded is ordinary (0), full with its background kept (1), light (2) or the proof's re-use (3);
+// view: the camera's view matrix (16 floats, row vectors). The last record of a frame wins.
+void np_gx_bg30(unsigned int kind, const float* view);
+// 1.3 MSC_TEX_PRETOUCH: the texture of this GXTexObj is uploaded now, without a draw and without changing any texmap's binding. mode 0 upload, 1 upload and keep it against
+// the renderer's texture budget until mode 2 (obj 0), which lets every kept texture go (the match is over).
+void np_gx_touch_tex(const void* gxTexObj, unsigned int mode);
 
 // What the 3-argument SDK form GXSetArray(attr, base, stride) assumes (default big-endian, as on the console). Only code
 // that has no stream to ask (the SDK's own libraries) uses it.

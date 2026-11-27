@@ -256,6 +256,8 @@ void FESceneManager::RenderActiveScenes()
 
         sceneIterator.Step();
     }
+
+    FERender::RenderNotice();  // np: the online banner (np/platform/sdk/net/np_notice.cpp)
 }
 
 void FESceneManager::InitializeScene(FEScene* pFEScene)

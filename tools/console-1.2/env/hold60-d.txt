@@ -1,0 +1,15 @@
+# console-1.2 run hold60-d: Smooth 60 with the hold (MSC_LOCK60_HOLD=1), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w18, route worstgpu, version payload 1.3, role ab
+# hold60: the GPU-bound stadium (GPU 23-25 ms at full size). PASS: it must not force 60 where the pictures do not come: `[hold60]` delivered over 5 s >= 50 whenever `[tier]` says 60, 60 -> 45 falls named in the `[fps] auto` lines with a hold60 reason, no two tier changes within 8 s, 45 (not 30) most of live play when the 45 holds (`[f45]` window late under 15 %).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_LOCK60_HOLD=1
+MSC_HEAD_STAT=1

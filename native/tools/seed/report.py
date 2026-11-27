@@ -14,7 +14,7 @@ import shl
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--rec', default='/home/claude/msc/build/np/W5SEED/rec')
+    ap.add_argument('--rec', default=os.path.join(os.environ.get('SEED_ROOT', '/work/msc/build/np/W5SEED'), 'rec'))
     ap.add_argument('--base')
     ap.add_argument('--out')
     ap.add_argument('--exclude', default='^ho_', help='regex of run names left out of the union (the held-out set)')

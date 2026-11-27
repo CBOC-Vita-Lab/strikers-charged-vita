@@ -27,8 +27,11 @@
 // Weak: absent when kubridge.skprx is not loaded.
 extern "C" int kuKernelRegisterExceptionHandler(SceUInt32, KuKernelExceptionHandler, KuKernelExceptionHandler*, KuKernelExceptionHandlerOpt*) __attribute__((weak));
 
+extern "C" void kuKernelReleaseExceptionHandler(SceUInt32) __attribute__((weak));
+
 namespace {
 
+bool g_freeze = false;   // FreezeTrap is under way: the handler must not run its crash path (screen, plan demotion)
 bool g_recoveryArmed = false;
 int g_faults = 0;
 uint32_t g_lastFaultAddress = 0, g_lastFaultPc = 0, g_lastFaultType = 0;
@@ -45,6 +48,10 @@ void CrashHandler(KuKernelExceptionContext* ctx) {
         ctx->SPSR = (ctx->SPSR & ~0x20u) | ((ctx->lr & 1u) << 5);
         ctx->pc = ctx->lr & ~1u;
         return;
+    }
+    if (g_freeze) {   // the release in FreezeTrap did not take: a clean exit (the FATAL line is already written)
+        VitaLog::FlushBlocking();
+        sceKernelExitProcess(0);
     }
     static int entered = 0;
 #if defined(MSC_LAB)
@@ -100,6 +107,21 @@ int InstallCrashHandler() {
     }
     std::fprintf(stderr, "[vita] crash handler registered for %d of 3 exception types\n", installed);
     return installed;
+}
+
+[[noreturn]] void FreezeTrap() {
+    g_freeze = true;
+    g_recoveryArmed = false;
+    VitaLog::FlushBlocking();
+    int released = 0;
+    if (kuKernelReleaseExceptionHandler) {   // (absent without kubridge: nothing is installed, the trap goes to the system at once)
+        for (SceUInt32 type = 0; type <= KU_KERNEL_EXCEPTION_TYPE_UNDEFINED_INSTRUCTION; ++type) { kuKernelReleaseExceptionHandler(type); ++released; }
+    }
+    char note[120];
+    std::snprintf(note, sizeof(note), "freeze button: %d kubridge handlers released, trapping for the system's core dump", released);
+    VitaLog::EventUncapped(note);
+    __builtin_trap();
+    for (;;) sceKernelExitProcess(0);   // (not reached)
 }
 
 void ArmFaultRecovery(bool on) { g_recoveryArmed = on; }

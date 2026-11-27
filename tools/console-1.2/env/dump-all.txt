@@ -1,0 +1,15 @@
+# console-1.2 run dump-all: All three cuts switches together at The Dump (shapes + pin + warm-up), recording run
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r15, route worstgpu, version payload 1.3, role ab
+# cuts10: the three switches together at the worst stadium. First launch records, the second (dump-all-2) acts: the [cuts] lines (first uses after kick-off, pins held), [hitch] at the goal cuts, [mem] FAILED counts.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CUTS_SHAPES=1
+MSC_POOL_SCENE_PIN=1
+MSC_FXAA_WARM=1

@@ -15,7 +15,11 @@
 #else
 #include <errno.h>
 #include <semaphore.h>
+#include <unistd.h>
 #endif
+
+extern "C" void NpGsWaitBegin(void) __attribute__((weak));   // (native/platform/compat/np_gsplit.cpp, MSC_GSPLIT: absent in other builds; a wait on the game thread is blocked time, not CPU)
+extern "C" void NpGsWaitEnd(void) __attribute__((weak));
 
 namespace vgx {
 
@@ -42,6 +46,7 @@ public:
 #if defined(__vita__)
         SceUInt us = 0;
         if (sceKernelWaitSema(m_id, 1, &us) >= 0) return;   // (a zero timeout: take it if it is there)
+        struct GsWait { GsWait() { if (NpGsWaitBegin) NpGsWaitBegin(); } ~GsWait() { if (NpGsWaitEnd) NpGsWaitEnd(); } } gsWait;
         for (int slice = 1;; ++slice) {
             us = static_cast<SceUInt>(logAfterMs) * 1000u;
             if (sceKernelWaitSema(m_id, 1, &us) >= 0) {
@@ -52,7 +57,22 @@ public:
         }
 #else
         (void)logAfterMs;
+        if (sem_trywait(&m_sem) == 0) return;
+        struct GsWait { GsWait() { if (NpGsWaitBegin) NpGsWaitBegin(); } ~GsWait() { if (NpGsWaitEnd) NpGsWaitEnd(); } } gsWait;
         while (sem_wait(&m_sem) != 0 && errno == EINTR) {}
+#endif
+    }
+    // Takes one unit if one arrives within `us` microseconds (a kernel timeout on the Vita; elsewhere a bounded poll that reads no clock). False: none came.
+    bool WaitFor(unsigned us) {
+#if defined(__vita__)
+        SceUInt t = us;
+        return sceKernelWaitSema(m_id, 1, &t) >= 0;
+#else
+        for (unsigned i = 0; i < us / 20 + 1; ++i) {
+            if (sem_trywait(&m_sem) == 0) return true;
+            usleep(20);
+        }
+        return false;
 #endif
     }
     bool TryWait() {

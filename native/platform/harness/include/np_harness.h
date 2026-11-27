@@ -77,6 +77,8 @@ void NpTaskEnd(const char* name, unsigned index);
 /* Optional hooks implemented by the platform layer (weak references: absent = skipped). */
 void NpVitaOnFramePresented(void) __attribute__((weak));   /* console/log accounting before the harness */
 void NpVitaExitReport(void) __attribute__((weak));         /* memory high-water marks etc. */
+void NpVitaLogFlush(void) __attribute__((weak));           /* stdio and the log sink to the file now (end of a run, [script] lines) */
+void NpVitaLogFlushAsync(void) __attribute__((weak));      /* the same without waiting for the card (mid-run [script] lines; MSC_SCRIPT_FLUSH_BLOCK=1 gives the blocking one back) */
 void NpVitaEndRun(int code, const char* why) __attribute__((weak)); /* lab: reason for the status file */
 
 #ifdef __cplusplus

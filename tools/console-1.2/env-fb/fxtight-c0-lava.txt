@@ -1,0 +1,17 @@
+# console-1.2 run fxtight-c0-lava: Tight particle polygons with the compositor off, Lava Pit
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route clava, version payload 1.3, role ab
+# census19: as fxtight-c0-pipe at Lava Pit.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was clava.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-lava.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FX_COMPOSITE=0
+MSC_FX_TIGHT=8
+MSC_FX_TIGHT_DROP=1
+MSC_FX_TIGHT_STAT=300

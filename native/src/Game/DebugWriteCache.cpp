@@ -358,7 +358,7 @@ void WriteDebugU32(
 void WriteDebugU64(
     const void* value, void*, char* buffer, unsigned long size)
 {
-    nlSNPrintf(buffer, size, "%lu", *(const unsigned long long*)value);
+    nlSNPrintf(buffer, size, "%llu", *(const unsigned long long*)value);
 }
 
 void WriteDebugChar(
@@ -382,7 +382,7 @@ void WriteDebugS32(
 void WriteDebugS64(
     const void* value, void*, char* buffer, unsigned long size)
 {
-    nlSNPrintf(buffer, size, "%ld", *(const long long*)value);
+    nlSNPrintf(buffer, size, "%lld", *(const long long*)value);
 }
 
 void WriteDebugInt(
@@ -412,13 +412,13 @@ void WriteDebugUnsignedShort(
 void WriteDebugLong(
     const void* value, void*, char* buffer, unsigned long size)
 {
-    nlSNPrintf(buffer, size, "%ld", *(const s32*)value);
+    nlSNPrintf(buffer, size, "%ld", static_cast<long>(*(const s32*)value));
 }
 
 void WriteDebugUnsignedLong(
     const void* value, void*, char* buffer, unsigned long size)
 {
-    nlSNPrintf(buffer, size, "%lu", *(const u32*)value);
+    nlSNPrintf(buffer, size, "%lu", static_cast<unsigned long>(*(const u32*)value));
 }
 
 void WriteDebugEnum(
@@ -450,7 +450,7 @@ void WriteDebugFloat(
 void WriteDebugDouble(
     const void* value, void*, char* buffer, unsigned long size)
 {
-    nlSNPrintf(buffer, size, "%f (%lx)", *(const double*)value,
+    nlSNPrintf(buffer, size, "%f (%llx)", *(const double*)value,
         *(const unsigned long long*)value);
 }
 

@@ -13,7 +13,7 @@ import shl
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--rec', default='/home/claude/msc/build/np/W5SEED/rec')
+    ap.add_argument('--rec', default=os.path.join(os.environ.get('SEED_ROOT', '/work/msc/build/np/W5SEED'), 'rec'))
     ap.add_argument('--base')
     ap.add_argument('--share', type=float, default=0.5)
     ap.add_argument('--frontend', default=r'^(sc\d*_|mn_|menu_|movie_|diag_|stadprobe_)')

@@ -1,0 +1,17 @@
+# console-1.2 run gt27ba0-v: Snapshot blend back on the game thread (MSC_BLEND_ASYNC=0; plan default 1 since 18 Nov), LOCKED 60 Vice with split lines
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route tour, version payload 1.3, role ab
+# gt27: the characters' and power-ups' blend kicked onto the helper lane at the top of RenderFrame, joined in RenderSnapshot::Blend (exact on the host). Alternate with lock60gs-v (OFF), two pairs. Read [gsplit] render-task blend (ON expected ~1.0 -> ~0.2 ms if the lane is done in time) and wait-other in [gsplit-rest] (the join wait), [gsplit-pic] 1-step p50 / p95, [blendasync] taken / made again (made again must stay near 0), [lane] waits and stalls (stalls must be 0), [jobs] crowd fork waits, [head] play with a step.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_HEAD_STAT=1
+MSC_GSPLIT=2
+MSC_FX_STAT=1
+MSC_BLEND_ASYNC=0

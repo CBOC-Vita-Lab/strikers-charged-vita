@@ -1,0 +1,15 @@
+# console-1.2 run f45-d: the 45 cadence alone (MSC_CADENCE45=1) with the headroom line, The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group f45, route worstgpu, version payload 1.3, role ab
+# f45: as f45-v at the heaviest stadium (GPU 20-30 ms at full size: the ladder should settle at 784x544-832x544 against the 22.2 ms budget). A fallback to 30 here is allowed but must be one, sticky, with the reason in the FALLBACK line. Pass rule: the log has `[f45] 45 cadence on` and `[f45] 300 pictures` lines (INVALID without). In live play: `off the pattern 0`; `[present]` held 1/2/3+ about 2 : 1 : 0; pattern slips under 8 % of the 45 pictures (late + held to a later predicted slot); interpolation error: pictures off their show vblank only behind slips (mean under 0.05 refreshes); no FALLBACK line at Vice; at most one fallback per match and never back and forth; `[speed]` 98 % or better; `[lat]` pad->shown p50 within 10 ms of the 30 FPS run (d30). Held scenes at 30 as in d30.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CADENCE45=1
+MSC_HEAD_STAT=1

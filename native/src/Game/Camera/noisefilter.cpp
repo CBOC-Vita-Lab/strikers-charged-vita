@@ -1,5 +1,7 @@
 #include "Game/Camera/noisefilter.h"
 
+#include "np/comfort.h"
+
 #include <math.h>
 
 namespace
@@ -31,6 +33,7 @@ void cNoiseFilter::Start(
     mSeed.y = (float)nlRandom(5000, &nlDefaultSeed);
     mSeed.z = (float)nlRandom(5000, &nlDefaultSeed);
     mAmplitude = amplitude;
+    nlVec3Scale(mAmplitude, NpShakeScale());   // MSC_REDUCED_MOTION (np/comfort.h): after the random draws above, which it must not change
     mFrequency = frequency;
     mSampleInterval = 1.0f / mFrequency;
     mTimeRemaining = duration;

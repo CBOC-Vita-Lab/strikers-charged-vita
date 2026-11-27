@@ -129,11 +129,11 @@ static void check_banner(const char* path) {
 }
 
 int main(int argc, char** argv) {
-    const char* dirs[] = {"/home/claude/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data",
-                          "/home/claude/msc/build/host-gl/appdata/MSCRecomp/NAND/title/00010000/52345145/data",
-                          "/home/claude/msc/build/split/v3k/pref/ux0/data/mscharged/NAND/title/00010000/52345145/data",
-                          "/home/claude/msc/build/rel/v3k/pref/ux0/data/mscharged/NAND/title/00010000/52345145/data",
-                          "/home/claude/msc/build/npm/runs/pair-03/peer0/xdg/MSCRecomp/NAND/title/00010000/52345145/data"};
+    const char* dirs[] = {"/work/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data",
+                          "/work/msc/build/host-gl/appdata/MSCRecomp/NAND/title/00010000/52345145/data",
+                          "/work/msc/build/split/v3k/pref/ux0/data/mscharged/NAND/title/00010000/52345145/data",
+                          "/work/msc/build/rel/v3k/pref/ux0/data/mscharged/NAND/title/00010000/52345145/data",
+                          "/work/msc/build/npm/runs/pair-03/peer0/xdg/MSCRecomp/NAND/title/00010000/52345145/data"};
     int files = 0;
     for (int i = 1; i < argc; ++i) { check_file(argv[i]); ++files; }
     if (argc == 1) {

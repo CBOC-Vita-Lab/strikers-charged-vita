@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 extern "C" {
 float g_npPaceFrames = 1.0f;
@@ -15,6 +16,8 @@ unsigned g_npPaceSites = 63;
 unsigned long g_npPaceRolls = 0;
 unsigned long g_npPaceChanges = 0;
 double NpVirtualSeconds(void) __attribute__((weak));   // platform/harness (virtual clock), absent in a bare game link
+int NpDisplayLastHeld(void) __attribute__((weak));     // Vita renderer (MSC_PACE_VBLANK): vblanks the last picture was on the screen, 0 if unknown
+int NpFpsPaced(void) __attribute__((weak));            // np_fps.cpp (MSC_FPS_BETWEEN=pace): pictures with no fixed cadence
 }
 
 namespace {
@@ -75,6 +78,30 @@ void NpPaceBeginFrame(float realSeconds)
     if (n < 1.0f) n = 1.0f;                     // faster than the original: its path, unchanged
     int k;
     float whole = floorf(n + 0.5f);
+    // 1.2 (MSC_PACE_VBLANK=1, on by default in the Vita player build and off elsewhere; 0 or off turns it off; the Galaxy port's PACE_VBLANK_COUNT): the number of real vblanks a picture was held is what the display showed, and the
+    // clock that measured the frame (task manager time) is only a proxy for it: a thread that woke late or early gives 1.8 or 2.2 for a picture shown for exactly two
+    // refreshes. When the display's own count of the last picture agrees with the clock to within half an original frame, the count is used (a whole number of original frames, as a snapped frame is); when it does not (a stall, a pause, no count yet) the clock decides as before.
+    static int vblankMode = -1;
+    if (vblankMode < 0)
+    {
+        const char* e = getenv("MSC_PACE_VBLANK");
+        vblankMode = (e && *e && *e != '0' && strcmp(e, "off") != 0) ? 1 : 0;
+    }
+    // (1.3: not while paced. Frames of 1.2 refreshes shown 1, 1, 1, 1, 2: a hold of 1 agrees with the clock and would be taken, a hold of 2 does not and would not, and the sum loses
+    // the difference: animation at 87 %. The clock's error-diffused path below keeps the time.)
+    if (vblankMode == 1 && &NpDisplayLastHeld != 0 && realSeconds > 0.0f && !(&NpFpsPaced != 0 && NpFpsPaced()))
+    {
+        const int held = NpDisplayLastHeld();
+        if (held > 0 && held < 64)
+        {
+            const float nHeld = (float)held * kNtscField / g_originalSeconds;
+            if (nHeld >= 1.0f && nHeld <= kMaxFrames && fabsf(nHeld - n) < 0.5f)
+            {
+                n = nHeld;   // (exact: a whole number of original frames at 30 in the usual swap mode, else the error-diffused path below takes it)
+                whole = floorf(n + 0.5f);
+            }
+        }
+    }
     if (fabsf(n - whole) < kSnap)
     {
         n = whole;
@@ -109,6 +136,11 @@ void NpPaceEvent(const char* what, float value)
     {
         fprintf(stderr, "[pace-ev] t=%.4f drawn=%lu %s %.4f\n", Now(), g_drawn, what, value);
     }
+}
+
+int NpFramePaceEnabled(void)
+{
+    return Enabled() ? 1 : 0;   // (MSC_FRAME_PACING, the run header)
 }
 
 } // extern "C"

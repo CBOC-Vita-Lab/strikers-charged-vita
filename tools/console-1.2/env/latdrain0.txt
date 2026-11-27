@@ -1,0 +1,13 @@
+# console-1.2 run latdrain0: Frames-in-flight gate stands aside after a long frame (no drain)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group pacing, route tour, version payload 1.3, role ab
+# MSC_LAT_DRAIN=0 (the Vita plan sets 1 since wave 10: a held 30 that stood aside after a long frame still drains a backlog above depth + 1). Against the default after a goal celebration and a load at a held 30: the `[lat]` press-to-picture p50 in the 5 s after the long frame and the `[fps] frames in flight` line's drain count; the hold mix must not move.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LAT_DRAIN=0

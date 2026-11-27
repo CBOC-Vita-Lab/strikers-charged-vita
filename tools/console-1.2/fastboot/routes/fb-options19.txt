@@ -1,0 +1,203 @@
+# front20: CREDITS is not visited any more (its movie scene was not left on the glnull host build, by Circle or by waiting, so the old end of this route timed out after the 20 cycles; the GL host build leaves it when the movie ends).
+# fast boot (test only, from the title): main menu -> OPTIONS -> VITA SETTINGS (corner button) -> DONE -> back on OPTIONS, 20 times; then AUDIO, VISUAL and BACK.
+# Needs a settings file (host: MSC_SETTINGS_FILE; emulator: the env file is np-player.txt). The log shows '[options] VITA SETTINGS selected', '[vitaset] screen created (front end)', '[vitaset] leaving to the OPTIONS screen' 20 times and 'STATE options19 done'.
+# Run: emu.sh <tag> <vpk> env/fb-options19.txt <seconds> <this file> (env: MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-options19.txt).
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 120
+touch 398 455 4 30
+wait scene == 13 900
+log STATE options scene
+idle 150
+log STATE cycle 1 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 1 closed
+log STATE cycle 2 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 2 closed
+log STATE cycle 3 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 3 closed
+log STATE cycle 4 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 4 closed
+log STATE cycle 5 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 5 closed
+log STATE cycle 6 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 6 closed
+log STATE cycle 7 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 7 closed
+log STATE cycle 8 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 8 closed
+log STATE cycle 9 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 9 closed
+log STATE cycle 10 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 10 closed
+log STATE cycle 11 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 11 closed
+log STATE cycle 12 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 12 closed
+log STATE cycle 13 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 13 closed
+log STATE cycle 14 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 14 closed
+log STATE cycle 15 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 15 closed
+log STATE cycle 16 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 16 closed
+log STATE cycle 17 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 17 closed
+log STATE cycle 18 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 18 closed
+log STATE cycle 19 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 19 closed
+log STATE cycle 20 start
+touch 480 497 4 30
+wait scene == 88 900
+idle 150
+touch 480 418 4 30
+wait scene == 13 900
+idle 100
+log STATE cycle 20 closed
+log STATE audio
+touch 480 288 4 30
+wait scene == 14 900
+idle 150
+touch 117 497 4 30
+wait scene == 13 900
+idle 100
+log STATE visual
+touch 480 178 4 30
+wait scene == 15 900
+idle 150
+touch 117 497 4 30
+wait scene == 13 900
+idle 100
+log STATE back
+touch 117 497 4 30
+wait scene == 1 900
+idle 100
+log STATE options19 done
+exit

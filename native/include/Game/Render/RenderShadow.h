@@ -35,6 +35,10 @@ void DrawPlanarShadow(const glModel* model, const nlMatrix4& transform,
 bool ShouldShadowBeUpdated(const ProjectedShadowParams& params);
 void RenderCharacterIntoTexture(const ProjectedShadowParams& params);
 void RenderProjectedShadow(const ProjectedShadowParams& params);
+#ifdef NP_NATIVE
+void RenderFlatShadow(const ProjectedShadowParams& params, bool waiting = false);   // MSC_SHADOW_LIVE=flat; waiting: a picture not ready yet at a cut (MSC_SHADOW_CUT)
+bool ShadowPictureDue(const ProjectedShadowParams& params, bool* flat);
+#endif
 
 RLView* SetCharacterShadowView(RLView* view);
 void ClearCharacterShadowsUpdated();

@@ -1,0 +1,3 @@
+# ---- Settings screen (LiveArea > Settings): the lines below are written by it; the rest of this file is kept ----
+NP_WIDESCREEN=0
+# ---- end of the Settings screen's lines ----

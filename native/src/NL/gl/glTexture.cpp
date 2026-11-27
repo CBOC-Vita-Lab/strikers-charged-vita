@@ -4,6 +4,7 @@
 #include "Game/GL/GLTextureAnim.h"
 #include "NL/gl/gl.h"
 #include "NL/gl/glMemory.h"
+#include "NL/gl/glTextureManager.h"
 #include "NL/glx/glxTexture.h"
 #include "NL/nlMemory.h"
 #include "NL/nlString.h"
@@ -164,6 +165,7 @@ void glReleaseTexture(PlatTexture* texture)
     manager->mFreeIndices->AddEnd((u16)index);
     manager->mTextures[index] = 0;
     texture->m_TextureIndex = 0xFFFF;
+    glTextureLookupChanged();
     texture->ClearData();
 }
 

@@ -2,6 +2,7 @@
 
 #include "NL/gl/glPlat.h"
 #include "Game/Render/RLViewLayers.h"
+#include "Game/Render/Amortize.h"
 #include "Game/Render/Frustum.h"
 #include "NL/gl/glMatrix.h"
 #include "NL/gl/glModel.h"
@@ -15,6 +16,9 @@
 #include "Game/Render/HighRange.h"
 
 #include "Game/Render/ShadowVolume.h"
+#ifdef NP_NATIVE
+#include "np/scenecut.h"
+#endif
 #include "Game/SharedStaticStorage.h"
 
 struct RLViewLayerDesc
@@ -194,14 +198,19 @@ void CreateShadowPartitionViews()
 {
     GLTargetInfo info;
     int i;
+#ifdef NP_NATIVE
+    const int side = NpSceneShadowResParse(getenv("MSC_SHADOW_RES"));   // (np/scenecut.h; the copy into the texture halves it whatever the side)
+#else
+    const int side = 0x90;
+#endif
 
     for (i = 0; i < 11; i++)
     {
         nlZeroMemory(&sShadowPartitionRects[i], sizeof(RLViewRect));
-        sShadowPartitionRects[i].width = 0x90;
-        sShadowPartitionRects[i].height = 0x90;
-        sShadowPartitionRects[i].x = (i % 4) * 0x90;
-        sShadowPartitionRects[i].y = (i / 4) * 0x90;
+        sShadowPartitionRects[i].width = side;
+        sShadowPartitionRects[i].height = side;
+        sShadowPartitionRects[i].x = (i % 4) * side;
+        sShadowPartitionRects[i].y = (i / 4) * side;
     }
 
     for (i = 0; i < 11; i++)
@@ -212,8 +221,8 @@ void CreateShadowPartitionViews()
     for (i = 0; i < 11; i++)
     {
         nlZeroMemory(&info, sizeof(GLTargetInfo));
-        info.width = 0x48;
-        info.height = 0x48;
+        info.width = side / 2;
+        info.height = side / 2;
         info.format = GLTargetFormat_A8;
         info.clearFlags = 0;
         info.clearDepthSetting = 0;
@@ -510,6 +519,9 @@ void SetupViews()
     sLayerViews[eCLV_CoPlanar]->mCoPlanarEnabled = true;
 
     CreateRenderTargets();
+#ifdef NP_NATIVE
+    AmortizeCreateTargets();   // MSC_FX_HAZE_CACHE
+#endif
 
     for (i = 0; i < eCLV_Num; i++)
     {

@@ -1,0 +1,16 @@
+# console-1.2 run lookctrim0: Look: crowd sprite quads uncut
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group look, route look, version payload 1.3, role look
+# MSC_VGX_CROWDTRIM (each crowd sprite quad cut to the box the figure was drawn in) is on in the default. The 9 open-play shots against lookbase should differ by at most 2 levels of 255 on a few hundred pixels; the frame timing of the open-play part against lookbase says whether the CPU cost of the cut (about 0.5 ms per crowd frame on the host) is paid back by the GPU (about half of the crowd's fragments).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/look.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FPS=30
+MSC_VITA_SHOT=700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2200
+MSC_VITA_SHOT_SIZE=640x448
+MSC_VGX_CROWDTRIM=0

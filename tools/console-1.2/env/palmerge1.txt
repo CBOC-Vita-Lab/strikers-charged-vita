@@ -1,0 +1,14 @@
+# console-1.2 run palmerge1: Skinned meshes' palette runs in one draw
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# Adjacent player meshes that differ only in their bone matrices are drawn as one call from a combined buffer (same pixels by construction and host test). Records with more than 30 matrix rows use a 60-row vertex shader that is not in the 1.3 pack: they compile on first use, so run it twice and judge the second. [palmerge] lines give the draws saved; compare [lane] backend ms, GPU ms and p50 with d1.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_PALMERGE=1
+MSC_VGX_PALMERGE_STATS=1

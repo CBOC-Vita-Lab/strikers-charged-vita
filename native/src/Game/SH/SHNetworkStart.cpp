@@ -19,6 +19,7 @@
 #include "NL/nlPrint.h"
 #include "Game/FE/tlComponentInstance.h"
 #include "NL/nlString.h"
+#include "platform/sdk/net/np_menu_flow.h"
 #include "NL/nlFunction.inl"
 
 bool gNetworkStartWaitingForDialog;
@@ -289,6 +290,21 @@ static void UpdatePlayer2Controls(NetworkStartScene* scene)
 void NetworkStartScene::Update(float dt)
 {
     BaseSceneHandler::Update(dt);
+    const int npStep = NpMenuLobbyStep();
+    if (npStep == 1)   // np: internet play, the link was lost and the player chose to leave (or could not reconnect): back to the main menu
+    {
+        GameSceneManager::Instance()->Push(SCENE_ONLINE_MENU, SCREEN_BACK, true);
+        g_pNetworkSessionBase->SetSessionState(NET_SESSION_NONE);
+        return;
+    }
+    if (npStep == 2)   // np: the link was rebuilt (RECONNECT): the lobby starts over. A lobby that had joined or hosted before the loss still holds that state
+    {                  // (LAN_JOIN_JOINED, the host flag, the advertising) and would refuse a new JOIN ("failed to join game") or a new CREATE.
+        g_pNetworkSessionBase->GetTransport()->Shutdown(false);
+        g_pNetworkSessionBase->SetSessionState(NET_SESSION_MATCHMAKE);
+        gNetworkStartWaitingForDialog = false;
+        EnterState(STATE_ONLINE_OPTIONS);
+        return;
+    }
     if (gNetworkStartWaitingForDialog && !g_pFEInput->HasInputLock(this))
         return;
     if (gNetworkStartResetRequested)

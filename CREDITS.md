@@ -14,6 +14,7 @@
 - **bythos14 and kubridge contributors:**
   [kubridge](https://github.com/bythos14/kubridge), whose header and export
   definitions are referenced by the build. The plugin is not bundled.
+- **danos-x5 (NFS Underground 2 Vita port):** the method of the optional on-console pc sampler (`MSC_SAMPLER`, a diagnostic that is off by default), MIT.
 - **Bitstream and DejaVu contributors:** console, button-prompt and UI fonts.
 
 The recovered source and upstream license texts are now included; see

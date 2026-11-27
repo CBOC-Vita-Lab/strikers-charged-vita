@@ -1,0 +1,15 @@
+# console-1.2 run hold60-v: Smooth 60 with the hold (MSC_LOCK60_HOLD=1): 60 kept down to 50 a second, climbs back on work, Vice tour
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w18, route tour, version payload 1.3, role ab
+# hold60: the owner's 60. INVALID without `[hold60] on` and `[tier] 300 live pictures` lines. Read the last `[tier]` line: time at 60 / 45 / 30 (all so far) - PASS when 60 is at least 60 % of live play (the 23 Nov tiers: 2-3 %), 45 -> 60 changes > 0, and no two `[tier] a -> b` lines within 8 s other than the one-frame 60 -> 30 -> 60 at a cut into play; `[hold60]` delivered over 5 s >= 50 while at 60. Smoothness at 60 (owner 17:57): `[present]` judder <= 0.10 vblanks a picture in live play at 60, `[tier]` '60 with the show-time clock: N of M off the vblank' at most the repeated refreshes of that window, `[smooth]` players+ball motion minus shown p95 <= 1.0 and share over 0.5 <= 5 %. `[f45]` 'first input over' says which input fails the 30's 45-fit test (the open question of 23 Nov). `[lat]` pad->shown p50 may be up to 17 ms over hold60-v0's (the 0.95 plan).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_LOCK60_HOLD=1
+MSC_HEAD_STAT=1

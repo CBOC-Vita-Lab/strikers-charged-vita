@@ -6,10 +6,10 @@
 # 2. NpSaveImportRecompiled (the code the player build runs at its first start) copies it into an empty native data directory
 # 3. the game plays the whole match script (menu, captains, stadium, kick-off: it writes Strikers2 on the way, SaveLoad::StartSave) with that directory
 # 4. the file the game wrote is compared with the one it read: sound header and CRC, and every byte of the populated parts equal
-B=${BUILD_ROOT:-/home/claude/msc/build/np/W5ONE}
+B=${BUILD_ROOT:-/work/msc/build/np/W5ONE}
 EXE=${1:-$B/host32/np-host32-full-null}
 NP=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
-REAL=/home/claude/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data
+REAL=/work/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data
 T=$B/set/test_save_import
 W=$B/savetest
 rm -rf $W; mkdir -p $W/recomp/NAND/title/00010000/52345145/data $W/native $W/set
@@ -21,14 +21,14 @@ $T import $W/recomp $W/native | tee $W/import.log
 cmp $W/recomp/NAND/title/00010000/52345145/data/Strikers2 $W/native/NAND/title/00010000/52345145/data/Strikers2 && echo "import: identical copy"
 cp -a $W/native/NAND/title/00010000/52345145/data/Strikers2 $W/in.Strikers2
 run() {   # run <n> <script> <frames>
-  ( cd $W/native; export NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$W/native MSC_INPUT_SCRIPT=$2 MSC_MAX_FRAMES=$3 MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 MSC_WATCH=1 MSC_WATCH_EVERY=100000
+  ( cd $W/native; export NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$W/native MSC_INPUT_SCRIPT=$2 MSC_MAX_FRAMES=$3 MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 MSC_WATCH=1 MSC_WATCH_EVERY=100000
     timeout -k 3 300 $EXE > $W/run$1.log 2>&1; echo "rc=$?" >> $W/run$1.log )
   echo "run $1: $(tail -1 $W/run$1.log), $(grep -ac 'accepting' $W/run$1.log) 'create save data' accepts, first-run lines: $(grep -ac 'first run' $W/run$1.log); $(grep -a 'STATE' $W/run$1.log | tail -2 | tr '\n' ';' | cut -c1-200)"
   ls -l --time-style=full-iso $W/native/NAND/title/00010000/52345145/data/ | tail -2
 }
-run 1 /home/claude/msc/tools/scripts/nav_match60.txt 4600
+run 1 /work/msc/tools/scripts/nav_match60.txt 4600
 cp -a $W/native/NAND/title/00010000/52345145/data/Strikers2 $W/after1.Strikers2
-run 2 /home/claude/msc/tools/scripts/nav_match60.txt 4600
+run 2 /work/msc/tools/scripts/nav_match60.txt 4600
 cp -a $W/native/NAND/title/00010000/52345145/data/Strikers2 $W/after2.Strikers2
 echo "source file untouched: $( [ "$sha_before" = "$(sha256sum $W/recomp/NAND/title/00010000/52345145/data/Strikers2 | cut -c1-16)" ] && echo yes || echo NO)"
 python3 -I - "$W" <<'PY'

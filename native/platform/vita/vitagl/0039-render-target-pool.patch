@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 12:00:00 -0500
+Subject: [PATCH] kept framebuffer render targets (vglSetRenderTargetPool, vglGetRenderTargetPoolStats; MSC_VGX_RT_POOL)
+
+---
+
+diff --git a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -374,6 +374,128 @@
+ 	return setup_render_target_ms(rt, w, h, refs, msaa_mode);
+ }
+ 
++// 0039 (MSC_VGX_RT_POOL): a framebuffer object's render target is kept when the object lets it go and handed to the next object that asks for the same (width, height, scenes per frame,
++// samples), instead of sceGxmDestroyRenderTarget there and sceGxmCreateRenderTarget here (40-95 ms an object on the console, estimate). Only the driver's object is kept: the colour and depth
++// memory follow their own rules. A target is pooled by the garbage collector, which runs it only when the GPU is done with the frames that used it. Off (vglSetRenderTargetPool(0, 0)): no
++// target is tracked or kept and nothing here runs but one compare. Exact sizes only (rounding up to 64 is not done: whether a larger target serves a smaller scene is not known).
++#define VGL_RTP_SLOTS 48
++typedef struct {
++	SceGxmRenderTarget *rt;
++	int w, h, refs;
++	SceGxmMultisampleMode mode;
++	uint32_t kib; // the driver's memory for it (sceGxmGetRenderTargetMemSize), at least 1
++	uint8_t state; // 0 free, 1 handed to a framebuffer object, 2 kept
++} vgl_rtp_slot;
++static vgl_rtp_slot vgl_rtp[VGL_RTP_SLOTS];
++static volatile int vgl_rtp_lock = 0;
++static uint32_t vgl_rtp_max_count = 0, vgl_rtp_max_kib = 0;
++static uint32_t vgl_rtp_stat[6] = {0, 0, 0, 0, 0, 0}; // hits, creates (missed or not pooled), kept, let go (over the cap or off), kept now, KiB kept now
++#define VGL_RTP_LOCK() while (__sync_lock_test_and_set(&vgl_rtp_lock, 1)) { sceKernelDelayThread(100); } /* yield: a higher-priority spinner must let a lower-priority holder run (fix16) */
++#define VGL_RTP_UNLOCK() __sync_lock_release(&vgl_rtp_lock)
++
++// count 0: off (every kept target is destroyed at once); else at most `count` kept targets and `kib` KiB of driver memory (0: no KiB cap)
++void vglSetRenderTargetPool(uint32_t count, uint32_t kib) {
++	SceGxmRenderTarget *gone[VGL_RTP_SLOTS];
++	int n = 0;
++	VGL_RTP_LOCK()
++	vgl_rtp_max_count = count > VGL_RTP_SLOTS ? VGL_RTP_SLOTS : count;
++	vgl_rtp_max_kib = kib;
++	if (!vgl_rtp_max_count) {
++		for (int i = 0; i < VGL_RTP_SLOTS; i++)
++			if (vgl_rtp[i].state == 2) {
++				gone[n++] = vgl_rtp[i].rt;
++				vgl_rtp[i].state = 0;
++			}
++		vgl_rtp_stat[3] += n;
++		vgl_rtp_stat[4] = 0;
++		vgl_rtp_stat[5] = 0;
++	}
++	VGL_RTP_UNLOCK();
++	for (int i = 0; i < n; i++)
++		sceGxmDestroyRenderTarget(gone[i]);
++}
++void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now) {
++	if (hits) *hits = vgl_rtp_stat[0];
++	if (creates) *creates = vgl_rtp_stat[1];
++	if (kept) *kept = vgl_rtp_stat[2];
++	if (let_go) *let_go = vgl_rtp_stat[3];
++	if (kept_now) *kept_now = vgl_rtp_stat[4];
++	if (kib_now) *kib_now = vgl_rtp_stat[5];
++}
++
++// a framebuffer object's render target: a kept one of the same shape, else a new one (tracked so that the collector can keep it when it is let go)
++static int setup_fbo_render_target_ms(SceGxmRenderTarget **rt, int w, int h, int refs, SceGxmMultisampleMode mode) {
++	if (!vgl_rtp_max_count)
++		return setup_render_target_ms(rt, w, h, refs, mode);
++	VGL_RTP_LOCK()
++	for (int i = 0; i < VGL_RTP_SLOTS; i++) {
++		vgl_rtp_slot *s = &vgl_rtp[i];
++		if (s->state == 2 && s->w == w && s->h == h && s->refs == refs && s->mode == mode) {
++			s->state = 1;
++			*rt = s->rt;
++			vgl_rtp_stat[0]++;
++			vgl_rtp_stat[4]--;
++			vgl_rtp_stat[5] -= s->kib;
++			VGL_RTP_UNLOCK();
++			return 0;
++		}
++	}
++	VGL_RTP_UNLOCK();
++	int r = setup_render_target_ms(rt, w, h, refs, mode);
++	if (r)
++		return r;
++	SceGxmRenderTargetParams params;
++	vgl_memset(&params, 0, sizeof(params));
++	params.width = w ? w : 1;
++	params.height = h ? h : 1;
++	params.scenesPerFrame = refs;
++	params.multisampleMode = mode;
++	params.driverMemBlock = -1;
++	unsigned int drv = 0;
++	if (sceGxmGetRenderTargetMemSize(&params, &drv))
++		drv = 0;
++	VGL_RTP_LOCK()
++	vgl_rtp_stat[1]++;
++	for (int i = 0; i < VGL_RTP_SLOTS; i++)
++		if (vgl_rtp[i].state == 0) {
++			vgl_rtp[i].rt = *rt;
++			vgl_rtp[i].w = w;
++			vgl_rtp[i].h = h;
++			vgl_rtp[i].refs = refs;
++			vgl_rtp[i].mode = mode;
++			vgl_rtp[i].kib = drv ? (drv + 1023) / 1024 : 1;
++			vgl_rtp[i].state = 1;
++			break;
++		}
++	VGL_RTP_UNLOCK();
++	return 0;
++}
++
++// the garbage collector's end of a framebuffer object's render target (the GPU is done with it): kept when the pool has room, else destroyed
++static void vgl_rtp_release(SceGxmRenderTarget *rt) {
++	if (vgl_rtp_max_count) {
++		VGL_RTP_LOCK()
++		for (int i = 0; i < VGL_RTP_SLOTS; i++) {
++			vgl_rtp_slot *s = &vgl_rtp[i];
++			if (s->state != 1 || s->rt != rt)
++				continue;
++			if (vgl_rtp_stat[4] < vgl_rtp_max_count && (!vgl_rtp_max_kib || vgl_rtp_stat[5] + s->kib <= vgl_rtp_max_kib)) {
++				s->state = 2;
++				vgl_rtp_stat[2]++;
++				vgl_rtp_stat[4]++;
++				vgl_rtp_stat[5] += s->kib;
++				VGL_RTP_UNLOCK();
++				return;
++			}
++			s->state = 0;
++			vgl_rtp_stat[3]++;
++			break;
++		}
++		VGL_RTP_UNLOCK();
++	}
++	sceGxmDestroyRenderTarget(rt);
++}
++
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ #define MAX_RENDER_TARGETS_NUM 47 // Maximum amount of dedicated render targets usable for fbos
+ #define MAX_SHARED_RT_SIZE 256 // Maximum  width value in pixels for shared rendertargets usage
+@@ -526,7 +648,7 @@
+ 		}
+ 		for (int i = 0; i < FRAME_PURGE_RENDERTARGETS_LIST_SIZE; i++) {
+ 			if (frame_rt_purge_list[frame_purge_clean_idx][i]) {
+-				sceGxmDestroyRenderTarget(frame_rt_purge_list[frame_purge_clean_idx][i]);
++				vgl_rtp_release(frame_rt_purge_list[frame_purge_clean_idx][i]); // 0039 (destroys it unless MSC_VGX_RT_POOL keeps it)
+ 				frame_rt_purge_list[frame_purge_clean_idx][i] = NULL;
+ 			} else
+ 				break;
+@@ -964,7 +1086,7 @@
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ 				active_write_fb->target = (SceGxmRenderTarget *)get_free_render_target(active_write_fb->width, active_write_fb->height);
+ #else
+-				int r = setup_render_target_ms(&active_write_fb->target, active_write_fb->width, active_write_fb->height, gxm_fbo_rt_size, FB_MSAA(active_write_fb));
++				int r = setup_fbo_render_target_ms(&active_write_fb->target, active_write_fb->width, active_write_fb->height, gxm_fbo_rt_size, FB_MSAA(active_write_fb));
+ #ifdef LOG_ERRORS
+ 				if (r) {
+ 					vgl_log("%s:%d Failed to create a rendertarget of size %dx%d for framebuffer 0x%08X (%s).\n", __FILE__, __LINE__, active_write_fb->width, active_write_fb->height, active_write_fb, get_gxm_error_literal(r));
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1408,6 +1408,8 @@
+ GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples); // 1, 2 or 4 samples a pixel for this framebuffer object alone (framebuffers.c)
+ GLboolean vglFramebufferNoDepth(GLuint fb_id, GLint on); // 0038: 1: this framebuffer object's scenes get no depth/stencil memory (tile memory only: nothing loaded or stored; for objects whose scenes never test or write depth). 0: as before. GL_FALSE for an unknown object
+ void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes); // 0038: depth/stencil memory (KiB) of the live framebuffer objects that have a surface, how many have one, how many run without (nodepth), scenes begun without
++void vglSetRenderTargetPool(uint32_t count, uint32_t kib); // 0039: keep up to `count` framebuffer render targets (and `kib` KiB of driver memory, 0: no cap) for the next object of the same shape; 0: off (gxm.c)
++void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now); // 0039: reused, newly made, kept by the collector, let go, kept now, KiB kept now
+ int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
+ 
+ // Makes vitaGL use cached memory instead of uncached memory for its internal memory pools. Must be called before vglInit*.

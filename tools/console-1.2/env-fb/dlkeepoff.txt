@@ -1,0 +1,14 @@
+# console-1.2 run dlkeepoff: Display lists let go after 10 s
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_DL_KEEP=24 is on by default in the player build (the lists of the walk-out, the celebration and the replay stay while they add up to 24 MiB, so a goal builds almost none: host, goals 2 and 3 built 135 and 18 lists in one picture instead of 187 and 161 with a 12 MiB cap, before the cap was sized from the measured 19 MiB). This run is the A/B: the old sweep after 600 frames. Against the tour: the front-end ms of the picture after a goal ([frame-timing] worst), the [dlkeep] lines, and the free memory over a long match.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_DL_KEEP=0

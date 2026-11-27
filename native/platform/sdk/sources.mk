@@ -22,11 +22,13 @@ SRC_OWN := \
   nand_native.cpp \
   input_native.cpp \
   thp_native.cpp \
+  thp_jpeg_vita.cpp \
   stubs_rfl_hbm.cpp \
   audio_out.cpp \
   dsp_hle.cpp \
   ax/ax_mix.cpp \
   ax/ax_memory.cpp \
+  axfx_reverb_neon.c \
   ax/ax_dsp_coef.c
 
 REF_SRC := \

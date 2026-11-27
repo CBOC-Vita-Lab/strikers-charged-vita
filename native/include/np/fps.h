@@ -36,10 +36,20 @@ void NpFpsBeginFrame(float realSeconds, unsigned taskState);   /* once per drawn
 void NpFpsSimBegin(void);                              /* FixedUpdateTask::Run: the simulation part of the frame (cost per step) */
 void NpFpsSimStep(void);
 void NpFpsSimEnd(void);
+void NpFpsSimOverlapNote(int mode, double windowUs, double joinUs, double simWallUs);   // pace18: after each MSC_SIMT join (np_simpace18.h)
 void NpFpsMovieEnd(unsigned decoded, unsigned retraces);   /* a movie stopped: decoded frames and retraces since its start (speed check) */
 int NpFpsPolicy(void);                                 /* 0 game, 1 = 30, 2 = 60, 3 = unlocked: the policy in force right now */
 int NpFpsMode(void);                                   /* 0 game, 1 = 30, 2 = 60, 3 = unlocked, 4 = auto: what MSC_FPS asked for */
 int NpFpsDisplayInterval(void);                        /* vblanks a picture is shown for: 2 under policy 30, 1 under 60, 0 = no gate (the vgx display gate reads it) */
+int NpFpsPaced(void);                                  /* 1.3 (MSC_FPS_BETWEEN=pace): AUTO's 30 is running free in a match right now (swap mode 3, no display gate) */
+int NpFpsPresentSyncMode(void);                        /* 1.3 (MSC_PRESENT_SYNC): 0 off, 1 measure, 2 hold pictures to their game time, as of this picture */
+int NpFpsDescribe(char* out, int size);                /* 1.2: one line for the run header of the logs: mode, policy, thresholds, frames-in-flight and late-wait settings */
+float NpSlipDelta(float dt);                           /* 1.2 (MSC_SLIP, default off): the frame time the simulation clock advances by; dt itself when slip is off */
+int NpFpsGameOverload(void);                        /* pacing12 (MSC_CLOCK=debt): 1 while the game clock sheds more than 2 % of real time (the game thread cannot run it); the controllers lower their cost */
+int NpFpsPairControlled(void);                    /* 1 when MSC_PAIR_RATE=1 (the pair controller decides the cadence) */
+int NpFpsPairWanted(void);                          /* pacing13 (MSC_PAIR_RATE=1): 1 while the pair (full + light picture per 33 ms) is the cadence, 0 for the even 30; changes only after a light picture */
+int NpFpsPairReport(int phase, float gameMs, float gpuMs, int heldRefreshes, int live, double now); /* pacing13: one call per picture (phase 0 even, 1 full, 2 light); returns the next wanted cadence */
+void NpFpsPairBackground(int room);                    /* pacing13: 0 when the background ladder has no room for a kept background (the pair is left at the next boundary) */
 void NpFpsBootDone(int atTitle);                       /* W5 BOOT: the boot screens (0) / the title screen (1): the start-up's picture-per-refresh pacing (MSC_BOOT_FPS) ends */
 /* W5 RT, the late wait (MSC_LATE_WAIT, input delay; np_fps.cpp has the reasoning). Under policy 30 (swap mode 4):
  *  1 = hand over first: swap_Post skips its wait (NpFpsLateWait(4, retrace at the previous hand-over + 2) returns 1) and the same wait is made
@@ -50,6 +60,10 @@ int NpFpsLateWait(int swapMode, unsigned long refRetrace);
 void NpFpsLateWaitAfterSend(void);
 void NpFpsLateWaitOwe(unsigned long refRetrace);
 void NpFpsLateWaitRun(int where);
+/* Wave 6 (MSC_PAD_LATE, default off; np_fps.cpp): called before the step that reads the pad; sleeps the controller's delay (single player, held cadence only). */
+void NpFpsPadLateWait(void);
+/* Wave 7 (MSC_CADENCE, np_fps_cadence.h): a goal was scored in play. Only notes the time for the cadence policy and the draw-side cache warm-up (render side; the simulation is untouched). */
+void NpFpsNoteGoal(void);
 
 /* The platform side: what a core spent. cpuMs / timeMs are CUMULATIVE busy milliseconds per core since the start (monotone); timeMs is the part of
  * it that follows time (audio mixer, helpers), not frames. gameCore is the core of the game thread. Returns 0 when there is no measurement. */
@@ -79,7 +93,9 @@ static inline void NpFpsBeginFrame(float, unsigned) {}
 static inline void NpFpsSimBegin(void) {}
 static inline void NpFpsSimStep(void) {}
 static inline void NpFpsSimEnd(void) {}
+static inline void NpFpsSimOverlapNote(int, double, double, double) {}
 static inline void NpFpsMovieEnd(unsigned, unsigned) {}
+static inline void NpFpsNoteGoal(void) {}
 #endif
 
 #endif /* NP_FPS_H */

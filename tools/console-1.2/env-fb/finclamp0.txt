@@ -1,0 +1,14 @@
+# console-1.2 run finclamp0: Final colour clamp kept in every shader
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group picture, route tour, version payload 1.3, role ab
+# MSC_VGX_FINCLAMP=0 (the build default is 3: the clamp is left out where the value ranges prove it is not needed; shader pack 16 holds both forms, so no compile). FIRST THING TO LOOK AT on the console: blended shadows, decals and multisampled edges for static or wrapped colours with the default; if any, this run is the fix and the default goes back to 0. Timing: GPU busy ms against the default.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_FINCLAMP=0

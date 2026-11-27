@@ -12,8 +12,8 @@
 #   padN    (N a number) an environment N bytes bigger, e.g. pad12 pad16
 #   onecore taskset -c 0 (all threads on one cpu: different thread timing)   load  two busy loops running next to the game (thread timing again)
 # Traces: build/np/B3/mx/<tag>-<cfg>.trace, logs <tag>-<cfg>.log; at the end tools/det/stepcmp.py base vs all. Exit 0 = all identical.
-B=/home/claude/msc/build/np; NP=/home/claude/msc/np
-EXE=$B/B3x/host32/np-host32-full-null; SCRIPT=/home/claude/msc/tools/scripts/nav_match60.txt; FR=4400; TAG=mx; Q=0
+B=/work/msc/build/np; NP=/work/msc/np
+EXE=$B/B3x/host32/np-host32-full-null; SCRIPT=/work/msc/tools/scripts/nav_match60.txt; FR=4400; TAG=mx; Q=0
 KEEP=$B/B3/rundata-save   # a data dir WITH a save file: the path every real run takes except the first (the fresh-data path hid the layout dependence of wave2-NPP 7.1)
 CFGS="base pad4k sp00 spAA hpA5 arena noaslr perturb onecore load"
 BUSY=""
@@ -25,7 +25,7 @@ for c in $CFGS; do
   T=$OUT/$TAG-$c.trace; L=$OUT/$TAG-$c.log; PRE=""
   (
     cd $D
-    export NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$SCRIPT MSC_MAX_FRAMES=$FR MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 MSC_WATCH_EVERY=100000 MSC_STATE_HASH=30 NP_DET_TRACE=$T
+    export NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$SCRIPT MSC_MAX_FRAMES=$FR MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 MSC_WATCH_EVERY=100000 MSC_STATE_HASH=30 NP_DET_TRACE=$T
     case $c in
       pad4k) export NPB3PAD=$(head -c 4096 /dev/zero | tr '\0' 'x');;
       pad1) export NPB3PAD=x;;
@@ -43,7 +43,7 @@ for c in $CFGS; do
       onecore) PRE="taskset -c 0";;
       load) ( while :; do :; done ) & echo $! > $D/b1; ( while :; do :; done ) & echo $! > $D/b2;;
     esac
-    if [ $Q = 1 ]; then timeout -k 3 500 $PRE /home/claude/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf $EXE > $L 2>&1
+    if [ $Q = 1 ]; then timeout -k 3 500 $PRE /work/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf $EXE > $L 2>&1
     else timeout -k 3 300 $PRE $EXE > $L 2>&1; fi
     echo "rc=$?" >> $L
   )

@@ -1,0 +1,14 @@
+# console-1.2 run tlsverify1: Fast thread-local lookup with every call checked against the library's
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_TLS_FAST_VERIFY=1 runs the library's lookup next to the fast one on every call (slower: not a timing run). The [tls] line must say on, and no '[tls] MISMATCH' line may appear in the whole log. This is the console proof of the TLS wraps.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_TLS_FAST_VERIFY=1

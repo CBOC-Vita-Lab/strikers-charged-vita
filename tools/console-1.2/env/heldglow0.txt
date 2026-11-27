@@ -1,0 +1,13 @@
+# console-1.2 run heldglow0: Glow chain redrawn every picture in held scenes
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route replay, version payload 1.3, role ab
+# held30: MSC_HELD_GLOW_HALF=1 is on in the Vita plan (owner 17 Nov 23:23): in walk-outs, cut-scenes and replays the glow chain's six blur passes are redrawn every other picture (the composite reads the chain of the previous picture). This run is the A/B off side: compare [beph] scenes a picture (about 3 more on average with it off: 6 on every second picture), [lane] gpu / be / fe in the walk-out, a goal cut-scene and a replay (expect gpu +3, be +4.5, fe +1 ms with it OFF, estimate: 1.1 ms a scene, be 1.5 ms a scene), and the [glow] MSC_HELD_GLOW_HALF line in the ON runs. By eye: the haze along the stadium's silhouettes in the walk-out lags one picture behind the camera on every second picture.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HELD_GLOW_HALF=0

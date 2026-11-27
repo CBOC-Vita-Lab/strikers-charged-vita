@@ -11,8 +11,8 @@
 # NOT RUN: like the vitaGL host it derives from this has been compiled, never executed here (no console, no emulator in the container); the
 # host file is the one that ran on the console in the recompiled build, with the runtime hooks replaced by vgx_native_vita.h services.
 VITASDK ?= /opt/vitasdk
-VDEPS   ?= /home/claude/msc/build/one/vdeps-strict
-NOUT    ?= /home/claude/msc/build/np/NPR/vgx
+VDEPS   ?= /work/msc/build/one/vdeps-strict
+NOUT    ?= /work/msc/build/np/NPR/vgx
 HERE    := $(dir $(lastword $(MAKEFILE_LIST)))
 ROOT    := $(abspath $(HERE)/..)
 SRC     := $(ROOT)/src
@@ -20,12 +20,14 @@ NAT     := $(ROOT)/native
 OUT     := $(NOUT)/vita-vitagl
 O       := $(OUT)/obj
 VBIN    := $(VITASDK)/bin
+# (llvm-ar when the objects are LLVM bitcode: EXTRA=-flto=thin, np/platform/gx/gx.mk VGX_LTO)
+VARCH   ?= $(VBIN)/arm-vita-eabi-gcc-ar
 VSYS    := $(VITASDK)/arm-vita-eabi
 GXXV    := 15.2.0
 
 # clang as a compiler for the VitaSDK ABI (one/vita/vita_clang.mk: why each flag).
 VTARGET := --target=armv7a-none-eabihf -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb \
-          -fsigned-char -fshort-enums -femulated-tls -fno-pic -munaligned-access \
+          -fsigned-char -fshort-enums -femulated-tls -fno-pic -munaligned-access -fomit-frame-pointer \
           -D__vita__ -D__USES_INITFINI__ -U_GNU_SOURCE \
           -Wno-builtin-macro-redefined \
           -U__WINT_TYPE__ '-D__WINT_TYPE__=unsigned int' \
@@ -45,23 +47,26 @@ CORE := vgx_api vgx_rec vgx_play vgx_guestmem vgx_dlcache vgx_state vgx_draw vgx
 SRCS := $(addprefix $(SRC)/,$(addsuffix .cpp,$(CORE))) $(ROOT)/vita/vgx_host_vita.cpp $(NAT)/vgx_native_bridge.cpp $(NAT)/vgx_native_vita_services.cpp
 OBJS := $(patsubst $(ROOT)/%.cpp,$(O)/%.o,$(SRCS))
 
-FLAGS := -std=gnu++20 -O2 -w -pipe $(VTARGET) $(CXXSYS) -DTARGET_PC -DNOMINMAX -D__VGX_VITA__ -DVGX_NATIVE '-DMSC_VGX_COMMIT="np branch"' \
+FLAGS := -std=gnu++20 -O2 -fno-math-errno -w -pipe $(VTARGET) $(CXXSYS) -DTARGET_PC -DNOMINMAX -D__VGX_VITA__ -DVGX_NATIVE '-DMSC_VGX_COMMIT="np branch"' \
          -I$(ROOT)/vita/include -I$(VDEPS)/include -I$(SRC) -I$(ROOT)/vita -I$(NAT) -I$(NAT)/vita_shim -I$(ROOT)/include -I$(ROOT)/third_party $(EXTRA)
 
 .PHONY: all clean syntax
 all: $(OUT)/libvgx-native-vita.a
 
-$(O)/src/vgx_api.o: $(SRC)/vgx_api.cpp $(NAT)/vgx_native_rename.h
+# Every object lists the recorder's headers ($(SRC)/*.h) it was compiled against: vgx_rec.h holds the Chunk layout and the inline Reserve / Commit / Wpos, so an object
+# built against an older copy writes and publishes at the wrong offsets (an incremental build after the Chunk got its two diagnostic fields kept a stale vgx_api.o: the player read
+# two words that were not written yet and aborted with "corrupt record stream" in the first frame).
+$(O)/src/vgx_api.o: $(SRC)/vgx_api.cpp $(NAT)/vgx_native_rename.h $(wildcard $(SRC)/*.h)
 	@mkdir -p $(dir $@)
 	@echo CXX $(notdir $<) '(renamed API)'
 	@clang++ $(FLAGS) -include $(NAT)/vgx_native_rename.h -c $< -o $@
 
-$(O)/vita/vgx_host_vita.o: $(ROOT)/vita/vgx_host_vita.cpp $(wildcard $(NAT)/*.h $(NAT)/vita_shim/*.h $(ROOT)/vita/*.h)
+$(O)/vita/vgx_host_vita.o: $(ROOT)/vita/vgx_host_vita.cpp $(wildcard $(SRC)/*.h $(NAT)/*.h $(NAT)/vita_shim/*.h $(ROOT)/vita/*.h)
 	@mkdir -p $(dir $@)
 	@echo CXX $(notdir $<)
 	@clang++ $(FLAGS) '-DMSC_VGL_ID="$(VGL_ID)"' -c $< -o $@
 
-$(O)/native/%.o: $(NAT)/%.cpp $(wildcard $(NAT)/*.h $(NAT)/vita_shim/*.h)
+$(O)/native/%.o: $(NAT)/%.cpp $(wildcard $(SRC)/*.h $(NAT)/*.h $(NAT)/vita_shim/*.h)
 	@mkdir -p $(dir $@)
 	@echo CXX $(notdir $<)
 	@clang++ $(FLAGS) -c $< -o $@
@@ -73,7 +78,7 @@ $(O)/src/%.o: $(SRC)/%.cpp $(wildcard $(SRC)/*.h)
 
 $(OUT)/libvgx-native-vita.a: $(OBJS)
 	@rm -f $@
-	@$(VBIN)/arm-vita-eabi-gcc-ar rcs $@ $(OBJS)
+	@$(VARCH) rcs $@ $(OBJS)
 	@echo "built $@ ($(words $(OBJS)) objects)"
 
 # Syntax check of every source with the Vita flags (no objects).

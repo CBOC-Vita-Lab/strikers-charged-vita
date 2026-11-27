@@ -1,0 +1,13 @@
+# console-1.2 run cutsshapes1: Pass objects of the cuts made before kick-off (shapes ON)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route tour, version payload 1.3, role ab
+# MSC_CUTS_SHAPES=1 (default 0 until proven on a console; wave 10: the pass objects an earlier session made after kick-off, the chains of the goal cut-scene, replay and celebration, are listed on the card (<list>.shapes) and made again before kick-off, one a present, 16 MiB at most and only while the video memory floor holds). Needs a second session. Against the default on the goal cuts: the [hitch] target counts and the late presents at the cuts, the [cuts] match line (first uses after kick-off; targets), [mem] FAILED counts and video memory free (it holds up to 16 MiB more).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CUTS_SHAPES=1

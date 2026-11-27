@@ -1,0 +1,14 @@
+# console-1.2 run cur-setes: SAFE START and ONLINE pages in Spanish (the port's own texts)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 0, group core-look, route settings, version payload 1.3, role settings
+# The isolated app's Settings hook opens the screen, takes a picture of each page and leaves with Circle (nothing saved). The port's own texts in Spanish, with accents.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/look.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- session.sh puts np-settings-open (the Settings screen's test hook) next to this file: wait:2500 shot:es-1 rtrigger wait:800 shot:es-2 wait:500 circle
+# ---- under test: nothing here means the default ----
+MSC_LANGUAGE=es

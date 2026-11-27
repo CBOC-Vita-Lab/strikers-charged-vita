@@ -42,7 +42,7 @@ void GXMaterialProgramImpl<GXFixedLightMaterialProgram>::Draw(
     const glModelPacket* packet)
 {
     nlMatrix4 packetMatrix;
-    GXLightObj light;
+    GXLightObj light = {}; // zeroed (no direction, attenuation or pad words are set below; see GameObjectLighting.cpp)
 
     static_cast<GXFixedLightMaterialProgram*>(this)->BindVertexArrays(packet);
     static_cast<GXFixedLightMaterialProgram*>(this)->BindParameters(packet);

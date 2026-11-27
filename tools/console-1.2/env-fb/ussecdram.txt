@@ -1,0 +1,15 @@
+# console-1.2 run ussecdram: Shader code in video memory
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group hardware, route tour, version payload 1.3, role ab
+# MSC_VITA_USSE_CDRAM against gpufix: [lane] gpu. Same pictures. 8 MiB less video memory for textures: read the pool lines of log.txt; any `no GPU memory` line fails the run.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_USSE_CDRAM=1
+MSC_DYNRES=0

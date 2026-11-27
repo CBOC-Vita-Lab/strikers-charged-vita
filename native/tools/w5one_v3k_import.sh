@@ -6,10 +6,10 @@
 # tools/nav/nps2_savetest.txt walks title -> main menu: with a save there must be no "create save data" prompt ("first run" line absent, "STATE main menu with a save" present).
 VPK=${1:?vpk}; TID=${2:-MSCN00003}
 cd "$(dirname "$0")/.."
-NP=$PWD; B=/home/claude/msc/build/np/W5ONE; R=$B/v3k-import; P=$B/v3k_i
+NP=$PWD; B=/work/msc/build/np/W5ONE; R=$B/v3k-import; P=$B/v3k_i
 rm -rf $R $P; mkdir -p $R/files
 D=$P/pref/ux0/data/mscharged; N=$D/NAND/title/00010000/52345145/data; mkdir -p $N
-REAL=/home/claude/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data
+REAL=/work/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data
 T=$B/set/test_save_import
 [ -x $T ] || g++ -std=gnu++17 -O1 -w $NP/platform/sdk/tests/test_save_import.cpp -o $T || exit 1
 $T populate $REAL/Strikers2 $N/Strikers2 || exit 1

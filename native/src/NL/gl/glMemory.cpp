@@ -3,6 +3,7 @@
 #include "Game/GL/GLInventory.h"
 #include "NL/nlDLRing.h"
 #include "NL/nlMemory.h"
+#include "NL/gl/glTextureManager.h"
 #include "Game/SharedStaticStorage.h"
 #ifdef NP_NATIVE
 #include "np/framesend.h"
@@ -55,6 +56,7 @@ GLResourcePool* glCreateResourcePool(
             requirements,
             count, name);
     nlDLRingAddEnd(&sResourcePoolList, resource);
+    glTextureLookupChanged();
     return resource;
 }
 
@@ -65,6 +67,7 @@ void glDestroyResourcePool(GLResourcePool* resource)
 #endif
     nlDLRingRemove(&sResourcePoolList, resource);
     delete resource;
+    glTextureLookupChanged();
 }
 
 void glSetCurrentResourcePool(GLResourcePool* resource)

@@ -4,7 +4,7 @@
 Files: build/host-gl-arm/runs/<tag>.{prof,bin,log}. Thread: o = render + audio threads (default),
 g = game thread. Counts are instructions per presented frame."""
 import subprocess, sys, bisect, re, os
-os.chdir('/home/claude/msc/build/host-gl-arm/runs')
+os.chdir('/work/msc/build/host-gl-arm/runs')
 tag, pat, top = sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 12
 col = 1 if (len(sys.argv) > 4 and sys.argv[4] == 'g') else 2
 FR = float(sys.argv[5]) if len(sys.argv) > 5 else 313.0

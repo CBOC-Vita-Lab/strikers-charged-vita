@@ -16,6 +16,7 @@
 #include "np/np_plat.h"
 #include "np/modal_clock.h"
 
+#include <atomic>
 #include <errno.h>
 #include <malloc.h>
 #include <stdarg.h>
@@ -57,21 +58,32 @@ void np_sleep_ns(uint64_t ns) {
 }
 void np_yield(void) { sceKernelDelayThread(1); }
 // W5 RT: when the last vblank the VI thread waited for began (np_display_last_vblank: the input-delay record dates a picture's refresh from it)
-static volatile uint32_t g_lastVblankCount = 0;
-static volatile uint64_t g_lastVblankNs = 0;
+// STR-102 (1.2): the pair (count, time) is published through a sequence lock: the VI thread (the only writer) makes the sequence odd, writes both, makes it
+// even; a reader takes the pair only when the sequence was even and unchanged across both reads. (The old pair was two plain volatiles: a reader could take
+// the old count with the new time, and the check "the count did not move" passed because the writer stored the count last.)
+static std::atomic<uint32_t> g_vblankSeq{0};
+static std::atomic<uint32_t> g_lastVblankCount{0};
+static std::atomic<uint64_t> g_lastVblankNs{0};
 int64_t np_display_vblank_wait(void) {
     if (sceDisplayWaitVblankStart() < 0) return -1;
     const uint32_t v = (uint32_t)sceDisplayGetVcount();
-    g_lastVblankNs = np_time_real_ns();
-    g_lastVblankCount = v;
+    const uint64_t t = np_time_real_ns();
+    const uint32_t s = g_vblankSeq.load(std::memory_order_relaxed);
+    g_vblankSeq.store(s + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
+    g_lastVblankNs.store(t, std::memory_order_relaxed);
+    g_lastVblankCount.store(v, std::memory_order_relaxed);
+    g_vblankSeq.store(s + 2, std::memory_order_release);
     return (int64_t)v;
 }
 extern "C" int np_display_last_vblank(uint32_t* vcount, uint64_t* ns) {
-    // (two reads of a pair written by one thread: re-read when the count moved in between)
-    for (int i = 0; i < 3; ++i) {
-        const uint32_t v = g_lastVblankCount;
-        const uint64_t t = g_lastVblankNs;
-        if (v == g_lastVblankCount && t) { *vcount = v; *ns = t; return 1; }
+    for (int i = 0; i < 8; ++i) {
+        const uint32_t s1 = g_vblankSeq.load(std::memory_order_acquire);
+        if (s1 & 1u) continue;   // (being written)
+        const uint32_t v = g_lastVblankCount.load(std::memory_order_relaxed);
+        const uint64_t t = g_lastVblankNs.load(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (s1 == g_vblankSeq.load(std::memory_order_relaxed) && t) { *vcount = v; *ns = t; return 1; }
     }
     return 0;
 }
@@ -127,6 +139,10 @@ void np_mutex_unlock(NpMutex* m) { sceKernelUnlockLwMutex((SceKernelLwMutexWork*
 
 // (W5 FPS) np_fps_probe.cpp lists the threads for the per-core busy time MSC_FPS=auto reads. Weak: absent in a build without it.
 extern "C" void NpFpsProbeRegisterThread(int tid, int kind) __attribute__((weak));
+// (T8) The player build's rules for the system core (vita/src/np_vita_core3.h, vita_threads.cpp). Weak: a build without them places threads as before.
+extern "C" int NpVitaCore3Filter(const char* name, int role, int mask) __attribute__((weak));
+extern "C" int NpVitaCore3Priority(int mask, int prio) __attribute__((weak));
+extern "C" void NpVitaCore3Placed(void) __attribute__((weak));
 
 namespace {
 
@@ -134,13 +150,15 @@ const char* const kRoleName[NP_ROLE_COUNT] = {"GAME", "OSTHREAD", "AUDIO", "IO",
 
 const int kUser0 = SCE_KERNEL_CPU_MASK_USER_0;
 const int kUserAll = SCE_KERNEL_CPU_MASK_USER_ALL;
+const int kSystemCore = 0x00080000;   // SCE_KERNEL_CPU_MASK_SYSTEM: "3" below, which vita_plan.cpp writes only after the core was proven (np_vita_core3.h)
 
-// "0" / "1" / "2", several digits for a set, "any". 0 = not understood.
+// "0" / "1" / "2" / "3", several digits for a set, "any". 0 = not understood.
 int parse_mask(const char* text) {
     if (!text || !*text) return 0;
     if (!strcmp(text, "any") || !strcmp(text, "all")) return kUserAll;
     int mask = 0;
     for (const char* c = text; *c; ++c) {
+        if (*c == '3') { mask |= kSystemCore; continue; }
         if (*c < '0' || *c > '2') return 0;
         mask |= kUser0 << (*c - '0');
     }
@@ -182,17 +200,42 @@ int role_priority(NpRole role) {
 
 NpThreadHook g_thread_hook = 0;
 
-void apply_role(const char* name, NpRole role) {
+// The mask a thread of this name and role gets (the thp-decode lanes have a line of their own), after the core rules.
+int thread_mask(const char* name, NpRole role) {
     if ((unsigned)role >= NP_ROLE_COUNT) role = NP_ROLE_HELPER;
-    SceUID me = sceKernelGetThreadId();
     int mask = role_mask(role);
-    // (W5 PIPE) The movie decode lanes (thp_native.cpp, "thp-decode"): NP_VITA_CORE_THP = 0, 1, 2, a set like 12, or any places them apart from the other helpers; not set: the helper role's core.
     if (name && !strcmp(name, "thp-decode")) {
         const int thp = parse_mask(getenv("NP_VITA_CORE_THP"));
         if (thp) mask = thp;
     }
-    sceKernelChangeThreadCpuAffinityMask(me, mask);
+    if ((mask & kSystemCore) && NpVitaCore3Filter) mask = NpVitaCore3Filter(name ? name : "", (int)role, mask);
+    return mask;
+}
+
+void apply_role(const char* name, NpRole role) {
+    if ((unsigned)role >= NP_ROLE_COUNT) role = NP_ROLE_HELPER;
+    SceUID me = sceKernelGetThreadId();
+    // (W5 PIPE) The movie decode lanes (thp_native.cpp, "thp-decode"): NP_VITA_CORE_THP = 0, 1, 2, a set like 12, or any places them apart from the other helpers; not set: the helper role's core.
+    const int mask = thread_mask(name, role);   // (T8: the core rules are applied here)
+    const int placed = sceKernelChangeThreadCpuAffinityMask(me, mask);
+    if (placed >= 0 && (mask & kSystemCore) && NpVitaCore3Placed) NpVitaCore3Placed();
+    if (placed < 0 && (mask & kSystemCore)) {   // a line that names the fourth core, or a core that stopped being there: the role's plain core, never "any"
+        fprintf(stderr, "[vita] sdk thread '%s': the fourth core was refused (0x%X), back to the plan's core\n", name ? name : "", (unsigned)placed);
+        sceKernelChangeThreadCpuAffinityMask(me, default_mask(role));
+    }
     int prio = role_priority(role);
+    if ((mask & kSystemCore) && NpVitaCore3Priority) prio = NpVitaCore3Priority(mask, prio);   // (T8) no more urgent than MSC_VITA_CORE3_AUDIO_PRIO on the system core
+    // 1.2 (the Galaxy port's VBLANK_PRIO): MSC_VITA_PRIO_VBLANK = a priority in sceKernel's form for the thread that follows the display's vblank
+    // ("vi-retrace"), which the game's retrace waits, the movies and the 30 fps cadence all hang on. By default it sits at the timer role's 128, level with the
+    // mixer and the audio output on core 2, so a mix burst can hold a retrace back by a time slice; 0x10000100 - 48 (112) puts it ahead of them.
+    // Unset, 0 or off: unchanged (the timer role's priority).
+    if (name && !strcmp(name, "vi-retrace")) {
+        const char* text = getenv("MSC_VITA_PRIO_VBLANK");
+        if (text && *text && strcmp(text, "0") != 0 && strcmp(text, "off") != 0) {   // (0 / off: the timer role's priority, as when it is not set; the player build sets 0x100000D0 by default)
+            prio = (int)strtoul(text, 0, 0);
+            fprintf(stderr, "[vita] vi-retrace thread priority 0x%X (MSC_VITA_PRIO_VBLANK)\n", (unsigned)prio);
+        }
+    }
     if (prio) sceKernelChangeThreadPriority(me, prio);
     // kind: 2 the game's OS threads (they run one at a time on the game's core), 1 work that follows time (audio, timers, disc workers, helpers)
     if (NpFpsProbeRegisterThread) NpFpsProbeRegisterThread((int)me, (role == NP_ROLE_GAME || role == NP_ROLE_OSTHREAD) ? 2 : 1);
@@ -261,7 +304,11 @@ NpThread* np_thread_create(const char* name, NpRole role, NpThreadFn fn, void* a
     info.size = sizeof(info);
     int prio = 0x10000100;
     if (sceKernelGetThreadInfo(sceKernelGetThreadId(), &info) >= 0) prio = info.currentPriority;
-    t->id = sceKernelCreateThread(t->name, thread_entry, prio, (SceSize)stack_size, 0, 0, NULL);
+    // (T8) A thread that belongs on the system core is created there (the mask in sceKernelCreateThread), not moved after it started; the system refusing it is the plain create, and apply_role
+    // then moves it as before. Every other thread is created as it always was (mask 0).
+    const int wanted = thread_mask(t->name, role);
+    t->id = wanted & kSystemCore ? sceKernelCreateThread(t->name, thread_entry, prio, (SceSize)stack_size, 0, wanted, NULL) : -1;
+    if (t->id < 0) t->id = sceKernelCreateThread(t->name, thread_entry, prio, (SceSize)stack_size, 0, 0, NULL);
     if (t->id < 0) {
         free(t);
         return 0;

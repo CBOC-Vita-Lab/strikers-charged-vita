@@ -69,7 +69,7 @@ int main() {
     NpSdk_Init(&cfg);
     OSInit();
     const char* dir = getenv("MSC_DISC_FILES");
-    if (!dir) dir = "/home/claude/msc/game/files";
+    if (!dir) dir = "/work/msc/game/files";
     char path[512];
     int ran = 0;
 

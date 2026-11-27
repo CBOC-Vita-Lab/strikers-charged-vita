@@ -23,7 +23,7 @@
 # of THIS tree), output under $REFCHECK_OUT (default build/host-gl/checks/r5), references under
 # $REFCHECK_REFS (default build/host-gl/checks) and REFCHECK_EXTRA="VAR=1 VAR2=0" adds variables to both runs
 # (the new switches of the merge: off must reproduce the references, defaults are compared with REFCHECK_DEF_REF).
-MSC=/home/claude/msc; C=${REFCHECK_REFS:-$MSC/build/host-gl/checks}; OUTD=${REFCHECK_OUT:-$C/r5}
+MSC=/work/msc; C=${REFCHECK_REFS:-$MSC/build/host-gl/checks}; OUTD=${REFCHECK_OUT:-$C/r5}
 TAG=${1:?tag}; EXE=${2:-$MSC/build/host-gl/msc_null_hle}
 cd "$(dirname "$(readlink -f "$0")")/.."; mkdir -p $OUTD; rc=0
 run() { # name reference env...

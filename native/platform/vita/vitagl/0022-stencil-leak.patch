@@ -1,0 +1,96 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: the stencil of a freed depth/stencil surface goes to the collector too (upstream fbb190f)
+
+Four sites that freed a framebuffer's hidden depth buffer (glDeleteFramebuffers, the two renderbuffer attach paths in framebuffers.c, the texture-resize paths in textures.c and shared.h)
+marked depthData dirty and never stencilData, so every deleted or re-attached framebuffer object with a stencil leaked it: 0.5 MiB at 960x544 with one sample, 2 MiB at 4x. Dynamic
+resolution and the pass pool delete and make such objects all session. mark_depth_stencil_as_dirty (utils/mem_utils.h) marks both. 0011's vglFramebufferMultisample already did.
+vglFramebufferMultisample marked the stencil itself after the depth line (0011), so the macro alone is right there: the first form of this patch marked it twice and the collector freed it twice.
+No compile option and no shader compilation changes: the cache identity stays the same.
+
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index b75d193..5320b95 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -283,7 +283,7 @@ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
+ 			}
+ #ifndef DEPTH_STENCIL_HACK
+ 			if (fb->depthbuffer_ptr) {
+-				mark_as_dirty(fb->depthbuffer_ptr->depthData);
++				mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+ 			}
+ #endif
+ 		}
+@@ -367,7 +367,7 @@ void glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbu
+ 	// Discarding any previously bound hidden depth buffers
+ 	if (fb->depthbuffer_ptr) {
+ #ifndef DEPTH_STENCIL_HACK
+-		mark_as_dirty(fb->depthbuffer_ptr->depthData);
++		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+ #endif
+ 	}
+ 	fb->depthbuffer_ptr = NULL;
+@@ -399,7 +399,7 @@ void glNamedFramebufferRenderbuffer(GLuint target, GLenum attachment, GLenum ren
+ 	// Discarding any previously bound hidden depth buffers
+ 	if (fb->depthbuffer_ptr) {
+ #ifndef DEPTH_STENCIL_HACK
+-		mark_as_dirty(fb->depthbuffer_ptr->depthData);
++		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+ #endif
+ 		fb->depthbuffer_ptr = NULL;
+ 	}
+@@ -1031,9 +1031,7 @@ GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples) {
+ 	}
+ 	if (fb->depthbuffer_ptr) {
+ #ifndef DEPTH_STENCIL_HACK
+-		mark_as_dirty(fb->depthbuffer_ptr->depthData);
+-		if (fb->depthbuffer_ptr->stencilData)
+-			mark_as_dirty(fb->depthbuffer_ptr->stencilData);
++		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+ #endif
+ 		fb->depthbuffer_ptr = NULL;
+ 	}
+diff --git a/source/shared.h b/source/shared.h
+index ab29dca..2f202ac 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -1427,7 +1427,7 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
+ 			}
+ 			if (fb->depthbuffer_ptr) {
+ #ifndef DEPTH_STENCIL_HACK
+-				mark_as_dirty(fb->depthbuffer_ptr->depthData);
++				mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+ #endif
+ 				fb->depthbuffer_ptr = NULL;
+ 				fb->depthbuffer_state &= ~DEPTHBUFFER_READY;
+diff --git a/source/textures.c b/source/textures.c
+index fd9ad25..f8def6f 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -1827,7 +1827,7 @@ void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
+ 						if (fb) {
+ 							gpu_free_texture(&texture_slots[i]);
+ 							if (fb->depthbuffer_ptr) {
+-								mark_as_dirty(fb->depthbuffer_ptr->depthData);
++								mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+ 								fb->depthbuffer_ptr = NULL;
+ 								fb->depthbuffer_state = DEPTHBUFFER_MISSING;
+ 							}
+diff --git a/source/utils/mem_utils.h b/source/utils/mem_utils.h
+index 80f3f86..29eaec6 100644
+--- a/source/utils/mem_utils.h
++++ b/source/utils/mem_utils.h
+@@ -60,6 +60,14 @@ extern int frame_rt_purge_idx; // Index for currently populatable purge list ren
+ #else
+ #define mark_as_dirty(x) frame_purge_list[frame_purge_idx][frame_elem_purge_idx++] = x
+ #endif
++// 0022 (upstream fbb190f): a depth/stencil surface goes to the collector with its stencil, which was leaked (0.5 MiB at 960x544, one sample; 2 MiB at 4x) each time a framebuffer object with one was deleted or re-attached
++#define mark_depth_stencil_as_dirty(s) \
++	do { \
++		mark_as_dirty((s)->depthData); \
++		if ((s)->stencilData) { \
++			mark_as_dirty((s)->stencilData); \
++		} \
++	} while (0)
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ typedef struct {
+ 	SceGxmRenderTarget *rt;

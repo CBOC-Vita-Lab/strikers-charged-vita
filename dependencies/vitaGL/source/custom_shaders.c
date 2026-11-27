@@ -25,6 +25,7 @@
 #include <string.h>
 #include "shared.h"
 #include "utils/glsl_utils.h"
+#include "utils/geom_fix.h" // 0059
 #include "utils/shacccg_paramquery.h"
 #if defined(HAVE_SHADER_CACHE) || defined(HAVE_TEX_CACHE)
 #define XXH_STATIC_LINKING_ONLY
@@ -50,8 +51,15 @@ static SceUID vgl_open_seed(const char *kind, uint8_t subdir_hash, uint64_t hash
 	if (!vgl_shader_seed_path[0])
 		return -1;
 	char fname[256];
-	sprintf(fname, "%s/%s/%02X/%llX.gxp", vgl_shader_seed_path, kind, subdir_hash, hash);
-	return sceIoOpen(fname, SCE_O_RDONLY, 0777);
+	// The names this library's own cache writes (16 hex digits, upstream since cache version 3) first; a seed taken from an older
+	// library names its files without the leading zeros: tried second, and only when that spelling is a different one.
+	sprintf(fname, "%s/%s/%02X/%016llX.gxp", vgl_shader_seed_path, kind, subdir_hash, hash);
+	SceUID f = sceIoOpen(fname, SCE_O_RDONLY, 0777);
+	if (f < 0 && (hash >> 60) == 0) {
+		sprintf(fname, "%s/%s/%02X/%llX.gxp", vgl_shader_seed_path, kind, subdir_hash, hash);
+		f = sceIoOpen(fname, SCE_O_RDONLY, 0777);
+	}
+	return f;
 }
 #endif
 #endif
@@ -156,15 +164,67 @@ char vgl_file_cache_path[256];
 	}
 
 #ifndef HAVE_FFP_SHADER_SUPPORT
+// be26 (uni_reuse 2): a copy of a value set that equals one of the program's last VGL_UNI_HIST copies of this generation (compared byte for byte with a copy kept in main
+// memory, never with the ring) is named again as well; vgl_uni_stat counts copies, last-copy reuses and history reuses (count, bytes).
+// 1.3 (vglSetDrawCaches, uni_reuse): a program whose values have not changed since it last copied them in this scene (the switch to it is what set the dirty flag) names
+// that copy again. vgl_unif_gen moves at every scene end and every wrap of the ring, so a copy is never named outside the scene it was made for.
 #define upload_uniforms() \
 	if (p->vert_uniforms && dirty_shader_vert_unifs) { \
-		void *buffer = vglReserveVertexUniformBuffer(p->vshader->unif_buf_size); \
-		vgl_fast_memcpy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
+		void *vgl_uh_hit = NULL; \
+		if (vgl_uni_reuse && p->unif_gen[0] == vgl_unif_gen && !p->unif_changed[0]) { \
+			vgl_def_vert_buf = p->unif_last[0]; \
+			sceGxmSetVertexDefaultUniformBuffer(gxm_context, vgl_def_vert_buf); \
+			vgl_uni_stat[2]++; \
+			vgl_uni_stat[3] += p->vshader->unif_buf_size; \
+			if (vgl_uni_reuse > 2 && !uni_hist_eq(p->unif_last[0], p->unif_vbuffer, p->vshader->unif_buf_size)) vgl_uni_stat[6]++; \
+		} else if (vgl_uni_reuse > 1 && (vgl_uh_hit = uni_hist_find(p, 0, p->unif_vbuffer, p->vshader->unif_buf_size))) { \
+			vgl_def_vert_buf = vgl_uh_hit; \
+			sceGxmSetVertexDefaultUniformBuffer(gxm_context, vgl_def_vert_buf); \
+			p->unif_last[0] = vgl_uh_hit; \
+			p->unif_gen[0] = vgl_unif_gen; \
+			p->unif_changed[0] = 0; \
+			vgl_uni_stat[4]++; \
+			vgl_uni_stat[5] += p->vshader->unif_buf_size; \
+			if (vgl_uni_reuse > 2 && !uni_hist_eq(vgl_uh_hit, p->unif_vbuffer, p->vshader->unif_buf_size)) vgl_uni_stat[6]++; \
+		} else { \
+			void *buffer = vglReserveVertexUniformBuffer(p->vshader->unif_buf_size); \
+			vgl_wr_copy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
+			if (vgl_uni_reuse > 1) uni_hist_add(p, 0, buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
+			p->unif_last[0] = buffer; \
+			p->unif_gen[0] = vgl_unif_gen; \
+			p->unif_changed[0] = 0; \
+			vgl_uni_stat[0]++; \
+			vgl_uni_stat[1] += p->vshader->unif_buf_size; \
+		} \
 		dirty_shader_vert_unifs = GL_FALSE; \
 	} \
 	if (p->frag_uniforms && dirty_shader_frag_unifs) { \
-		void *buffer = vglReserveFragmentUniformBuffer(p->fshader->unif_buf_size); \
-		vgl_fast_memcpy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
+		void *vgl_uh_hit = NULL; \
+		if (vgl_uni_reuse && p->unif_gen[1] == vgl_unif_gen && !p->unif_changed[1]) { \
+			vgl_def_frag_buf = p->unif_last[1]; \
+			sceGxmSetFragmentDefaultUniformBuffer(gxm_context, vgl_def_frag_buf); \
+			vgl_uni_stat[2]++; \
+			vgl_uni_stat[3] += p->fshader->unif_buf_size; \
+			if (vgl_uni_reuse > 2 && !uni_hist_eq(p->unif_last[1], p->unif_fbuffer, p->fshader->unif_buf_size)) vgl_uni_stat[6]++; \
+		} else if (vgl_uni_reuse > 1 && (vgl_uh_hit = uni_hist_find(p, 1, p->unif_fbuffer, p->fshader->unif_buf_size))) { \
+			vgl_def_frag_buf = vgl_uh_hit; \
+			sceGxmSetFragmentDefaultUniformBuffer(gxm_context, vgl_def_frag_buf); \
+			p->unif_last[1] = vgl_uh_hit; \
+			p->unif_gen[1] = vgl_unif_gen; \
+			p->unif_changed[1] = 0; \
+			vgl_uni_stat[4]++; \
+			vgl_uni_stat[5] += p->fshader->unif_buf_size; \
+			if (vgl_uni_reuse > 2 && !uni_hist_eq(vgl_uh_hit, p->unif_fbuffer, p->fshader->unif_buf_size)) vgl_uni_stat[6]++; \
+		} else { \
+			void *buffer = vglReserveFragmentUniformBuffer(p->fshader->unif_buf_size); \
+			vgl_wr_copy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
+			if (vgl_uni_reuse > 1) uni_hist_add(p, 1, buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
+			p->unif_last[1] = buffer; \
+			p->unif_gen[1] = vgl_unif_gen; \
+			p->unif_changed[1] = 0; \
+			vgl_uni_stat[0]++; \
+			vgl_uni_stat[1] += p->fshader->unif_buf_size; \
+		} \
 		dirty_shader_frag_unifs = GL_FALSE; \
 	} \
 	if (p->vert_ubos) { \
@@ -210,12 +270,12 @@ char vgl_file_cache_path[256];
 				vglSetUniformData(p->ffp_binds[FFP_NORMAL_MATRIX]->vptr, SCE_GXM_PARAMETER_TYPE_F32, 0, 3, 3, (const float *)normal_matrix, SCE_GXM_PARAMETER_TYPE_F32); \
 			} \
 		} \
-		vgl_fast_memcpy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
+		vgl_wr_copy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
 		dirty_shader_vert_unifs = GL_FALSE; \
 	} \
 	if (p->frag_uniforms && dirty_shader_frag_unifs) { \
 		void *buffer = vglReserveFragmentUniformBuffer(p->fshader->unif_buf_size); \
-		vgl_fast_memcpy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
+		vgl_wr_copy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
 		dirty_shader_frag_unifs = GL_FALSE; \
 	} \
 	if (p->vert_ubos) { \
@@ -237,13 +297,35 @@ char vgl_file_cache_path[256];
 	}
 #endif
 	
-#define setup_frag_program() \
-	if ((p->blend_info.raw != blend_info.raw) || (is_fbo_float != p->is_fbo_float)) { \
-		p->is_fbo_float = is_fbo_float; \
-		p->blend_info.raw = blend_info.raw; \
-		rebuild_frag_shader(p->fshader->id, &p->fprog, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4); \
+// 1.2 (vglSetRobustScenes): the program for the current blend function and target format is made first and published, together with the key that says
+// it is the current one, only when sceGxm made it. A program that could not be made (the shader patcher's memory is full) used to leave the key saying
+// "up to date" over the previous program (the draw then used the wrong blend function for as long as the key stayed) or, for a program's first draw,
+// over nothing (sceGxmSetFragmentProgram(NULL)). Now the draw is skipped (`failed`) and the next draw tries again.
+#define setup_frag_program_tx(failed) \
+	if ((p->blend_info.raw != blend_info.raw) || (is_fbo_float != p->is_fbo_float) || (cur_msaa != p->msaa)) { \
+		if (vgl_robust_scenes) { \
+			SceGxmFragmentProgram *rebuilt = vgl_frag_memo ? frag_memo_find(p) : NULL; \
+			if (!rebuilt) { \
+				if (rebuild_frag_shader(p->fshader->id, &rebuilt, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4) || !rebuilt) { \
+					failed; \
+				} \
+				if (vgl_frag_memo) \
+					frag_memo_add(p, rebuilt); \
+			} \
+			p->fprog = rebuilt; \
+			p->is_fbo_float = is_fbo_float; \
+			p->msaa = cur_msaa; \
+			p->blend_info.raw = blend_info.raw; \
+		} else { \
+			p->is_fbo_float = is_fbo_float; \
+			p->msaa = cur_msaa; \
+			p->blend_info.raw = blend_info.raw; \
+			rebuild_frag_shader(p->fshader->id, &p->fprog, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4); \
+		} \
 	} \
 	sceGxmSetFragmentProgram(gxm_context, p->fprog);
+#define setup_frag_program() setup_frag_program_tx(return GL_FALSE) // (in the functions that return GLboolean: the draw is skipped by their callers)
+#define setup_frag_program_void() setup_frag_program_tx(return) // (the others: the program is not published, nothing is skipped)
 	
 #define align_attributes(attributes, streams) \
 	if (p->has_unaligned_attrs) { \
@@ -307,6 +389,27 @@ shark_opt compiler_opts = SHARK_OPT_FAST;
 
 GLuint cur_program = 0; // Current in use custom program (0 = No custom program)
 
+#define VGL_DIRECT_VPROGS 8
+#define VGL_FRAG_MEMO 8
+GLboolean vgl_frag_memo = GL_FALSE, vgl_uni_reuse = GL_FALSE; // vglSetDrawCaches (uni_reuse: 0 off, 1 the last copy, 2 the last VGL_UNI_HIST copies, 3 as 2 and every reuse reads the ring copy back and counts a difference: a test mode)
+#define VGL_UNI_HIST 4
+#define VGL_UNI_HIST_BUDGET (1536u * 1024u) // bytes of main memory all programs' history copies may take together; a program past it gets none (it copies as before)
+uint32_t vgl_uni_stat[7]; // copies made, their bytes; last-copy reuses, their bytes; history reuses, their bytes; (uni_reuse 3, verify) reuses whose ring copy differs from the buffer now (since start; vglGlbGetStats)
+static uint32_t vgl_uni_hist_bytes;
+uint32_t vgl_uni_hist_cap = 0; // gem2b (vglSetUniHistCap): 0 every buffer size keeps a history (be26); else only the buffers of at most this many bytes (the big skin / palette buffers rarely repeat: their misses cost a scan and a copy for nothing)
+static const vglDirectLayout *direct_layout = NULL; // vglDrawElementsDirect: the layout of the draw in progress
+static vbo *direct_vbo = NULL;
+static uint32_t direct_base = 0;
+static GLboolean direct_failed = GL_FALSE;
+
+// What glUseProgram did before upstream 9bf3e3f for every call: the uniform buffers of the program in use are reserved and copied again by the next draw.
+static inline __attribute__((always_inline)) void vgl_dirty_all_uniforms(void) {
+	dirty_shader_frag_unifs = GL_TRUE;
+	dirty_shader_vert_unifs = GL_TRUE;
+	dirty_vert_unifs = 0xFFFF;
+	dirty_frag_unifs = 0xFFFFFFFF;
+}
+
 typedef enum {
 	UNIFORM_DATA,
 	UNIFORM_SAMPLER,
@@ -321,6 +424,7 @@ typedef struct {
 #endif
 	void *fptr;
 	void *vptr;
+	uint8_t *changed; // 1.3: the program's unif_changed[2] (vertex, fragment): set by every write of a value
 	uniform_type type;
 	uint8_t sampler_index;
 } uniform;
@@ -384,14 +488,128 @@ typedef struct {
 	GLuint attr_highest_idx;
 	GLboolean has_unaligned_attrs;
 	GLboolean is_fbo_float;
+	SceGxmMultisampleMode msaa; // the multisample mode fprog was patched for
 	uint8_t num_glsl_attr;
 	attr_mapping *glsl_attr_map;
 	void *unif_fbuffer;
 	void *unif_vbuffer;
+	// vglDrawElementsDirect: vertex programs patched for a caller's layout keys (round robin). Every entry stays valid while the program does: the
+	// vertex cache's own evictions forget a pointer, they do not release it, and the shader's patcher registration outlives the program (release_shader).
+	uint32_t direct_key[VGL_DIRECT_VPROGS];
+	SceGxmVertexProgram *direct_vprog[VGL_DIRECT_VPROGS];
+	uint8_t direct_next;
+	// vglSetDrawCaches: the fragment programs this program was patched into (round robin; each stays valid as p->fprog does: only the splash screen releases one)
+	uint32_t memo_blend[VGL_FRAG_MEMO];
+	SceGxmFragmentProgram *memo_fprog[VGL_FRAG_MEMO];
+	uint8_t memo_mode[VGL_FRAG_MEMO];
+	uint8_t memo_next;
+	uint8_t fresh_draw; // 0040: linked and not drawn with yet (vglDrawElementsDirect times that first draw)
+	// vglSetDrawCaches: the last copy of each default uniform buffer (vertex, fragment), the generation it belongs to (0: none), values written since
+	void *unif_last[2];
+	uint32_t unif_gen[2];
+	uint8_t unif_changed[2];
+	// be26 (vglSetDrawCaches uni_reuse 2): the last VGL_UNI_HIST copies of each default uniform buffer: their ring addresses, generations (0: empty), and the bytes they held (hdata, VGL_UNI_HIST slots of the buffer size, made at the first copy)
+	void *unif_hptr[2][VGL_UNI_HIST];
+	uint32_t unif_hgen[2][VGL_UNI_HIST];
+	uint8_t *unif_hdata[2];
+	uint32_t unif_hsize[2];
+	uint8_t unif_hnext[2];
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
 	uint32_t vertex_layout_version;
 #endif
 } program;
+
+// 1.3 (vglSetDrawCaches, frag_memo): what vitaGL asks the shader patcher at every change of a program's blend function, target format or samples, kept per program. The
+// patcher keeps one object per combination, so the answer is the same pointer; what goes is the patcher's hash lookup. The vertex program a fragment program links to is
+// the program's own, so the key is the three things setup_frag_program compares.
+static inline __attribute__((always_inline)) SceGxmFragmentProgram *frag_memo_find(const program *p) {
+	const uint8_t mode = (is_fbo_float ? 4 : 0) | (uint8_t)cur_msaa;
+	for (int i = 0; i < VGL_FRAG_MEMO; i++) {
+		if (p->memo_fprog[i] && p->memo_blend[i] == blend_info.raw && p->memo_mode[i] == mode)
+			return p->memo_fprog[i];
+	}
+	return NULL;
+}
+static inline __attribute__((always_inline)) void frag_memo_add(program *p, SceGxmFragmentProgram *f) {
+	p->memo_blend[p->memo_next] = blend_info.raw;
+	p->memo_mode[p->memo_next] = (is_fbo_float ? 4 : 0) | (uint8_t)cur_msaa;
+	p->memo_fprog[p->memo_next] = f;
+	p->memo_next = (p->memo_next + 1) % VGL_FRAG_MEMO;
+}
+// be26: are the n bytes at a and b equal? 32 bytes a step (words, one branch a step; newlib's memcmp spends ten instructions on four bytes). n is a multiple of 4 (sizes of uniform buffers).
+static inline __attribute__((always_inline)) int uni_hist_eq(const void *a, const void *b, uint32_t n) {
+	const uint32_t *x = (const uint32_t *)a, *y = (const uint32_t *)b;
+	uint32_t w = n >> 2;
+	while (w >= 8) {
+		if ((x[0] ^ y[0]) | (x[1] ^ y[1]) | (x[2] ^ y[2]) | (x[3] ^ y[3]) | (x[4] ^ y[4]) | (x[5] ^ y[5]) | (x[6] ^ y[6]) | (x[7] ^ y[7]))
+			return 0;
+		x += 8;
+		y += 8;
+		w -= 8;
+	}
+	while (w--) {
+		if (*x++ != *y++)
+			return 0;
+	}
+	return 1;
+}
+// be26 (uni_reuse 2): the ring address of a copy of this program's stage `st` (0 vertex, 1 fragment) made in this generation that holds exactly the n bytes at buf, or NULL.
+static inline __attribute__((always_inline)) void *uni_hist_find(program *p, int st, const void *buf, uint32_t n) {
+	if (!p->unif_hdata[st] || p->unif_hsize[st] != n || (vgl_uni_hist_cap && n > vgl_uni_hist_cap))
+		return NULL;
+	for (int i = 0; i < VGL_UNI_HIST; i++) {
+		if (p->unif_hgen[st][i] == vgl_unif_gen && uni_hist_eq(p->unif_hdata[st] + (size_t)i * n, buf, n))
+			return p->unif_hptr[st][i];
+	}
+	return NULL;
+}
+// be26: remember a copy just made (ring address `ring`, contents buf). The slots are taken round robin; the memory is made at the first copy while the budget lasts.
+static inline __attribute__((always_inline)) void uni_hist_add(program *p, int st, void *ring, const void *buf, uint32_t n) {
+	if (vgl_uni_hist_cap && n > vgl_uni_hist_cap)
+		return;
+	if (!p->unif_hdata[st]) {
+		if (n == 0 || n > 65536 || vgl_uni_hist_bytes + n * VGL_UNI_HIST > VGL_UNI_HIST_BUDGET)
+			return;
+		p->unif_hdata[st] = (uint8_t *)vglMalloc(n * VGL_UNI_HIST);
+		if (!p->unif_hdata[st])
+			return;
+		p->unif_hsize[st] = n;
+		vgl_uni_hist_bytes += n * VGL_UNI_HIST;
+		vgl_memset(p->unif_hgen[st], 0, sizeof(p->unif_hgen[st]));
+		p->unif_hnext[st] = 0;
+	}
+	if (p->unif_hsize[st] != n)
+		return;
+	const uint8_t i = p->unif_hnext[st];
+	vgl_fast_memcpy(p->unif_hdata[st] + (size_t)i * n, buf, n);
+	p->unif_hptr[st][i] = ring;
+	p->unif_hgen[st][i] = vgl_unif_gen;
+	p->unif_hnext[st] = (uint8_t)((i + 1) % VGL_UNI_HIST);
+}
+static inline __attribute__((always_inline)) void uni_hist_free(program *p) {
+	for (int st = 0; st < 2; st++) {
+		if (p->unif_hdata[st]) {
+			vgl_uni_hist_bytes -= p->unif_hsize[st] * VGL_UNI_HIST;
+			vgl_free(p->unif_hdata[st]);
+		}
+		p->unif_hdata[st] = NULL;
+		p->unif_hsize[st] = 0;
+		p->unif_hnext[st] = 0;
+		vgl_memset(p->unif_hgen[st], 0, sizeof(p->unif_hgen[st]));
+	}
+}
+static inline __attribute__((always_inline)) void program_caches_reset(program *p) {
+	vgl_memset(p->memo_fprog, 0, sizeof(p->memo_fprog));
+	p->memo_next = 0;
+	uni_hist_free(p);
+	p->unif_gen[0] = p->unif_gen[1] = 0;
+	p->unif_changed[0] = p->unif_changed[1] = 1;
+}
+
+void vglSetDrawCaches(GLboolean frag_memo, GLboolean uni_reuse) {
+	vgl_frag_memo = frag_memo;
+	vgl_uni_reuse = uni_reuse;
+}
 
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
 enum {
@@ -524,6 +742,74 @@ static inline __attribute__((always_inline)) uniform *get_uniform_from_ptr(GLint
 #else
 #define get_uniform_from_ptr(ptr, offs) (-ptr)
 #endif
+
+// 1.3 vgx uniform shadows (MSC_VGX_UNI_SHADOW; ported from the Galaxy port's patch 0015, GXV_UNI_SHADOW). Nothing changes unless a caller uses the two
+// calls below. glUniform4fv / glUniformMatrix4fv (transpose GL_FALSE) on an F32 four-component uniform end in copies into u->vptr and u->fptr (the
+// program's default uniform buffers), the program's unif_changed flag of each stage written and the global dirty flag of that stage
+// (vgl_fill_uniform_data). For more than one element that copy goes through vglSetUniformData, element by element. A caller that keeps its own copy of
+// what it gave can write the changed values into these buffers itself and then make one vglUniformShadowWritten call for the flags.
+// vglGetUniformShadow: the addresses of a linked program's uniform in its vertex / fragment buffers (either may be null: the stage does not use it) and the
+// bytes that belong to it there (array size x 16, bounded by what is left of each buffer). GL_FALSE for anything but a plain F32 vec4 / vec4 array / mat4
+// of this program (sampler, other type or component count, element offset, unlinked program, a location of another program).
+GLboolean vglGetUniformShadow(GLuint prog, GLint location, void **vptr, void **fptr, uint32_t *bytes) {
+#if defined(HAVE_GLSL_TEXTURE_SIZE) || defined(HAVE_FFP_SHADER_SUPPORT)
+	return GL_FALSE;
+#else
+	if (!prog || prog > MAX_CUSTOM_PROGRAMS || location == -1 || location == 0 || !vptr || !fptr || !bytes)
+		return GL_FALSE;
+	program *p = &progs[prog - 1];
+	if (p->status != PROG_LINKED)
+		return GL_FALSE;
+	int offs = 0;
+	uniform *u = (uniform *)get_uniform_from_ptr(location, &offs);
+	if (offs != 0 || !u || u->type != UNIFORM_DATA || !u->ptr)
+		return GL_FALSE;
+	if (sceGxmProgramParameterGetType(u->ptr) != SCE_GXM_PARAMETER_TYPE_F32 || sceGxmProgramParameterGetComponentCount(u->ptr) != 4)
+		return GL_FALSE;
+	uint32_t room = sceGxmProgramParameterGetArraySize(u->ptr) * 16;
+	if (!room)
+		room = 16;
+	// (the uniform must be this program's: its addresses lie in this program's buffers; what is left of each buffer bounds it)
+	if (u->vptr) {
+		const uint8_t *b = (const uint8_t *)p->unif_vbuffer, *a = (const uint8_t *)u->vptr;
+		if (!b || a < b || a >= b + p->vshader->unif_buf_size)
+			return GL_FALSE;
+		if ((uint32_t)(b + p->vshader->unif_buf_size - a) < room)
+			room = (uint32_t)(b + p->vshader->unif_buf_size - a);
+	}
+	if (u->fptr) {
+		const uint8_t *b = (const uint8_t *)p->unif_fbuffer, *a = (const uint8_t *)u->fptr;
+		if (!b || a < b || a >= b + p->fshader->unif_buf_size)
+			return GL_FALSE;
+		if ((uint32_t)(b + p->fshader->unif_buf_size - a) < room)
+			room = (uint32_t)(b + p->fshader->unif_buf_size - a);
+	}
+	if (!u->vptr && !u->fptr)
+		return GL_FALSE;
+	*vptr = u->vptr;
+	*fptr = u->fptr;
+	*bytes = room;
+	return GL_TRUE;
+#endif
+}
+// What vgl_fill_uniform_data does after its copies, for the stages a caller wrote through vglGetUniformShadow's addresses (bit 0 vertex, bit 1 fragment):
+// the program's unif_changed flag (no uni_reuse copy of an older value is named again) and the dirty flag of the stage. The program must be the current one,
+// as for glUniform*.
+void vglUniformShadowWritten(GLuint prog, uint32_t stages) {
+#if !defined(HAVE_GLSL_TEXTURE_SIZE) && !defined(HAVE_FFP_SHADER_SUPPORT)
+	if (!prog || prog > MAX_CUSTOM_PROGRAMS)
+		return;
+	program *p = &progs[prog - 1];
+	if (stages & 1) {
+		p->unif_changed[0] = 1;
+		dirty_shader_vert_unifs = GL_TRUE;
+	}
+	if (stages & 2) {
+		p->unif_changed[1] = 1;
+		dirty_shader_frag_unifs = GL_TRUE;
+	}
+#endif
+}
 
 void release_shader(shader *s) {
 	// Deallocating shader and unregistering it from sceGxmShaderPatcher
@@ -769,7 +1055,7 @@ GLboolean unserialize_shader(void *in, size_t sz, shader *s, GLboolean load_bind
 			candidate.mat = m;
 		}
 	}
-	if (sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, candidate.prog, &candidate.id))
+	if (vgl_register_program(candidate.prog, &candidate.id))
 		goto failed;
 	commit_shader_candidate(s, &candidate);
 	if (load_bindings)
@@ -815,11 +1101,14 @@ static GLboolean load_shader_cache(SceUID f, shader *s, GLboolean bindings) {
 #endif
 
 #ifdef HAVE_SHADER_CACHE
-#define vgl_compile_shader(shd, sv) compile_shader(shd, sv, fname)
+#define vgl_compile_shader(shd, sv) compile_shader(shd, sv, fname, fname_len)
 #include "utils/shader_cache_io.h"
 /* Compile-time capability, valid before vglInit: bit 0 owns bucket creation. */
 unsigned vglStrikersShaderCacheCaps(void) { return 1u; }
-static inline __attribute__((always_inline)) void compile_shader(shader *s, GLboolean save_bindings, const char *cache_fname) {
+/* The cache version folder this library writes under the cache path ("v<n>", SHADER_CACHE_MAGIC): the host needs it before vglInit
+   (upstream moved it from 2 to 3 together with the 16-digit file names, 13 Oct 2026). */
+unsigned vglStrikersShaderCacheVersion(void) { return SHADER_CACHE_MAGIC; }
+static inline __attribute__((always_inline)) void compile_shader(shader *s, GLboolean save_bindings, const char *cache_fname, int fname_len) {
 #else
 #define vgl_compile_shader(shd, sv) compile_shader(shd, sv)
 static inline __attribute__((always_inline)) void compile_shader(shader *s, GLboolean save_bindings) {
@@ -872,7 +1161,7 @@ static inline __attribute__((always_inline)) void compile_shader(shader *s, GLbo
 			param = sceShaccCgGetNextParameter(param);
 		}
 		// Registration is last: no fallible work may leave a registered partial shader.
-		int r = sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, res, &candidate.id);
+		int r = vgl_register_program(res, &candidate.id);
 		if (r) {
 			vgl_log("%s: Program registration failed (0x%08X).\n", __func__, r);
 			goto done;
@@ -902,6 +1191,173 @@ done:
 #endif
 }
 
+/* 1.3 ASYNC_SHADERS (patch 0027; the Galaxy port's 0020 vglCompileShaderPairToCache, written again from its description): a shader is compiled
+   into the shader cache on another thread, never registered with the patcher. Every compile (this one and glCompileShader's translate and
+   compile) holds the compiler lock: the translator's and vitaShaRK's state is global. The render thread's next glCompileShader of the same
+   text finds the cache file and loads it. Without vglShaderCompilerLockInit nothing here changes: the lock is not taken. */
+static SceUID vgl_compiler_lock = -1;
+int vglShaderCompilerLockInit(void) {
+	if (vgl_compiler_lock >= 0)
+		return 0;
+	SceUID m = sceKernelCreateMutex("vgl compiler", 0, 0, NULL);
+	if (m < 0)
+		return m;
+	vgl_compiler_lock = m;
+	return 0;
+}
+static inline void vgl_compiler_enter(void) {
+	if (vgl_compiler_lock >= 0)
+		sceKernelLockMutex(vgl_compiler_lock, 1, NULL);
+}
+static inline void vgl_compiler_leave(void) {
+	if (vgl_compiler_lock >= 0)
+		sceKernelUnlockMutex(vgl_compiler_lock, 1);
+}
+
+#ifdef HAVE_SHADER_CACHE
+/* The text glShaderSource would make of these parts, and its cache file name (glCompileShader's spelling). */
+static char *vgl_async_source(GLenum type, const char *const *parts, int count, uint32_t *size, uint64_t *hash, char *fname) {
+	uint32_t n = 0;
+	for (int i = 0; i < count; i++)
+		n += strlen(parts[i]);
+	char *src = (char *)vglMalloc(n + 1);
+	if (!src)
+		return NULL;
+	n = 0;
+	for (int i = 0; i < count; i++) {
+		size_t l = strlen(parts[i]);
+		vgl_fast_memcpy(&src[n], parts[i], l);
+		n += l;
+	}
+	src[n] = 0;
+	*size = n;
+	*hash = XXH3_64bits(src, n);
+	sprintf(fname, "%s/%s/%02X/%016llX.gxp", vgl_shader_cache_path, type == GL_VERTEX_SHADER ? "v" : "f", (uint8_t)(*hash >> 56), *hash);
+	return src;
+}
+static int vgl_async_cached(GLenum type, uint64_t hash, const char *fname) {
+	SceIoStat st;
+	if (vgl_shader_pack_lookup) {
+		uint32_t psz = 0;
+		if (vgl_shader_pack_lookup(type == GL_FRAGMENT_SHADER, hash, &psz))
+			return 1;
+	}
+	if (sceIoGetstat(fname, &st) >= 0 && st.st_size > 0)
+		return 1;
+	SceUID f = vgl_open_seed(type == GL_VERTEX_SHADER ? "v" : "f", (uint8_t)(hash >> 56), hash);
+	if (f >= 0) {
+		sceIoClose(f);
+		return 1;
+	}
+	return 0;
+}
+#endif
+
+/* 1 = the pack, the cache or the seed has the compiled form of this text (glCompileShader would load it), 0 = it would compile. */
+int vglShaderCacheProbe(GLenum type, const char *const *parts, int count) {
+#ifdef HAVE_SHADER_CACHE
+	char fname[256];
+	uint32_t size;
+	uint64_t hash;
+	if (!vgl_shader_cache_path[0])
+		return 0;
+	char *src = vgl_async_source(type, parts, count, &size, &hash, fname);
+	if (!src)
+		return 0;
+	vgl_free(src);
+	return vgl_async_cached(type, hash, fname);
+#else
+	return 0;
+#endif
+}
+
+/* Compiles the text into the cache: 1 compiled and written, 2 the pack / cache / seed has it already, 0 the compile or the write failed,
+   -1 no cache path, -2 the compiler is not online. Any thread; the GL state is not touched. */
+int vglCompileShaderToCache(GLenum type, const char *const *parts, int count) {
+#ifdef HAVE_SHADER_CACHE
+	char fname[256];
+	uint32_t size;
+	uint64_t hash;
+	if (!vgl_shader_cache_path[0])
+		return -1;
+	shader s = {0};
+	s.type = type;
+	s.is_glsl = GL_TRUE;
+	s.source = vgl_async_source(type, parts, count, &size, &hash, fname);
+	if (!s.source)
+		return 0;
+	s.size = size;
+	if (vgl_async_cached(type, hash, fname)) {
+		vgl_free(s.source);
+		return 2;
+	}
+	int result = 0;
+	vgl_compiler_enter();
+	if (!is_shark_online && !start_shader_compiler()) {
+		vgl_compiler_leave();
+		vgl_free(s.source);
+		return -2;
+	}
+	glsl_translator_process(&s);
+	shader candidate = {0};
+	candidate.type = type;
+	candidate.size = (uint32_t)strlen((const char *)s.source);
+	const SceGxmProgram *output = shark_compile_shader_extended((const char *)s.source, &candidate.size, type == GL_FRAGMENT_SHADER ? SHARK_FRAGMENT_SHADER : SHARK_VERTEX_SHADER, compiler_opts, compiler_fastmath, compiler_fastprecision, compiler_fastint);
+	if (output && candidate.size) {
+		SceGxmProgram *res = (SceGxmProgram *)vglMalloc(candidate.size);
+		if (res) {
+			candidate.prog = res;
+			vgl_fast_memcpy(res, output, candidate.size);
+			GLboolean ok = GL_TRUE;
+			SceShaccCgCompileOutput *cout = (SceShaccCgCompileOutput *)shark_get_internal_compile_output();
+			SceShaccCgParameter param = sceShaccCgGetFirstParameter(cout);
+			while (param && ok) {
+				if (sceShaccCgGetParameterClass(param) == SCE_SHACCCG_PARAMETERCLASS_MATRIX) {
+					const SceGxmProgramParameter *ptr = sceGxmProgramFindParameterByName(res, sceShaccCgGetParameterName(param));
+					if (ptr) {
+						matrix_uniform *m = (matrix_uniform *)vglMalloc(sizeof(matrix_uniform));
+						if (!m)
+							ok = GL_FALSE;
+						else {
+							m->ptr = ptr;
+							m->chain = candidate.mat;
+							candidate.mat = m;
+						}
+					}
+				} else if (sceShaccCgGetParameterClass(param) == SCE_SHACCCG_PARAMETERCLASS_UNIFORMBLOCK) {
+					const char *name = sceShaccCgGetParameterName(param);
+					if (!name || strlen(name) >= sizeof(((block_uniform *)0)->name))
+						ok = GL_FALSE; /* compile_shader refuses this shader too */
+				}
+				param = sceShaccCgGetNextParameter(param);
+			}
+			if (ok) {
+				candidate.semantics = s.semantics;
+#ifdef HAVE_GLSL_TEXTURE_SIZE
+				candidate.sized_samplers_num = s.sized_samplers_num;
+				vgl_fast_memcpy(candidate.sized_samplers, s.sized_samplers, sizeof(candidate.sized_samplers));
+#endif
+				vgl_cache_compiled_shader(&candidate, GL_FALSE, fname);
+				SceIoStat st;
+				result = sceIoGetstat(fname, &st) >= 0 && st.st_size > 0 ? 1 : 0;
+			}
+		}
+	}
+	discard_shader_candidate(&candidate);
+#ifdef HAVE_SHARK_LOG
+	if (shark_log)
+		vgl_free(shark_log);
+	shark_log = NULL;
+#endif
+	shark_clear_output();
+	vgl_compiler_leave();
+	vgl_free(s.source);
+	return result;
+#else
+	return -1;
+#endif
+}
+
 void reset_custom_shaders(void) {
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
 	sceClibMemset(&vertex_layout_cache, 0, sizeof(vertex_layout_cache));
@@ -925,7 +1381,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 	VGL_STREAM_FLUSH_IF_NEEDED() // GLB
 
 	// Check if a blend info rebuild is required and upload fragment program
-	setup_frag_program();
+	setup_frag_program_void();
 
 	// Uploading fragment textures on relative texture units
 	for (int i = 0; i < p->max_frag_texunit_idx; i++) {
@@ -969,6 +1425,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 				vglGetTexSizes(&tex->gxm_tex, &sizes[0], &sizes[1]);
 				float fsizes[2] = {sizes[0], sizes[1]};
 				vglSetUniformData(p->frag_texunits[i]->fptr, SCE_GXM_PARAMETER_TYPE_F32, 0, 1, 2, fsizes, SCE_GXM_PARAMETER_TYPE_F32);
+				p->unif_changed[1] = 1;
 				dirty_shader_frag_unifs = GL_TRUE;
 			}
 #endif
@@ -1104,6 +1561,9 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 		}
 	}
 #else
+	// 0059: the packed-VBO attribute offset is 16 bits (SceGxmVertexAttribute.offset): an attribute further into the buffer than 64 KiB is read from the wrong place
+	if (is_packed && target_vbo && !vgl_pack_offsets_fit(cur_vao->vertex_attrib_offsets, cur_vao->vertex_attrib_state, p->attr_map, p->attr_num))
+		is_packed = GL_FALSE;
 	// Gathering real attribute data pointers
 	if (is_packed) {
 		if (target_vbo) {
@@ -1139,7 +1599,8 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 #endif
 
 	// Uploading new vertex program
-	patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog) && vgl_robust_scenes)
+		return; // 1.2: a layout that could not be made is not drawn with the previous one's program
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
 	vertex_layout_cache_insert(p, VERTEX_LAYOUT_MULTI_DRAW, 0, is_packed, GL_FALSE, attributes, streams);
 #endif
@@ -1228,6 +1689,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 				vglGetTexSizes(&tex->gxm_tex, &sizes[0], &sizes[1]);
 				float fsizes[2] = {sizes[0], sizes[1]};
 				vglSetUniformData(p->frag_texunits[i]->fptr, SCE_GXM_PARAMETER_TYPE_F32, 0, 1, 2, fsizes, SCE_GXM_PARAMETER_TYPE_F32);
+				p->unif_changed[1] = 1;
 				dirty_shader_frag_unifs = GL_TRUE;
 			}
 #endif
@@ -1369,6 +1831,9 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 		}
 	}
 #else
+	// 0059: the packed-VBO attribute offset is 16 bits (SceGxmVertexAttribute.offset): an attribute further into the buffer than 64 KiB is read from the wrong place
+	if (is_packed && target_vbo && !vgl_pack_offsets_fit(cur_vao->vertex_attrib_offsets, cur_vao->vertex_attrib_state, p->attr_map, p->attr_num))
+		is_packed = GL_FALSE;
 	// Gathering real attribute data pointers
 	if (is_packed) {
 		if (target_vbo) {
@@ -1421,7 +1886,8 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 #endif
 
 	// Uploading new vertex program
-	patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog) && vgl_robust_scenes)
+		return GL_FALSE; // 1.2: a layout that could not be made is not drawn with the previous one's program
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
 	vertex_layout_cache_insert(p, VERTEX_LAYOUT_ARRAYS, layout_variant, is_packed, GL_FALSE, attributes, streams);
 #endif
@@ -1461,6 +1927,149 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean 
 	shaders_draw_cnt++;
 #endif
 	return GL_TRUE;
+}
+
+// One hardware stream for an interleaved layout (STR-076). With DRAW_SPEEDHACK every attribute of a draw gets a stream of its own, all of them pointing into
+// the same interleaved vertex buffer. vglSetOneStream(GL_TRUE) makes glDrawElements describe such a draw with ONE stream (the lowest attribute offset
+// is the stream's base, the others are attribute offsets inside the vertex) plus one stream per attribute that is disabled (a constant), so the vertex
+// program has fewer streams and the draw sets fewer of them. Draws that do not qualify are made the old way. Off by default.
+static GLboolean vgl_one_stream = GL_FALSE;
+void vglSetOneStream(GLboolean enable) {
+	vgl_one_stream = enable;
+}
+#ifdef DRAW_SPEEDHACK
+// Qualifies and rewrites the draw's attributes / streams (the arrays the speedhack macro filled) into out_attr / out_streams.
+// Returns the number of streams (0: does not qualify, nothing was written). *ptr0 is the pointer of stream 0.
+static uint32_t vgl_collapse_streams(const program *p, const SceGxmVertexAttribute *attributes, const SceGxmVertexStream *streams,
+	SceGxmVertexAttribute *out_attr, SceGxmVertexStream *out_streams, void **ptr0) {
+	vbo *common = NULL;
+	uint32_t stride = 0, base = 0xFFFFFFFFu, active = 0;
+	SceGxmIndexSource index_source = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
+	for (uint32_t i = 0; i < p->attr_num; i++) {
+		uint8_t attr_idx = p->attr_map[i];
+		if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
+			continue;
+		vbo *v = (vbo *)cur_vao->vertex_attrib_vbo[attr_idx];
+		if (!v || (common && v != common) || streams[i].stride == 0 || (stride && streams[i].stride != stride))
+			return 0;
+		if (active && streams[i].indexSource != index_source)
+			return 0;
+		index_source = streams[i].indexSource;
+		common = v;
+		stride = streams[i].stride;
+		uint32_t off = cur_vao->vertex_attrib_offsets[attr_idx];
+		if (off < base)
+			base = off;
+		active++;
+	}
+	if (active < 2)
+		return 0;
+	uint32_t next = 1;
+	GLboolean first = GL_TRUE;
+	for (uint32_t i = 0; i < p->attr_num; i++) {
+		uint8_t attr_idx = p->attr_map[i];
+		out_attr[i] = attributes[i];
+		if (cur_vao->vertex_attrib_state & (1 << attr_idx)) {
+			uint32_t rel = cur_vao->vertex_attrib_offsets[attr_idx] - base;
+			if (rel >= stride)
+				return 0;
+			out_attr[i].streamIndex = 0;
+			out_attr[i].offset = (uint16_t)rel;
+			if (first) {
+				out_streams[0] = streams[i];
+				first = GL_FALSE;
+			}
+		} else {
+			out_attr[i].streamIndex = next;
+			out_streams[next++] = streams[i];
+		}
+	}
+	*ptr0 = (uint8_t *)common->ptr + base;
+	common->last_frame = vgl_framecount;
+	return next;
+}
+#endif
+
+// vglDrawElementsDirect (from the Galaxy port; 1.3, MSC_VGX_GXM_DIRECT): every enabled attribute of the draw comes from one interleaved buffer, so one vertex
+// stream carries them all; each attribute the layout does not supply reads its constant (glVertexAttrib*, as on the ordinary path) from a stream of stride 0.
+// This is the program shape vgl_collapse_streams (MSC_VGX_ONESTREAM) arrives at per draw, so both paths share one patched program in the vertex cache; what this
+// path leaves out is the per-attribute walk and the cache's hash: the patched program is kept per (program, caller's key), and the VAO's arrays are not read.
+static GLboolean direct_vertex_setup(program *p, SceGxmIndexSource index_type) {
+	const vglDirectLayout *L = direct_layout;
+	SceGxmVertexProgram *vp = NULL;
+	for (int k = 0; k < VGL_DIRECT_VPROGS; k++) {
+		if (p->direct_vprog[k] && p->direct_key[k] == L->key) {
+			vp = p->direct_vprog[k];
+			break;
+		}
+	}
+	if (!vp) {
+		SceGxmVertexAttribute attrs[VERTEX_ATTRIBS_NUM];
+		SceGxmVertexStream strs[VERTEX_ATTRIBS_NUM];
+		uint32_t nstreams = 1;
+		strs[0].stride = L->stride;
+		strs[0].indexSource = index_type & 1;
+		for (int i = 0; i < p->attr_num; i++) {
+			uint8_t attr_idx = p->attr_map[i];
+			attrs[i].regIndex = p->attr[attr_idx].regIndex;
+			if (L->enabled & (1u << attr_idx)) {
+				attrs[i].streamIndex = 0;
+				attrs[i].offset = L->offset[attr_idx];
+				attrs[i].componentCount = L->size[attr_idx];
+				attrs[i].format = L->type[attr_idx] == VGL_DIRECT_F32 ? SCE_GXM_ATTRIBUTE_FORMAT_F32 : (L->type[attr_idx] == VGL_DIRECT_U8N ? SCE_GXM_ATTRIBUTE_FORMAT_U8N : SCE_GXM_ATTRIBUTE_FORMAT_U8);
+			} else {
+				if (nstreams == VERTEX_ATTRIBS_NUM)
+					return GL_FALSE;
+				attrs[i].streamIndex = nstreams;
+				attrs[i].offset = 0;
+				attrs[i].componentCount = cur_vao->vertex_attrib_size[attr_idx];
+				attrs[i].format = SCE_GXM_ATTRIBUTE_FORMAT_F32;
+				strs[nstreams].stride = 0;
+				strs[nstreams].indexSource = index_type & 1;
+				nstreams++;
+			}
+		}
+		if (patch_vertex_program(p->vshader->id, attrs, p->attr_num, strs, nstreams, &vp) || !vp)
+			return GL_FALSE;
+		p->direct_key[p->direct_next] = L->key;
+		p->direct_vprog[p->direct_next] = vp;
+		p->direct_next = (p->direct_next + 1) % VGL_DIRECT_VPROGS;
+	}
+	p->vprog = vp;
+	sceGxmSetVertexProgram(gxm_context, vp);
+	upload_uniforms();
+	sceGxmSetVertexStream(gxm_context, 0, (uint8_t *)direct_vbo->ptr + direct_base);
+	direct_vbo->last_frame = vgl_framecount;
+	uint32_t s = 1;
+	for (int i = 0; i < p->attr_num; i++) {
+		uint8_t attr_idx = p->attr_map[i];
+		if (!(L->enabled & (1u << attr_idx)))
+			sceGxmSetVertexStream(gxm_context, s++, cur_vao->vertex_attrib_value[attr_idx]);
+	}
+	return GL_TRUE;
+}
+
+GLboolean vglDrawElementsDirect(GLenum mode, GLsizei count, uint32_t idx_offset, GLuint vbo_name, uint32_t base, const vglDirectLayout *layout) {
+	if (!cur_program || !vbo_name || !layout || mode != GL_TRIANGLES || count <= 0)
+		return GL_FALSE;
+	vbo *v = (vbo *)vbo_name;
+	if (!v->ptr)
+		return GL_FALSE;
+	direct_layout = layout;
+	direct_vbo = v;
+	direct_base = base;
+	direct_failed = GL_FALSE;
+	program *fresh_prog = &progs[cur_program - 1];
+	const uint8_t fresh = fresh_prog->fresh_draw;
+	const uint64_t fresh_t0 = fresh ? sceKernelGetProcessTimeWide() : 0;
+	glDrawElements(mode, count, GL_UNSIGNED_SHORT, (const GLvoid *)idx_offset);
+	if (fresh) {
+		fresh_prog->fresh_draw = 0;
+		vgl_bt_note(2, fresh_t0); // 0040: the first draw since the link
+	}
+	direct_layout = NULL;
+	direct_vbo = NULL;
+	return !direct_failed;
 }
 
 GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, uint32_t top_idx, uint32_t base_idx, SceGxmIndexSource index_type) {
@@ -1517,6 +2126,7 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 				vglGetTexSizes(&tex->gxm_tex, &sizes[0], &sizes[1]);
 				float fsizes[2] = {sizes[0], sizes[1]};
 				vglSetUniformData(p->frag_texunits[i]->fptr, SCE_GXM_PARAMETER_TYPE_F32, 0, 1, 2, fsizes, SCE_GXM_PARAMETER_TYPE_F32);
+				p->unif_changed[1] = 1;
 				dirty_shader_frag_unifs = GL_TRUE;
 			}
 #endif
@@ -1558,6 +2168,14 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 #ifndef SAMPLERS_SPEEDHACK
 		}
 #endif
+	}
+
+	// vglDrawElementsDirect: before the layout cache, which would read the VAO's arrays
+	if (direct_layout) {
+		if (direct_vertex_setup(p, index_type))
+			return GL_TRUE;
+		direct_failed = GL_TRUE;
+		return GL_FALSE;
 	}
 
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
@@ -1704,6 +2322,9 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 		}
 	}
 #else
+	// 0059: the packed-VBO attribute offset is 16 bits (SceGxmVertexAttribute.offset): an attribute further into the buffer than 64 KiB is read from the wrong place
+	if (is_packed && target_vbo && !vgl_pack_offsets_fit(cur_vao->vertex_attrib_offsets, cur_vao->vertex_attrib_state, p->attr_map, p->attr_num))
+		is_packed = GL_FALSE;
 	// Gathering real attribute data pointers
 	if (is_packed) {
 		if (target_vbo) {
@@ -1741,6 +2362,15 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 #else // DRAW_SPEEDHACK
 	handle_speedhack_attrib();
 #endif
+	SceGxmVertexAttribute *attributes_orig = attributes; // (what the draw changed in the VAO's own arrays is put back through these)
+	SceGxmVertexStream *streams_orig = streams;
+	uint32_t stream_num = p->attr_num;
+#ifdef DRAW_SPEEDHACK
+	SceGxmVertexAttribute one_attr[VERTEX_ATTRIBS_NUM];
+	SceGxmVertexStream one_streams[VERTEX_ATTRIBS_NUM];
+	void *one_ptr = NULL;
+	uint32_t collapsed = 0;
+#endif
 
 #ifndef INDICES_SPEEDHACK
 	// Check if highest index is small enough for 16 bit usage and if so, downgrade to 16 bit vertex sources for faster emitted code
@@ -1760,8 +2390,20 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 	}
 #endif
 
+#ifdef DRAW_SPEEDHACK
+	if (vgl_one_stream && p->attr_num > 1 && !(index_type & 2)) {
+		collapsed = vgl_collapse_streams(p, attributes, streams, one_attr, one_streams, &one_ptr);
+		if (collapsed) {
+			attributes = one_attr;
+			streams = one_streams;
+			stream_num = collapsed;
+		}
+	}
+#endif
+
 	// Uploading new vertex program
-	patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
+	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, stream_num, &p->vprog) && vgl_robust_scenes)
+		return GL_FALSE; // 1.2: a layout that could not be made is not drawn with the previous one's program
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
 	vertex_layout_cache_insert(p, VERTEX_LAYOUT_ELEMENTS, (uint8_t)index_type, is_packed, is_full_vbo, attributes, streams);
 #endif
@@ -1771,12 +2413,24 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 	upload_uniforms();
 
 	// Uploading vertex streams
+#ifdef DRAW_SPEEDHACK
+	if (collapsed) {
+		sceGxmSetVertexStream(gxm_context, 0, one_ptr);
+		uint32_t next = 1;
+		for (int i = 0; i < p->attr_num; i++) {
+			uint8_t attr_idx = p->attr_map[i];
+			if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
+				sceGxmSetVertexStream(gxm_context, next++, cur_vao->vertex_attrib_value[attr_idx]);
+		}
+	}
+#endif
 	for (int i = 0; i < p->attr_num; i++) {
 		uint8_t attr_idx = p->attr_map[i];
 		GLboolean is_active = (cur_vao->vertex_attrib_state & (1 << attr_idx)) ? GL_TRUE : GL_FALSE;
 		if (is_active) {
 #ifdef DRAW_SPEEDHACK
-			sceGxmSetVertexStream(gxm_context, i, ptrs[i]);
+			if (!collapsed)
+				sceGxmSetVertexStream(gxm_context, i, ptrs[i]);
 #else
 #ifdef STRICT_DRAW_COMPLIANCE
 			sceGxmSetVertexStream(gxm_context, i, is_packed[i] ? ptrs[0] : ptrs[i]);
@@ -1785,14 +2439,17 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
 #endif
 #endif
 		} else {
-			sceGxmSetVertexStream(gxm_context, i, cur_vao->vertex_attrib_value[attr_idx]);
+#ifdef DRAW_SPEEDHACK
+			if (!collapsed)
+#endif
+				sceGxmSetVertexStream(gxm_context, i, cur_vao->vertex_attrib_value[attr_idx]);
 		}
 		if (!p->has_unaligned_attrs) {
-			attributes[i].regIndex = i;
+			attributes_orig[i].regIndex = i;
 			if (!is_active) {
-				streams[i].stride = orig_stride[i];
-				attributes[i].componentCount = orig_size[i];
-				attributes[i].format = orig_fmt[i];
+				streams_orig[i].stride = orig_stride[i];
+				attributes_orig[i].componentCount = orig_size[i];
+				attributes_orig[i].format = orig_fmt[i];
 			}
 		}
 	}
@@ -1812,7 +2469,7 @@ void _vglDrawObjects_CustomShadersIMPL() {
 	VGL_STREAM_FLUSH_IF_NEEDED() // GLB
 
 	// Check if a blend info rebuild is required
-	setup_frag_program();
+	setup_frag_program_void();
 
 	// Setting up required vertex shader
 	sceGxmSetVertexProgram(gxm_context, p->vprog);
@@ -1834,6 +2491,7 @@ void _vglDrawObjects_CustomShadersIMPL() {
 				vglGetTexSizes(&tex->gxm_tex, &sizes[0], &sizes[1]);
 				float fsizes[2] = {sizes[0], sizes[1]};
 				vglSetUniformData(p->frag_texunits[i]->fptr, SCE_GXM_PARAMETER_TYPE_F32, 0, 1, 2, fsizes, SCE_GXM_PARAMETER_TYPE_F32);
+				p->unif_changed[1] = 1;
 				dirty_shader_frag_unifs = GL_TRUE;
 			}
 #endif
@@ -2129,9 +2787,12 @@ void glCompileShader(GLuint handle) {
 		return;
 
 	// If vitaShaRK is not enabled, we try to initialize it
+	vgl_compiler_enter(); // 1.3 ASYNC_SHADERS (0027): a worker may be starting or using the compiler
 	if (!is_shark_online && !start_shader_compiler()) {
+		vgl_compiler_leave();
 		SET_GL_ERROR(GL_INVALID_OPERATION)
 	}
+	vgl_compiler_leave();
 	
 	// If we use VGL_MODE_POSTPONED, we compile shaders in glLinkProgram
 	if (s->is_glsl && glsl_sema_mode == VGL_MODE_POSTPONED)
@@ -2141,7 +2802,7 @@ void glCompileShader(GLuint handle) {
 	char fname[256];
 	uint64_t hash = XXH3_64bits(s->source, s->size);
 	uint8_t subdir_hash = hash >> 56;
-	sprintf(fname, "%s/%s/%02X/%llX.gxp", vgl_shader_cache_path, s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
+	int fname_len = sprintf(fname, "%s/%s/%02X/%016llX.gxp", vgl_shader_cache_path, s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
 	if (vgl_shader_pack_lookup) {
 		uint32_t psz = 0;
 		const void *pb = vgl_shader_pack_lookup(s->type == GL_FRAGMENT_SHADER, hash, &psz);
@@ -2159,10 +2820,12 @@ void glCompileShader(GLuint handle) {
 	}
 #endif
 
+	vgl_compiler_enter(); // 1.3 ASYNC_SHADERS (0027): the translator's and the compiler's state are global
 	if (s->is_glsl) {
 		glsl_translator_process(s);
 	}
 	vgl_compile_shader(s, GL_FALSE);
+	vgl_compiler_leave();
 }
 
 void glDeleteShader(GLuint shad) {
@@ -2281,6 +2944,10 @@ GLuint glCreateProgram(void) {
 			progs[i].vertex_layout_version = ++vertex_program_layout_current_ver;
 #endif
 			progs[i].attr_num = 0;
+			vgl_memset(progs[i].direct_key, 0, sizeof(progs[i].direct_key));
+			vgl_memset(progs[i].direct_vprog, 0, sizeof(progs[i].direct_vprog));
+			progs[i].direct_next = 0;
+			program_caches_reset(&progs[i]);
 #ifdef ENABLE_LEGACY_PIPELINE
 			progs[i].attr_mode = VGL_ATTRIB_REGULAR;
 #endif
@@ -2406,6 +3073,7 @@ void glDeleteProgram(GLuint prog) {
 		if (p->unif_fbuffer) {
 			vgl_free(p->unif_fbuffer);
 		}
+		uni_hist_free(p);
 		while (p->vert_ubos) {
 			ubo *old = p->vert_ubos;
 			p->vert_ubos = (ubo *)p->vert_ubos->chain;
@@ -2435,6 +3103,9 @@ void glDeleteProgram(GLuint prog) {
 		}
 	}
 	p->status = PROG_INVALID;
+	// 1.2 (upstream 9bf3e3f): see glLinkProgram. A program id that is deleted and made again is the same id to glUseProgram's early return.
+	if (prog == cur_program)
+		vgl_dirty_all_uniforms();
 }
 
 void glGetProgramInfoLog(GLuint program, GLsizei maxLength, GLsizei *length, GLchar *infoLog) {
@@ -2513,7 +3184,12 @@ void glGetProgramiv(GLuint progr, GLenum pname, GLint *params) {
 	}
 }
 
-void glLinkProgram(GLuint progr) {
+// 1.2: SAMPLERS_SPEEDHACK (upstream) loops over the texture units of a program without asking whether a unit has a sampler. The units are indexed by the resource index
+// the shader compiler gave the sampler, which has a gap when a sampler was optimised out. A gap holds this record (unit 0, nothing is sampled from it) so the loop never
+// meets a null pointer. The arrays are cleared at every link: a program slot that is made again must not keep the pointers of the program that was in it.
+static uniform vgl_dummy_texunit = { .type = UNIFORM_SAMPLER, .sampler_index = 0 };
+
+static void link_program_untimed(GLuint progr) {
 	THREAD_SAFE()
 	if (!progr || progr > MAX_CUSTOM_PROGRAMS)
 		return;
@@ -2522,6 +3198,12 @@ void glLinkProgram(GLuint progr) {
 	program *p = &progs[progr - 1];
 	if (p->status != PROG_UNLINKED || !p->vshader || !p->fshader)
 		return;
+	vgl_memset(p->direct_key, 0, sizeof(p->direct_key));
+	vgl_memset(p->direct_vprog, 0, sizeof(p->direct_vprog));
+	p->direct_next = 0;
+	program_caches_reset(p);
+	vgl_memset(p->vert_texunits, 0, sizeof(p->vert_texunits));
+	vgl_memset(p->frag_texunits, 0, sizeof(p->frag_texunits));
 #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
 	p->vertex_layout_version = ++vertex_program_layout_current_ver;
 #endif
@@ -2542,11 +3224,12 @@ void glLinkProgram(GLuint progr) {
 		glsl_sema_mode = VGL_MODE_SHADER_PAIR;
 #ifdef HAVE_SHADER_CACHE
 		char frag_fname[256], vert_fname[256];
+		int fname_len;
 		char *fname;
 		if (!p->vshader->prog) {
 			uint64_t hash = XXH3_64bits(p->vshader->source, p->vshader->size);
 			uint8_t subdir_hash = hash >> 56;
-			sprintf(vert_fname, "%s/v/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+			fname_len = sprintf(vert_fname, "%s/v/%02X/%016llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
 			uint32_t psz = 0;
 			const void *pb = vgl_shader_pack_lookup ? vgl_shader_pack_lookup(0, hash, &psz) : NULL;
 			if (pb)
@@ -2557,7 +3240,7 @@ void glLinkProgram(GLuint progr) {
 		if (!p->fshader->prog) {
 			uint64_t hash = XXH3_64bits(p->fshader->source, p->fshader->size);
 			uint8_t subdir_hash = hash >> 56;
-			sprintf(frag_fname, "%s/f/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+			fname_len = sprintf(frag_fname, "%s/f/%02X/%016llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
 			uint32_t psz = 0;
 			const void *pb = vgl_shader_pack_lookup ? vgl_shader_pack_lookup(1, hash, &psz) : NULL;
 			if (pb)
@@ -2689,6 +3372,7 @@ void glLinkProgram(GLuint progr) {
 				uniform *u = &p->frag_uniforms[j++];
 				u->ptr = param;
 				u->vptr = NULL;
+				u->changed = p->unif_changed;
 				u->fptr = (uint8_t *)p->unif_fbuffer + sceGxmProgramParameterGetResourceIndex(param) * 4;
 				u->type = UNIFORM_DATA;
 #ifdef HAVE_GLSL_TEXTURE_SIZE
@@ -2715,6 +3399,7 @@ void glLinkProgram(GLuint progr) {
 					uniform *u2 = &p->frag_uniforms[j];
 					if (u2->sampler == u1->sampler && u2->type == UNIFORM_DATA) {
 						u1->fptr = u2->fptr;
+						u1->changed = u2->changed;
 						break;
 					}
 				}
@@ -2792,6 +3477,7 @@ void glLinkProgram(GLuint progr) {
 				u->ptr = param;
 				u->type = UNIFORM_DATA;
 				u->vptr = (uint8_t *)p->unif_vbuffer + sceGxmProgramParameterGetResourceIndex(param) * 4;
+				u->changed = p->unif_changed;
 				u->fptr = get_uniform_alias_data_ptr(p->frag_uniforms, p->frag_uniforms_num, sceGxmProgramParameterGetName(param));
 			}
 			ptr += 4;
@@ -2818,6 +3504,7 @@ void glLinkProgram(GLuint progr) {
 			p->stream, p->attr_mode == VGL_ATTRIB_UNPACKED ? p->attr_num : 1, &p->vprog);
 		rebuild_frag_shader(p->fshader->id, &p->fprog, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4);
 		p->is_fbo_float = is_fbo_float;
+		p->msaa = cur_msaa;
 
 		// Populating current blend settings
 		p->blend_info.raw = blend_info.raw;
@@ -2846,7 +3533,19 @@ void glLinkProgram(GLuint progr) {
 			}
 		}
 	}
+#ifdef SAMPLERS_SPEEDHACK
+	for (int i = 0; i < p->max_frag_texunit_idx; i++)
+		if (!p->frag_texunits[i])
+			p->frag_texunits[i] = &vgl_dummy_texunit;
+	for (int i = 0; i < p->max_vert_texunit_idx; i++)
+		if (!p->vert_texunits[i])
+			p->vert_texunits[i] = &vgl_dummy_texunit;
+#endif
 	p->status = PROG_LINKED;
+	// 1.2 (upstream 9bf3e3f): glUseProgram(cur_program) no longer marks the uniform buffers dirty. A (re)linked program that is the one in use has fresh
+	// uniform buffers that no draw has uploaded yet: mark them here, where the old glUseProgram(same id) used to.
+	if (progr == cur_program)
+		vgl_dirty_all_uniforms();
 	return;
 link_failed:
 	vgl_free(p->unif_vbuffer);
@@ -2866,15 +3565,27 @@ link_failed:
 	*p = saved;
 }
 
+// 0040: the whole link is timed (vglBackendTimingTake [1]); a program that this call linked has its first vglDrawElementsDirect draw timed ([2])
+void glLinkProgram(GLuint progr) {
+	THREAD_SAFE()
+	uint64_t t0 = sceKernelGetProcessTimeWide();
+	const GLboolean was_linked = (progr && progr <= MAX_CUSTOM_PROGRAMS && progs[progr - 1].status == PROG_LINKED) ? GL_TRUE : GL_FALSE;
+	link_program_untimed(progr);
+	vgl_bt_note(1, t0);
+	if (progr && progr <= MAX_CUSTOM_PROGRAMS && !was_linked && progs[progr - 1].status == PROG_LINKED)
+		progs[progr - 1].fresh_draw = 1;
+}
+
 void glUseProgram(GLuint prog) {
 	THREAD_SAFE()
 
+	if (cur_program == prog) {
+		return;
+	}
+
 	// Setting current custom program to passed program
 	cur_program = prog;
-	dirty_shader_frag_unifs = GL_TRUE;
-	dirty_shader_vert_unifs = GL_TRUE;
-	dirty_vert_unifs = 0xFFFF;
-	dirty_frag_unifs = 0xFFFFFFFF;
+	vgl_dirty_all_uniforms();
 }
 
 GLuint glGetUniformBlockIndex(GLuint prog, const GLchar *uniformBlockName) {
@@ -2979,15 +3690,45 @@ GLint glGetUniformLocation(GLuint prog, const GLchar *name) {
 	return -1;
 }
 
-#define vgl_fill_uniform_data(p, type, size, count) \
-	if (u->vptr) { \
-		vglSetUniformData(u->vptr, sceGxmProgramParameterGetType(u->ptr), offs, count, size, p, type); \
-		dirty_shader_vert_unifs = GL_TRUE; \
+#define vgl_fill_uniform_data(p, type, size, count) { \
+	if (count == 1 && size >= 1 && size <= 4 && offs == 0 && (type == SCE_GXM_PARAMETER_TYPE_F32 || type == SCE_GXM_PARAMETER_TYPE_S32)) { \
+		const SceGxmParameterType dst_type = sceGxmProgramParameterGetType(u->ptr); \
+		if (dst_type == type) { \
+			if (u->vptr) { \
+				__builtin_memcpy(u->vptr, p, size * sizeof(uint32_t)); \
+				u->changed[0] = 1; \
+				dirty_shader_vert_unifs = GL_TRUE; \
+			} \
+			if (u->fptr) { \
+				__builtin_memcpy(u->fptr, p, size * sizeof(uint32_t)); \
+				u->changed[1] = 1; \
+				dirty_shader_frag_unifs = GL_TRUE; \
+			} \
+		} else { \
+			if (u->vptr) { \
+				vglSetUniformData(u->vptr, dst_type, offs, count, size, p, type); \
+				u->changed[0] = 1; \
+				dirty_shader_vert_unifs = GL_TRUE; \
+			} \
+			if (u->fptr) { \
+				vglSetUniformData(u->fptr, dst_type, offs, count, size, p, type); \
+				u->changed[1] = 1; \
+				dirty_shader_frag_unifs = GL_TRUE; \
+			} \
+		} \
+	} else { \
+		if (u->vptr) { \
+			vglSetUniformData(u->vptr, sceGxmProgramParameterGetType(u->ptr), offs, count, size, p, type); \
+			u->changed[0] = 1; \
+			dirty_shader_vert_unifs = GL_TRUE; \
+		} \
+		if (u->fptr) { \
+			vglSetUniformData(u->fptr, sceGxmProgramParameterGetType(u->ptr), offs, count, size, p, type); \
+			u->changed[1] = 1; \
+			dirty_shader_frag_unifs = GL_TRUE; \
+		} \
 	} \
-	if (u->fptr) { \
-		vglSetUniformData(u->fptr, sceGxmProgramParameterGetType(u->ptr), offs, count, size, p, type); \
-		dirty_shader_frag_unifs = GL_TRUE; \
-	}
+}
 
 inline void glUniform1i(GLint location, GLint v0) {
 	THREAD_SAFE()
@@ -3261,7 +4002,7 @@ inline void glUniform4iv(GLint location, GLsizei count, const GLint *value) {
 	uniform *u = (uniform *)get_uniform_from_ptr(location, &offs);
 
 	// Setting passed value to desired uniform
-	vgl_fill_uniform_data(value, SCE_GXM_PARAMETER_TYPE_S32, 4, 1)
+	vgl_fill_uniform_data(value, SCE_GXM_PARAMETER_TYPE_S32, 4, count)
 }
 
 void glProgramUniform4iv(GLuint prog, GLint location, GLsizei count, const GLint *value) {
@@ -3319,8 +4060,9 @@ inline void glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpos
 	uniform *u = (uniform *)get_uniform_from_ptr(location, &offs);
 
 	// Setting passed value to desired uniform
+	float stack_tmp[4 * 4];
 	if (transpose) {
-		float *tmp = gpu_alloc_mapped_temp(count * 4 * sizeof(float));
+		float *tmp = count <= 4 ? stack_tmp : gpu_alloc_mapped_temp(count * 4 * sizeof(float));
 		for (int i = 0; i < count; i++) {
 			matrix2x2_transpose(&tmp[i * 4], &value[i * 4]);
 		}
@@ -3345,8 +4087,9 @@ inline void glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpos
 	uniform *u = (uniform *)get_uniform_from_ptr(location, &offs);
 
 	// Setting passed value to desired uniform
+	float stack_tmp[4 * 9];
 	if (transpose) {
-		float *tmp = gpu_alloc_mapped_temp(count * 9 * sizeof(float));
+		float *tmp = count <= 4 ? stack_tmp : gpu_alloc_mapped_temp(count * 9 * sizeof(float));
 		for (int i = 0; i < count; i++) {
 			matrix3x3_transpose(&tmp[i * 9], &value[i * 9]);
 		}
@@ -3372,8 +4115,9 @@ inline void glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpos
 	uniform *u = (uniform *)get_uniform_from_ptr(location, &offs);
 
 	// Setting passed value to desired uniform
+	float stack_tmp[4 * 16];
 	if (transpose) {
-		float *tmp = gpu_alloc_mapped_temp(count * 16 * sizeof(float));
+		float *tmp = count <= 4 ? stack_tmp : gpu_alloc_mapped_temp(count * 16 * sizeof(float));
 		for (int i = 0; i < count; i++) {
 			matrix4x4_transpose(&tmp[i * 16], &value[i * 16]);
 		}
@@ -4177,7 +4921,7 @@ void vglShaderGxpBinary(GLsizei count, const GLuint *handles, const void *binary
 	if (!candidate.prog)
 		return;
 	vgl_fast_memcpy((void *)candidate.prog, binary, candidate.size);
-	if (sceGxmProgramCheck(candidate.prog) || sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, candidate.prog, &candidate.id)) {
+	if (sceGxmProgramCheck(candidate.prog) || vgl_register_program(candidate.prog, &candidate.id)) {
 		discard_shader_candidate(&candidate);
 		return;
 	}

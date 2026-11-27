@@ -50,7 +50,7 @@ static Bytes ZeroSave() {
     Fix(f);
     return f;
 }
-static const char* kReal = "/home/claude/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data/Strikers2";
+static const char* kReal = "/work/msc/appdata/MSCRecomp/NAND/title/00010000/52345145/data/Strikers2";
 
 // A populated save: from `base`, the Striker Challenge unlocks (ChallengeUnlockRecord, the last 52 bytes of the payload: twelve completion dates and the
 // unlock bits), the cup unlock flags (the 9 bit unit at +44 of the CupProgressRecord that starts the 928 byte progress span, itself before the unlock record),
@@ -146,6 +146,31 @@ int main(int argc, char** argv) {
         rc = NpSaveImportRecompiled(src.c_str(), (src + "/").c_str(), msg, sizeof msg);
         CHECK(rc == NP_SAVE_IMPORT_NOT_NEEDED);
         printf("  %s\n", msg);
+    }
+    // 2b. a deleted native save does not come back from the recompiled build's copy at the next start (the game offers to delete a save it found damaged)
+    {
+        const std::string src = TempDir(), dst = TempDir();
+        Seed(src, &pop, &banner);
+        char msg[800];
+        CHECK(NpSaveImportRecompiled(src.c_str(), dst.c_str(), msg, sizeof msg) == NP_SAVE_IMPORT_DONE);
+        CHECK(IsFile((dst + "/np-save-import.done").c_str()));
+        CHECK(remove((Data(dst) + "/Strikers2").c_str()) == 0);   // the player deleted it
+        int rc = NpSaveImportRecompiled(src.c_str(), dst.c_str(), msg, sizeof msg);
+        printf("  %s\n", msg);
+        CHECK(rc == NP_SAVE_IMPORT_NOT_NEEDED && !IsFile((Data(dst) + "/Strikers2").c_str()));
+        // deleting the marker is the way to ask for the import again
+        CHECK(remove((dst + "/np-save-import.done").c_str()) == 0);
+        CHECK(NpSaveImportRecompiled(src.c_str(), dst.c_str(), msg, sizeof msg) == NP_SAVE_IMPORT_DONE && IsFile((Data(dst) + "/Strikers2").c_str()));
+    }
+    // 2c. a native game that made its own save first (no import ever happened) is marked too: deleting that save does not bring the recompiled copy back later
+    {
+        const std::string src = TempDir(), dst = TempDir();
+        Seed(dst, &pop, nullptr);
+        char msg[800];
+        CHECK(NpSaveImportRecompiled(src.c_str(), dst.c_str(), msg, sizeof msg) == NP_SAVE_IMPORT_NOT_NEEDED && IsFile((dst + "/np-save-import.done").c_str()));
+        Seed(src, &pop, &banner);                                  // the recompiled build gets a save afterwards
+        CHECK(remove((Data(dst) + "/Strikers2").c_str()) == 0);
+        CHECK(NpSaveImportRecompiled(src.c_str(), dst.c_str(), msg, sizeof msg) == NP_SAVE_IMPORT_NOT_NEEDED && !IsFile((Data(dst) + "/Strikers2").c_str()));
     }
     // 3. no save of the recompiled build: nothing is created
     {

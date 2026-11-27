@@ -100,6 +100,7 @@
 // needs the native value: run with MSC_WATCH_BUTTONS=1 and read the "scene+0x..." column).
 #include "np_harness.h"
 #include "np_frame_timing.h"
+#include "np_exit_watch.h"
 #include "../../../include/np/touch_diag.h"
 #pragma weak NpDiagEnabled
 #pragma weak NpDiagContext
@@ -118,9 +119,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <pthread.h>
 #include <string>
 #include <vector>
 #if defined(__linux__)
+extern "C" int np_gx_request_dump(const char* png_path) __attribute__((weak));
+#include <sys/stat.h>
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
@@ -129,13 +133,22 @@
 #endif
 #if defined(__vita__)
 #include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/threadmgr.h>
 #endif
+
+#include "../../../include/np/host_alloc.h"
 
 extern "C" void NpJobsLogStats(const char* when) __attribute__((weak));   // platform/vita/src/np_jobs.cpp
 extern "C" void NpLanStatus(int out[8]) __attribute__((weak));               // platform/sdk/net/np_lan.cpp (LAN session counters)
 extern "C" int NpLanNetBrief(char* out, int size) __attribute__((weak));     // platform/sdk/net/np_lan.cpp (LAN match: delay, starved, rtt)
+extern "C" void NpVitaLogDirect(const char* text) __attribute__((weak));       // platform/vita/src/vita_log.cpp (exit17: one line straight into the file)
 extern "C" void NpFsJoin(void) __attribute__((weak));                          // platform/vita/src/np_framesend.cpp
 extern "C" void NpFsLogStats(const char* when) __attribute__((weak));
+extern "C" int NpFpsDescribe(char* out, int size) __attribute__((weak));   // 1.2 run header (platform/compat/np_fps.cpp, renderer/src/vgx_backend_gl.cpp)
+extern "C" int VgxDynResDescribe(char* out, int size) __attribute__((weak));
+extern "C" int VgxGfxDescribe(char* out, int size) __attribute__((weak));
+extern "C" int NpSettingsDescribe(char* out, int size) __attribute__((weak));
+extern "C" int NpInputDescribe(char* out, int size) __attribute__((weak));
 extern "C" void NpLatTakeWindow(uint32_t* n, uint32_t* p50Us, uint32_t* p95Us) __attribute__((weak));   // platform/compat/np_latency.cpp (W5 RT)
 extern "C" void NpThpLogStats(void) __attribute__((weak));                   // platform/sdk/src/thp_native.cpp
 // W5 ITEM (src/Game/NpItemTest.cpp, np/itemtest.h): the test-only item hook
@@ -143,7 +156,9 @@ extern "C" int NpItemTestQueue(int side, int type, int count, int mode) __attrib
 extern "C" void NpItemTestFrame(unsigned long long frame) __attribute__((weak));
 extern "C" int NpItemTestAim(int target, int* sx, int* sy) __attribute__((weak));
 extern "C" int NpItemTestVar(const char* name, double* out) __attribute__((weak));
+extern "C" int VgxQuiesceForExit(unsigned ms) __attribute__((weak));        // renderer/src/vgx_play.cpp: the back end finishes its picture, no new one is handed over (galcheck round 3)
 extern "C" void __gcov_dump(void) __attribute__((weak));                     // only in a -fprofile-generate build (PGO recipe: np/docs/vita.md)
+extern "C" int __llvm_profile_write_file(void) __attribute__((weak));        // only in a clang -fprofile-generate build (NP_CLANG_PGO_GEN, docs/BUILDING.md "PGO")
 
 namespace NpHarness {
 extern "C" long long NpFpsModelCharge(unsigned taskState, int sceneId, unsigned steps) __attribute__((weak));   // platform/compat/np_fps.cpp (np/fps.h)
@@ -151,9 +166,85 @@ namespace {
 
 State g_state;
 
+// exit17: the end of a run names its steps and has a watchdog (np_exit_watch.h). MSC_EXIT_TRACE=0 silences the "[exit] step N" lines (default on: about a dozen lines at the end of a
+// scripted run), MSC_EXIT_WATCHDOG_S=<s> (default 30, 0 off) is how long ONE step may take before the watchdog thread writes "[plat] EXIT STUCK in step ..." and leaves the process.
+NpExitWatch::State g_exitWatch;
+bool g_exitTrace = true;
+unsigned g_exitLimitMs = 30000;
+int g_exitCode = 0;
+
+void ExitSay(const char* line) {
+    if (NpVitaLogDirect) { NpVitaLogDirect(line); return; }
+    std::fputs(line, stderr);
+    std::fflush(stderr);
+}
+void ExitSleepMs(unsigned ms) {
+#if defined(__vita__)
+    sceKernelDelayThread(ms * 1000u);
+#else
+    usleep(ms * 1000u);
+#endif
+}
+[[noreturn]] void ExitForce(int code) {   // (no flush here: the line above went to the file directly; a flush is what may be stuck)
+#if defined(__vita__)
+    sceKernelExitProcess(code);
+    for (;;) sceKernelDelayThread(1000000);
+#else
+    std::_Exit(code);
+#endif
+}
+void* ExitWatchMain(void*) {
+#if defined(__vita__)
+    sceKernelChangeThreadPriority(sceKernelGetThreadId(), 64);   // (above every game thread, as the lab's watchdog)
+#endif
+    NpExitWatch::Run(g_exitWatch, g_exitLimitMs, 250, 3, ExitSleepMs, ExitSay, ExitForce);
+    return nullptr;
+}
+void ExitMark(const char* name) { NpExitWatch::Mark(g_exitWatch, name, g_exitTrace, ExitSay); }
+// The first call (the script's exit, a frame limit, the lab's request) starts the watchdog and marks the first step; later calls only mark.
+void ExitBegin(int code, const char* name) {
+    if (g_exitWatch.started.exchange(1) == 0) {
+        g_exitCode = code;
+        if (const char* e = std::getenv("MSC_EXIT_TRACE")) g_exitTrace = !(e[0] == '0');
+        if (const char* e = std::getenv("MSC_EXIT_WATCHDOG_S")) { if (*e) g_exitLimitMs = static_cast<unsigned>(std::strtoul(e, nullptr, 10)) * 1000u; }
+        ExitMark(name);
+        if (g_exitLimitMs != 0) {
+            pthread_t th;
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setstacksize(&attr, 64 * 1024);
+            if (pthread_create(&th, &attr, ExitWatchMain, nullptr) == 0) pthread_detach(th);
+            pthread_attr_destroy(&attr);
+        }
+        return;
+    }
+    ExitMark(name);
+}
+
+// A [script] line is the route's own evidence: it goes to the file at once (a crash right after it must not lose it).
+// nxr6b: mid-run, the flush no longer waits for the card. It used to be FlushBlocking(): core 0 took the sink's io lock behind the writer thread (priority 191, inside sceIoWrite)
+// and wrote itself, three times at the first kick-off ([boot] play began, log STATE, log @begin), adding to that frame's hitch in every harness build. Now the writer is woken and
+// writes within a slice; a crash right after the line still finds it (or the crash path's own flush does). MSC_SCRIPT_FLUSH_BLOCK=1 = the old blocking flush. The end of a run
+// (HarnessExit, the exit command) is unchanged. Counted: the [script-flush] line at the exit.
+static unsigned g_scriptFlushAsync = 0, g_scriptFlushBlock = 0;
+static bool ScriptFlushBlockOn() { static const bool block = [] { const char* e = std::getenv("MSC_SCRIPT_FLUSH_BLOCK"); return e && e[0] == '1'; }(); return block; }
+void ScriptFlush() {
+    const bool block = ScriptFlushBlockOn();
+    std::fflush(stderr);
+    if (NpVitaLogFlushAsync && !block) { NpVitaLogFlushAsync(); ++g_scriptFlushAsync; }
+    else if (NpVitaLogFlush) { NpVitaLogFlush(); ++g_scriptFlushBlock; }
+}
+void ScriptFlushFinal() {
+    std::fflush(stderr);
+    if (NpVitaLogFlush) { NpVitaLogFlush(); ++g_scriptFlushBlock; }
+}
+
 // Leaves the process at once (no static destructors, as on the desktop).
 [[noreturn]] void HarnessExit(int code) {
+    g_exitWatch.finished.store(1, std::memory_order_release);   // (the watchdog stops: from here the process leaves at once)
     std::fflush(nullptr);
+    std::fprintf(stderr, "[script-flush] MSC_SCRIPT_FLUSH_BLOCK=%s: %u mid-run flushes handed to the writer thread, %u blocking (the end of the run and the exit command)\n", ScriptFlushBlockOn() ? "1" : "0", g_scriptFlushAsync, g_scriptFlushBlock + 1u);
+    if (NpVitaLogFlush) NpVitaLogFlush();   // the platform's log sink is not stdio: the buffered tail (the run's last lines) goes to the file here
 #if defined(__vita__)
     sceKernelExitProcess(code);
     for (;;) sceKernelDelayThread(1000000);
@@ -225,7 +316,7 @@ std::vector<Step> g_script;
 struct Term { std::string var, op; double value = 0; bool orWithPrev = false; };
 struct Cmd {
     enum Kind { Wait, Hold, Mash, If, EndIf, Log, ProfBegin, ProfEnd, Exit, StopWhen, Launch, Scene, PopScene, SetF, Item, Aim, Tap, Repeat, EndRepeat,
-                Expect, Check } kind;
+                Expect, Check, Shot, Score } kind;
     uint64_t period = 0;
     std::vector<Term> cond;
     std::string text;
@@ -379,6 +470,7 @@ bool ParseLaunch(const char* text, LaunchSpec& l) {
 }
 
 void LoadScript() {
+    NpHostAllocScope hostScope;   // (1.3: the script lives for the run: its storage on the host heap, not the game's; np/host_alloc.h)
     const char* path = std::getenv("MSC_INPUT_SCRIPT");
     if (!path) return;
     FILE* f = std::fopen(path, "r");
@@ -406,6 +498,20 @@ void LoadScript() {
                 s.first = a; s.last = b; s.buttons = btn; s.sx = sx; s.sy = sy;
                 g_script.push_back(s);
             }
+            continue;
+        }
+        if (!std::strcmp(word, "bootmatch")) {
+            // "bootmatch <spec> [launch keys]": MSC_BOOT_MATCH / MSC_BOOT_MATCH_OPTS from the route itself (the Vita build's env file did not deliver
+            // MSC_BOOT_MATCH to the process in the emulator, a line of the same file did: the route is read by the same harness and always arrives).
+            char spec[128] = {0};
+            int used2 = 0;
+            if (std::sscanf(rest, " %127s%n", spec, &used2) != 1) goto bad;
+            setenv("MSC_BOOT_MATCH", spec, 1);
+            std::string opts(rest + used2);
+            while (!opts.empty() && std::isspace(static_cast<unsigned char>(opts.back()))) opts.pop_back();
+            size_t b = 0;
+            while (b < opts.size() && std::isspace(static_cast<unsigned char>(opts[b]))) ++b;
+            if (b < opts.size()) setenv("MSC_BOOT_MATCH_OPTS", opts.c_str() + b, 1);
             continue;
         }
         if (!std::strcmp(word, "wait") || !std::strcmp(word, "if")) {
@@ -516,6 +622,12 @@ void LoadScript() {
             c.kind = Cmd::Log; c.text = rest;
             while (!c.text.empty() && (c.text.back() == '\n' || c.text.back() == '\r' || c.text.back() == ' ')) c.text.pop_back();
             while (!c.text.empty() && c.text.front() == ' ') c.text.erase(c.text.begin());
+        } else if (!std::strcmp(word, "shot")) {
+            // shot <name>: the next presented picture is written to $MSC_SHOT_DIR/<name>.png (needs a GL build; used for the screen pictures of the menus)
+            c.kind = Cmd::Shot; c.text = rest;
+            while (!c.text.empty() && (c.text.back() == '\n' || c.text.back() == '\r' || c.text.back() == ' ')) c.text.pop_back();
+            while (!c.text.empty() && c.text.front() == ' ') c.text.erase(c.text.begin());
+            if (c.text.empty()) goto bad;
         } else if (!std::strcmp(word, "prof")) {
             char w[16] = {0};
             std::sscanf(rest, " %15s", w);
@@ -531,6 +643,13 @@ void LoadScript() {
             float v = 0;
             if (std::sscanf(rest, " %63s %f", nm, &v) != 2) goto bad;
             c.kind = Cmd::SetF; c.gname = nm; c.gvalue = v;
+        } else if (!std::strcmp(word, "score")) {
+            // score [side|me]: test only, route files only (nothing else makes this command): the ball is kicked into the other team's net (NpHarness::ScoreGoal; refused in
+            // LAN, online and recorded games and outside open play)
+            char sd[16] = {0};
+            std::sscanf(rest, " %15s", sd);
+            c.kind = Cmd::Score; c.itemSide = (!sd[0] || !std::strcmp(sd, "me")) ? 0 : std::atoi(sd);
+            if (c.itemSide < 0 || c.itemSide > 1) goto bad;
         } else if (!std::strcmp(word, "popscene")) {
             c.kind = Cmd::PopScene;
         } else if (!std::strcmp(word, "launch")) {
@@ -665,8 +784,135 @@ bool CondHolds(const std::vector<Term>& cond, std::string* text = nullptr) {
     return result;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// MSC_BOOT_MATCH (test only, default off): from the title screen straight into a match, the front-end menus skipped.
+//   MSC_BOOT_MATCH=<stadium>[:<captainA>:<captainB>][:<mode>]
+//     stadium  0..17 or a name prefix (battledome, bowser, crater, crystal, dump, galactic, kong, lava, pipeline, storm, palace, thunder, underground, vice, wastelands, sand)
+//     captains 0..11 (home = the pad's side, away = the CPU's), default 3 (Donkey Kong) and 6 (Waluigi), the pair of every route
+//     mode     friendly (default: the Domination Mode friendly match the menus start), demo, cup, challenge, or 0..4
+//   MSC_BOOT_MATCH_OPTS="time=180 skill=0 powerup=10 ..."   more `launch` keys (ParseLaunch); without them the game's own defaults stay (what the menus leave)
+//   MSC_BOOT_MATCH_SEED=<hex|off>   the simulation's random seed written at the launch (default 12345678, the game's start value); off = leave it
+// What it does: the calls the `launch` script command makes (GameInfoManager::SetMode / SetStadium / SetTeam / ResetPlayingSides / SetPlayingSide, then
+// BaseGameSceneManager::PushLoadingScene(true)) once the title scene is up; until then it presses A (the wrist-strap screen and the intro movie), as every
+// route's first lines do. A route given with MSC_INPUT_SCRIPT starts after the launch (write it without the title and menu lines).
+// Saves: while it is on, the NAND layer drops every write (platform/sdk/src/nand_native.cpp), so no save file is touched.
+// Log: "boot: ..." lines, "boot: play began in <stadium> after N s".
+// ---------------------------------------------------------------------------------------------
+namespace {
+struct BootMatch {
+    bool on = false;
+    int stage = 0;              // 0 waiting for the title scene, 1 launched (waiting for play), 2 play reached / gave up
+    LaunchSpec spec;
+    std::string text;
+    double t0 = 0, tLaunch = 0;
+    uint64_t fLaunch = 0;
+    uint64_t waited = 0;
+} g_boot;
+bool g_bootOnly = false;        // no script of the user's: after the launch the real pad is the player's again
+
+const char* const kStadiumNames[18] = {"battledome", "bowserstadium", "craterfield", "crystalcanyon", "dump", "galacticstadium", "kongacoliseum", "lavapit",
+                                       "pipelinecentral", "stormship", "thepalace", "thunderisland", "underground", "vice", "wastelands", "sandtomb", "stadium16", "stadium17"};
+const char* StadiumName(int id) { return id >= 0 && id < 18 ? kStadiumNames[id] : "?"; }
+int ParseStadium(const std::string& v) {
+    if (v.empty()) return -1;
+    if (std::isdigit(static_cast<unsigned char>(v[0]))) { const int n = static_cast<int>(std::strtol(v.c_str(), nullptr, 0)); return n >= 0 && n < 18 ? n : -1; }
+    std::string w;
+    for (char ch : v) w += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    for (int i = 0; i < 16; ++i) if (!std::strncmp(kStadiumNames[i], w.c_str(), w.size())) return i;   // a prefix: "lava", "dump", "pipe"
+    return -1;
+}
+
+void BootMatchInit() {
+    const char* e = std::getenv("MSC_BOOT_MATCH");
+    if (!e || !*e || !std::strcmp(e, "0") || !std::strcmp(e, "off")) return;
+    g_boot.text = e;
+    std::vector<std::string> f;
+    for (size_t at = 0; at <= g_boot.text.size();) {
+        size_t end = g_boot.text.find(':', at);
+        if (end == std::string::npos) end = g_boot.text.size();
+        f.push_back(g_boot.text.substr(at, end - at));
+        at = end + 1;
+    }
+    LaunchSpec& l = g_boot.spec;
+    l.mode = 0; l.home = 3; l.away = 6; l.human = 0; l.pinSeed = true;
+    l.stadium = ParseStadium(f[0]);
+    bool ok = l.stadium >= 0 && f.size() <= 4;
+    std::string mode;
+    if (ok && f.size() >= 3) {
+        ok = !f[1].empty() && !f[2].empty();
+        l.home = static_cast<int>(std::strtol(f[1].c_str(), nullptr, 0));
+        l.away = static_cast<int>(std::strtol(f[2].c_str(), nullptr, 0));
+        ok = ok && l.home >= 0 && l.home <= 11 && l.away >= 0 && l.away <= 11;
+        if (f.size() == 4) mode = f[3];
+    } else if (ok && f.size() == 2) mode = f[1];
+    if (ok && !mode.empty()) {
+        l.mode = mode == "friendly" || mode == "domination" ? 0 : mode == "demo" ? 2 : mode == "cup" ? 3 : mode == "challenge" ? 4
+               : std::isdigit(static_cast<unsigned char>(mode[0])) ? static_cast<int>(std::strtol(mode.c_str(), nullptr, 0)) : -1;
+        ok = l.mode >= 0 && l.mode <= 4;
+    }
+    if (ok) if (const char* o = std::getenv("MSC_BOOT_MATCH_OPTS")) if (*o) ok = ParseLaunch(o, l);
+    if (const char* sd = std::getenv("MSC_BOOT_MATCH_SEED")) {
+        if (!std::strcmp(sd, "off") || !std::strcmp(sd, "0")) l.pinSeed = false;
+        else if (*sd) l.seed = static_cast<uint32_t>(std::strtoul(sd, nullptr, 16));
+    }
+    if (!ok) {
+        std::fprintf(stderr, "boot: MSC_BOOT_MATCH=%s not understood (want <stadium>[:<captainA>:<captainB>][:<mode>], MSC_BOOT_MATCH_OPTS in `launch` keys): normal start\n", e);
+        ScriptFlush();
+        return;
+    }
+    g_boot.on = true;
+    g_boot.t0 = NpRealSeconds();
+    const char* us = std::getenv("MSC_INPUT_SCRIPT");
+    g_bootOnly = !(us && *us) && g_script.empty() && g_prog.empty();
+    std::fprintf(stderr, "boot: MSC_BOOT_MATCH=%s: %s (stadium %d), captains %d v %d, mode %d%s%s; menus skipped at the title; saves are not written (the NAND layer drops writes)\n", e,
+                 StadiumName(l.stadium), l.stadium, l.home, l.away, l.mode, l.pinSeed ? ", seed pinned" : ", seed left", g_bootOnly ? "; no route: the pad is yours after the launch" : "");
+    ScriptFlush();
+}
+
+// One frame of the boot, before the route's program. True while the boot still owns the frame (waiting for the title: it presses A like the routes' first lines).
+bool BootMatchTick(unsigned long long frame) {
+    if (!g_boot.on || g_boot.stage != 0) return false;
+    const int top = g_state.scene.depth ? g_state.scene.ids[g_state.scene.depth - 1] : -1;
+    if (top == 0 && frame > 2) {   // scene 0: sms2_start, the title
+        std::string msg;
+        const bool ok = LaunchMatch(g_boot.spec, msg);
+        g_boot.tLaunch = NpRealSeconds();
+        g_boot.fLaunch = frame;
+        std::fprintf(stderr, "boot: title reached at f=%llu after %.1f s; launch stadium=%d (%s) mode=%d home=%d away=%d: %s%s\n", frame, g_boot.tLaunch - g_boot.t0,
+                     g_boot.spec.stadium, StadiumName(g_boot.spec.stadium), g_boot.spec.mode, g_boot.spec.home, g_boot.spec.away, ok ? "" : "FAILED: ", msg.c_str());
+        ScriptFlush();
+        if (!ok) { g_boot.stage = 2; Finish(4, "boot match launch failed"); return false; }
+        g_boot.stage = 1;
+        return false;
+    }
+    if (++g_boot.waited > 36000) {
+        std::fprintf(stderr, "boot: the title scene was not reached in %llu frames: giving up, normal start\n", static_cast<unsigned long long>(g_boot.waited));
+        ScriptFlush();
+        g_boot.stage = 2;
+        return false;
+    }
+    if (g_boot.waited % 20 < 3) { g_padOut.active = true; g_padOut.buttons = 0x100; }   // A (the wrist-strap screen, the intro movie)
+    return true;
+}
+// After each sampled frame: the first open-play state after the launch.
+void BootMatchWatch(unsigned long long frame) {
+    if (!g_boot.on || g_boot.stage != 1) return;
+    if (g_state.gameState == 5 && g_state.game && g_state.simStarted) {
+        const double now = NpRealSeconds();
+        uint32_t chk = 0, rng = 0;
+        DeepDigest(&chk, &rng);
+        std::fprintf(stderr, "boot: play began in %s (stadium %d) after %.1f s (f=%llu; %.1f s and %llu pictures after the launch; sim step %u, random seed %08X)\n", StadiumName(g_state.stadium),
+                     g_state.stadium, now - g_boot.t0, frame, now - g_boot.tLaunch, static_cast<unsigned long long>(frame - g_boot.fLaunch), g_state.simFrame, rng);
+        ScriptFlush();
+        g_boot.stage = 2;
+    }
+}
+} // namespace
+
 // Runs the sequential program for the frame about to be produced.
 void ProgramTick() {
+    NpHostAllocScope hostScope;   // (1.3: the harness's own work on the host heap; the calls into the game's scene manager leave it, np_harness_game.cpp)
     g_padOut = {};
     g_rawOut = {};
     const unsigned long long frame = g_frames.load(std::memory_order_relaxed);
@@ -676,6 +922,7 @@ void ProgramTick() {
         std::fprintf(stderr, "[script] f=%llu stopwhen: %s\n", frame, text.c_str());
         Finish(0, "script stop condition");
     }
+    if (BootMatchTick(frame)) return;   // MSC_BOOT_MATCH: waiting for the title (the route's program has not started)
     while (g_pc < g_prog.size()) {
         const Cmd& c = g_prog[g_pc];
         switch (c.kind) {
@@ -775,7 +1022,22 @@ void ProgramTick() {
             return;
         case Cmd::Log:
             std::fprintf(stderr, "[script] f=%llu %s\n", frame, c.text.c_str());
+            ScriptFlush();
             ++g_pc; continue;
+        case Cmd::Shot: {
+            const char* dir = std::getenv("MSC_SHOT_DIR");
+            char path[600];
+            std::snprintf(path, sizeof path, "%s/%s.png", dir && *dir ? dir : ".", c.text.c_str());
+#if defined(__linux__)
+            if (dir && *dir) mkdir(dir, 0755);
+            const int ok = np_gx_request_dump ? np_gx_request_dump(path) : 0;
+#else
+            const int ok = 0;   // (the Vita has no PNG dump here: MSC_VITA_SHOT takes its pictures; mpux's shot command is a host tool)
+#endif
+            std::fprintf(stderr, "[script] f=%llu shot %s (%s)\n", frame, c.text.c_str(), ok ? "requested" : "no renderer");
+            ScriptFlush();
+            ++g_pc; continue;
+        }
         case Cmd::ProfBegin:
         case Cmd::ProfEnd:
             std::fprintf(stderr, "[script] f=%llu profile %s\n", frame, c.kind == Cmd::ProfBegin ? "begin" : "end");
@@ -798,6 +1060,12 @@ void ProgramTick() {
             std::fprintf(stderr, "[script] f=%llu setf %s %g: %s%s\n", frame, c.gname.c_str(), c.gvalue, ok ? "" : "FAILED: ", msg.c_str());
             if (!ok) Finish(4, "setf failed");
             ++g_pc; continue;
+        }
+        case Cmd::Score: {
+            std::string msg;
+            const bool ok = ScoreGoal(c.itemSide, msg);
+            std::fprintf(stderr, "[script] f=%llu score side=%d: %s%s\n", frame, c.itemSide, ok ? "" : "REFUSED: ", msg.c_str());
+            ++g_pc; continue;   // a refusal is logged, the route goes on (no goal then)
         }
         case Cmd::PopScene: {
             std::string msg;
@@ -863,6 +1131,8 @@ void ProgramTick() {
         }
         case Cmd::Exit:
             std::fprintf(stderr, "[script] f=%llu exit\n", frame);
+            ExitBegin(0, "script flush");
+            ScriptFlushFinal();
             Finish(0, "script exit");
             return;
         }
@@ -1116,6 +1386,7 @@ void Init() {
     if (const char* e = std::getenv("MSC_VIRTUAL_STEP_US")) g_stepCostNs = std::strtoll(e, nullptr, 10) * 1000;
     if (const char* e = std::getenv("MSC_FPS_MODEL")) g_fpsModel = *e && std::strcmp(e, "0") != 0 && std::strcmp(e, "off") != 0;
     LoadScript();
+    BootMatchInit();
     if (const char* chk = std::getenv("MSC_SCRIPT_CHECK")) {
         // Parse-only: `MSC_SCRIPT_CHECK=1 MSC_INPUT_SCRIPT=f` reports the script's size and leaves.
         if (*chk && *chk != '0') {
@@ -1131,21 +1402,37 @@ void Init() {
 }
 
 void Finish(int code, const char* why) {
+    ExitBegin(code, "frame-send join");   // (starts the watchdog when the script's exit did not; marks the step either way)
     if (NpFsJoin) NpFsJoin();   // a frame limit or a script's exit comes from the frame hook, which runs right after the fork: finish the send first
     const unsigned long long n = g_frames.load(std::memory_order_relaxed);
+    ExitMark("watch and hash lines");
     if (g_watch) WatchLine(g_state, n);
     if (g_hashEvery) HashLine(n, true);
     // The process leaves without running exit handlers: the other layers' end-of-run reports
     // (the platform's memory high-water marks, the SDK layer's statistics) are asked for here.
+    ExitMark("exit hooks");
     for (unsigned i = 0; i < g_nExitHooks; ++i) g_exitHooks[i]();
+    ExitMark("jobs, frame-send and thp statistics");
     if (NpJobsLogStats) NpJobsLogStats("the end of the run");
     if (NpFsLogStats) NpFsLogStats("the end of the run");
     if (NpThpLogStats) NpThpLogStats();
+    ExitMark("profile dump");
     if (__gcov_dump) __gcov_dump();   // the process leaves without exit handlers: write the profile now
+    if (__llvm_profile_write_file) __llvm_profile_write_file();
+    ExitMark("memory report");
     if (NpVitaExitReport) NpVitaExitReport();
+    ExitMark("frame timing");
     FinishFrameTiming();
+    ExitMark("plat line");
     std::fprintf(stderr, "[plat] %s at frame %llu, exiting\n", why, n);
+#if defined(__vita__)
+    // The process leaves with sceKernelExitProcess, no destructors: the back end must not be inside sceGxm then (r10 console: a data abort in glDrawElements right after the line above, 1 exit in 12).
+    ExitMark("back end quiesce");
+    if (VgxQuiesceForExit) VgxQuiesceForExit(200);
+#endif
+    ExitMark("end of run");
     if (NpVitaEndRun) NpVitaEndRun(code, why);
+    ExitMark("final flush");
     std::fflush(nullptr);
 #if defined(__linux__)
     // If the SDK layer routes stdout/stderr through a pipe with pump threads, _Exit would drop
@@ -1166,7 +1453,7 @@ bool HarnessWanted() {
     static const bool wanted = [] {
         static const char* const names[] = {"MSC_INPUT_SCRIPT", "MSC_WATCH", "MSC_WATCH_BUTTONS", "MSC_MAX_FRAMES",
                                             "MSC_FRAME_TRACE",  "MSC_STATE_HASH", "MSC_QEMU_MARK", "MSC_FRAME_LOG",
-                                            "MSC_FRAME_TIMING", "MSC_VIRTUAL_FRAME_US", "MSC_VIRTUAL_STEP_US"};
+                                            "MSC_FRAME_TIMING", "MSC_VIRTUAL_FRAME_US", "MSC_VIRTUAL_STEP_US", "MSC_BOOT_MATCH"};
         for (const char* name : names) {
             const char* value = std::getenv(name);
             if (value && *value) {
@@ -1222,6 +1509,17 @@ void OnFrameBody() {
     if (markEvery && n % markEvery == 0) syscall(0x7f00, static_cast<long>(n));
 #endif
     if (every && n % every == 0) {
+        static bool header = false;
+        if (!header) {   // 1.2 (STR-102): what the run was set to, ahead of its first frame line
+            header = true;
+            char fps[320] = "fps=?", dyn[360] = "dynres=?", gfx[320] = "gfx: ?", set[260] = "settings: ?", inp[300] = "controls: ?";
+            if (&NpFpsDescribe) NpFpsDescribe(fps, sizeof fps);
+            if (&VgxDynResDescribe) VgxDynResDescribe(dyn, sizeof dyn);
+            if (&VgxGfxDescribe) VgxGfxDescribe(gfx, sizeof gfx);
+            if (&NpSettingsDescribe) NpSettingsDescribe(set, sizeof set);
+            if (&NpInputDescribe) NpInputDescribe(inp, sizeof inp);
+            std::fprintf(stderr, "[run] host build; %s\n[run] %s\n[run] %s\n[run] %s\n[run] %s\n", fps, dyn, gfx, set, inp);
+        }
         const double now = NpRealSeconds();
         const double span = now - last;
         const double cpu = threadCpu();
@@ -1239,9 +1537,10 @@ void OnFrameBody() {
         lastCpu = cpu;
     }
     // State after this frame; the script decides the next frame's input from it.
-    const bool needState = g_watch || g_watchButtons || g_frameTrace || !g_prog.empty() || g_stepCostNs != 0 || g_fpsModel;
+    const bool needState = g_watch || g_watchButtons || g_frameTrace || !g_prog.empty() || g_stepCostNs != 0 || g_fpsModel || g_boot.on;
     uint32_t modelSteps = 0;
     if (needState) {
+        NpHostAllocScope hostScope;   // (1.3: the buttons, scene names and report lines of every frame on the host heap: the census of MSC_HEAP_GUARD=2)
         const State prev = g_state;
         std::vector<Button> buttons;
         float ptr[2] = {0, 0};
@@ -1254,6 +1553,11 @@ void OnFrameBody() {
         if (g_frameTrace)
             std::fprintf(stderr, "[ft] %llu %u %u %d\n", (unsigned long long)n, g_state.simFrame, g_state.retrace, g_state.gameState);
         if (g_watch && g_watchEvery && n % g_watchEvery == 0) WatchLine(g_state, n);
+        BootMatchWatch(n);
+        // MSC_SIM_SEED=<hex> (test): the simulation's random seed is rewritten on every picture from the match object's creation until the first step, so a menu-started and a
+        // fast-booted match (whose menus and loads draw different numbers) start from the same seed: the determinism comparison of the fast boot (w8/fastboot10.md)
+        static const char* const simSeedEnv = std::getenv("MSC_SIM_SEED");
+        if (simSeedEnv && *simSeedEnv && g_state.game && !g_state.simStarted) PinSimSeed(static_cast<uint32_t>(std::strtoul(simSeedEnv, nullptr, 16)));
     }
     if (NpItemTestFrame) NpItemTestFrame(n);   // W5 ITEM: item slots, objects, hits and effects -> [item] lines (only with MSC_ITEM_TEST=1)
     if (g_frameCostNs) NpVirtualAdvanceNs(g_frameCostNs);
@@ -1297,7 +1601,8 @@ void NpOnFramePresented(void) {
     // An unattended run: nobody touches the pad, so the console would dim the screen and then
     // suspend (the system counts idle time from the real controls, not from what a script feeds
     // the game). Tell it the application is in use.
-    if (g_countAlways.load(std::memory_order_relaxed) % 120 == 0) sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+    const uint64_t n = g_countAlways.load(std::memory_order_relaxed);
+    if (n == 1 || n % 120 == 0) sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 #endif
     // Last: with a frame limit or a script's "exit" this call does not return.
     OnFrameBody();
@@ -1362,6 +1667,7 @@ int NpHarnessOwnsPad(void) {
     if (!HarnessWanted()) return 0;
     if (!g_initDone) Init();
     const char* s = std::getenv("MSC_INPUT_SCRIPT");
+    if (g_bootOnly) return g_boot.on && g_boot.stage == 0 ? 1 : 0;   // MSC_BOOT_MATCH without a route: the script owns the pad only until the launch
     return ((s && *s) || !g_script.empty() || !g_prog.empty()) ? 1 : 0;
 }
 uint64_t NpHarnessFrameCount(void) { return g_countAlways.load(std::memory_order_relaxed); }

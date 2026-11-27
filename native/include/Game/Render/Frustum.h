@@ -15,6 +15,8 @@ void ExtractFrustumPlanes(nlVector4* pPlanes, const nlMatrix4& projection,
 FrustumResult ClassifyBoxInFrustum(const nlVector4* pPlanes,
     const nlVector3* pBoundsMin, const nlVector3* pBoundsMax,
     unsigned long* pPlaneMask);
+bool IsBoxVisibleInFrustum(const nlVector4* pPlanes,
+    const nlVector3* pBoundsMin, const nlVector3* pBoundsMax);
 FrustumResult ClassifySphereInFrustum(const nlVector4* pPlanes,
     const nlVector3* pPosition, float fRadius);
 void GetFrustumCorners(const nlVector4* pPlanes, nlVector4* pCorners);

@@ -6,6 +6,7 @@
 #include <revolution/nand.h>
 #include <revolution/os.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -15,6 +16,7 @@
 #include <unistd.h>
 
 #include "np_internal.h"
+#include "../save/np_safe_file.h"
 
 namespace {
 
@@ -54,6 +56,38 @@ bool make_abs(char* out, size_t cap, const char* path) {
 
 void host_path(char* out, size_t cap, const char* abs) { snprintf(out, cap, "%s%s", g_root, abs); }
 
+// The game's save files ("Strikers2", and "Online" in the nocopy directory) are the player's progress. They are written the way the Wii's NANDSafeOpen does
+// it: into a copy, which replaces the file when it is closed (platform/sdk/save/np_safe_file.h: synced, the previous good save kept as <name>.bak, a damaged
+// file set aside as <name>.bad and a restart's first open completes or undoes an interrupted replace). The format of the files is not changed. Other
+// files of the directory (banner.bin, the replay and cache files) are written in place as before.
+bool is_save_file(const char* abs) {
+    const char* base = strrchr(abs, '/');
+    base = base ? base + 1 : abs;
+    return !strcmp(base, "Strikers2") || !strcmp(base, "Online");
+}
+bool is_tmp_file(const char* abs) {
+    return !strncmp(abs, "/tmp/", 5);
+}
+void clear_tmp_dir(const char* tmp_dir) {
+    DIR* d = opendir(tmp_dir);
+    if (!d) return;
+    while (struct dirent* de = readdir(d)) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        char hp[1200];
+        int w = snprintf(hp, sizeof(hp), "%s/%s", tmp_dir, de->d_name);
+        if (w < 0 || (size_t)w >= sizeof(hp)) continue;
+        struct stat st;
+        if (stat(hp, &st) == 0 && S_ISREG(st.st_mode)) unlink(hp);
+    }
+    closedir(d);
+}
+const u8 kStageShadow = 1;   // NANDFileInfo::stage of a file opened for writing through a copy
+
+void note_recovery(const char* hp, NpSafeFile::Found f) {
+    if (f == NpSafeFile::Found::Nothing || f == NpSafeFile::Found::Primary) return;
+    fprintf(stderr, "[nand] %s: %s\n", hp, NpSafeFile::FoundName(f));
+}
+
 s32 errno_result() {
     switch (errno) {
     case ENOENT: return NAND_RESULT_NOEXISTS;
@@ -74,18 +108,40 @@ s32 errno_result() {
     }
 }
 
+
+// MSC_BOOT_MATCH (the test-only fast boot, platform/harness/src/np_harness.cpp): the run skips the menus where the game loads and creates its save, and the
+// player's progress must never be touched by a test run, so while the switch is on every operation that would change the NAND (create, create directory,
+// delete, move, open for writing and what is written through such a handle) is DROPPED: it reports success, nothing reaches the files, and the first few
+// are logged ("boot: ... dropped"). A handle opened for writing is a stub (stage kStageDrop): reads give 0 bytes, writes and the close succeed.
+// The crash recovery of a save on open (NpSafeFile::Recover: finishes or undoes an interrupted replace, sets a damaged file aside) renames files too, so it
+// is skipped as well: a save is only ever READ. Off (the default): one flag test per call, nothing else changes.
+const u8 kStageDrop = 2;
+bool nosave() {
+    // (read at each call, not once: a route's `bootmatch` line sets the variable at the harness's start, after the first NAND call)
+    const char* e = getenv("MSC_BOOT_MATCH");
+    return e && *e && strcmp(e, "0") != 0 && strcmp(e, "off") != 0;
+}
+unsigned g_dropped = 0;
+void dropped(const char* what, const char* path) {
+    ++g_dropped;
+    if (g_dropped <= 12) fprintf(stderr, "boot: NAND %s dropped (MSC_BOOT_MATCH: saves are never written) %s\n", what, path ? path : "");
+}
+
 // ---- operations (synchronous cores) ------------------------------------------------------------
 
 s32 op_create(const char* path, u8, u8) {
+    if (nosave()) { dropped("create", path); return NAND_RESULT_OK; }
     char abs[512], hp[1100];
     if (!make_abs(abs, sizeof(abs), path)) return NAND_RESULT_INVALID;
     host_path(hp, sizeof(hp), abs);
+    if (is_save_file(abs) && !nosave()) note_recovery(hp, NpSafeFile::Recover(hp, NpSafeFile::GameSaveOptions()));   // (an interrupted replace is finished before "does it exist" is asked)
     int fd = open(hp, O_WRONLY | O_CREAT | O_EXCL, 0666);
     if (fd < 0) return errno_result();
     close(fd);
     return NAND_RESULT_OK;
 }
 s32 op_create_dir(const char* path, u8, u8) {
+    if (nosave()) { dropped("create directory", path); return NAND_RESULT_OK; }
     char abs[512], hp[1100];
     if (!make_abs(abs, sizeof(abs), path)) return NAND_RESULT_INVALID;
     host_path(hp, sizeof(hp), abs);
@@ -93,51 +149,109 @@ s32 op_create_dir(const char* path, u8, u8) {
     return NAND_RESULT_OK;
 }
 s32 op_delete(const char* path) {
+    if (nosave()) { dropped("delete", path); return NAND_RESULT_OK; }
     char abs[512], hp[1100];
     if (!make_abs(abs, sizeof(abs), path)) return NAND_RESULT_INVALID;
     host_path(hp, sizeof(hp), abs);
     struct stat st;
-    if (stat(hp, &st) != 0) return errno_result();
+    const bool present = stat(hp, &st) == 0;
+    if (is_save_file(abs) && !(present && S_ISDIR(st.st_mode))) {
+        // The player's delete (the "save is damaged, delete?" popup, or the game's own delete): the live file is set aside (<name>.bad, at most three kept) and the
+        // .bak and .tmp go with it, so the older backup does not come back at the next start. Set-aside .bad copies stay, for a manual rescue. This is done even
+        // when the live file is gone (a damaged one set aside when it was opened): its backup must not outlive the delete.
+        if (!NpSafeFile::Discard(hp)) { errno = ENOENT; return errno_result(); }
+        return NAND_RESULT_OK;
+    }
+    if (!present) return errno_result();
     int r = S_ISDIR(st.st_mode) ? rmdir(hp) : unlink(hp);
     return r == 0 ? NAND_RESULT_OK : errno_result();
 }
 s32 op_open(const char* path, NANDFileInfo* info, u8 mode) {
+    if (nosave() && mode != NAND_ACCESS_READ) {
+        dropped("open for writing", path);
+        memset(info, 0, sizeof(*info));
+        info->fd = -1;
+        info->tempFd = -1;
+        info->access = mode;
+        info->stage = kStageDrop;
+        snprintf(info->openPath, sizeof(info->openPath), "%s", path);
+        return NAND_RESULT_OK;
+    }
     char abs[512], hp[1100];
     if (!make_abs(abs, sizeof(abs), path)) return NAND_RESULT_INVALID;
+    // int29: under MSC_BOOT_MATCH (nosave), writes to /tmp (e.g. REPLAY_0..2) are dropped, so reading a stale /tmp file
+    // left over from a prior run would load stale heap pointers into ReplayManager::mMemory and crash during highlights.
+    if (nosave() && is_tmp_file(abs)) return NAND_RESULT_NOEXISTS;
     host_path(hp, sizeof(hp), abs);
-    int flags = mode == NAND_ACCESS_READ ? O_RDONLY : mode == NAND_ACCESS_WRITE ? O_WRONLY : O_RDWR;
-    int fd = open(hp, flags);
+    const bool save = is_save_file(abs);
+    int fd;
+    bool shadow = false;
+    if (save) {
+        NpSafeFile::Options o = NpSafeFile::GameSaveOptions();
+        o.removeEmpty = mode == NAND_ACCESS_READ;   // (a file the game has just created is empty and about to be written)
+        if (!nosave()) note_recovery(hp, NpSafeFile::Recover(hp, o));   // (Recover renames and deletes files: never while MSC_BOOT_MATCH is on)
+        if (mode == NAND_ACCESS_READ) {
+            fd = open(hp, O_RDONLY);
+        } else {
+            struct stat st;
+            if (stat(hp, &st) != 0) return errno_result();   // (the game creates the file first and gets "no file" here, as before)
+            NpSafeFile::Writer w;
+            if (!NpSafeFile::BeginWrite(hp, &w, o)) return NAND_RESULT_ACCESS;
+            fd = w.fd;
+            shadow = true;
+        }
+    } else {
+        int flags = mode == NAND_ACCESS_READ ? O_RDONLY : mode == NAND_ACCESS_WRITE ? O_WRONLY : O_RDWR;
+        fd = open(hp, flags);
+    }
     if (fd < 0) return errno_result();
     memset(info, 0, sizeof(*info));
     info->fd = fd;
     info->tempFd = -1;
     info->access = mode;
+    info->stage = shadow ? kStageShadow : 0;
     snprintf(info->openPath, sizeof(info->openPath), "%s", abs);
     return NAND_RESULT_OK;
 }
 s32 op_close(NANDFileInfo* info) {
+    if (info->stage == kStageDrop) { info->stage = 0; return NAND_RESULT_OK; }
     if (info->fd < 0) return NAND_RESULT_INVALID;
+    if (info->stage == kStageShadow) {
+        char hp[1100];
+        host_path(hp, sizeof(hp), info->openPath);
+        NpSafeFile::Writer w;
+        w.fd = info->fd;
+        w.path = hp;
+        w.keepBackup = true;
+        info->fd = -1;
+        info->stage = 0;
+        return NpSafeFile::Commit(&w, NpSafeFile::GameSaveOptions()) ? NAND_RESULT_OK : NAND_RESULT_UNKNOWN;
+    }
     close(info->fd);
     info->fd = -1;
     return NAND_RESULT_OK;
 }
 s32 op_read(NANDFileInfo* info, void* buf, u32 len) {
+    if (info->stage == kStageDrop) return 0;
     if (info->fd < 0) return NAND_RESULT_INVALID;
     ssize_t r = read(info->fd, buf, len);
     return r < 0 ? errno_result() : (s32)r;
 }
 s32 op_write(NANDFileInfo* info, const void* buf, u32 len) {
+    if (info->stage == kStageDrop) { dropped("write", info->openPath); return (s32)len; }
     if (info->fd < 0) return NAND_RESULT_INVALID;
     ssize_t r = write(info->fd, buf, len);
     if (r < 0) return errno_result();
     return (s32)r;
 }
 s32 op_seek(NANDFileInfo* info, s32 off, NANDSeekMode whence) {
+    if (info->stage == kStageDrop) return 0;
     if (info->fd < 0) return NAND_RESULT_INVALID;
     off_t r = lseek(info->fd, off, whence == NAND_SEEK_BEG ? SEEK_SET : whence == NAND_SEEK_CUR ? SEEK_CUR : SEEK_END);
     return r < 0 ? errno_result() : (s32)r;
 }
 s32 op_getlength(NANDFileInfo* info, u32* length) {
+    if (info->stage == kStageDrop) { *length = 0; return NAND_RESULT_OK; }
     struct stat st;
     if (info->fd < 0 || fstat(info->fd, &st) != 0) return NAND_RESULT_INVALID;
     *length = (u32)st.st_size;
@@ -159,6 +273,7 @@ s32 op_check(u32 blocks, u32 files, u32* answer) {
 s32 op_getstatus(const char* path, NANDStatus* status) {
     char abs[512], hp[1100];
     if (!make_abs(abs, sizeof(abs), path)) return NAND_RESULT_INVALID;
+    if (nosave() && is_tmp_file(abs)) return NAND_RESULT_NOEXISTS;
     host_path(hp, sizeof(hp), abs);
     struct stat st;
     if (stat(hp, &st) != 0) return errno_result();
@@ -169,6 +284,7 @@ s32 op_getstatus(const char* path, NANDStatus* status) {
 s32 op_gettype(const char* path, u8* type) {
     char abs[512], hp[1100];
     if (!make_abs(abs, sizeof(abs), path)) return NAND_RESULT_INVALID;
+    if (nosave() && is_tmp_file(abs)) return NAND_RESULT_NOEXISTS;
     host_path(hp, sizeof(hp), abs);
     struct stat st;
     if (stat(hp, &st) != 0) return errno_result();
@@ -176,6 +292,7 @@ s32 op_gettype(const char* path, u8* type) {
     return NAND_RESULT_OK;
 }
 s32 op_move(const char* from, const char* to) {
+    if (nosave()) { dropped("move", to); return NAND_RESULT_OK; }
     char a1[512], a2[512], h1[1100], h2[1100];
     if (!make_abs(a1, sizeof(a1), from) || !make_abs(a2, sizeof(a2), to)) return NAND_RESULT_INVALID;
     host_path(h1, sizeof(h1), a1);
@@ -350,6 +467,9 @@ s32 NANDInit(void) {
     np_mkdir_p(p);
     snprintf(p, sizeof(p), "%s/tmp", g_root);
     np_mkdir_p(p);
+    // Real Wii IOS clears /tmp on launch so stale per-session scratch files (REPLAY_0..2) never outlive the process.
+    // Never touch disk while MSC_BOOT_MATCH (nosave) is active.
+    if (!nosave()) clear_tmp_dir(p);
     g_inited = 1;
     snprintf(g_cwd, sizeof(g_cwd), "/");
     np_log("nand", "root %s, home %s", g_root, kHome);

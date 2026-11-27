@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 12:00:00 -0500
+Subject: [PATCH] display depth/stencil surface without memory except while a common dialog is up (vglSetDisplayNoDepth) and the parameter buffer in main memory for a normal app (vglSetParamBufferLpddr, with fallback); both off unless asked
+
+---
+diff --git a/dependencies/vitaGL/source/gxm.c b/dependencies/vitaGL/source/gxm.c
+index 16da5f62..22564783 100644
+--- a/dependencies/vitaGL/source/gxm.c
++++ b/dependencies/vitaGL/source/gxm.c
+@@ -57,6 +57,17 @@ static void *gxm_shader_patcher_vertex_usse_addr; // Shader Patcher vertex USSE
+ static void *gxm_shader_patcher_fragment_usse_addr; // Shader Patcher fragment USSE memblock starting address
+ 
+ SceGxmDepthStencilSurface gxm_depth_stencil_surface; // Depth/Stencil surfaces setup for sceGxm
++// 0042: the display's depth/stencil surface made without memory (vglSetDisplayNoDepth), a real one only while a common dialog is up
++static GLboolean vgl_disp_nodepth = GL_FALSE;
++static GLboolean vgl_disp_real = GL_FALSE;     // the display surface currently has memory
++static uint32_t vgl_disp_quiet = 0;            // swaps since the last one with a dialog
++static uint32_t vgl_disp_made = 0, vgl_disp_freed = 0, vgl_disp_failed = 0;
++#define VGL_DISP_QUIET_SWAPS 90
++// 0042: parameter buffer in main memory (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR) for a normal application: 0 not asked, 1 taken, -1 refused (fell back)
++static GLboolean vgl_pb_lpddr_want = GL_FALSE;
++int vgl_pb_lpddr_state = 0;
++int vgl_pb_lpddr_rc = 0;
++uint32_t vgl_pb_lpddr_shrink = 0;
+ 
+ static SceUID shared_fb; // In-use hared framebuffer identifier
+ static SceSharedFbInfo shared_fb_info; // In-use shared framebuffer info struct
+@@ -757,6 +768,8 @@ void init_gxm(void) {
+ 	SceGxmInitializeParams gxm_init_params;
+ 	vgl_memset(&gxm_init_params, 0, sizeof(SceGxmInitializeParams));
+ 	gxm_init_params.flags = SCE_GXM_INITIALIZE_FLAG_EXTENDED_FORMAT;
++	if (vgl_pb_lpddr_want && !system_app_mode)
++		gxm_init_params.flags |= SCE_GXM_INITIALIZE_FLAG_PB_LPDDR; // 0042 vglSetParamBufferLpddr
+ 	if (system_app_mode) {
+ 		gxm_init_params.flags |= (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR | SCE_GXM_INITIALIZE_FLAG_SHARED_SYNC | SCE_GXM_INITIALIZE_FLAG_SHAREDPB_CREATE | SCE_GXM_INITIALIZE_FLAG_SHAREDPB_OPEN);
+ 	}
+@@ -766,7 +779,18 @@ void init_gxm(void) {
+ 	gxm_init_params.parameterBufferSize = gxm_param_buf_size;
+ 
+ 	// Initializing sceGxm
+-	sceGxmVshInitialize(&gxm_init_params);
++	int gxm_init_rc = sceGxmVshInitialize(&gxm_init_params);
++	if (gxm_init_rc < 0 && vgl_pb_lpddr_want && !system_app_mode) {
++		// 0042: the firmware refused the parameter buffer in main memory for a normal application: go on without it, and tell the caller its
++		// video memory pool request (made for a parameter buffer outside video memory) is 'size' too big
++		vgl_pb_lpddr_state = -1;
++		vgl_pb_lpddr_rc = gxm_init_rc;
++		vgl_pb_lpddr_shrink = gxm_param_buf_size;
++		gxm_init_params.flags &= ~SCE_GXM_INITIALIZE_FLAG_PB_LPDDR;
++		(void)sceGxmVshInitialize(&gxm_init_params);
++	} else if (vgl_pb_lpddr_want && !system_app_mode) {
++		vgl_pb_lpddr_state = 1;
++	}
+ 	gxm_initialized = GL_TRUE;
+ 
+ #ifdef HAVE_DEVKIT
+@@ -919,8 +943,61 @@ GLboolean init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSu
+ 	return init_depth_stencil_buffer_ms(w, h, surface, has_stencil, msaa_mode);
+ }
+ 
++// 0042: a display depth/stencil surface that points at no memory (the scenes begun on it load and store nothing: rt.c vgl_rt_scene_begin)
++static void init_display_depth_null(void) {
++	vglDepthStencilSurfaceInit(&gxm_depth_stencil_surface, SCE_GXM_DEPTH_STENCIL_FORMAT_DF32M_S8, SCE_GXM_DEPTH_STENCIL_SURFACE_LINEAR,
++		VGL_ALIGN(DISPLAY_WIDTH, SCE_GXM_TILE_SIZEX), NULL, NULL);
++	sceGxmDepthStencilSurfaceSetForceLoadMode(&gxm_depth_stencil_surface, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_DISABLED);
++	sceGxmDepthStencilSurfaceSetForceStoreMode(&gxm_depth_stencil_surface, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_DISABLED);
++	vgl_disp_real = GL_FALSE;
++}
++
+ void init_display_depth_stencil_surfaces(void) {
++	if (vgl_disp_nodepth) {
++		init_display_depth_null();
++		return;
++	}
+ 	init_depth_stencil_buffer(DISPLAY_WIDTH, DISPLAY_HEIGHT, &gxm_depth_stencil_surface, GL_TRUE);
++	vgl_disp_real = GL_TRUE;
++}
++
++// 0042: called from vglSwapBuffers. With a dialog up the surface gets memory (once); some swaps after the last dialog it is given back.
++static void display_depth_for_dialog(GLboolean dialog) {
++	if (!vgl_disp_nodepth)
++		return;
++	if (dialog) {
++		vgl_disp_quiet = 0;
++		if (!vgl_disp_real) {
++			SceGxmDepthStencilSurface real;
++			vgl_memset(&real, 0, sizeof(real));
++			if (init_depth_stencil_buffer(DISPLAY_WIDTH, DISPLAY_HEIGHT, &real, GL_TRUE)) {
++				gxm_depth_stencil_surface = real;
++				vgl_disp_real = GL_TRUE;
++				vgl_disp_made++;
++			} else {
++				vgl_disp_failed++; // (the dialog is updated with no depth memory, as before there was a switch: it may show nothing)
++			}
++		}
++		return;
++	}
++	if (vgl_disp_real && ++vgl_disp_quiet >= VGL_DISP_QUIET_SWAPS) {
++		mark_depth_stencil_as_dirty(&gxm_depth_stencil_surface);
++		init_display_depth_null();
++		vgl_disp_freed++;
++		vgl_disp_quiet = 0;
++	}
++}
++
++void vglSetDisplayNoDepth(GLint on) {
++	vgl_disp_nodepth = on ? GL_TRUE : GL_FALSE; // (before vglInit*)
++}
++
++void vglDisplayDepthStats(uint32_t *mode, uint32_t *real, uint32_t *made, uint32_t *freed, uint32_t *failed) {
++	if (mode) *mode = vgl_disp_nodepth;
++	if (real) *real = vgl_disp_real;
++	if (made) *made = vgl_disp_made;
++	if (freed) *freed = vgl_disp_freed;
++	if (failed) *failed = vgl_disp_failed;
+ }
+ 
+ void start_shader_patcher(void) {
+@@ -1216,6 +1293,18 @@ void vglSetParamBufferSize(uint32_t size) {
+ 	gxm_param_buf_size = size;
+ }
+ 
++// 0042: ask for the parameter buffer in main memory (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR) in a normal application; before vglInit*. State: vglParamBufferLpddrState.
++void vglSetParamBufferLpddr(GLint on) {
++	vgl_pb_lpddr_want = on ? GL_TRUE : GL_FALSE;
++}
++
++// 0: not asked, 1: taken, -1: refused (sceGxm returned *rc and the buffer is in video memory), *shrink = the bytes a caller's video memory request was too big by
++int vglParamBufferLpddrState(int *rc, uint32_t *shrink) {
++	if (rc) *rc = vgl_pb_lpddr_rc;
++	if (shrink) *shrink = vgl_pb_lpddr_shrink;
++	return vgl_pb_lpddr_state;
++}
++
+ void vglSetVDMBufferSize(uint32_t size) {
+ 	gxm_vdm_buf_size = size;
+ }
+@@ -1318,6 +1407,7 @@ void vglSwapBuffers(GLboolean has_commondialog) {
+ 		scene_end();
+ 	vgl_rt_frame_end(); // RT: per-frame scene counters and timers (rt.c)
+ 
++	display_depth_for_dialog(vgl_has_cdlg_support && has_commondialog ? GL_TRUE : GL_FALSE); // 0042
+ 	if (vgl_has_cdlg_support && has_commondialog) {
+ 		// Performing commondialog update
+ 		SceCommonDialogUpdateParam updateParam;
+diff --git a/dependencies/vitaGL/source/shared.h b/dependencies/vitaGL/source/shared.h
+index 002ab8ee..b9bba519 100644
+--- a/dependencies/vitaGL/source/shared.h
++++ b/dependencies/vitaGL/source/shared.h
+@@ -915,6 +915,7 @@ extern const char *ffp_bind_names[FFP_BINDS_NUM];
+ // Internal stuffs
+ extern GLboolean vgl_has_cdlg_support;
+ extern uint32_t gxm_param_buf_size; // Param buffer size for sceGxm
++extern uint32_t vgl_pb_lpddr_shrink; // 0042: video memory bytes a caller counted as free that the parameter buffer took after all
+ extern GLboolean skip_viewport_override;
+ extern GLboolean dirty_scissor_state;
+ #ifdef LAZY_CLEAR
+diff --git a/dependencies/vitaGL/source/vgl.c b/dependencies/vitaGL/source/vgl.c
+index 46c19fac..3c50500d 100644
+--- a/dependencies/vitaGL/source/vgl.c
++++ b/dependencies/vitaGL/source/vgl.c
+@@ -287,6 +287,8 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
+ 
+ 	// Initializing sceGxm
+ 	init_gxm();
++	if (vgl_pb_lpddr_shrink && cdram_pool_size > (int)vgl_pb_lpddr_shrink)
++		cdram_pool_size -= (int)vgl_pb_lpddr_shrink; // 0042: PB_LPDDR refused, the parameter buffer took video memory the caller counted as free
+ 
+ 	// Initializing memory heaps for CDRAM and RAM memory (both standard and physically contiguous)
+ 	vgl_mem_init(ram_pool_size, cdram_pool_size, phycont_pool_size, cdlg_pool_size);
+diff --git a/dependencies/vitaGL/source/vitaGL.h b/dependencies/vitaGL/source/vitaGL.h
+index d2ee05b8..857a5591 100644
+--- a/dependencies/vitaGL/source/vitaGL.h
++++ b/dependencies/vitaGL/source/vitaGL.h
+@@ -1397,6 +1397,14 @@ void vglSetupRuntimeShaderCompiler(shark_opt opt_level, int32_t use_fastmath, in
+ // Load a precompiled gxp binary to a given shader handle
+ void vglShaderGxpBinary(GLsizei count, const GLuint *handles, const void *binary, GLsizei length);
+ 
++// 0042: the display's depth/stencil surface without memory, a real one only while a common dialog is up. Must be called before vglInit*.
++void vglSetDisplayNoDepth(GLint on);
++void vglDisplayDepthStats(uint32_t *mode, uint32_t *real, uint32_t *made, uint32_t *freed, uint32_t *failed);
++
++// 0042: parameter buffer in main memory (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR) in a normal application. Must be called before vglInit*.
++void vglSetParamBufferLpddr(GLint on);
++int vglParamBufferLpddrState(int *rc, uint32_t *shrink);
++
+ // Perform a display buffer swap. Equivalent of eglSwapBuffers but allows support with Common Dialog.
+ void vglSwapBuffers(GLboolean has_commondialog);
+ 

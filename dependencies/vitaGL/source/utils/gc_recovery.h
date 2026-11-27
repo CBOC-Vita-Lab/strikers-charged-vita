@@ -36,6 +36,7 @@ static int gc_return_credit(void) {
 
 static int gc_enqueue(uint32_t *ticket) {
 	int res;
+	const uint32_t gcj_t0 = sceKernelGetProcessTimeLow(); // 0064
 	for (;;) {
 		if (vgl_gc_failed()) return 0;
 		unsigned int timeout = 100000;
@@ -45,6 +46,11 @@ static int gc_enqueue(uint32_t *ticket) {
 	if (res < 0) {
 		gc_failure("take credit", res);
 		return 0;
+	}
+	{ // 0064: the time the render thread waited for a credit
+		const uint32_t gcj_us = sceKernelGetProcessTimeLow() - gcj_t0;
+		__atomic_add_fetch(&vgl_gcj_wait_total_us, gcj_us, __ATOMIC_RELAXED);
+		vgl_gcj_max(&vgl_gcj_wait_max_us, gcj_us);
 	}
 	if (vgl_gc_failed()) {
 		gc_return_credit();
@@ -78,9 +84,11 @@ static void gc_mark_ready(int started) {
 		__atomic_store_n(&gc_ready, 1, __ATOMIC_RELEASE);
 }
 
+// 0036: only the path with no collector running yet; waits vglSetGcPauseMs (default 16 ms), not 1 s.
 int vgl_gc_retry_pause(void) {
 	if (vgl_gc_failed()) return 0;
-	int res = sceKernelDelayThread(1000000);
+	vgl_gc_note_legacy();
+	int res = vgl_gc_pause_ms ? sceKernelDelayThread(vgl_gc_pause_ms * 1000u) : 0;
 	if (res < 0) gc_failure("delayed retry", res);
 	return !vgl_gc_failed();
 }

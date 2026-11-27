@@ -13,6 +13,9 @@
 #include "NL/glx/glxDisplayList.h"
 #include "NL/nlMath.h"
 #include "Game/SharedStaticStorage.h"
+#ifdef NP_NATIVE
+#include "np/floorbake.h"
+#endif
 
 int gScrollingCameraOverlayStageCount = 4;
 bool gScrollingCameraOverlayShadowsEnabled = true;
@@ -21,6 +24,9 @@ nlMatrix4 sScrollingCameraOverlayViewMatrix;
 int sScrollingCameraOverlayLightCount;
 bool sScrollingCameraOverlayLightingActive;
 bool sScrollingCameraOverlayShadowsActive;
+#ifdef NP_NATIVE
+static int sScrollingCameraOverlayBakedActive;   // MSC_FLOOR_BAKE: NP_FB_*, as the TEV stands
+#endif
 
 extern "C" void glxConfigureScrollingCameraOverlay()
 {
@@ -53,6 +59,9 @@ void GXMaterialProgramImpl<GXScrollingCameraOverlayMaterialProgram>::Activate(GL
 {
     static_cast<GXScrollingCameraOverlayMaterialProgram*>(this)->ConfigureVertexFormat(true);
     glxConfigureScrollingCameraOverlay();
+#ifdef NP_NATIVE
+    sScrollingCameraOverlayBakedActive = NP_FB_FULL;
+#endif
     view->m_Interface->GetViewMatrix(sScrollingCameraOverlayViewMatrix);
     sScrollingCameraOverlayLightCount = GetGameObjectLightCount(0, 1);
     LoadGameObjectLights(sScrollingCameraOverlayLightCount, view, 0);
@@ -70,6 +79,10 @@ void GXMaterialProgramImpl<GXScrollingCameraOverlayMaterialProgram>::Deactivate(
         sScrollingCameraOverlayShadowsActive = false;
     }
 
+#ifdef NP_NATIVE
+    NpFloorTevLeave(sScrollingCameraOverlayBakedActive);
+    sScrollingCameraOverlayBakedActive = NP_FB_FULL;
+#endif
     gxSetNumTevStages(1);
     gxSetNumTexGens(1);
     gxSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
@@ -88,6 +101,12 @@ template <>
 void GXMaterialProgramImpl<GXScrollingCameraOverlayMaterialProgram>::Prepare(
     glModelPacket* packet)
 {
+#ifdef NP_NATIVE
+    {
+        GXScrollingCameraOverlayParameters* parameters = static_cast<GXScrollingCameraOverlayParameters*>(packet->materialParameters);
+        NpFloorBakePacket(packet, &parameters->diffuseTexture, &parameters->overlayTexture, &parameters->overlayMaskTexture, parameters->overlayScale, parameters->cameraScroll, &parameters->overlayAmount, 3, 4);
+    }
+#endif
     glSetMaterialTextureAlphaState(this, packet, static_cast<const GXScrollingCameraOverlayParameters*>(packet->materialParameters)->diffuseTexture.texture);
 }
 
@@ -96,6 +115,30 @@ void GXMaterialProgramImpl<GXScrollingCameraOverlayMaterialProgram>::Draw(
     const glModelPacket* packet)
 {
     static_cast<GXScrollingCameraOverlayMaterialProgram*>(this)->BindVertexArrays(packet);
+#ifdef NP_NATIVE
+    const bool baked = NpFloorBakeOn() && static_cast<const GXScrollingCameraOverlayParameters*>(packet->materialParameters)->overlayAmount == 0.0f;
+    NpFloorSheen* const sheen = baked ? NpFloorSheenOf(&static_cast<const GXScrollingCameraOverlayParameters*>(packet->materialParameters)->overlayMaskTexture) : 0;
+    const int floorMode = !baked ? NP_FB_FULL : (sheen ? sheen->mode : NP_FB_BAKED);
+    if (floorMode != sScrollingCameraOverlayBakedActive)
+    {
+        if (sScrollingCameraOverlayShadowsActive)
+        {
+            RestoreGameObjectShadowLighting();
+            sScrollingCameraOverlayShadowsActive = false;
+        }
+        NpFloorTevLeave(sScrollingCameraOverlayBakedActive);
+        if (sScrollingCameraOverlayBakedActive == NP_FB_SHEEN_VERTEX)
+            static_cast<GXScrollingCameraOverlayMaterialProgram*>(this)->ConfigureVertexFormat(true);
+        if (baked)
+            NpFloorTevEnter(floorMode, sheen);
+        else
+            glxConfigureScrollingCameraOverlay();
+        sScrollingCameraOverlayBakedActive = floorMode;
+    }
+    if (baked)
+        glx_BindTexture(0, &static_cast<GXScrollingCameraOverlayParameters*>(packet->materialParameters)->diffuseTexture);
+    else
+#endif
     static_cast<GXScrollingCameraOverlayMaterialProgram*>(this)->BindParameters(packet);
 
 #ifdef NP_NATIVE
@@ -181,6 +224,15 @@ void GXMaterialProgramImpl<GXScrollingCameraOverlayMaterialProgram>::Draw(
     GXColor overlayGXColour = { overlayColour8.c[0], overlayColour8.c[1], overlayColour8.c[2], overlayColour8.c[3] };
     GXSetTevKColor(GX_KCOLOR0, overlayGXColour);
 
+#ifdef NP_NATIVE
+    if (floorMode == NP_FB_SHEEN_LOOKUP)
+        NpFloorKey(sheen);
+    if (floorMode == NP_FB_SHEEN_VERTEX)
+    {
+        NpFloorDrawSheen(packet, sheen, GX_VA_TEX1);
+        return;
+    }
+#endif
     if (packet->displayList != 0)
         GXCallDisplayList(packet->displayList->list, packet->displayList->size);
     else if (packet->indexBuffer != 0)

@@ -1,0 +1,336 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 18:57:00 -0500
+Subject: [PATCH] int32: remove dead vglColorLoadSkip path (retail libSceGxm returns SCE_GXM_ERROR_INVALID_VALUE on 32x32 swizzled backgroundTex) while keeping vglFlushStreamArena, harden vgl_memcpy DMA span check + error fallback, and avoid DMA behind ARM D-cache in glNamedBufferSubData realloc
+
+---
+diff --git a/source/buffers.c b/source/buffers.c
+index db4baf1d..e9a188fc 100644
+--- a/source/buffers.c
++++ b/source/buffers.c
+@@ -498,11 +498,24 @@ inline void glNamedBufferSubData(GLuint buffer, GLintptr offset, GLsizeiptr size
+ #endif
+ 
+ 		// Copying up previous data combined to modified data
+-		if (offset > 0)
+-			vgl_memcpy(ptr, gpu_buf->ptr, offset);
+-		vgl_memcpy(ptr + offset, data, size);
+-		if (gpu_buf->size - size - offset > 0)
+-			vgl_memcpy(ptr + offset + size, (uint8_t *)gpu_buf->ptr + offset + size, gpu_buf->size - size - offset);
++		// int32 (Carbon S2): never call sceDmacMemcpy behind dirty ARM D-cache on cached USER_RW stream arena buffers
++#if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++		if (vgl_stream_is_cached_addr(gpu_buf->ptr) || vgl_stream_is_cached_addr(ptr)) {
++			if (offset > 0)
++				vgl_fast_memcpy(ptr, gpu_buf->ptr, offset);
++			vgl_fast_memcpy(ptr + offset, data, size);
++			if (gpu_buf->size - size - offset > 0)
++				vgl_fast_memcpy(ptr + offset + size, (uint8_t *)gpu_buf->ptr + offset + size, gpu_buf->size - size - offset);
++			vgl_stream_touch(ptr);
++		} else
++#endif
++		{
++			if (offset > 0)
++				vgl_memcpy(ptr, gpu_buf->ptr, offset);
++			vgl_memcpy(ptr + offset, data, size);
++			if (gpu_buf->size - size - offset > 0)
++				vgl_memcpy(ptr + offset + size, (uint8_t *)gpu_buf->ptr + offset + size, gpu_buf->size - size - offset);
++		}
+ 
+ 		// Marking previous content for deletion
+ #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index a4570b00..3646f3b9 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -290,7 +290,6 @@ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
+ 			if (fb == active_write_fb) {
+ 				active_write_fb = NULL;
+ 			}
+-			vgl_color_skip_forget_fb(fb); // 0066: never keep a dangling FBO pointer armed
+ 
+ 			fb->active = GL_FALSE;
+ 			if (fb->tex) {
+diff --git a/source/gxm.c b/source/gxm.c
+index 10974641..89db282b 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -1203,150 +1203,11 @@ static inline __attribute__((always_inline)) void scene_end(void) {
+ // attempt start a scene from nothing, and the callers (draws, clears, blits) skip themselves on the false it returns. The same framebuffer is not tried
+ // again before the next frame: an allocation that failed has already been through the allocator's recovery (a GPU finish and delayed retries), which
+ // costs seconds, and a draw call after draw call must not each pay for that.
+-// 0066 (int29/int30, from Galaxy patches 0021/0028, GXV_COLOR_LOADSKIP=17): FBO-only dead color tile-load skip with automatic surface-refusal retry.
+-// Arms the next scene begun on the bound 1x-MSAA non-float FBO to load tiles from a 32x32 swizzled REPEAT texture
+-// (4 KiB, resident in texture cache) instead of reading dead frame memory from CDRAM. Display scenes are left untouched.
+-static framebuffer *vgl_color_skip_fb = NULL;
+-static GLboolean vgl_color_skip_armed = GL_FALSE;
+-static GLboolean vgl_color_mods_broken = GL_FALSE;
+-static uint32_t vgl_color_load_skips = 0;
+-static uint32_t vgl_color_surface_refusals = 0;
+-static void *vgl_color_skip_data = NULL;
+-static void *vgl_color_skip_colors[16];
+-static void *vgl_color_skip_cur = NULL;
+-static GLboolean vgl_color_skip_need_rgba8 = GL_FALSE;
+-
+-uint32_t vglGetColorLoadSkips(void) { return vgl_color_load_skips; }
+-uint32_t vglGetColorSurfaceRefusals(void) { return vgl_color_surface_refusals; }
+ void vglFlushStreamArena(void) {
+ 	VGL_STREAM_SCENE_SUBMIT()
+ }
+ 
+-static inline void vgl_color_skip_disarm(void) {
+-	vgl_color_skip_armed = GL_FALSE;
+-	vgl_color_skip_fb = NULL;
+-	vgl_color_skip_cur = NULL;
+-	vgl_color_skip_need_rgba8 = GL_FALSE;
+-}
+-
+-static GLboolean vgl_color_skip_target_ok(void) {
+-	if (vgl_color_mods_broken || !active_write_fb)
+-		return GL_FALSE;
+-	if (FB_MSAA(active_write_fb) != SCE_GXM_MULTISAMPLE_NONE)
+-		return GL_FALSE;
+-	if (!active_write_fb->tex || active_write_fb->is_float)
+-		return GL_FALSE;
+-	return GL_TRUE;
+-}
+-
+-static void *vgl_color_skip_alloc_tile(void) {
+-	// Allocate strictly from uncached GPU pools so CPU writes are immediately visible to SGX543 without D-cache writeback.
+-	void *p = vgl_memalign(SCE_GXM_TEXTURE_ALIGNMENT, 4096, VGL_MEM_VRAM);
+-	if (!p && !has_cached_mem) {
+-		p = vgl_memalign(SCE_GXM_TEXTURE_ALIGNMENT, 4096, VGL_MEM_RAM);
+-		if (!p)
+-			p = vgl_memalign(SCE_GXM_TEXTURE_ALIGNMENT, 4096, VGL_MEM_PHYCONT);
+-	}
+-	return p;
+-}
+-
+-static void vgl_color_surface_refused(int r, const char *where) {
+-	if (!vgl_color_surface_refusals)
+-		vgl_log("%s:%d sceGxmBeginScene refused a cheap colour load on %s (%s): begun again as it is; disabling colour load skip.\n",
+-			__FILE__, __LINE__, where, get_gxm_error_literal(r));
+-	vgl_color_surface_refusals++;
+-	vgl_color_mods_broken = GL_TRUE;
+-}
+-
+-void vgl_color_skip_forget_fb(framebuffer *fb) {
+-	if (vgl_color_skip_armed && vgl_color_skip_fb == fb)
+-		vgl_color_skip_disarm();
+-}
+-
+-GLboolean vglColorLoadSkip(GLboolean arm) {
+-	vgl_color_skip_disarm();
+-	if (!arm)
+-		return GL_TRUE;
+-	if (!vgl_color_skip_target_ok())
+-		return GL_FALSE;
+-	if (!vgl_color_skip_data) {
+-		vgl_color_skip_data = vgl_color_skip_alloc_tile();
+-		if (!vgl_color_skip_data)
+-			return GL_FALSE;
+-		vgl_memset(vgl_color_skip_data, 0, 4096);
+-	}
+-	vgl_color_skip_armed = GL_TRUE;
+-	vgl_color_skip_fb = active_write_fb;
+-	return GL_TRUE;
+-}
+-
+-GLboolean vglColorLoadSkipColor(GLboolean arm, uint32_t rgba) {
+-	vgl_color_skip_disarm();
+-	if (!arm)
+-		return GL_TRUE;
+-	if (!vgl_color_skip_target_ok())
+-		return GL_FALSE;
+-	uint32_t idx = 0;
+-	for (int i = 0; i < 4; ++i) {
+-		const uint32_t b = (rgba >> (8 * i)) & 0xFFu;
+-		if (b != 0 && b != 0xFFu)
+-			return GL_FALSE;
+-		idx |= (b ? 1u : 0u) << i;
+-	}
+-	if (!vgl_color_skip_colors[idx]) {
+-		uint32_t *p = (uint32_t *)vgl_color_skip_alloc_tile();
+-		if (!p)
+-			return GL_FALSE;
+-		for (int i = 0; i < 1024; ++i)
+-			p[i] = rgba; // U8U8U8U8_ABGR: red in low byte
+-		vgl_color_skip_colors[idx] = p;
+-	}
+-	vgl_color_skip_armed = GL_TRUE;
+-	vgl_color_skip_fb = active_write_fb;
+-	vgl_color_skip_cur = vgl_color_skip_colors[idx];
+-	vgl_color_skip_need_rgba8 = GL_TRUE;
+-	return GL_TRUE;
+-}
+-
+-static GLboolean vgl_color_skip_apply(SceGxmColorSurface *surface) {
+-	SceGxmTextureFormat fmt = sceGxmTextureGetFormat(&surface->backgroundTex);
+-	void *data = vgl_color_skip_cur ? vgl_color_skip_cur : vgl_color_skip_data;
+-	const GLboolean needRgba8 = vgl_color_skip_need_rgba8;
+-	vgl_color_skip_cur = NULL;
+-	vgl_color_skip_need_rgba8 = GL_FALSE;
+-	if (needRgba8 ? (fmt != SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR) : (tex_format_to_bytespp(fmt) > 4))
+-		return GL_FALSE;
+-	SceGxmTexture t;
+-	if (sceGxmTextureInitSwizzled(&t, data, fmt, 32, 32, 1) != 0)
+-		return GL_FALSE;
+-	sceGxmTextureSetUAddrMode(&t, SCE_GXM_TEXTURE_ADDR_REPEAT);
+-	sceGxmTextureSetVAddrMode(&t, SCE_GXM_TEXTURE_ADDR_REPEAT);
+-	sceGxmTextureSetMinFilter(&t, SCE_GXM_TEXTURE_FILTER_POINT);
+-	sceGxmTextureSetMagFilter(&t, SCE_GXM_TEXTURE_FILTER_POINT);
+-	surface->backgroundTex = t;
+-	return GL_TRUE;
+-}
+-
+-static SceGxmColorSurface *vgl_color_skip_fbo(framebuffer *fb) {
+-	static SceGxmColorSurface surface; // alive until scene ends
+-	if (vgl_color_skip_armed) {
+-		const GLboolean mine = (vgl_color_skip_fb == fb) && (FB_MSAA(fb) == SCE_GXM_MULTISAMPLE_NONE) && !fb->is_float;
+-		vgl_color_skip_armed = GL_FALSE;
+-		vgl_color_skip_fb = NULL;
+-		if (mine) {
+-			surface = fb->colorbuffer;
+-			if (vgl_color_skip_apply(&surface))
+-				return &surface;
+-		} else {
+-			vgl_color_skip_cur = NULL;
+-			vgl_color_skip_need_rgba8 = GL_FALSE;
+-		}
+-	}
+-	return &fb->colorbuffer;
+-}
+-
+ static GLboolean scene_reset_failed(void) {
+-	vgl_color_skip_disarm();
+ 	scene_fail_valid = GL_TRUE;
+ 	scene_fail_fb = active_write_fb;
+ 	scene_fail_frame = vgl_framecount;
+@@ -1367,7 +1228,6 @@ GLboolean scene_reset(void) {
+ #endif
+ 	if (vgl_robust_scenes && scene_fail_valid && scene_fail_frame == vgl_framecount && scene_fail_fb == active_write_fb &&
+ 		(in_use_framebuffer != active_write_fb || needs_scene_reset || dirty_framebuffer || dirty_query)) {
+-		vgl_color_skip_disarm();
+ 		vgl_rt_hint_valid = GL_FALSE;
+ 		vgl_rt_clear_full = GL_FALSE;
+ 		return GL_FALSE;
+@@ -1416,7 +1276,6 @@ GLboolean scene_reset(void) {
+ 		// Starting drawing scene
+ 		is_rendering_display = !active_write_fb;
+ 		if (is_rendering_display) { // Default framebuffer is used
+-			vgl_color_skip_disarm(); // 0066: FBO-only; drop any armed skip on display begin
+ 			if (system_app_mode) {
+ 				sceSharedFbBegin(shared_fb, &shared_fb_info);
+ 				shared_fb_info.vsync = vsync_interval;
+@@ -1523,39 +1382,17 @@ GLboolean scene_reset(void) {
+ #ifdef RECYCLE_RENDERTARGETS
+ 			fbo_rt->last_frame = vgl_framecount;
+ #endif
+-			SceGxmColorSurface *fbo_cs = vgl_color_skip_fbo(active_write_fb); // 0066
+ 			const uint32_t rt_bf0 = rt_time ? vgl_rt_now() : 0; // 0065: only the sceGxmBeginScene call below
+ 			int r = sceGxmBeginScene(gxm_context, 0, fbo_rt->rt,
+ 					NULL, NULL, NULL,
+-					fbo_cs,
+-					active_write_fb->depthbuffer_ptr);
+-			if (r && fbo_cs != &active_write_fb->colorbuffer) { // 0066: immediate retry with untouched surface if GXM refuses
+-				vgl_color_surface_refused(r, "a framebuffer object");
+-				fbo_cs = &active_write_fb->colorbuffer;
+-				r = sceGxmBeginScene(gxm_context, 0, fbo_rt->rt,
+-					NULL, NULL, NULL,
+-					fbo_cs,
++					&active_write_fb->colorbuffer,
+ 					active_write_fb->depthbuffer_ptr);
+-			} else if (!r && fbo_cs != &active_write_fb->colorbuffer) {
+-				vgl_color_load_skips++;
+-			}
+ #else
+-			SceGxmColorSurface *fbo_cs = vgl_color_skip_fbo(active_write_fb); // 0066
+ 			const uint32_t rt_bf0 = rt_time ? vgl_rt_now() : 0; // 0065: only the sceGxmBeginScene call below
+ 			int r = sceGxmBeginScene(gxm_context, 0, scene_rt,
+ 					NULL, NULL, NULL,
+-					fbo_cs,
++					&active_write_fb->colorbuffer,
+ 					active_write_fb->depthbuffer_ptr);
+-			if (r && fbo_cs != &active_write_fb->colorbuffer) { // 0066: immediate retry with untouched surface if GXM refuses
+-				vgl_color_surface_refused(r, "a framebuffer object");
+-				fbo_cs = &active_write_fb->colorbuffer;
+-				r = sceGxmBeginScene(gxm_context, 0, scene_rt,
+-					NULL, NULL, NULL,
+-					fbo_cs,
+-					active_write_fb->depthbuffer_ptr);
+-			} else if (!r && fbo_cs != &active_write_fb->colorbuffer) {
+-				vgl_color_load_skips++;
+-			}
+ #endif
+ 			if (rt_time)
+ 				vgl_rt_begin_split(1, vgl_rt_now() - rt_bf0);
+@@ -1610,7 +1447,6 @@ GLboolean scene_reset(void) {
+ 			vgl_rt_cpu_switch(rt_t1 - rt_t0, rt_t2 - rt_t1, rt_t3 - rt_t2);
+ 		}
+ 	}
+-	vgl_color_skip_disarm(); // 0066: one-shot arming expires on the operation that follows it, whether or not that began a scene
+ 	vgl_rt_hint_valid = GL_FALSE; // RT: a hint is for the operation that follows it, whether or not that began a scene
+ 	vgl_rt_clear_full = GL_FALSE;
+ 	
+diff --git a/source/shared.h b/source/shared.h
+index 4f4c3c05..af03b41f 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -1289,7 +1289,6 @@ extern uint32_t uniform_array_unit; // Current in-use uniform buffer unit
+ extern GLenum orig_depth_test; // Original depth test state (used for depth test invalidation)
+ extern framebuffer *in_use_framebuffer; // Currently in use framebuffer
+ extern uint8_t dirty_framebuffer; // Flag whether current in use framebuffer is invalidated
+-void vgl_color_skip_forget_fb(framebuffer *fb); // 0066: disarm if armed FBO is deleted
+ 
+ // Scissor test shaders
+ extern SceGxmFragmentProgram *scissor_test_fragment_program; // Scissor test fragment program
+diff --git a/source/textures.c b/source/textures.c
+index 921600fd..fbfbf515 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -1837,7 +1837,6 @@ void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
+ 								fb->target = NULL;
+ 							}
+ 							VGL_FB_DROP_RT2(fb); // 0063
+-							vgl_color_skip_forget_fb(fb); // 0066/int31: disarm if armed FBO loses its colour texture
+ 							fb->data = NULL;
+ 							fb->tex = NULL;
+ 						} else {
+diff --git a/source/utils/mem_utils.h b/source/utils/mem_utils.h
+index aabcf470..443763cb 100644
+--- a/source/utils/mem_utils.h
++++ b/source/utils/mem_utils.h
+@@ -128,11 +128,12 @@ void vgl_free(void *ptr);
+ // Helper function for fastest memory copy on uncached mem
+ static inline __attribute__((always_inline)) void vgl_memcpy(void *dst, const void *src, size_t size) {
+ #ifndef DISABLE_DMAC
+-	if (size >= 0x2000 && (uint32_t)src < 0x81000000 && (uint32_t)dst < 0x81000000)
+-		sceDmacMemcpy(dst, src, size);
+-	else
++	if (size >= 0x2000 && size <= 0x81000000u && (uint32_t)src <= 0x81000000u - size && (uint32_t)dst <= 0x81000000u - size) {
++		if (sceDmacMemcpy(dst, src, size) >= 0)
++			return;
++	}
+ #endif
+-		vgl_fast_memcpy(dst, src, size);
++	vgl_fast_memcpy(dst, src, size);
+ }
+ 
+ #endif
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 56f969f6..323a5364 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1609,12 +1609,7 @@ void vglSetTiledTargets(GLint mode); // Strikers 1.3 wave 24 (0057): allow vglTe
+ GLboolean vglTexMakeTiledTarget(void); // 0057: the fresh RGBA8 render-target texture on the active unit becomes a tiled one (32 x 32 tiles, zeroed); GL_FALSE: unchanged
+ void vglTiledStats(uint32_t *made, uint32_t *refused); // 0057: tiled targets made, glReadPixels from one refused
+ GLboolean vglTexIsTiled(void); // 0057: the texture on the active unit is tiled
+-// 0066 (int29, from Galaxy patches 0021/0028): dead color tile-load skip with surface-refusal retry
+-GLboolean vglColorLoadSkip(GLboolean arm);
+-GLboolean vglColorLoadSkipColor(GLboolean arm, uint32_t rgba);
+-uint32_t vglGetColorLoadSkips(void);
+-uint32_t vglGetColorSurfaceRefusals(void);
+-void vglFlushStreamArena(void);
++void vglFlushStreamArena(void); // 0066: flush cached stream arena before kicking TA mid-scene
+ 
+ #ifdef __cplusplus
+ }

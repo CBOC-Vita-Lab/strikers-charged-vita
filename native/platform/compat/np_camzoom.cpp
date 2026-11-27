@@ -1,5 +1,6 @@
 // The match camera's default zoom on the Vita and the one-time move of a save that holds the TV default: see include/np/camzoom.h.
 #include "np/camzoom.h"
+#include "np/hot_knob.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,7 +98,7 @@ extern "C" int NpCameraZoomDefaultLevel(void)
 // (Before 23 Oct only 6 and 7 were widened, to about level 5.) MSC_CAMERA_VIS=screen: the real screen at every level.
 extern "C" float NpCameraVisibilityWindow(float zoomLevel)
 {
-    static const bool screenOnly = [] { const char* e = getenv("MSC_CAMERA_VIS"); return e && strcmp(e, "screen") == 0; }();
+    const bool screenOnly = NP_HOT_KNOB(bool, [] { const char* e = getenv("MSC_CAMERA_VIS"); return e && strcmp(e, "screen") == 0; }()); // (1.3: np/hot_knob.h)
     if (zoomLevel <= 0.5f || screenOnly) return 0.95f;
     const float L = zoomLevel > 1.5f ? 1.5f : zoomLevel;
     float z = 0.05f + 0.95f * (1.5f - L);
@@ -109,7 +110,7 @@ extern "C" float NpCameraVisibilityWindow(float zoomLevel)
 // The same with Auto Zoom off: the camera stays at z = 0.05 + 0.95 (1 - L) (level 4 24.3 m, level 5 20.8 m), so the window is wider still.
 extern "C" float NpCameraVisibilityWindowFixed(float zoomLevel)
 {
-    static const bool screenOnly = [] { const char* e = getenv("MSC_CAMERA_VIS"); return e && strcmp(e, "screen") == 0; }();
+    const bool screenOnly = NP_HOT_KNOB(bool, [] { const char* e = getenv("MSC_CAMERA_VIS"); return e && strcmp(e, "screen") == 0; }()); // (1.3: np/hot_knob.h)
     if (zoomLevel <= 0.5f || screenOnly) return 0.95f;   // levels 1..3: the game's own test, as retail
     const float L = zoomLevel > 1.5f ? 1.5f : zoomLevel;
     float z = 0.05f + 0.95f * (1.0f - L);

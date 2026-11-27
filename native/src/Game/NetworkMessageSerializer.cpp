@@ -8,6 +8,7 @@ NetworkMessageSerializer::NetworkMessageSerializer(
     , mBuffer(buffer)
     , mEnd(buffer + size)
     , mOwnsBuffer(false)
+    , mFailed(false)
 {
 }
 

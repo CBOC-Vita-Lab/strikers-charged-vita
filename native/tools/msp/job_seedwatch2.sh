@@ -4,15 +4,15 @@
 # MSC_STATE_HASH + NP_DET_NAN + MSC_FRAME_PACING_LOG + NP_DET_TRACE.)  One variable at a time, B and C under gdb, 2520 frames each.
 #   tools/heavy.sh -t 900 tools/msp/job_seedwatch2.sh
 NP=$(cd "$(dirname "$0")/../.." && pwd); cd $NP || exit 1
-B=${BUILD_ROOT:-/home/claude/msc/build/np/MSP}
+B=${BUILD_ROOT:-/work/msc/build/np/MSP}
 EXE=${EXE:-$B/host32/np-host32-full-null}
 OUT=$B/runs/seedwatch2; mkdir -p $OUT
-SAVEDIR=${SAVEDIR:-/home/claude/msc/build/np/B3/rundata-save}
-SCRIPT=/home/claude/msc/tools/scripts/nav_match60.txt
+SAVEDIR=${SAVEDIR:-/work/msc/build/np/B3/rundata-save}
+SCRIPT=/work/msc/tools/scripts/nav_match60.txt
 run() {  # run <name> <var=value> [env...]
   local n=$1 v=$2; shift 2
   local D=$OUT/data-$n-$$; rm -rf $D; mkdir -p $D; cp -a $SAVEDIR/. $D/
-  ( cd $D; env NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$SCRIPT MSC_MAX_FRAMES=${FR:-2520} MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 \
+  ( cd $D; env NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$SCRIPT MSC_MAX_FRAMES=${FR:-2520} MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 \
       MSC_WATCH=1 MSC_WATCH_EVERY=100000 NP_WIDESCREEN=0 MSC_VIRTUAL_FRAME_US=33000 $v "$@" \
       timeout -k 3 ${RUNT:-300} gdb -q -batch -x $NP/tools/msp/seedwatch.gdb $EXE > $OUT/$n.log 2>&1 )
   rm -rf $D

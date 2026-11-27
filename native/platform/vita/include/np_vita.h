@@ -46,6 +46,7 @@ void* NpAllocArena(size_t bytes, size_t alignment, const char* name);
 int NpAudioOpen(uint32_t sampleRate);                       /* 1 = open (also when it already was) */
 int NpAudioPushLE16(const int16_t* leftRight, uint32_t frames);   /* interleaved L,R; 1 pushed, 0 dropped */
 int NpAudioPushWiiAiBE16(const uint8_t* data, size_t bytes);      /* Wii AI DMA block: big-endian, right then left */
+int NpAudioIsOpen(void);                                    /* 1 = the output device is open and fed (NpAudioOpen succeeded) */
 int NpAudioSpaceFrames(void);                               /* frames that fit now; -1 = not known (fixed policy / not open) */
 int NpAudioPaceFrames(void);                                /* frames a clockless producer may push now (start level + 48 ms); -1 = not known */
 void NpAudioSetVolume(float volume);                        /* 0..1 */

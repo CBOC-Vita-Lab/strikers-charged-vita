@@ -9,6 +9,7 @@
  */
 #pragma once
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
 #define VGX_GL_STUB 1
 
@@ -31,7 +32,7 @@ enum {
     GL_CULL_FACE = 0xB44, GL_DEPTH_TEST = 0xB71, GL_BLEND = 0xBE2, GL_DITHER = 0xBD0, GL_SCISSOR_TEST = 0xC11,
     GL_UNPACK_ALIGNMENT = 0xCF5, GL_PACK_ALIGNMENT = 0xD05, GL_TEXTURE_2D = 0xDE1,
     GL_UNSIGNED_BYTE = 0x1401, GL_UNSIGNED_SHORT = 0x1403, GL_UNSIGNED_INT = 0x1405, GL_FLOAT = 0x1406,
-    GL_DEPTH_COMPONENT = 0x1902, GL_RGBA = 0x1908, GL_LUMINANCE_ALPHA = 0x190A,
+    GL_DEPTH_COMPONENT = 0x1902, GL_RED = 0x1903, GL_RGBA = 0x1908, GL_INTENSITY = 0x8049, GL_LUMINANCE_ALPHA = 0x190A,
     GL_VENDOR = 0x1F00, GL_RENDERER, GL_VERSION, GL_EXTENSIONS,
     GL_NEAREST = 0x2600, GL_LINEAR = 0x2601, GL_NEAREST_MIPMAP_NEAREST = 0x2700, GL_LINEAR_MIPMAP_NEAREST, GL_NEAREST_MIPMAP_LINEAR,
     GL_LINEAR_MIPMAP_LINEAR,
@@ -42,6 +43,9 @@ enum {
     GL_FRAGMENT_SHADER = 0x8B30, GL_VERTEX_SHADER = 0x8B31, GL_COMPILE_STATUS = 0x8B81, GL_LINK_STATUS = 0x8B82, GL_ACTIVE_UNIFORMS = 0x8B86,
     GL_FRAMEBUFFER_COMPLETE = 0x8CD5, GL_COLOR_ATTACHMENT0 = 0x8CE0, GL_DEPTH_ATTACHMENT = 0x8D00, GL_FRAMEBUFFER = 0x8D40,
     GL_RENDERBUFFER = 0x8D41,
+    // (pace18: the census19 header, which the host GL build compiles in, reads these; the stub answers 0)
+    GL_TEXTURE = 0x1702, GL_COLOR_CLEAR_VALUE = 0x0C22, GL_COLOR_WRITEMASK = 0x0C23, GL_TEXTURE_BINDING_2D = 0x8069, GL_FRAMEBUFFER_BINDING = 0x8CA6,
+    GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE = 0x8CD0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME = 0x8CD1,
 };
 
 static unsigned vgx_stub_name_ = 0;
@@ -87,6 +91,8 @@ static inline void glGetActiveUniform(GLuint, GLuint, GLsizei, GLsizei*, GLint* 
 static inline GLint glGetUniformLocation(GLuint, const GLchar*) { return 1; }
 static inline void glUseProgram(GLuint) {}
 static inline void glUniform1i(GLint, GLint) {}
+static inline void glUniform1f(GLint, GLfloat) {}
+static inline void glUniform3f(GLint, GLfloat, GLfloat, GLfloat) {}
 static inline void glUniform4f(GLint, GLfloat, GLfloat, GLfloat, GLfloat) {}
 static inline void glUniform4fv(GLint, GLsizei, const GLfloat*) {}
 static inline void glUniformMatrix4fv(GLint, GLsizei, GLboolean, const GLfloat*) {}
@@ -112,14 +118,21 @@ static inline void glGenerateMipmap(GLenum) {
     if (t && t < VGX_STUB_MAXN && vgx_stub_kind_[t]) vgx_stub_set(t, vgx_stub_kind_[t], (uint64_t)vgx_stub_base_[t] * 4u / 3u);
 }
 static inline void glTexParameteri(GLenum, GLenum, GLint) {}
+static inline void glTexParameterf(GLenum, GLenum, GLfloat) {}
 static inline void glDeleteTextures(GLsizei n, const GLuint* ids) { for (GLsizei i = 0; i < n; ++i) vgx_stub_set(ids[i], 0, 0); }
 static GLint vgx_stub_unpack_ = 4;
 static inline void glPixelStorei(GLenum name, GLint value) { if (name == GL_UNPACK_ALIGNMENT) vgx_stub_unpack_ = value; }
 static inline void glGetIntegerv(GLenum name, GLint* value) { *value = name == GL_UNPACK_ALIGNMENT ? vgx_stub_unpack_ : 0; }
+static inline GLboolean glIsEnabled(GLenum) { return 0; }
+static inline void glGetBooleanv(GLenum, GLboolean* v) { v[0] = v[1] = v[2] = v[3] = 0; }
+static inline void glGetFloatv(GLenum, GLfloat* v) { v[0] = v[1] = v[2] = v[3] = 0.0f; }
+static inline void glGetFramebufferAttachmentParameteriv(GLenum, GLenum, GLenum, GLint* v) { *v = 0; }
 static inline void glBindFramebuffer(GLenum, GLuint) {}
+static inline void glDeleteFramebuffers(GLsizei, const GLuint*) {}
 static inline void glFramebufferTexture2D(GLenum, GLenum, GLenum, GLuint, GLint) {}
 static inline void glBindRenderbuffer(GLenum, GLuint name) { vgx_stub_curRb_ = name; }
 static inline void glRenderbufferStorage(GLenum, GLenum, GLsizei w, GLsizei h) { vgx_stub_set(vgx_stub_curRb_, VGX_STUB_RB, (uint64_t)w * (uint64_t)h * 4u); }
+static inline void glDeleteRenderbuffers(GLsizei n, const GLuint* ids) { for (GLsizei i = 0; i < n; ++i) vgx_stub_set(ids[i], 0, 0); }
 static inline void glFramebufferRenderbuffer(GLenum, GLenum, GLenum, GLuint) {}
 static inline GLenum glCheckFramebufferStatus(GLenum) { return GL_FRAMEBUFFER_COMPLETE; }
 static inline void glViewport(GLint, GLint, GLsizei, GLsizei) {}
@@ -132,6 +145,7 @@ static inline void glDepthMask(GLboolean) {}
 static inline void glDepthFunc(GLenum) {}
 static inline void glBlendEquation(GLenum) {}
 static inline void glBlendFunc(GLenum, GLenum) {}
+static inline void glBlendFuncSeparate(GLenum, GLenum, GLenum, GLenum) {}   // (wave 8: the back end had used it for a while; the host tests did not build without it)
 static inline void glCullFace(GLenum) {}
 static inline void glFrontFace(GLenum) {}
 static inline void glLineWidth(GLfloat) {}
@@ -142,6 +156,7 @@ static inline void glBindBuffer(GLenum target, GLuint name) { vgx_stub_curBuf_[t
 static inline void glBufferData(GLenum target, GLsizeiptr size, const GLvoid*, GLenum usage) {
     vgx_stub_set(vgx_stub_curBuf_[target == GL_ELEMENT_ARRAY_BUFFER], usage == GL_STREAM_DRAW ? VGX_STUB_BUF_STREAM : usage == GL_DYNAMIC_DRAW ? VGX_STUB_BUF_DYNAMIC : VGX_STUB_BUF_STATIC, (uint64_t)size);
 }
+static inline void glBufferSubData(GLenum, GLintptr, GLsizeiptr, const GLvoid*) {}
 static inline void glDeleteBuffers(GLsizei n, const GLuint* ids) { for (GLsizei i = 0; i < n; ++i) vgx_stub_set(ids[i], 0, 0); }
 static inline void glEnableVertexAttribArray(GLuint) {}
 static inline void glDisableVertexAttribArray(GLuint) {}
@@ -153,5 +168,5 @@ static inline void glReadPixels(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, 
 static inline void glFinish(void) {}
 static inline GLenum glGetError(void) { return GL_NO_ERROR; }
 static inline const GLubyte* glGetString(GLenum name) {
-    return (const GLubyte*)(name == GL_EXTENSIONS ? "GL_OES_depth24 GL_EXT_texture_compression_s3tc" : name == GL_VERSION ? "vgx GL stub (no rasteriser)" : "stub");
+    return (const GLubyte*)(name == GL_EXTENSIONS ? (getenv("MSC_VGX_STUB_DEPTHTEX") ? "GL_OES_depth24 GL_OES_depth_texture GL_EXT_texture_compression_s3tc" : "GL_OES_depth24 GL_EXT_texture_compression_s3tc") : name == GL_VERSION ? "vgx GL stub (no rasteriser)" : "stub");
 }

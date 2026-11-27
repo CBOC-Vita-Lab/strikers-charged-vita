@@ -1,0 +1,16 @@
+# console-1.2 run gal0: Galaxy r41 ports off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# Static cull and the two vitaGL draw caches (exact: the same picture; judged on back end ms), and the deeper floor under a severe GPU overload (not exact, acts only at 1.8 times the budget).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_CULL=0
+MSC_VGX_VGL_FRAGMEMO=0
+MSC_VGX_VGL_UNIREUSE=0
+MSC_DYNRES_SEVERE=0

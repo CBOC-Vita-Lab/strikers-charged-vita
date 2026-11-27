@@ -1,0 +1,13 @@
+# console-1.2 run irqwait: Interrupt lock waits of the game thread (audio callback)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# Diagnostic, nothing changes. The [irq] lines every 5 s: ms the game thread waited for the AX frame callback's hold of the interrupt lock, and the callback's hold time. Under ~0.5 ms a second there is nothing to win by moving game audio; Galaxy's audio-on-core-1 does not apply otherwise (no guest sound thread here).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_IRQ_WAITSTAT=1

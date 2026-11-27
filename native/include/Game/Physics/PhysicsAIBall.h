@@ -41,6 +41,6 @@ public:
 }; // total size: 0x84
 
 // Variadic debug print whose release body is empty.
-void DebugPrintf(const char* format, ...);
+void DebugPrintf(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
 #endif // GAME_PHYSICS_PHYSICS_AI_BALL_H

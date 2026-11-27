@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 12:00:00 -0500
+Subject: [PATCH] back end timers: shader registration, glLinkProgram, first direct draw of a linked program (vglBackendTimingTake)
+
+---
+
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -463,6 +463,7 @@
+ 	SceGxmFragmentProgram *memo_fprog[VGL_FRAG_MEMO];
+ 	uint8_t memo_mode[VGL_FRAG_MEMO];
+ 	uint8_t memo_next;
++	uint8_t fresh_draw; // 0040: linked and not drawn with yet (vglDrawElementsDirect times that first draw)
+ 	// vglSetDrawCaches: the last copy of each default uniform buffer (vertex, fragment), the generation it belongs to (0: none), values written since
+ 	void *unif_last[2];
+ 	uint32_t unif_gen[2];
+@@ -945,7 +946,7 @@
+ 			candidate.mat = m;
+ 		}
+ 	}
+-	if (sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, candidate.prog, &candidate.id))
++	if (vgl_register_program(candidate.prog, &candidate.id))
+ 		goto failed;
+ 	commit_shader_candidate(s, &candidate);
+ 	if (load_bindings)
+@@ -1051,7 +1052,7 @@
+ 			param = sceShaccCgGetNextParameter(param);
+ 		}
+ 		// Registration is last: no fallible work may leave a registered partial shader.
+-		int r = sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, res, &candidate.id);
++		int r = vgl_register_program(res, &candidate.id);
+ 		if (r) {
+ 			vgl_log("%s: Program registration failed (0x%08X).\n", __func__, r);
+ 			goto done;
+@@ -1943,7 +1944,14 @@
+ 	direct_vbo = v;
+ 	direct_base = base;
+ 	direct_failed = GL_FALSE;
++	program *fresh_prog = &progs[cur_program - 1];
++	const uint8_t fresh = fresh_prog->fresh_draw;
++	const uint64_t fresh_t0 = fresh ? sceKernelGetProcessTimeWide() : 0;
+ 	glDrawElements(mode, count, GL_UNSIGNED_SHORT, (const GLvoid *)idx_offset);
++	if (fresh) {
++		fresh_prog->fresh_draw = 0;
++		vgl_bt_note(2, fresh_t0); // 0040: the first draw since the link
++	}
+ 	direct_layout = NULL;
+ 	direct_vbo = NULL;
+ 	return !direct_failed;
+@@ -3062,7 +3070,7 @@
+ // meets a null pointer. The arrays are cleared at every link: a program slot that is made again must not keep the pointers of the program that was in it.
+ static uniform vgl_dummy_texunit = { .type = UNIFORM_SAMPLER, .sampler_index = 0 };
+ 
+-void glLinkProgram(GLuint progr) {
++static void link_program_untimed(GLuint progr) {
+ 	THREAD_SAFE()
+ 	if (!progr || progr > MAX_CUSTOM_PROGRAMS)
+ 		return;
+@@ -3438,6 +3446,17 @@
+ 	*p = saved;
+ }
+ 
++// 0040: the whole link is timed (vglBackendTimingTake [1]); a program that this call linked has its first vglDrawElementsDirect draw timed ([2])
++void glLinkProgram(GLuint progr) {
++	THREAD_SAFE()
++	uint64_t t0 = sceKernelGetProcessTimeWide();
++	const GLboolean was_linked = (progr && progr <= MAX_CUSTOM_PROGRAMS && progs[progr - 1].status == PROG_LINKED) ? GL_TRUE : GL_FALSE;
++	link_program_untimed(progr);
++	vgl_bt_note(1, t0);
++	if (progr && progr <= MAX_CUSTOM_PROGRAMS && !was_linked && progs[progr - 1].status == PROG_LINKED)
++		progs[progr - 1].fresh_draw = 1;
++}
++
+ void glUseProgram(GLuint prog) {
+ 	THREAD_SAFE()
+ 
+@@ -4783,7 +4802,7 @@
+ 	if (!candidate.prog)
+ 		return;
+ 	vgl_fast_memcpy((void *)candidate.prog, binary, candidate.size);
+-	if (sceGxmProgramCheck(candidate.prog) || sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, candidate.prog, &candidate.id)) {
++	if (sceGxmProgramCheck(candidate.prog) || vgl_register_program(candidate.prog, &candidate.id)) {
+ 		discard_shader_candidate(&candidate);
+ 		return;
+ 	}
+diff --git a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -88,6 +88,20 @@
+ 		vgl_patch_max_us[i] = 0;
+ 	}
+ }
++uint32_t vgl_bt_calls[3] = {0, 0, 0};
++uint64_t vgl_bt_us[3] = {0, 0, 0};
++uint32_t vgl_bt_max_us[3] = {0, 0, 0};
++// 1.3 wave 11 (0040): shader registrations, glLinkProgram calls and first draws of newly linked programs since the last call (counts, total and longest microseconds, three of each), then reset.
++void vglBackendTimingTake(uint32_t *calls, uint64_t *us, uint32_t *max_us) {
++	for (int i = 0; i < 3; i++) {
++		calls[i] = vgl_bt_calls[i];
++		us[i] = vgl_bt_us[i];
++		max_us[i] = vgl_bt_max_us[i];
++		vgl_bt_calls[i] = 0;
++		vgl_bt_us[i] = 0;
++		vgl_bt_max_us[i] = 0;
++	}
++}
+ void vglSetRobustScenes(uint32_t enabled) { vgl_robust_scenes = enabled ? GL_TRUE : GL_FALSE; }
+ uint32_t vglRobustFailures(uint32_t *scene_begins, uint32_t *shader_patches) {
+ 	if (scene_begins)
+diff --git a/source/shared.h b/source/shared.h
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -499,6 +499,24 @@
+ 	if (d > vgl_patch_max_us[k])
+ 		vgl_patch_max_us[k] = (uint32_t)d;
+ }
++// 1.3 wave 11 (0040): the rest of the back end's own cost for a new program, microseconds like the three above: [0] sceGxmShaderPatcherRegisterProgram (a shader), [1] glLinkProgram (the whole call: shader cache or pack read, registration, uniform and attribute set-up),
++// [2] the first vglDrawElementsDirect draw of a program since it was linked (the whole draw: includes the vertex and fragment program creates counted in [0] and [1] above); read and reset by vglBackendTimingTake
++extern uint32_t vgl_bt_calls[3];
++extern uint64_t vgl_bt_us[3];
++extern uint32_t vgl_bt_max_us[3];
++static inline __attribute__((always_inline)) void vgl_bt_note(int k, uint64_t t0) {
++	uint64_t d = sceKernelGetProcessTimeWide() - t0;
++	vgl_bt_calls[k]++;
++	vgl_bt_us[k] += d;
++	if (d > vgl_bt_max_us[k])
++		vgl_bt_max_us[k] = (uint32_t)d;
++}
++static inline __attribute__((always_inline)) int vgl_register_program(const SceGxmProgram *prog, SceGxmShaderPatcherId *id) {
++	uint64_t t0 = sceKernelGetProcessTimeWide();
++	int r = sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, prog, id);
++	vgl_bt_note(0, t0);
++	return r;
++}
+ static inline __attribute__((always_inline)) int patch_vertex_program(SceGxmShaderPatcherId id, const SceGxmVertexAttribute *attr, uint32_t attr_num, const SceGxmVertexStream *stream, uint32_t stream_num, SceGxmVertexProgram **prog) {
+ 	uint64_t t0 = sceKernelGetProcessTimeWide();
+ 	int r = vglCreateVertexProgram(id, attr, attr_num, stream, stream_num, prog);
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1410,6 +1410,7 @@
+ void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes); // 0038: depth/stencil memory (KiB) of the live framebuffer objects that have a surface, how many have one, how many run without (nodepth), scenes begun without
+ void vglSetRenderTargetPool(uint32_t count, uint32_t kib); // 0039: keep up to `count` framebuffer render targets (and `kib` KiB of driver memory, 0: no cap) for the next object of the same shape; 0: off (gxm.c)
+ void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now); // 0039: reused, newly made, kept by the collector, let go, kept now, KiB kept now
++void vglBackendTimingTake(uint32_t *calls, uint64_t *us, uint32_t *max_us); // 0040: [0] shader registrations, [1] glLinkProgram calls, [2] first vglDrawElementsDirect draws of linked programs: count, total and longest microseconds since the last call (arrays of 3), then reset (gxm.c)
+ int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
+ 
+ // Makes vitaGL use cached memory instead of uncached memory for its internal memory pools. Must be called before vglInit*.

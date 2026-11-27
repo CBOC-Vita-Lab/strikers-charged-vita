@@ -1,8 +1,10 @@
 // Extension records of the native port (vgx_ext.h): the player's side. W5 SKIN.
 #include "vgx_ext.h"
 #include "vgx_state.h"
+#include "../../native/include/np/bg30_env.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <unordered_set>
 
@@ -15,7 +17,7 @@ uint32_t g_diagTag = 0, g_diagFlags = 0;
 SkinState g_skin;
 
 bool SkinEnabled() {
-    static const bool on = EnvInt("MSC_VGX_SKIN", 1) != 0;
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_SKIN", 1) != 0));
     return on;
 }
 
@@ -46,7 +48,7 @@ TagRec& TagFor(uint32_t tag, uint32_t flags) {
 } // namespace
 
 bool TagCensusOn() {
-    static const bool on = EnvInt("MSC_VGX_TAGCENSUS", 0) != 0;
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_TAGCENSUS", 0) != 0));
     return on;
 }
 void TagCensusDraw(uint32_t verts, uint32_t vtxBytes, uint32_t idxCount, bool isStatic) {
@@ -79,7 +81,7 @@ struct SoftCensus {
 } g_sc2;
 }
 bool SoftCensusOn() {
-    static const bool on = EnvInt("MSC_VGX_SOFTCENSUS", 0) != 0;
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_SOFTCENSUS", 0) != 0));
     return on;
 }
 void SoftCensusDraw(uint32_t count, uint32_t layoutMask, const float* mv12, const float* nrm9) {
@@ -109,6 +111,35 @@ void SoftCensusFrame(uint64_t frame) {
 
 // ------------------------------------------------------------------ the records
 bool g_fxDraws = false;
+uint8_t g_sceneCls = 0;
+uint8_t g_bg30Kind = 0;
+float g_bg30View[16] = {};
+bool g_hiddenFrame = false;
+uint8_t g_layerCls = 0, g_layerId = 0;
+// MSC_DYNRES_FG: 1 background steps on the ladder, 0 off. Unset: kFgDefault.
+static const bool kFgDefault = false;
+bool FgRequested() {
+    const bool on = static_cast<bool>(VGX_KNOB([] {
+        const char* e = std::getenv("MSC_DYNRES_FG");
+        if (!e || !*e) return kFgDefault;
+        return std::strcmp(e, "0") != 0 && std::strcmp(e, "off") != 0;
+    }()));
+    return on;
+}
+bool FgMarksOn() {
+    const bool on = static_cast<bool>(VGX_KNOB([] {
+        const char* c = std::getenv("MSC_VGX_FGCENSUS");
+        // W12 CROWD: the crowd options find the crowd draws (layer 10) by these marks
+        const char* cs = std::getenv("MSC_VGX_CROWDSORT");
+        const char* cp = std::getenv("MSC_VGX_CROWDPREZ");
+        const bool crowd = (cs && *cs && std::strcmp(cs, "0") != 0) || (cp && *cp && std::strcmp(cp, "0") != 0);
+        // 1.3 MSC_BG30: the background / foreground split needs the draw classes
+        const char* bg = std::getenv("MSC_BG30");
+        const bool bg30 = NpBg30ParseMode(bg) != 0;
+        return (c && *c && std::strcmp(c, "0") != 0) || FgRequested() || crowd || bg30;
+    }()));
+    return on;
+}
 void PlayExt(uint32_t kind, const uint32_t* w, uint32_t n) {
     switch (kind) {
     case EXT_TAG:
@@ -132,6 +163,14 @@ void PlayExt(uint32_t kind, const uint32_t* w, uint32_t n) {
     }
     case EXT_SKIN_OFF: g_skin.on = false; break;
     case EXT_FX: g_fxDraws = n >= 1 && w[0] != 0; break;
+    case EXT_LAYER: g_layerCls = n >= 1 && (w[0] & 0xFFu) < CLS_COUNT ? static_cast<uint8_t>(w[0] & 0xFFu) : 0; g_layerId = n >= 1 ? static_cast<uint8_t>((w[0] >> 8) & 0xFFu) : 0; break;
+    case EXT_TOUCH_TEX: TexTouch(w, n); break;
+    case EXT_BG30:
+        g_bg30Kind = n >= 17 && w[0] <= 3 ? static_cast<uint8_t>(w[0]) : 0;
+        if (g_bg30Kind) std::memcpy(g_bg30View, w + 1, sizeof g_bg30View);
+        break;
+    case EXT_SCENE: g_sceneCls = n >= 1 && w[0] < 8 ? static_cast<uint8_t>(w[0]) : 0; break;
+    case EXT_HIDDEN: g_hiddenFrame = n >= 1 && w[0] != 0; break;
     default: break;
     }
 }

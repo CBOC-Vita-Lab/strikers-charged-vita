@@ -1,0 +1,2 @@
+#!/bin/bash
+exec python3 -I "$FAKEDIR/fakecon.py" nc "$@"

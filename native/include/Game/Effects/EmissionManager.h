@@ -91,7 +91,7 @@ public:
     void Kill(unsigned long userData, const EffectsGroup* pEffectsGroup);
     bool IsPlaying(
         unsigned long userData, const EffectsGroup* pEffectsGroup);
-    void AddError(const char* format, ...);
+    void AddError(const char* format, ...) __attribute__((format(printf, 2, 3)));
     void Replay(LoadFrame& frame);
     void Replay(SaveFrame& frame);
     void KillOldest(int num, bool lingeringOnly);

@@ -1,5 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 08:41:10 -0400
+Subject: [PATCH] RT: scene depth load and store hints, scene and GPU timers
+
+---
+ source/gxm.c    |  31 ++++-
+ source/misc.c   |   6 +
+ source/rt.c     | 313 ++++++++++++++++++++++++++++++++++++++++++++++++
+ source/shared.h |   9 ++
+ source/tests.c  |   9 +-
+ source/vitaGL.h |  38 ++++++
+ 6 files changed, 404 insertions(+), 2 deletions(-)
+ create mode 100644 source/rt.c
+
 diff --git a/source/gxm.c b/source/gxm.c
-index a539e9c..a4a3192 100644
+index bfdccfa..53c0b9d 100644
 --- a/source/gxm.c
 +++ b/source/gxm.c
 @@ -574,13 +574,20 @@ void start_shader_patcher(void) {
@@ -426,7 +441,7 @@ index 0000000..99d8d39
 +	vgl_fast_memcpy(s->gpu_frames, rt_gpu_frames, sizeof(rt_gpu_frames));
 +}
 diff --git a/source/shared.h b/source/shared.h
-index fcc28a5..a135eca 100644
+index 29b132f..a25e4be 100644
 --- a/source/shared.h
 +++ b/source/shared.h
 @@ -124,6 +124,15 @@ void vgl_stream_touch(const void *addr);
@@ -466,10 +481,10 @@ index 373473c..3c776be 100644
  	if (skip_scissor_invalidation) {
  		skip_scissor_invalidation = GL_FALSE;
 diff --git a/source/vitaGL.h b/source/vitaGL.h
-index c3e1aad..09634e4 100644
+index a4e5274..52185af 100644
 --- a/source/vitaGL.h
 +++ b/source/vitaGL.h
-@@ -1357,6 +1357,44 @@ typedef struct {
+@@ -1380,6 +1380,44 @@ typedef struct {
  // Fills *s (all counters are cumulative; the *_frame_peak ones are the last finished frame's).
  void vglGlbGetStats(vglGlbStats *s);
  

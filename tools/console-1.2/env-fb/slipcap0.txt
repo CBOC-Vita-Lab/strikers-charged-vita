@@ -1,0 +1,14 @@
+# console-1.2 run slipcap0: No cap on the catch-up steps
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route replay, version payload 1.3, role ab
+# MSC_SLIP_STEPS=0 (default 2: a late frame advances the game by at most two 20 ms steps, single player only). Against the default: the hold mix in the `[present]` line (percent of pictures shown 3+ refreshes in live play) and the `[fps] slip` line (frames cut, ms not advanced). Estimate from a model: fewer holds of three refreshes and more; the game clock runs a little behind real time after a long hitch.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was replay.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_SLIP_STEPS=0

@@ -87,8 +87,24 @@ float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v
 
 // Radial dead zone and scaling of a Vita stick (VitaInput::MapStick): 16 raw units dead, 102 full.
 // Result in -1..1, +y up.
+// Wave 6: MSC_STICK_DEAD / MSC_STICK_FULL (raw units; defaults 16 and 102 as before) for a console A/B of the Vita's small stick throw
+// (np_vita_input.cpp's MapStick has the same constants for the harness path; this one is the one the game reads).
+void stick_limits(float* dead, float* full) {
+    static float d = -1.0f, f = 102.0f;   // (f starts at its default: a second thread that sees d set must not see a zero full-scale)
+    if (d < 0.0f) {
+        d = 16.0f;
+        f = 102.0f;
+        const char* ed = getenv("MSC_STICK_DEAD");
+        const char* ef = getenv("MSC_STICK_FULL");
+        float nd = (ed && *ed) ? (float)atof(ed) : d, nf = (ef && *ef) ? (float)atof(ef) : f;
+        if (nd >= 0.0f && nd <= 40.0f && nf > nd + 20.0f && nf <= 127.0f) { d = nd; f = nf; }
+    }
+    *dead = d;
+    *full = f;
+}
 void map_stick(uint8_t rx, uint8_t ry, float* ox, float* oy) {
-    const float kDead = 16.0f, kFull = 102.0f;
+    float kDead, kFull;
+    stick_limits(&kDead, &kFull);
     float x = (float)rx - 128.0f;
     float y = 128.0f - (float)ry;
     float m = sqrtf(x * x + y * y);
@@ -105,7 +121,8 @@ void map_stick(uint8_t rx, uint8_t ry, float* ox, float* oy) {
 
 // The inverse of map_stick for a stick given as +-72 GameCube units: a raw Vita stick position (0..255, 128 centre).
 void gc_stick_to_raw(int sx, int sy, uint8_t* rx, uint8_t* ry) {
-    const float kDead = 16.0f, kFull = 102.0f;
+    float kDead, kFull;
+    stick_limits(&kDead, &kFull);
     float nx = (float)sx / 72.0f, ny = (float)sy / 72.0f;
     float m = sqrtf(nx * nx + ny * ny);
     if (m < 1e-4f) {

@@ -41,4 +41,34 @@ static inline int NpGameFix(int bit)
 static inline int NpGameFix(int) { return 0; }
 #endif
 
+/* RULE OPTIONS: settings that change what a match computes, chosen by the player, OFF by default. Unlike the fixes above they are not repairs of
+ * the original game but a different ruleset, so they belong to the LAN/online rule fingerprint (platform/sdk/net/so_net.cpp) and every console
+ * of a match must use the same value.
+ *
+ *   MSC_RULE_NOMEGA=1   no Mega Strikes (STR-008): a captain who charges a shot to the end takes an ordinary full-power shot, the Mega Strike
+ *                       meter never starts. This is the game's own "no Mega Strike" branch (the Glass Jaw cheat, GameInfoManager::IsRule0x8Equal4)
+ *                       switched on by the option instead of the cheat. It applies to friendly matches, cups and LAN matches; the Strikers
+ *                       101 tutorial and the challenges keep their Mega Strikes (they are built on them), and a ranked online match ignores it
+ *                       (ranked play is always the standard rules). NpRuleNoMegaStrikes() is the single place that decides.
+ */
+#ifdef NP_NATIVE
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern int g_npRuleNoMega;   /* -1 until decided */
+int NpRuleNoMegaDecide(void);
+#ifdef __cplusplus
+}
+#endif
+/* the option as chosen (environment); the rule fingerprint uses this one */
+static inline int NpRuleNoMegaChosen(void)
+{
+    int v = g_npRuleNoMega;
+    if (v < 0) v = NpRuleNoMegaDecide();
+    return v;
+}
+#else
+static inline int NpRuleNoMegaChosen(void) { return 0; }
+#endif
+
 #endif // NP_GAMEFIXES_H

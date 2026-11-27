@@ -33,6 +33,11 @@ spaces
 #include "collision_kernel.h"
 
 #include "collision_space_internal.h"
+#include "np_broadphase.h"
+#include "np/gsplit.h"   // MSC_GSPLIT counters
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 extern "C"
 {
@@ -52,6 +57,8 @@ extern const float __float_max;
 #pragma warning(disable : 4291) // for VC++, no complaints about "no matching operator delete found"
 #endif
 
+unsigned npGeomEpoch;   // np_broadphase.h: counts every change of a space's list, a geom's enabled flag or a cached AABB
+
 //****************************************************************************
 // make the geom dirty by setting the GEOM_DIRTY and GEOM_BAD_AABB flags
 // and moving it to the front of the space's list. all the parents of a
@@ -60,6 +67,7 @@ extern const float __float_max;
 static inline void geomMoved(dxGeom* geom)
 {
     dAASSERT(geom);
+    npGeomEpoch++;
 
     // from the bottom of the space heirarchy up, process all clean geoms
     // turning them into dirty geoms.
@@ -212,6 +220,7 @@ void dxSpace::add(dxGeom* geom)
     dAASSERT(geom);
     dUASSERT(geom->parent_space == 0 && geom->next == 0,
         "geom is already in a space");
+    npGeomEpoch++;
 
     // add
     geom->parent_space = this;
@@ -233,6 +242,7 @@ void dxSpace::remove(dxGeom* geom)
     CHECK_NOT_LOCKED(this);
     dAASSERT(geom);
     dUASSERT(geom->parent_space == this, "object is not in this space");
+    npGeomEpoch++;
 
     // remove
     geom->spaceRemove();
@@ -291,19 +301,114 @@ void dxSimpleSpace::cleanGeoms()
     lock_count--;
 }
 
-void dxSimpleSpace::collide(void* data, dNearCallback* callback)
+// MSC_ODE_BROADPHASE (np_broadphase.h): 0 = the plain loop, 2 = the plain loop plus a check of every skip decision of the call against the float test (one log line
+// each 600 calls: pairs, skips, wrong skips, calls that left the flat walk).
+static int NpBroadphaseMode()
 {
-    dAASSERT(callback);
+    static int mode = -1;
+    if (mode < 0)
+    {
+        const char* e = getenv("MSC_ODE_BROADPHASE");
+        mode = (e && e[0] == '0') ? 0 : (e && e[0] == '2') ? 2 : 1;
+    }
+    return mode;
+}
 
-    lock_count++;
-    cleanGeoms();
+// MSC_ODE_BPFULL (default 0 = off; 1 on, needs MSC_ODE_BROADPHASE != 0): the flat walk also skips the pairs collideAABBs returns from before it calls anything because of the
+// geoms' Z extents, their category / collide bits or a shared body (the 884 collideAABBs calls of a step that make 71 callbacks). Pure tests of the geoms' own fields:
+// the survivors are the same pairs in the same order. 0: only the X / Y test. 2: as 1, and a run of three or more consecutive geoms on one body (a character's bone geoms)
+// is stepped over in one test of the run's union box (np_broadphase.h NpBpSegs); exact, the same survivors in the same order. Only where unsigned long is 32 bits (the console, host32).
+static int NpBpFullMode()
+{
+    static int mode = -1;
+    if (mode < 0)
+    {
+        const char* e = getenv("MSC_ODE_BPFULL");
+        mode = (sizeof(unsigned long) == 4 && e && e[0] == '1') ? 1 : (sizeof(unsigned long) == 4 && e && e[0] == '2') ? 2 : 0;
+    }
+    return mode;
+}
 
-    // intersect all bounding boxes
-    for (dxGeom* g1 = first; g1; g1 = g1->next)
+enum { NP_BP_MIN = 8, NP_BP_MAX = 512 };
+
+static unsigned NpBpBits(dReal v)
+{
+    unsigned bits;
+    memcpy(&bits, &v, 4);
+    return bits;
+}
+
+// The enabled geoms of the list, in list order, into g[] and the four key arrays. 0 = this call takes the plain loop.
+static int NpBpSnapshot(dxGeom* first, dxGeom** g, int* lox, int* hix, int* loy, int* hiy, int capacity, const NpBpExtra* x)
+{
+    int n = 0;
+    for (dxGeom* p = first; p; p = p->next)
+    {
+        if (p->gflags & (GEOM_DIRTY | GEOM_AABB_BAD))
+            return 0;
+        if (GEOM_ENABLED(p))
+        {
+            if (n == capacity)
+                return 0;
+            const unsigned b0 = NpBpBits(p->aabb[0]), b1 = NpBpBits(p->aabb[1]), b2 = NpBpBits(p->aabb[2]), b3 = NpBpBits(p->aabb[3]);
+            if (!(NpBpKeyable(b0) & NpBpKeyable(b1) & NpBpKeyable(b2) & NpBpKeyable(b3)))
+                return 0;
+            if (x)
+            {
+                const unsigned b4 = NpBpBits(p->aabb[4]), b5 = NpBpBits(p->aabb[5]);
+                if (!(NpBpKeyable(b4) & NpBpKeyable(b5)))
+                    return 0;
+                x->loz[n] = NpBpKey(b4);
+                x->hiz[n] = NpBpKey(b5);
+                x->cat[n] = (unsigned)p->category_bits;
+                x->col[n] = (unsigned)p->collide_bits;
+                x->body[n] = (unsigned)(uintptr_t)p->body;
+                static int brk = -1;   // MSC_ODE_BPFULL_BREAK=1: proof mutant, the flat copy of every 3rd geom's category bits is zeroed (must change the trace and be counted by mode 2); =2: the run mutant (NpBpBuildSegs)
+                if (brk < 0)
+                {
+                    const char* e = getenv("MSC_ODE_BPFULL_BREAK");
+                    brk = (e && e[0] == '1') ? 1 : (e && e[0] == '2') ? 2 : 0;
+                }
+                if (brk == 1 && n % 3 == 0)
+                {
+                    x->cat[n] = 0;
+                    x->col[n] = 0;
+                }
+            }
+            g[n] = p;
+            lox[n] = NpBpKey(b0);
+            hix[n] = NpBpKey(b1);
+            loy[n] = NpBpKey(b2);
+            hiy[n] = NpBpKey(b3);
+            n++;
+        }
+    }
+    NpBpPad(lox, hix, loy, hiy, n);
+    if (x)
+        NpBpPadExtra(*x, n);
+    return n;
+}
+
+// The plain walk, entered at any pair: g2 = 0 starts at the top of g1's turn, otherwise the walk goes on after the pair (g1, g2), reading the list as it is now,
+// which is what the plain loop would do after a callback that moved, added, removed or switched a geom. The enabled test of g1 was made when its turn began.
+static void NpPlainWalk(dxGeom* g1, dxGeom* g2, void* data, dNearCallback* callback)
+{
+    if (g1 && g2)
+    {
+        for (g2 = g2->next; g2; g2 = g2->next)
+        {
+            if (GEOM_ENABLED(g2))
+            {
+                collideAABBs(g1, g2, data, callback);
+            }
+        }
+        g1 = g1->next;
+    }
+    for (; g1; g1 = g1->next)
     {
         if (GEOM_ENABLED(g1))
         {
-            for (dxGeom* g2 = g1->next; g2; g2 = g2->next)
+            for (g2 = g1->next; g2; g2 = g2->next)
             {
                 if (GEOM_ENABLED(g2))
                 {
@@ -312,6 +417,267 @@ void dxSimpleSpace::collide(void* data, dNearCallback* callback)
             }
         }
     }
+}
+
+// MSC_ODE_BROADPHASE=2. Decides nothing: compares each decision with the float test and counts.
+static unsigned npBpLeft;
+
+static unsigned long long sBpRunSkipped;
+
+static void NpBpVerify(dxGeom** g, const int* lox, const int* hix, const int* loy, const int* hiy, int n, const NpBpExtra* x, NpBpSegs* S)
+{
+    static unsigned calls, wrong;
+    static unsigned long long pairs, skips;
+    calls++;
+    for (int i = 0; i < n; i++)
+    {
+        int next = S ? NpBpNextSeg(lox, hix, loy, hiy, *x, *S, i, i + 1, n) : x ? NpBpNextFull(lox, hix, loy, hiy, *x, i, i + 1, n) : NpBpNext(lox, hix, loy, hiy, i, i + 1, n);
+        for (int j = i + 1; j < n; j++)
+        {
+            const dReal* a = g[i]->aabb;
+            const dReal* b = g[j]->aabb;
+            const int skip = j != next;
+            int floatReject = a[0] > b[1] || a[1] < b[0] || a[2] > b[3] || a[3] < b[2];
+            if (x)   // the first three early outs of collideAABBs, from the geoms themselves, then the Z bounds
+                floatReject = (g[i]->body == g[j]->body && g[i]->body) || (((g[i]->category_bits & g[j]->collide_bits) || (g[j]->category_bits & g[i]->collide_bits)) == 0) || floatReject
+                              || a[4] > b[5] || a[5] < b[4];
+            pairs++;
+            if (skip)
+                skips++;
+            else
+                next = S ? NpBpNextSeg(lox, hix, loy, hiy, *x, *S, i, j + 1, n) : x ? NpBpNextFull(lox, hix, loy, hiy, *x, i, j + 1, n) : NpBpNext(lox, hix, loy, hiy, i, j + 1, n);
+            if (skip != floatReject)
+                wrong++;
+        }
+    }
+    if (calls % 600 == 0)
+    {
+        printf("ode broadphase: calls=%u pairs=%llu skipped=%llu wrong=%u left=%u runskipped=%llu\n", calls, pairs, skips, wrong, npBpLeft, S ? S->skipped : 0ull);
+        fflush(stdout);
+    }
+}
+
+// MSC_ODE_BPFULL / MSC_ODE_BROADPHASE action counters (a line at exit): spaces walked flat, geom pairs in them, pairs handed on to collideAABBs, calls that left the flat walk
+static unsigned long long sBpSpaces, sBpPairs, sBpSurvivors, sBpPlain;
+static void NpSim26BpReport(void);   // MSC_SIM26_BP (below)
+static void NpBpReport(void)
+{
+    fprintf(stderr, "[bpfull] flat spaces %llu, pairs %llu, passed to collideAABBs %llu (avoided %llu), plain walks %llu, geoms of runs stepped over %llu, full=%d\n", sBpSpaces, sBpPairs, sBpSurvivors,
+        sBpPairs - sBpSurvivors, sBpPlain, sBpRunSkipped, NpBpFullMode());
+    NpSim26BpReport();
+}
+
+// MSC_SIM26_BP (wave 12, sim26; needs MSC_ODE_BPFULL=2): 0 off (default), 1 the rows of a character's bone run walk the run's candidate list (np_broadphase.h
+// NpBpRunCands; exact: the same survivors in the same order), 2 verify: the list is built and its survivors compared with the walk's for every run row, the
+// calls come from the walk (count in the [sim26bp] line: wrong must be 0). MSC_SIM26_BP_BREAK=1 / 2: proof mutants (the last / every candidate dropped).
+static int NpSim26BpMode()
+{
+    static int mode = -1;
+    if (mode < 0)
+    {
+        const char* e = getenv("MSC_SIM26_BP");
+        mode = (e && (e[0] == '1' || e[0] == '2')) ? e[0] - '0' : 0;
+    }
+    return mode;
+}
+static int NpSim26BpBreak()
+{
+    static int brk = -1;
+    if (brk < 0)
+    {
+        const char* e = getenv("MSC_SIM26_BP_BREAK");
+        brk = (e && (e[0] == '1' || e[0] == '2')) ? e[0] - '0' : 0;
+    }
+    return brk;
+}
+static unsigned long long sS26Lists, sS26Rows, sS26Cands, sS26Calls, sS26RunSkips, sS26Checked, sS26Wrong;
+static void NpSim26BpReport(void)
+{
+    if (NpSim26BpMode() == 0)
+        return;
+    fprintf(stderr, "[sim26bp] mode=%d break=%d run lists %llu (candidates %llu, later runs stepped over %llu), run rows %llu, their calls %llu, verify rows %llu wrong %llu\n", NpSim26BpMode(),
+        NpSim26BpBreak(), sS26Lists, sS26Cands, sS26RunSkips, sS26Rows, sS26Calls, sS26Checked, sS26Wrong);
+}
+
+void dxSimpleSpace::collide(void* data, dNearCallback* callback)
+{
+    dAASSERT(callback);
+
+    lock_count++;
+    cleanGeoms();
+    NP_GSC(NPGC_GEOMS, count);
+    NP_GSC(NPGC_PAIRS, (unsigned)count * (unsigned)(count > 0 ? count - 1 : 0) / 2u);
+
+    const int mode = NpBroadphaseMode();
+    if (mode != 0 && count >= NP_BP_MIN && count <= NP_BP_MAX)
+    {
+        const int cap = count;
+        dxGeom** g = (dxGeom**)ALLOCA(cap * sizeof(dxGeom*));
+        int* keys = (int*)ALLOCA(4 * (cap + NP_BP_PAD) * sizeof(int));
+        int* lox = keys;
+        int* hix = lox + cap + NP_BP_PAD;
+        int* loy = hix + cap + NP_BP_PAD;
+        int* hiy = loy + cap + NP_BP_PAD;
+        const int full = NpBpFullMode();
+        NpBpExtra ex = { 0, 0, 0, 0, 0 };
+        int* ints = 0;
+        if (full)
+        {
+            ints = (int*)ALLOCA(5 * (cap + NP_BP_PAD) * sizeof(int));
+            ex.loz = ints;
+            ex.hiz = ex.loz + cap + NP_BP_PAD;
+            ex.cat = (unsigned*)(ex.hiz + cap + NP_BP_PAD);
+            ex.col = ex.cat + cap + NP_BP_PAD;
+            ex.body = ex.col + cap + NP_BP_PAD;
+        }
+        const int n = NpBpSnapshot(first, g, lox, hix, loy, hiy, cap, full ? &ex : 0);
+        if (n != 0)
+        {
+            // BPFULL=2: the runs of one body (a character's bone geoms), only when the list has one
+            NpBpSegs sg;
+            NpBpSegs* segs = 0;
+            if (full == 2)
+            {
+                const int m = cap + 1;
+                int* si = (int*)ALLOCA(8 * m * sizeof(int));
+                unsigned* su = (unsigned*)ALLOCA(2 * m * sizeof(unsigned));
+                unsigned char* sr = (unsigned char*)ALLOCA(m);
+                sg.end = si;
+                sg.segOf = si + m;
+                sg.ulox = si + 2 * m; sg.uhix = si + 3 * m; sg.uloy = si + 4 * m; sg.uhiy = si + 5 * m; sg.uloz = si + 6 * m; sg.uhiz = si + 7 * m;
+                sg.ucat = su; sg.ucol = su + m;
+                sg.run = sr;
+                sg.skipped = 0;
+                static int mut = -1;
+                if (mut < 0)
+                {
+                    const char* e = getenv("MSC_ODE_BPFULL_BREAK");
+                    mut = (e && e[0] == '2') ? 1 : 0;
+                }
+                NpBpBuildSegs(sg, lox, hix, loy, hiy, ex, n, mut);
+                if (sg.hasRun)
+                    segs = &sg;
+            }
+            if (mode == 2)
+            {
+                NpBpVerify(g, lox, hix, loy, hiy, n, full ? &ex : 0, segs);
+                const unsigned before = npGeomEpoch;
+                NpPlainWalk(first, 0, data, callback);
+                npBpLeft += npGeomEpoch != before;
+                lock_count--;
+                return;
+            }
+            const unsigned epoch = npGeomEpoch;
+            static bool reported = false;
+            if (!reported)
+            {
+                reported = true;
+                atexit(NpBpReport);
+            }
+            sBpSpaces++;
+            if (sBpSpaces == 1 || sBpSpaces % 1500 == 0)
+                NpBpReport();   // (the harness may leave by _exit)
+            sBpPairs += (unsigned long long)n * (unsigned long long)(n - 1) / 2u;
+            // MSC_SIM26_BP: the rows of a run walk the run's candidate list (np_broadphase.h NpBpRunCands)
+            const int rowsMode = segs ? NpSim26BpMode() : 0;
+            int* cand = rowsMode ? (int*)ALLOCA((n + 1) * sizeof(int)) : 0;
+            int* ref = rowsMode == 2 ? (int*)ALLOCA((n + 1) * sizeof(int)) : 0;
+            int candSeg = -1, candCount = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (rowsMode)
+                {
+                    const int s = segs->segOf[i];
+                    if (segs->run[s])
+                    {
+                        if (s != candSeg)
+                        {
+                            candSeg = s;
+                            candCount = NpBpRunCands(lox, hix, loy, hiy, ex, *segs, s, ex.body[i], segs->end[s], n, cand, NpSim26BpBreak(), &sS26RunSkips);
+                            sS26Lists++;
+                            sS26Cands += (unsigned)candCount;
+                        }
+                        sS26Rows++;
+                        if (rowsMode == 2)
+                        {
+                            // verify: the survivors of the old walk, compared with those of the list; the calls are made from the old walk
+                            int nr = 0;
+                            for (int j = NpBpNextSeg(lox, hix, loy, hiy, ex, *segs, i, i + 1, n); j < n; j = NpBpNextSeg(lox, hix, loy, hiy, ex, *segs, i, j + 1, n))
+                                ref[nr++] = j;
+                            int k2 = 0, ok = 1;
+                            for (int k = 0; k < candCount; k++)
+                            {
+                                const int j = cand[k];
+                                if (j <= i || NpBpRejectFull(lox, hix, loy, hiy, ex, i, j))
+                                    continue;
+                                if (k2 >= nr || ref[k2] != j)
+                                    ok = 0;
+                                k2++;
+                            }
+                            if (k2 != nr)
+                                ok = 0;
+                            sS26Checked++;
+                            sS26Wrong += ok ? 0u : 1u;
+                            for (int k = 0; k < nr; k++)
+                            {
+                                sBpSurvivors++;
+                                collideAABBs(g[i], g[ref[k]], data, callback);
+                                if (npGeomEpoch != epoch)
+                                {
+                                    sBpPlain++;
+                                    npBpLeft++;
+                                    NpPlainWalk(g[i], g[ref[k]], data, callback);
+                                    lock_count--;
+                                    return;
+                                }
+                            }
+                            continue;
+                        }
+                        for (int k = 0; k < candCount; k++)
+                        {
+                            const int j = cand[k];
+                            if (NpBpRejectFull(lox, hix, loy, hiy, ex, i, j))
+                                continue;
+                            sS26Calls++;
+                            sBpSurvivors++;
+                            collideAABBs(g[i], g[j], data, callback);
+                            if (npGeomEpoch != epoch)
+                            {
+                                sBpPlain++;
+                                npBpLeft++;
+                                NpPlainWalk(g[i], g[j], data, callback);
+                                lock_count--;
+                                return;
+                            }
+                        }
+                        continue;
+                    }
+                }
+                for (int j = segs ? NpBpNextSeg(lox, hix, loy, hiy, ex, *segs, i, i + 1, n) : full ? NpBpNextFull(lox, hix, loy, hiy, ex, i, i + 1, n) : NpBpNext(lox, hix, loy, hiy, i, i + 1, n); j < n;
+                     j = segs ? NpBpNextSeg(lox, hix, loy, hiy, ex, *segs, i, j + 1, n) : full ? NpBpNextFull(lox, hix, loy, hiy, ex, i, j + 1, n) : NpBpNext(lox, hix, loy, hiy, i, j + 1, n))
+                {
+                    sBpSurvivors++;
+                    collideAABBs(g[i], g[j], data, callback);
+                    if (npGeomEpoch != epoch)
+                    {
+                        sBpPlain++;
+                        if (segs) sBpRunSkipped += segs->skipped;
+                        // the callback changed the list, an enabled flag or an AABB: the arrays say nothing about the rest
+                        npBpLeft++;
+                        NpPlainWalk(g[i], g[j], data, callback);
+                        lock_count--;
+                        return;
+                    }
+                }
+            }
+            if (segs) sBpRunSkipped += segs->skipped;
+            lock_count--;
+            return;
+        }
+    }
+
+    // intersect all bounding boxes
+    NpPlainWalk(first, 0, data, callback);
 
     lock_count--;
 }
@@ -864,6 +1230,7 @@ static void collideAABBs(dxGeom* g1, dxGeom* g2, void* data,
     dIASSERT((g1->gflags & GEOM_AABB_BAD) == 0);
     dIASSERT((g2->gflags & GEOM_AABB_BAD) == 0);
 
+    NP_GSC(NPGC_AABB, 1);
     // no contacts if both geoms on the same body, and the body is not 0
     if (g1->body == g2->body && g1->body)
         return;

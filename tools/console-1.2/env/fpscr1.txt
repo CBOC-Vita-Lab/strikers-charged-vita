@@ -1,0 +1,13 @@
+# console-1.2 run fpscr1: Flush-to-zero on the game thread
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_VITA_FPSCR is 0 (nothing changed, only logged) in 1.3. The [fpscr] line of ANY run says what the main thread starts with; this run sets flush-to-zero (a denormal reads as 0): game thread ms in [lane] and p50 against d1. Keep only if the game thread drops and the route ends the same.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_FPSCR=1

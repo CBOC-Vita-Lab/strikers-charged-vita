@@ -1,0 +1,210 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: a scissor-mask rebuild the depth/stencil surface already holds is not drawn (vglSetMaskKeep, MASK_KEEP)
+
+MSC_VGX_VGL_MASKKEEP (default on; the Galaxy port's vitaGL 0018 MASK_KEEP, run on by default on its console; written again from the description):
+update_scissor_test draws the mask from nothing (a full-target quad that clears the bit and the region quad that sets it) at every framebuffer-object
+scene start, every return to the display and every scissor or attribute restore. The quads are deterministic, so each depth/stencil surface keeps a
+record of the mask it holds and a rebuild equal to the record is not drawn. Records are dropped for new surface memory, a scene that does not load or
+does not store the surface, a clear that writes stencil, and table overflow. vglSetMaskKeep(GL_FALSE) (the library default) draws every rebuild.
+Host test: renderer/tests/run_vitagl_maskkeep_test.sh.
+
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -561,6 +561,7 @@ GLboolean init_depth_stencil_buffer_ms(uint32_t w, uint32_t h, SceGxmDepthStenci
+ 	// Initializing mask update bit to 1
+ 	vgl_memset(depth_buffer, 0x80, 4 * depth_stencil_samples);
+ #endif
++	vgl_mk_forget(depth_buffer); // 1.3 MASK_KEEP (tests.c): new memory, whatever an old surface at this address held
+ #endif
+ 
+ 	// Allocating stencil surface
+@@ -814,6 +815,8 @@ GLboolean scene_reset(void) {
+ 
+ 		if (rt_time)
+ 			rt_t2 = vgl_rt_now();
++		// 1.3 MASK_KEEP (tests.c): what the scene's depth/stencil surface brings in, with the load and store modes it begun with
++		vgl_mk_scene_begin(is_rendering_display ? &gxm_depth_stencil_surface : active_write_fb->depthbuffer_ptr);
+ 		// RT: a surface that was not loaded holds the background mask (0): rebuild the mask as every framebuffer object scene does
+ 		if (rt_applied & VGL_RT_NOLOAD) {
+ 			dirty_scissor_state = GL_TRUE;
+--- a/source/misc.c
++++ b/source/misc.c
+@@ -814,12 +814,16 @@ void glClear(GLbitfield mask) {
+ 		vgl_lc_in_clear = GL_FALSE;
+ 		if (!ok)
+ 			return; // 1.2: no scene could be started: the clear is skipped
++		if (mask & GL_STENCIL_BUFFER_BIT)
++			vgl_mk_touch(); // 1.3 MASK_KEEP (tests.c): the mask is not assumed to survive a stencil clear
+ 		lc_clear(mask);
+ 		return;
+ 	}
+ #endif
+ 	if (!scene_reset())
+ 		return; // 1.2: no scene could be started: the clear is skipped
++	if (mask & GL_STENCIL_BUFFER_BIT)
++		vgl_mk_touch(); // 1.3 MASK_KEEP (tests.c): the mask is not assumed to survive a stencil clear
+ 
+ 	// Invalidating viewport and culling
+ 	invalidate_viewport();
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -1283,6 +1283,10 @@ GLboolean change_stencil_config(SceGxmStencilOp *cfg, GLenum new_cfg); // Change
+ GLboolean change_stencil_func_config(SceGxmStencilFunc *cfg, GLenum new_cfg); // Changes current in use stencil test function value
+ void update_alpha_test_settings(void); // Changes current in use alpha test operation value
+ void update_scissor_test(void); // Changes current in use scissor test region
++void vgl_mk_scene_begin(SceGxmDepthStencilSurface *ds); // 1.3 MASK_KEEP (patch 0026): a scene began on `ds` (NULL: none)
++void vgl_mk_forget(const void *surface); // 1.3 MASK_KEEP: new depth/stencil memory at `surface`
++void vgl_mk_touch(void); // 1.3 MASK_KEEP: the open scene's mask may have changed outside update_scissor_test
++extern GLboolean vgl_mask_keep;
+ void reset_scissor_test_region(void); // Resets scissor test region to default values
+ void update_scissor_test_uniforms(void); // Updates scissor test region update uniforms
+ void invalidate_viewport(void); // Invalidates currently set viewport
+--- a/source/tests.c
++++ b/source/tests.c
+@@ -40,6 +40,97 @@ vector4f *scissor_test_vertices = NULL; // Scissor test region vertices
+ GLboolean skip_scissor_invalidation = GL_TRUE; // Flag whether to skip mask update bit invalidation pass during scissor test region update
+ #endif
+ 
++// 1.3 MASK_KEEP (patch 0026, MSC_VGX_VGL_MASKKEEP; the Galaxy port's vitaGL 0018, written again from its description). update_scissor_test draws the mask
++// (the scissor bit of the depth/stencil surface) again from nothing: a full-target quad that clears the bit, then the quad of the region (or of the whole
++// target) that sets it. Under STORE_DEPTH_STENCIL it does so at the start of every framebuffer-object scene and at every return to the display, and after any
++// scissor or attribute restore, although the surface usually holds that very mask already: it was drawn there before, stored at the scene's end and loaded at
++// this one's start. The two quads are deterministic: what they leave depends only on the scissor state, the region and the target (size, display or not),
++// never on what the bit held before. So each depth/stencil surface (by its memory) keeps a record of the mask it holds, and a rebuild whose inputs equal the
++// record is not drawn. The record is dropped whenever the bit could hold anything else:
++//   - a new surface (init_depth_stencil_buffer_ms: the memory is set to 0x80, a different mask, and the address may be an old surface's);
++//   - a scene that does not load the surface (it begins from the background mask, 0; RT NOLOAD);
++//   - a scene that does not store it (the memory keeps an older mask, or part of this one after a partial render): the scene follows a copy of the record and
++//     the surface's own record is dropped;
++//   - a clear that writes stencil (vgl_mk_touch; nothing documents what such a clear does to the bit's neighbour, so it is not assumed);
++//   - more surfaces than the table holds (the oldest record is reused).
++// vglSetMaskKeep(GL_FALSE) (the default) draws every rebuild as before; the records are kept either way, so the switch can change at any time.
++GLboolean vgl_mask_keep = GL_FALSE;
++uint32_t vgl_mk_stat[4]; // rebuilds drawn, rebuilds kept, records dropped by a clear, scenes begun without a record to use
++typedef struct {
++	const void *surface; // the surface's depth memory (NULL: unused)
++	uint32_t w, h; // the target the mask was drawn for
++	int x, y, rw, rh; // the region (sceGxm rows from the top) when on
++	uint8_t on, disp, valid;
++} vgl_mk_rec;
++#define VGL_MK_RECS 16
++static vgl_mk_rec vgl_mk_recs[VGL_MK_RECS];
++static vgl_mk_rec vgl_mk_scene_copy; // a scene that does not store: the mask as it goes in that scene only
++static vgl_mk_rec *vgl_mk_cur = NULL; // the open scene's mask (NULL: unknown, every rebuild drawn)
++static uint32_t vgl_mk_next = 0;
++
++void vglSetMaskKeep(GLboolean on) {
++	vgl_mask_keep = on;
++}
++void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept) {
++	if (drawn)
++		*drawn = vgl_mk_stat[0];
++	if (kept)
++		*kept = vgl_mk_stat[1];
++}
++static vgl_mk_rec *vgl_mk_find(const void *surface) {
++	for (int i = 0; i < VGL_MK_RECS; i++) {
++		if (vgl_mk_recs[i].surface == surface)
++			return &vgl_mk_recs[i];
++	}
++	return NULL;
++}
++// gxm.c init_depth_stencil_buffer_ms: `surface` is new memory for a depth/stencil surface
++void vgl_mk_forget(const void *surface) {
++	vgl_mk_rec *r = vgl_mk_find(surface);
++	if (r) {
++		r->valid = 0;
++		r->surface = NULL;
++	}
++	if (vgl_mk_cur && vgl_mk_cur->surface == surface)
++		vgl_mk_cur = NULL;
++}
++// gxm.c scene_reset, after sceGxmBeginScene: the scene's depth/stencil surface (NULL: none) and its load and store modes as the scene runs with them
++void vgl_mk_scene_begin(SceGxmDepthStencilSurface *ds) {
++	vgl_mk_cur = NULL;
++	if (!ds || !ds->depthData) {
++		vgl_mk_stat[3]++;
++		return;
++	}
++	const GLboolean loads = sceGxmDepthStencilSurfaceGetForceLoadMode(ds) == SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED;
++	const GLboolean stores = sceGxmDepthStencilSurfaceGetForceStoreMode(ds) == SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED;
++	vgl_mk_rec *r = vgl_mk_find(ds->depthData);
++	if (!r) {
++		r = &vgl_mk_recs[vgl_mk_next];
++		vgl_mk_next = (vgl_mk_next + 1) % VGL_MK_RECS;
++		r->surface = ds->depthData;
++		r->valid = 0;
++	}
++	if (!loads)
++		r->valid = 0;
++	if (!r->valid)
++		vgl_mk_stat[3]++;
++	if (stores) {
++		vgl_mk_cur = r;
++	} else {
++		vgl_mk_scene_copy = *r;
++		vgl_mk_scene_copy.surface = NULL;
++		r->valid = 0;
++		vgl_mk_cur = &vgl_mk_scene_copy;
++	}
++}
++// misc.c glClear: a clear that writes stencil in the open scene
++void vgl_mk_touch(void) {
++	if (vgl_mk_cur && vgl_mk_cur->valid) {
++		vgl_mk_cur->valid = 0;
++		vgl_mk_stat[2]++;
++	}
++}
++
+ // Stencil Test
+ uint8_t stencil_mask_front = 0xFF; // Current in use mask for stencil test on front
+ uint8_t stencil_mask_back = 0xFF; // Current in use mask for stencil test on back
+@@ -296,6 +387,29 @@ void update_scissor_test() {
+ 	// Invalidating internal tile based region clip
+ 	sceGxmSetRegionClip(gxm_context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, active_w - 1, active_h - 1);
+ #endif
++
++	// MASK_KEEP (patch 0026): the surface holds this very mask already: neither quad is drawn (every state set and restore around them stays as it was)
++	const GLboolean mk_same = vgl_mk_cur && vgl_mk_cur->valid && vgl_mk_cur->on == (scissor_test_state ? 1 : 0) && vgl_mk_cur->disp == (is_rendering_display ? 1 : 0) &&
++		vgl_mk_cur->w == active_w && vgl_mk_cur->h == active_h &&
++		(!scissor_test_state || (vgl_mk_cur->x == region.x && vgl_mk_cur->y == region.y && vgl_mk_cur->rw == region.w && vgl_mk_cur->rh == region.h));
++	if (vgl_mask_keep && mk_same && !vgl_rt_skip_invalidation) {
++		vgl_mk_stat[1]++;
++		if (scissor_test_state)
++			vector4f_convert_to_local_space(scissor_test_vertices, region.x, region.y, region.w, region.h);
++		goto mask_done;
++	}
++	vgl_mk_stat[0]++;
++	if (vgl_mk_cur) {
++		vgl_mk_cur->on = scissor_test_state ? 1 : 0;
++		vgl_mk_cur->disp = is_rendering_display ? 1 : 0;
++		vgl_mk_cur->w = active_w;
++		vgl_mk_cur->h = active_h;
++		vgl_mk_cur->x = region.x;
++		vgl_mk_cur->y = region.y;
++		vgl_mk_cur->rw = region.w;
++		vgl_mk_cur->rh = region.h;
++		vgl_mk_cur->valid = 1;
++	}
+ 	
+ #ifdef STORE_DEPTH_STENCIL
+ 	if (vgl_rt_skip_invalidation) {
+@@ -359,6 +473,7 @@ void update_scissor_test() {
+ 
+ 	sceGxmDrawPrecomputed(gxm_context, &clear_draw_state);
+ 
++mask_done:
+ 	// Restoring viewport and culling
+ 	validate_viewport();
+ 	change_cull_mode();
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1134,6 +1134,8 @@ GLboolean vglDrawElementsDirect(GLenum mode, GLsizei count, uint32_t idx_offset,
+ #define VGL_HAS_DRAW_CACHES 1
+ void vglSetDrawCaches(GLboolean frag_memo, GLboolean uni_reuse);
+ void vglSetViewportExact(GLboolean exact); // 1.3 glViewport halves as floats (patch 0025; default GL_TRUE)
++void vglSetMaskKeep(GLboolean on); // 1.3 MASK_KEEP (patch 0026; default GL_FALSE): a scissor mask rebuild the depth/stencil surface already holds is not drawn
++void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept); // 1.3 MASK_KEEP: mask rebuilds drawn and not drawn so far (counted with the switch off too)
+ GLboolean vglGetUniformShadow(GLuint prog, GLint location, void **vptr, void **fptr, uint32_t *bytes); // 1.3 vgx uniform shadows (patch 0024)
+ void vglUniformShadowWritten(GLuint prog, uint32_t stages);
+ 

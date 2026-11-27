@@ -7,14 +7,26 @@ does not replace a complete current-build Vita input test.
 
 ## Port Settings
 
-Press **PS**, then choose the bubble's **Settings** button in LiveArea.
+Pause a match and pick **VITA SETTINGS**, or open **OPTIONS** in the main menu and pick **VITA SETTINGS** in the bottom corner
+(the button that says DONE on the other screens; not while a LAN or online game is running). Every setting is there. The LiveArea bubble no longer has a Settings
+tile (an old one just starts the game). If a setting ever stops the game from starting, hold **L + R** while it starts: **SAFE START** resets the settings.
 The game pauses while settings are open.
 
-- **Circle:** return to your game without saving.
+- **L / R:** change page (Picture, Game, Controls, Multiplayer, System).
+- **Circle:** return to your game. With unsaved changes it asks first: keep
+  editing, discard or save.
 - **Save and Return:** keep playing; saved changes apply on the next launch.
 - **Save and Restart:** apply changes now, after a separate restart confirmation.
 
-To enable the existing extra-arena option, turn **Bonus Stadiums** on, then
+**Language** (Game page): English, Spanish or French. The Settings screen
+switches as soon as you pick one, so you can read the rest of it in your
+language; the game's menus, the online and local multiplayer menus and the
+port's messages follow at the next start. In Spanish and French the control
+guide (Triangle) is translated too; the game's own tutorial texts still name the
+Wii's buttons (see [Known Issues](KNOWN-ISSUES.md)).
+
+To enable the existing extra-arena option, turn **Bonus Stadiums** on (Game
+page), then
 choose **Save and Restart** and confirm. This does not change earned progress.
 
 ## Modern

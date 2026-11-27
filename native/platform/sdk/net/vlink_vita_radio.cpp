@@ -1,6 +1,8 @@
 #if defined(NP_TARGET_VITA)  // the Vita target only (the np Makefile compiles every platform/ source for every target)
 
 #include "platform/sdk/net/vlink_vita_radio.h"
+#include "platform/sdk/net/np_galaxy16.h"   // galaxy16: MSC_LAN_RADIO_FIX / MSC_LAN_GROUP / MSC_LAN_TIMEOUT_MS decisions (host-tested)
+#include "platform/sdk/net/np_mpfix18.h"   // mpfix18: MSC_NET_KEEP_STACK (host-tested)
 
 #include <atomic>
 #include <cstdio>
@@ -28,6 +30,7 @@ constexpr unsigned kPort = 19021, kRxSlots = 256, kNetPool = 1024 * 1024;
 // accepts up to 1500 as before (nothing longer than the MFS can arrive).
 constexpr unsigned kRawMax = 1500;
 std::atomic<uint32_t> g_oversizeSends{0};
+std::atomic<uint32_t> g_sendRefused{0};   // (delay19) PdpSend answered WOULD_BLOCK (reported as sent)
 enum Step { MODULE_NET, MODULE_ADHOC, POOL, NET, NETCTL, ADHOC, CTL,
             DIALOG_INIT, DIALOG_POLL, DIALOG_RESULT, DIALOG_TERM,
             MAC, SOCKET, RING, THREAD_CREATE, THREAD_START, OPENING, ACTIVE };
@@ -88,6 +91,10 @@ bool LinkWatch() {
     return on != 0;
 }
 std::atomic<uint32_t> g_ringPeak{0};
+// galaxy16 (MSC_LAN_RADIO_FIX, default 0 = off, see np_galaxy16.h): what the receive worker saw that the pump logs once (the worker does not log).
+std::atomic<uint32_t> g_rxFirstErr{0}, g_rxErrCount{0}, g_rxOddPort{0};   // first non-time-out PdpRecv error, how many, first source port that is not kPort (0x10000 | port)
+bool g_rxErrLogged = false, g_rxPortLogged = false;
+uint8_t g_seenMac[8][6]; std::atomic<uint32_t> g_seenCount{0}; uint32_t g_seenLogged = 0;   // the first 8 distinct sender MACs (worker appends, pump logs)
 uint64_t g_openUs = 0, g_nextLookUs = 0;
 int g_cellStrikes = 0;
 bool g_peerSeen = false, g_noPeerNoted = false;
@@ -104,6 +111,16 @@ bool cleanup_failed(int rc) {
     if (++p.cleanup_failures >= 8) p.cleanup_stalled = true;
     p.cleanup_retry_us = sceKernelGetProcessTimeWide() + (p.cleanup_stalled ? 1000000 : 100000);
     return true;
+}
+
+// galaxy16 (RADIO_FIX bit 1): a teardown call that may fail because the cell is already gone: three tries, then the failure is logged and the close goes on. Off = cleanup_failed.
+bool cleanup_soft(int rc, const char *what) {
+    if (!NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioSoftClose)) return cleanup_failed(rc);
+    if (rc >= 0) return false;
+    cleanup_failed(rc);
+    if (NpGalaxy16::SoftCloseRetry(p.cleanup_failures)) return true;
+    std::fprintf(stderr, "[vlink-vita] %s failed 0x%08X three times: going on with the close\n", what, static_cast<unsigned>(rc));
+    cleanup_progress(); return false;
 }
 
 // One owner publishes stable storage, one renderer replies. Neither can reuse
@@ -178,21 +195,39 @@ bool transient(int rc) {
 }
 int receive_worker(SceSize, void *) {
     uint8_t scratch[1472];
+    unsigned errRun = 0;   // galaxy16 (RADIO_FIX bit 2): consecutive PdpRecv errors that are not time-outs
     while (p.run.load(std::memory_order_acquire)) {
         SceNetEtherAddr from{}; unsigned short port{}; int length = sizeof(scratch);
         const uint64_t before = sceKernelGetProcessTimeWide();
         int rc = sceNetAdhocPdpRecv(p.socket, &from, &port, scratch, &length, 10000, 0);
         if (!p.run.load(std::memory_order_acquire)) break;
         if (rc < 0) {
-            if (!transient(rc)) { p.rx_error.store(static_cast<uint32_t>(rc), std::memory_order_release); break; }
+            if (!transient(rc)) {
+                if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioStrayErrors)) {   // galaxy16: one odd error code no longer ends the link; about a second of nothing but errors does
+                    uint32_t none = 0;
+                    g_rxFirstErr.compare_exchange_strong(none, static_cast<uint32_t>(rc), std::memory_order_relaxed);
+                    g_rxErrCount.fetch_add(1, std::memory_order_relaxed);
+                    if (!NpGalaxy16::StrayErrorEndsLink(++errRun)) { sceKernelDelayThread(5000); continue; }
+                }
+                p.rx_error.store(static_cast<uint32_t>(rc), std::memory_order_release); break;
+            }
+            errRun = 0;
             // A firmware/backend returning immediately must not spin a core.
             if (sceKernelGetProcessTimeWide() - before < 1000) sceKernelDelayThread(1000);
             continue;
         }
+        errRun = 0;
         if (rc > 0 && length == static_cast<int>(sizeof(scratch))) length = rc;
+        if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioDiag)) {   // galaxy16: the first 8 distinct sender MACs, for the pump's log
+            const uint32_t n = g_seenCount.load(std::memory_order_relaxed);
+            bool known = false;
+            for (uint32_t i = 0; i < n && !known; ++i) known = std::memcmp(g_seenMac[i], from.data, 6) == 0;
+            if (!known && n < 8) { std::memcpy(g_seenMac[n], from.data, 6); g_seenCount.store(n + 1, std::memory_order_release); }
+        }
+        if (port != kPort && !g_rxOddPort.load(std::memory_order_relaxed)) g_rxOddPort.store(0x10000u | port, std::memory_order_relaxed);
         const uint32_t head = p.head.load(std::memory_order_relaxed);
         const uint32_t tail = p.tail.load(std::memory_order_acquire);
-        if (length <= 0 || length > static_cast<int>(kRawMax) || port != kPort || head - tail == kRxSlots) {
+        if (length <= 0 || length > static_cast<int>(kRawMax) || !NpGalaxy16::PortKept(NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioAnyPort), port, kPort) || head - tail == kRxSlots) {
             p.dropped.fetch_add(1, std::memory_order_relaxed); continue;
         }
         RawRecord &record = p.ring[head % kRxSlots];
@@ -230,14 +265,23 @@ void cleanup() {
         p.worker = -1; cleanup_progress(); return;
     }
     if (p.ring) { p.cleanup_stage = "close_ring"; ::free(p.ring); p.ring = nullptr; cleanup_progress(); return; }
-    if (p.socket >= 0) { p.cleanup_stage = "close_socket"; if (cleanup_failed(sceNetAdhocPdpDelete(p.socket, 0))) return; p.socket = -1; cleanup_progress(); return; }
-    if (p.cell) { p.cleanup_stage = "close_cell"; if (cleanup_failed(sceNetCtlAdhocDisconnect())) return; p.cell = false; cleanup_progress(); return; }
-    if (p.ctl) { p.cleanup_stage = "close_ctl"; if (cleanup_failed(sceNetAdhocctlTerm())) return; p.ctl = false; cleanup_progress(); return; }
-    if (p.adhoc) { p.cleanup_stage = "close_adhoc"; if (cleanup_failed(sceNetAdhocTerm())) return; p.adhoc = false; cleanup_progress(); return; }
+    if (p.socket >= 0) { p.cleanup_stage = "close_socket"; if (cleanup_soft(sceNetAdhocPdpDelete(p.socket, 0), "sceNetAdhocPdpDelete")) return; p.socket = -1; cleanup_progress(); return; }
+    if (p.cell) { p.cleanup_stage = "close_cell"; if (cleanup_soft(sceNetCtlAdhocDisconnect(), "sceNetCtlAdhocDisconnect")) return; p.cell = false; cleanup_progress(); return; }
+    if (p.ctl) { p.cleanup_stage = "close_ctl"; if (cleanup_soft(sceNetAdhocctlTerm(), "sceNetAdhocctlTerm")) return; p.ctl = false; cleanup_progress(); return; }
+    if (p.adhoc) { p.cleanup_stage = "close_adhoc"; if (cleanup_soft(sceNetAdhocTerm(), "sceNetAdhocTerm")) return; p.adhoc = false; cleanup_progress(); return; }
+    // (mpfix18) MSC_NET_KEEP_STACK (default on): sceNet, sceNetCtl and the NET module stay up for the life of the process, as the Same Wi-Fi path already does. np_https_sys
+    // (g_netUp) and the online socket cache "the stack is up"; after a Nearby session that had initialised the stack first, sceNetTerm left them with a dead one until a restart.
+    // The pool then belongs to the stack and is not freed; the next sceNetInit answers EBUSY and frees its own spare pool (NET step).
+    if (NpMpfix18::KeepStack()) {
+        if (p.netctl) { p.cleanup_stage = "keep_netctl"; p.netctl = false; cleanup_progress(); return; }
+        if (p.net) { p.cleanup_stage = "keep_net"; p.net = false; p.pool = nullptr; std::fprintf(stderr, "[vlink-vita] the sceNet stack stays up after the radio closes (MSC_NET_KEEP_STACK)\n"); cleanup_progress(); return; }
+    } else {
     if (p.netctl) { p.cleanup_stage = "close_netctl"; sceNetCtlTerm(); p.netctl = false; cleanup_progress(); return; }
     if (p.net) { p.cleanup_stage = "close_net"; if (cleanup_failed(sceNetTerm())) return; p.net = false; cleanup_progress(); return; }
+    }
     if (p.pool) { p.cleanup_stage = "close_pool"; ::free(p.pool); p.pool = nullptr; cleanup_progress(); return; }
-    if (p.module_adhoc) { p.cleanup_stage = "close_module_adhoc"; if (cleanup_failed(sceSysmoduleUnloadModule(SCE_SYSMODULE_PSPNET_ADHOC))) return; p.module_adhoc = false; cleanup_progress(); return; }
+    if (p.module_adhoc) { p.cleanup_stage = "close_module_adhoc"; if (cleanup_soft(sceSysmoduleUnloadModule(SCE_SYSMODULE_PSPNET_ADHOC), "sceSysmoduleUnloadModule(PSPNET_ADHOC)")) return; p.module_adhoc = false; cleanup_progress(); return; }   // (gxnet14, Galaxy 6948822b: soft with RADIO_FIX bit 1, as the other teardown calls)
+    if (p.module_net && NpMpfix18::KeepStack()) { p.cleanup_stage = "keep_module_net"; p.module_net = false; cleanup_progress(); return; }   // (the stack above still uses it)
     if (p.module_net) { p.cleanup_stage = "close_module_net"; if (cleanup_failed(sceSysmoduleUnloadModule(SCE_SYSMODULE_NET))) return; p.module_net = false; cleanup_progress(); return; }
     p.phase = NP_RADIO_DOWN; p.cleanup_stalled = false;
 }
@@ -245,10 +289,15 @@ void cleanup() {
 
 extern "C" unsigned np_vita_radio_ring_take_peak(void) { return g_ringPeak.exchange(0, std::memory_order_relaxed); }
 extern "C" unsigned np_vita_radio_rx_dropped(void) { return p.dropped.load(std::memory_order_relaxed); }
+extern "C" unsigned np_vita_radio_send_refused(void) { return g_sendRefused.load(std::memory_order_relaxed); }   // (delay19) ad hoc sends answered WOULD_BLOCK since the process started
 
 extern "C" NpRadioStatus np_vita_radio_begin_link() {
     if (p.phase != NP_RADIO_DOWN) return NP_RADIO_WRONG_PHASE;
     g_openUs = 0; g_ringPeak.store(0);
+    g_rxFirstErr.store(0); g_rxErrCount.store(0); g_rxOddPort.store(0); g_rxErrLogged = g_rxPortLogged = false; g_seenCount.store(0); g_seenLogged = 0;   // (galaxy16)
+    if (NpGalaxy16::RadioFix())
+        std::fprintf(stderr, "[vlink-vita] Nearby starts: MSC_LAN_RADIO_FIX=%u MSC_LAN_GROUP=%d MSC_LAN_TIMEOUT_MS=%u\n", NpGalaxy16::RadioFix(),
+                     NpGalaxy16::LanGroup(std::getenv("MSC_LAN_GROUP")), NpGalaxy16::LanTimeoutUs(std::getenv("MSC_LAN_TIMEOUT_MS")) / 1000u);
     if (!dialog_ready.load(std::memory_order_acquire)) return NP_RADIO_LIMIT;
     p.step = MODULE_NET; p.error = 0; p.status = NP_RADIO_AGAIN;
     p.head.store(0); p.tail.store(0); p.dropped.store(0); p.rx_error.store(0);
@@ -261,6 +310,7 @@ extern "C" int np_vita_radio_link_send(const uint8_t *mac, const void *bytes, si
     const auto one = [&](const uint8_t *to) {
         SceNetEtherAddr address{}; std::memcpy(address.data, to, 6);
         const int rc = sceNetAdhocPdpSend(p.socket, &address, kPort, bytes, static_cast<int>(length), 0, SCE_NET_ADHOC_F_NONBLOCK);
+        if (static_cast<uint32_t>(rc) == SCE_ERROR_NET_ADHOC_WOULD_BLOCK) g_sendRefused.fetch_add(1, std::memory_order_relaxed);   // (delay19) reported as sent below; counted for the "[mp-lan] net" line
         return rc >= 0 || transient(rc) ? static_cast<int>(length) : rc;
     };
     if (mac) return one(mac);
@@ -300,6 +350,30 @@ extern "C" void np_vita_radio_pump() {
     if (p.phase == NP_RADIO_OPEN) {
         int state{}; uint32_t error = p.rx_error.load(std::memory_order_acquire);
         if (error) { close_with(NP_RADIO_CLOSED, error); return; }
+        if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioDiag)) {   // galaxy16: what the receive worker saw, logged once from here (the worker does not log)
+            if (!g_rxErrLogged && g_rxFirstErr.load(std::memory_order_relaxed)) {
+                g_rxErrLogged = true;
+                std::fprintf(stderr, "[vlink-vita] PdpRecv error 0x%08X (first of %u so far; the link goes on unless they never stop)\n",
+                             g_rxFirstErr.load(std::memory_order_relaxed), g_rxErrCount.load(std::memory_order_relaxed));
+            }
+            if (!g_rxPortLogged && g_rxOddPort.load(std::memory_order_relaxed)) {
+                g_rxPortLogged = true;
+                std::fprintf(stderr, "[vlink-vita] a datagram came from PDP port 0x%04X, not %04X: the port byte order differs from what was assumed\n",
+                             g_rxOddPort.load(std::memory_order_relaxed) & 0xFFFFu, static_cast<unsigned>(kPort));
+            }
+            for (uint32_t n = g_seenCount.load(std::memory_order_acquire); g_seenLogged < n; ++g_seenLogged) {
+                const uint8_t *m = g_seenMac[g_seenLogged];
+                SceNetAdhocctlPeerInfo peers[8]{}; int size = sizeof(peers);
+                uint8_t macs[8 * 6]; int count = 0; bool readable = false;
+                if (sceNetAdhocctlGetPeerList(&size, peers) >= 0 && size >= 0 && size <= static_cast<int>(sizeof(peers)) && size % static_cast<int>(sizeof(peers[0])) == 0) {
+                    readable = true; count = size / static_cast<int>(sizeof(peers[0]));
+                    for (int i = 0; i < count; ++i) std::memcpy(macs + 6 * i, peers[i].macAddr.data, 6);
+                }
+                static const char *const kVerdict[] = {"in the peer list", "ALL ZERO: unicast to it will fail", "FIRST BYTE differs from the peer list's: unicast to it may fail", "NOT in the peer list (yet?)"};
+                std::fprintf(stderr, "[vlink-vita] first datagram from %02X:%02X:%02X:%02X:%02X:%02X: %s\n", m[0], m[1], m[2], m[3], m[4], m[5],
+                             readable ? kVerdict[NpGalaxy16::MacVerdict(m, macs, count)] : "peer list unreadable");
+            }
+        }
         if (!LinkWatch()) {
             if (sceNetCtlAdhocGetState(&state) >= 0 && state == SCE_NETCTL_STATE_DISCONNECTED) close_with(NP_RADIO_CLOSED, error);
             return;  // the LAN link polls the receive ring itself
@@ -324,7 +398,7 @@ extern "C" void np_vita_radio_pump() {
             } else if (!g_noPeerNoted && now - g_openUs > 30000000) {
                 g_noPeerNoted = true;
                 std::fprintf(stderr, "[vlink-vita] no other console in the ad hoc cell after 30 s: if the two Vitas do not find each other, set "
-                                     "MULTIPLAYER LINK to NEARBY HOST on one and NEARBY JOIN on the other (MSC_LAN_DIALOG=create / join)\n");
+                                     "MSC_LAN_DIALOG=create on one and join on the other (a line of np-player.txt)\n");
             }
         }
         return;  // the LAN link polls the receive ring itself
@@ -353,18 +427,27 @@ extern "C" void np_vita_radio_pump() {
         rc = sceNetCtlInit();
         if (static_cast<uint32_t>(rc) != 0x80412102u) { if (failed(rc)) return; p.netctl = true; }
         break;
-    case ADHOC: if (failed(sceNetAdhocInit())) return; p.adhoc = true; break;
+    case ADHOC:
+        rc = sceNetAdhocInit();
+        // gxnet14 (Galaxy R5, 6948822b; RADIO_FIX bit 1): a sceNetAdhocTerm that was skipped after three failures leaves the library initialised: not an error for the next session.
+        if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioSoftClose) && static_cast<uint32_t>(rc) == SCE_ERROR_NET_ADHOC_ALREADY_INITIALIZED) {
+            std::fprintf(stderr, "[vlink-vita] sceNetAdhocInit: already initialised (an earlier close skipped its Term): using it\n"); rc = 0;
+        }
+        if (failed(rc)) return;
+        p.adhoc = true; break;
     case CTL: {
         SceNetAdhocctlAdhocId id{}; id.type = SCE_NET_ADHOCCTL_ADHOCTYPE_RESERVED;
         std::memcpy(id.data, kAdhocId, 9);
         g_ctlId = kAdhocId; g_ctlFirstError = 0;
         rc = sceNetAdhocctlInit(&id);
+        if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioSoftClose) && static_cast<uint32_t>(rc) == SCE_ERROR_NET_ADHOCCTL_ALREADY_INITIALIZED) rc = 0;   // gxnet14 (Galaxy R5): see ADHOC
         if (rc < 0 && TitleId() && std::strcmp(TitleId(), kAdhocId) != 0) {
             // Fallback (wave 5 NET): the running title id, as the shipping references pass.
             g_ctlFirstError = static_cast<uint32_t>(rc);
             std::memcpy(id.data, TitleId(), 9);
             g_ctlId = TitleId();
             rc = sceNetAdhocctlInit(&id);
+            if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioSoftClose) && static_cast<uint32_t>(rc) == SCE_ERROR_NET_ADHOCCTL_ALREADY_INITIALIZED) rc = 0;   // gxnet14 (Galaxy R5)
         }
         std::fprintf(stderr, "[vlink-vita] ad hoc id %s: %s (0x%08X)%s\n", g_ctlId, rc >= 0 ? "accepted" : "refused", static_cast<uint32_t>(rc),
                      g_ctlFirstError ? " after MSCH00002 was refused" : "");
@@ -394,6 +477,9 @@ extern "C" void np_vita_radio_pump() {
     case DIALOG_RESULT: {
         DialogReply reply{}; if (!call_dialog(DialogOp::Result, reply)) return;
         if (failed(reply.rc)) return;
+        if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioDiag) || reply.result != SCE_COMMON_DIALOG_RESULT_OK)   // galaxy16; (mpfix18) a cancel or a refusal is always logged: it is what a player's "Nearby does nothing" report needs
+            std::fprintf(stderr, "[vlink-vita] NetCheck dialog result 0x%08X (%s)\n", static_cast<unsigned>(reply.result),
+                         reply.result == SCE_COMMON_DIALOG_RESULT_OK ? "ok, in a cell" : reply.result == SCE_COMMON_DIALOG_RESULT_USER_CANCELED ? "cancelled by the player" : "not connected");
         if (reply.result != SCE_COMMON_DIALOG_RESULT_OK) { close_with(NP_RADIO_CLOSED, reply.result); return; }
         break;
     }
@@ -402,18 +488,40 @@ extern "C" void np_vita_radio_pump() {
         if (failed(reply.rc)) return;
         p.phase = NP_RADIO_STARTING; break;
     }
-    case MAC: if (failed(sceNetAdhocctlGetEtherAddr(&p.mac))) return; break;
+    case MAC:
+        rc = sceNetAdhocctlGetEtherAddr(&p.mac);
+        if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioDiag)) {   // galaxy16
+            std::fprintf(stderr, "[vlink-vita] sceNetAdhocctlGetEtherAddr: 0x%08X (%02X:%02X:%02X:%02X:%02X:%02X)\n", static_cast<unsigned>(rc), p.mac.data[0], p.mac.data[1], p.mac.data[2], p.mac.data[3], p.mac.data[4], p.mac.data[5]);
+            if (rc >= 0 && !(p.mac.data[0] | p.mac.data[1] | p.mac.data[2] | p.mac.data[3] | p.mac.data[4] | p.mac.data[5])) std::fprintf(stderr, "[vlink-vita] WARNING: our own ad hoc MAC is all zero\n");
+        }
+        if (failed(rc)) return;
+        break;
     case SOCKET:
-        rc = sceNetAdhocPdpCreate(&p.mac, kPort, 65536, 0); if (failed(rc)) return; p.socket = rc; break;
+        rc = sceNetAdhocPdpCreate(&p.mac, kPort, 65536, 0);
+        if (NpGalaxy16::RadioFixOn(NpGalaxy16::kRadioDiag)) std::fprintf(stderr, "[vlink-vita] sceNetAdhocPdpCreate port %u: %d (0x%08X)\n", static_cast<unsigned>(kPort), rc, static_cast<unsigned>(rc));
+        if (failed(rc)) return;
+        p.socket = rc; break;
     case RING:
         p.ring = static_cast<RawRecord *>(::calloc(kRxSlots, sizeof(RawRecord)));
         if (!p.ring) { close_with(NP_RADIO_LIMIT); return; } break;
-    case THREAD_CREATE:
+    case THREAD_CREATE: {
         // Core 2 (SCE_KERNEL_CPU_MASK_USER_2): the platform plan keeps the game thread on core 0 and the renderer on core 1; this thread
         // only waits for datagrams (a 10 ms receive time-out) and must not take time from either.
-        rc = sceKernelCreateThread("strikers_mp_rx", receive_worker, 0x10000100, 65536, 0, SCE_KERNEL_CPU_MASK_USER_2, nullptr);
+        // (lane24 FIX-27, MSC_MP_RX_PRIO, default unset = 0x10000100 = 160 as before) On core 2 the receiver shares its priority with the front-end record player (160), so a datagram that arrives while
+        // the player runs waits for the player's slice before it is copied into the ring. MSC_MP_RX_PRIO=0x100000F0 (144, the job lanes' priority: above the player, below the audio at 128) lets it in at once;
+        // its work is a copy of one datagram and a 10 ms time-out poll. Only the priority: receive latency, never what is received or in which order. 64..191 or 0x10000100 +- offset.
+        int rxPrio = 0x10000100;
+        if (const char* e = std::getenv("MSC_MP_RX_PRIO")) {
+            const long long v = std::strtoll(e, nullptr, 0);
+            const long long abs = (v >= 0x10000000LL && v <= 0x1000FFFFLL) ? 160 + (v - 0x10000100LL) : v;
+            if (abs >= 64 && abs <= 191) rxPrio = static_cast<int>(v);
+            else std::fprintf(stderr, "[vlink-vita] MSC_MP_RX_PRIO=%s not understood (64..191 or 0x10000100 +- offset): the receiver keeps priority 0x10000100\n", e);
+        }
+        rc = sceKernelCreateThread("strikers_mp_rx", receive_worker, rxPrio, 65536, 0, SCE_KERNEL_CPU_MASK_USER_2, nullptr);
+        if (rxPrio != 0x10000100) std::fprintf(stderr, "[vlink-vita] receiver thread priority 0x%X (MSC_MP_RX_PRIO), core 2: %s\n", static_cast<unsigned>(rxPrio), rc >= 0 ? "ok" : "REFUSED");
         if (failed(rc)) return;
         p.worker = rc; break;
+    }
     case THREAD_START:
         p.run.store(true, std::memory_order_release);
         if (failed(sceKernelStartThread(p.worker, 0, nullptr))) return;
@@ -477,7 +585,11 @@ extern "C" int np_vita_radio_dialog_prepare(bool surface_ready) {
     if (!(renderer_apputil && renderer_config) && !configure_dialogs("renderer")) return NP_RADIO_CLOSED;
     dialog_ready.store(true, std::memory_order_release); return NP_RADIO_OK;
 }
+extern "C" void np_vita_ime_dialog_render(void) __attribute__((weak));   // platform/sdk/dwc/np_online_ime_vita.cpp (the name keyboard)
+extern "C" bool np_vita_ime_dialog_active(void) __attribute__((weak));
+extern "C" bool np_vita_radio_dialogs_ready() { return dialog_ready.load(std::memory_order_acquire); }
 extern "C" void np_vita_radio_dialog_render() {
+    if (np_vita_ime_dialog_render) np_vita_ime_dialog_render();
     if (mail.state.load(std::memory_order_acquire) != MailState::Requested) return;
     auto &reply = mail.reply;
     switch (reply.op) {
@@ -489,8 +601,9 @@ extern "C" void np_vita_radio_dialog_render() {
         const int dialogMode = !mode || !std::strcmp(mode, "conn") ? SCE_NETCHECK_DIALOG_MODE_PSP_ADHOC_CONN :
             !std::strcmp(mode, "create") ? SCE_NETCHECK_DIALOG_MODE_PSP_ADHOC_CREATE : SCE_NETCHECK_DIALOG_MODE_PSP_ADHOC_JOIN;
         g_dialogFirstError = 0;
-        int tried = 0;
-        for (int variant = 0; variant < 3; ++variant) {
+        const int lanGroup = NpGalaxy16::LanGroup(std::getenv("MSC_LAN_GROUP"));   // galaxy16: 0 = no group name (default 1 = as in 1.2)
+        int tried = lanGroup ? 0 : 1;
+        for (int variant = lanGroup ? 0 : 1; variant < 3; ++variant) {
             const char *id = variant == 2 ? TitleId() : g_ctlId;
             if (!id || (variant == 2 && !std::strcmp(id, g_ctlId))) continue;
             tried = variant;
@@ -500,7 +613,7 @@ extern "C" void np_vita_radio_dialog_render() {
             p.dialog_param.groupName = variant == 0 ? &p.group : nullptr;
             std::memcpy(p.dialog_param.npCommunicationId.data, id, 9);
             p.dialog_param.mode = static_cast<decltype(p.dialog_param.mode)>(dialogMode);
-            p.dialog_param.timeoutUs = 60000000;
+            p.dialog_param.timeoutUs = NpGalaxy16::LanTimeoutUs(std::getenv("MSC_LAN_TIMEOUT_MS"));   // galaxy16: default 60000 ms as in 1.2
             reply.rc = sceNetCheckDialogInit(&p.dialog_param);
             if (reply.rc >= 0) break;
             if (!g_dialogFirstError) g_dialogFirstError = static_cast<uint32_t>(reply.rc);
@@ -522,6 +635,8 @@ extern "C" void np_vita_radio_dialog_render() {
     }
     mail.state.store(MailState::Completed, std::memory_order_release);
 }
-extern "C" bool np_vita_radio_dialog_active() { return dialog_visible.load(std::memory_order_acquire); }
+extern "C" bool np_vita_radio_dialog_active() {
+    return dialog_visible.load(std::memory_order_acquire) || (np_vita_ime_dialog_active && np_vita_ime_dialog_active());
+}
 
 #endif  // NP_TARGET_VITA

@@ -1,5 +1,5 @@
 // Unit tests of the DVD layer: a scanned table over a temporary tree, then the real disc dump
-// (sys/fst.bin) when NP_TEST_DISC (default /home/claude/msc/game) exists.
+// (sys/fst.bin) when NP_TEST_DISC (default /work/msc/game) exists.
 #include <revolution/dvd.h>
 #include <revolution/os.h>
 
@@ -102,7 +102,7 @@ static void test_scanned() {
 int main() {
     printf("scanned table\n");
     test_scanned();
-    const char* disc = getenv("NP_TEST_DISC") ? getenv("NP_TEST_DISC") : "/home/claude/msc/game";
+    const char* disc = getenv("NP_TEST_DISC") ? getenv("NP_TEST_DISC") : "/work/msc/game";
     char p[512];
     snprintf(p, sizeof p, "%s/sys/fst.bin", disc);
     if (access(p, R_OK) == 0) {

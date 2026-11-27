@@ -1,0 +1,4 @@
+# ---- Settings screen (LiveArea > Settings): the lines below are written by it; the rest of this file is kept ----
+MSC_VITA_RENDER=640x362
+MSC_PERFORMANCE_MODE=1
+# ---- end of the Settings screen's lines ----

@@ -1,0 +1,14 @@
+# console-1.2 run texc-2: Texture compression on, warm card (the real gain)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route worstgpu, version payload 1.3, role ab
+# texc15b.md: `(N from the card)`, encoded 0, `[lane]` gpu p50 / p95 against worstgpu1 = the real gain. Over 0.3 ms GPU p50 with no visible change: candidate for default ON.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_VGX_TEX_COMPRESS=1

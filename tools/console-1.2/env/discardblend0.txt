@@ -1,0 +1,13 @@
+# console-1.2 run discardblend0: Alpha-tested blended draws with discard again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# MSC_VGX_DISCARD_BLEND=0 (on in the plan since wave 16; pixel-exact by host proof, 61 pictures and 2M blend/z combinations, sgx16, and its fx-additive programs are in pack27): an alpha-tested draw that is blended so that a source of 0 changes nothing and writes no depth writes vec4(0) where its test fails instead of discarding, so the SGX keeps hidden-surface removal for it. This run is the A/B off side: the plain discard. Against d1: GPU busy ms ([rt]/[gpu]) in play with items and in Mega Strikes, expect off to be 0.1-0.3 ms slower (ESTIMATE); the off programs are in the pack as well, so no compile in either run. Any picture difference in d1 (black or dark fringes on effects) means DISCARD_BLEND goes back to off.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_DISCARD_BLEND=0

@@ -1,0 +1,14 @@
+# console-1.2 run la2-on: One byte a texel for I4/I8 textures (MSC_VGX_LA88=2), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r15, route tour, version payload 1.3, role ab
+# mem10: the existing LA88 switch, never run on a console; host pictures identical, upload bytes -75 %. Read the texture census and upload time and look for wrong greys.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_LA88=2

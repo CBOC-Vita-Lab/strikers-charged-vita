@@ -1,0 +1,14 @@
+# console-1.2 run pbl1: Parameter buffer in LPDDR (MSC_VITA_PB_LPDDR=1), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route tour, version payload 1.3, role ab
+# vram19: does sceGxm take the flag in a normal app (`PB_LPDDR: TAKEN` or REFUSED), does `pools requested ... cdram` rise by about 16 MiB, are the GPU ms the same as d1. A HANG or a fault = fail (the switch stays off).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_PB_LPDDR=1

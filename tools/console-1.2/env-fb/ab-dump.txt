@@ -1,0 +1,16 @@
+# console-1.2 run ab-dump: In-run A/B at The Dump (GPU-bound): the pixel-work cuts and the mid-scene flush
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group ab15, route worstgpu, version payload 1.3, role ab
+# Replaces pxscissor0, pxcut0 and midflush-dump (12.8 min). `gpu` and fps of each pixel cut where the GPU is the limit (20-30 ms); MIDFLUSH is the control (expected no gain). Read: abpair.py --inrun LOG (key, metric, diff b minus a, 90 % interval, verdict); the `[ab] flip` lines show the clock of each flip, `[lane] ... ab KEY=v a wN` the windows. Replaces the pairs listed in w8/ab15.md and w8/ab15b.md.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_AB=MSC_VGX_PX_SCISSOR,1,0;MSC_VGX_PX_NOOP,1,0;MSC_VGX_PX_DEADCLEAR,1,0;MSC_VGX_MIDFLUSH,0,30003
+MSC_AB_START_S=40
+MSC_AB_REPEATS=3

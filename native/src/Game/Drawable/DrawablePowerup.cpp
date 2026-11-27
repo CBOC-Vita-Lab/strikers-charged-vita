@@ -11,6 +11,11 @@
 #include "Game/Render/RenderShadow.h"
 #include "Game/Render/StadiumLoading.h"
 #include "Game/SharedStaticStorage.h"
+#ifdef NP_NATIVE
+#include <string.h>
+#include "np/overlap.h"
+#include "np/cpu22.h"
+#endif
 
 u8 sDrawPowerupShadows = 1;
 u8 sUseModelPowerupShadows = 1;
@@ -180,18 +185,69 @@ void DrawablePowerup::Grab(int idx)
     }
 }
 
+#ifdef NP_NATIVE
+// MSC_CPU22_POWERUP (include/np/cpu22.h): FindStadiumDrawableObject(hash of "powerup_generated_<idx>") is two AVL walks (the stadium's registered drawables, then the world's
+// map) for each of the 150 slots every picture, and its answer only changes when a drawable is added to or removed from the stadium (NpCpu22DrawEpochBump at each writer: fn_8027876C,
+// World::AddDrawableObject / RemoveDrawableObject, the World and BasicStadium constructors and destructors) or the current stadium is another one. Answer per slot kept for that state.
+static DrawableObject* NpPowerupObject(int idx)
+{
+    static DrawableObject* sObj[150];
+    static unsigned char sKnown[150];
+    static unsigned sEpoch = ~0u;
+    static const void* sStadium;
+    const int mode = NpCpu22Mode(NP_C22_POWERUP);
+    if (mode == 0 || idx < 0 || idx >= 150 || !NpMemGetGameThread())
+        return FindStadiumDrawableObject(NP_POWERUP_HASH(idx));
+    const void* stadium = BasicStadium::GetCurrentStadium();
+    if (sEpoch != NpCpu22DrawEpochV || sStadium != stadium)
+    {
+        memset(sKnown, 0, sizeof sKnown);
+        sEpoch = NpCpu22DrawEpochV;
+        sStadium = stadium;
+    }
+    NpCpu22Note(NP_C22_POWERUP, 0);
+    if (sKnown[idx])
+    {
+        NpCpu22Note(NP_C22_POWERUP, 1);
+        if (mode == 1)
+            return sObj[idx];
+        DrawableObject* real = FindStadiumDrawableObject(NP_POWERUP_HASH(idx));
+        if (real != sObj[idx])
+            NpCpu22Note(NP_C22_POWERUP, 2);
+        return real;
+    }
+    DrawableObject* object = FindStadiumDrawableObject(NP_POWERUP_HASH(idx));
+    sObj[idx] = (NpCpu22Break() == 2 && (idx & 7) == 3) ? 0 : object;   // (proof mutant: every 8th slot is kept as "no object")
+    sKnown[idx] = 1;
+    return object;
+}
+#endif
+
 void DrawablePowerup::Render(int idx) const
 {
 #ifndef NP_NATIVE
     FindPowerUp(nlStringLowerHash(GetName(idx)));   // (result unused: a pure lookup; dropped natively)
 #endif
+#ifdef NP_NATIVE
+    DrawableObject* object = NpPowerupObject(idx);
+#else
     DrawableObject* object
         = FindStadiumDrawableObject(NP_POWERUP_HASH(idx));
+#endif
 
     if (object == 0)
     {
         return;
     }
+
+#ifdef NP_NATIVE
+    // MSC_POWERUP_HIDDEN: a hidden slot whose object is already hidden would only get a new world matrix, which nothing reads until the slot is shown (and then this
+    // function sets it before the draw)
+    if (!mVisible && (object->m_uObjectFlags & 1) == 0 && NpPowerupHidden())
+    {
+        return;
+    }
+#endif
 
     nlQuaternion orientation;
     float angle = 0.0000958738f * (float)mOrientation;

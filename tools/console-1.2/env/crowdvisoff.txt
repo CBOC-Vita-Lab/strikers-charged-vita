@@ -1,0 +1,13 @@
+# console-1.2 run crowdvisoff: Crowd figure lists off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_CROWD_VISFAST is on by default in the player build (the crowd's per-picture visibility pass appends precomputed figure lists; the same lists in the same order, det trace and frame hashes identical on the host). This run is the A/B: the game's loop over every figure. Against the tour: game-thread ms in the goal celebration and replays.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CROWD_VISFAST=0

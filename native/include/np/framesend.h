@@ -19,6 +19,7 @@ void NpFsGateSlow(const char* why) __attribute__((weak));
 typedef void (*NpFsJobFn)(void* arg);
 int NpFsMode(void) __attribute__((weak));
 int NpFsStates(void) __attribute__((weak));
+int NpFsHeldStates(void) __attribute__((weak));   /* rep27 MSC_FS_HELD: task-state bits sent on the game thread */
 int NpFsTaskMask(void) __attribute__((weak));
 void NpFsFork(NpFsJobFn fn, void* arg) __attribute__((weak));
 void NpFsJoin(void) __attribute__((weak));
@@ -31,8 +32,12 @@ int NpFsDeferWrite(void** slot, void* value) __attribute__((weak));   /* W5 PIPE
 void NpFsWorkerHeapCall(void) __attribute__((weak));
 int NpFsDeferCall(void (*fn)(const void*), const void* data, unsigned size) __attribute__((weak));   /* W5 PIPE: 1 = kept until the job is done */
 int NpLaneEnabled(void) __attribute__((weak));
+int NpLaneTrySubmit(NpFsJobFn fn, void* arg) __attribute__((weak));
 void NpLaneSubmit(NpFsJobFn fn, void* arg) __attribute__((weak));
 void NpLaneWait(void) __attribute__((weak));
+int NpLaneTakeUnstarted(void) __attribute__((weak));   // lane24: run the queued jobs the lane thread has not started, here and now (returns how many)
+int NpLaneForce(void) __attribute__((weak));   // gt27: start the helper lane for a non-skinning user (1 = running)
+double NpLaneWaitedSeconds(void) __attribute__((weak));
 #ifdef __cplusplus
 }
 #endif

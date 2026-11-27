@@ -19,6 +19,7 @@ namespace VitaThreads {
 int CoreMask(int role) {
     const auto& s = vgxn_vita::Services();
     if (s.core_mask) return s.core_mask(role);
+    role &= ~VGXN_ROLE_PLAN;
     // Standalone plan: the game thread has core 0; the render thread and sceGxm's display queue core 1; vitaGL's collector and the
     // record player (MSC_VGX_BACKEND_THREAD) core 2.
     switch (role) {

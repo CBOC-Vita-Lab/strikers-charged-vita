@@ -30,6 +30,14 @@ bool sStats = false;
 bool sInit = false;
 double sParam = 1.0;           // slow: K; ops/insn: R (thousand per ms)
 NpAiClockFn sReal = 0;
+bool sNoClock = false;         // MSC_AI_NOCLOCK=1: with MSC_AI_BUDGET=off nothing reads the script clock (see NpAiBudgetSetup)
+unsigned long sNoClockReads = 0;
+float ZeroClock() { ++sNoClockReads; return 0.0f; }
+// MSC_AI_NOCLOCK_BREAK=1 (host builds only, the proof's negative control, probe18): with MSC_AI_NOCLOCK=1 the AI decision DEPENDS on the clock: the budget is 1.0 (the retail rule: a script
+// may be skipped, nlRandomf is drawn) and the clock counts 0.02 ms a read. The det trace of that run must differ from MSC_AI_NOCLOCK=0 (w8/probe18.md).
+bool sBreak = false;
+float BreakClock() { ++sNoClockReads; static float t = 0.0f; t += 0.02f; return t; }
+void PrintNoClock() { fprintf(stderr, "[aibudget] MSC_AI_NOCLOCK: %lu script clock reads that returned 0 instead of reading the system clock\n", sNoClockReads); }
 
 // Clocks that count work. Base moved at every update end keeps the float small (ms within one update).
 double sBaseWork = 0.0;
@@ -151,6 +159,18 @@ void Init()
     const char* s = getenv("MSC_AI_STATS");
     if (s && *s && *s != '0')
         sStats = true;
+    // MSC_AI_NOCLOCK=1 (wave 9, game-thread cost): with MSC_AI_BUDGET=off the profiling clock's only reader is the statistics (the budget is -1: CheckScriptTimeBudget
+    // never reads gScriptFrameTime, nothing else does), yet every script execution read the system clock twice (about 36 reads a simulation step, each a
+    // system call on the console). The clock then reads 0, and the statistics a plain `MSC_AI_BUDGET=off` implies stay off unless MSC_AI_STATS=1 asks for them.
+    const char* nc = getenv("MSC_AI_NOCLOCK");
+    sNoClock = nc && *nc == '1' && sMode == kOff;
+    if (sNoClock && !(s && *s && *s != '0'))
+        sStats = false;
+#if !defined(__vita__)
+    { const char* nb = getenv("MSC_AI_NOCLOCK_BREAK"); sBreak = sNoClock && nb && *nb == '1'; }
+#endif
+    if (sNoClock)
+        atexit(PrintNoClock);
     if (sStats)
         atexit(PrintAtExit);
 }
@@ -164,7 +184,14 @@ extern "C" float NpAiBudgetSetup(NpAiClockFn* profilingClock, NpAiClockFn realCl
     switch (sMode)
     {
     case kOff:
-        fprintf(stderr, "[aibudget] single player: budget -1 (no script is skipped)\n");
+        fprintf(stderr, "[aibudget] single player: budget -1 (no script is skipped)%s\n", sNoClock ? ", script clock off" : "");
+        if (sBreak)
+        {
+            *profilingClock = BreakClock;
+            return 1.0f;
+        }
+        if (sNoClock && !sStats)
+            *profilingClock = ZeroClock;
         return -1.0f;
     case kSlow:
         *profilingClock = SlowClock;

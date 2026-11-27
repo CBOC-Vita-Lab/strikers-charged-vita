@@ -84,13 +84,7 @@ void GXShadowedDiffuseMaterialProgram::DrawIndexed(const glModelPacket* packet)
 void GXShadowedDiffuseMaterialProgram::DrawDirect(const glModelPacket* packet)
 {
     GXBegin(glxGetPrimitiveType((unsigned char)packet->primType), GX_VTXFMT0, packet->numUniqueVertices);
-
-    for (unsigned short i = 0; i < packet->numUniqueVertices; ++i)
-    {
-        WGPIPE.us = i;
-        WGPIPE.us = i;
-        WGPIPE.us = i;
-    }
+    np_gx_pipe_seq16(packet->numUniqueVertices, 3);
 }
 
 void GXShadowedDiffuseMaterialProgram::BindParameters(const glModelPacket* packet)

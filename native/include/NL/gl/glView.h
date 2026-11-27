@@ -57,7 +57,8 @@ enum GLViewTargetMode
     GLViewTarget_None = 0,
     GLViewTarget_Mode8 = 8,
     GLViewTarget_Mode9 = 9,
-    GLViewTarget_Mode10 = 10
+    GLViewTarget_Mode10 = 10,
+    GLViewTarget_Mode11 = 11   // nxr4b (MSC_GLOW_L0OFF=2): as 10, but nothing reads the copy: only its clear is made (the renderer keeps the clear inside the EFB scene)
 };
 
 class GLView
@@ -133,7 +134,8 @@ public:
     void* m_Unknown38;
     void* m_Unknown3C;
     bool m_Visible;
-    u8 m_Pad41[3];
+    u8 m_StillHidden; // (StillBackdrop.cpp: hidden for this frame's send only)
+    u8 m_Pad41[2];
     const char* m_Name;
     unsigned long m_Unknown48;
     unsigned long m_TriangleCount;
@@ -178,6 +180,8 @@ void glViewCompact();
 GLPacketSorterTree* NpViewEmptyTree();
 GLPacketSorterTree* NpViewTakeTree(GLView* view);
 void NpViewReleaseTree(GLPacketSorterTree* tree);
+/* cpu60-25 (MSC_SNAP_SKIPEMPTY): a view whose send would draw, clear and copy nothing (no packets in its tree, no clear flag, no copy target) */
+bool NpViewSendsNothing(const GLView* view);
 #endif
 void glViewProjectPoint(GLView* view, const nlVector3& v3world, nlVector3& v3NDC);
 void glViewUnprojectOrthographicPoint(GLView* view, const nlVector3* normalized, nlVector3* viewPosition);

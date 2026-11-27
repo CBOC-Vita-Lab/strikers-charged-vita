@@ -19,6 +19,7 @@
 #include "Game/Camera/CameraMan.h"
 #include "Game/Field.h"
 #include "Game/Task/FixedUpdateTask.h"
+#include "Game/CharacterTemplate.h"
 #include "np/camzoom.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -331,6 +332,38 @@ void GameplayCamera::Reactivate()
     }
 }
 
+#ifdef NP_NATIVE
+// Wave 6 (MSC_CAM_INTERP=1, default; 0 = the game's own): where the camera looks when a player has the ball. The game read the SIMULATION position of the
+// owner (a new value every 20 ms, a staircase at 60 pictures a second) while the ball, when it is free, is read from the picture's blended snapshot and
+// every player is drawn from it: the camera's aim point stepped against the interpolated players it frames (relative jitter) and jumped by up to a step
+// when the ball changed hands. The owner's position in the same snapshot (the one the last picture was drawn from, as the ball branch below) is
+// the same kind of value as the free ball's. Render-side: the camera's output is part of the input record only through the remap angle, which is
+// captured once per step and sent with the input (InputRouter mRemapAngles), so peers are not affected.
+static nlVector3 CameraOwnerPosition(cPlayer* owner)
+{
+    static const bool on = [] { const char* e = getenv("MSC_CAM_INTERP"); return !(e && e[0] == '0'); }();
+    if (on)
+    {
+        RenderSnapshot* r = ReplayManager::Instance()->mRender;
+        if (r != NULL && r->mValid)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                if (g_pCharacters[i] == static_cast<cCharacter*>(owner))
+                {
+                    const nlVector3& p = r->mCharacters[i].position;
+                    if (p.x == p.x && p.y == p.y && p.z == p.z) return p;   // (not NaN)
+                    break;
+                }
+            }
+        }
+    }
+    return owner->m_DetChar.m_v3Position;
+}
+#else
+static nlVector3 CameraOwnerPosition(cPlayer* owner) { return owner->m_DetChar.m_v3Position; }
+#endif
+
 void GameplayCameraZoomLevel::CalcDesiredTarget()
 {
     nlVector3 v3OOIPos = { 0.0f, 0.0f, 0.0f };
@@ -348,7 +381,7 @@ void GameplayCameraZoomLevel::CalcDesiredTarget()
             cPlayer* pBallOwner = g_pBall->m_pOwner;
             if (pBallOwner != NULL)
             {
-                v3OOIPos = pBallOwner->m_DetChar.m_v3Position;
+                v3OOIPos = CameraOwnerPosition(pBallOwner);
             }
             else if (ReplayManager::Instance()->mRender != NULL)
             {

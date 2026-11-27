@@ -2960,9 +2960,13 @@ float cFielder::fn_80048A08()
     return InterpolateClamped(lbl_806DB950, lbl_806DB954, fShooting);
 }
 
+// (Vita port, MSC_MEGA_WARM) the renderer is told a Mega Strike has begun (its meter starts): the cut into the Mega Strike scene is a few seconds away
+extern "C" void VgxMegaPending(int on) __attribute__((weak));
+
 void cFielder::InitActionMegaStrikeMeter(bool bParam)
 {
     tDebugPrintManager::Print(DC_NETWORK, "InitActionMegaStrikeMeter at frame %d\n", GetFixedUpdateTask()->GetFrame());
+    if (VgxMegaPending) VgxMegaPending(1);
 
     m_fMegaStrikeNumBalls = 0.0f;
     m_fMegaStrikeAccuracy = 0.0f;

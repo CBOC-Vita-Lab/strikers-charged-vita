@@ -64,7 +64,7 @@ inline int greaterThanEqual(float a, float b) { return (a >= b ? 1 : 0); }
 inline int2 greaterThanEqual(float2 a, float2 b) { return int2(a.x >= b.x ? 1 : 0, a.y >= b.y ? 1 : 0); }
 inline int3 greaterThanEqual(float3 a, float3 b) { return int3(a.x >= b.x ? 1 : 0, a.y >= b.y ? 1 : 0, a.z >= b.z ? 1 : 0); }
 inline int4 greaterThanEqual(float4 a, float4 b) { return int4(a.x >= b.x ? 1 : 0, a.y >= b.y ? 1 : 0, a.z >= b.z ? 1 : 0, a.w >= b.w ? 1 : 0); }
-inline int greaterThan(int a, int b) { return (a >= b ? 1 : 0); }
+inline int greaterThan(int a, int b) { return (a > b ? 1 : 0); }
 inline int2 greaterThan(int2 a, int2 b) { return int2(a.x > b.x ? 1 : 0, a.y > b.y ? 1 : 0); }
 inline int3 greaterThan(int3 a, int3 b) { return int3(a.x > b.x ? 1 : 0, a.y > b.y ? 1 : 0, a.z > b.z ? 1 : 0); }
 inline int4 greaterThan(int4 a, int4 b) { return int4(a.x > b.x ? 1 : 0, a.y > b.y ? 1 : 0, a.z > b.z ? 1 : 0, a.w > b.w ? 1 : 0); }
@@ -72,8 +72,8 @@ inline int greaterThan(float a, float b) { return (a > b ? 1 : 0); }
 inline int2 greaterThan(float2 a, float2 b) { return int2(a.x > b.x ? 1 : 0, a.y > b.y ? 1 : 0); }
 inline int3 greaterThan(float3 a, float3 b) { return int3(a.x > b.x ? 1 : 0, a.y > b.y ? 1 : 0, a.z > b.z ? 1 : 0); }
 inline int4 greaterThan(float4 a, float4 b) { return int4(a.x > b.x ? 1 : 0, a.y > b.y ? 1 : 0, a.z > b.z ? 1 : 0, a.w > b.w ? 1 : 0); }
-#define lessThan(x, y) greaterThanEqual(y, x)
-#define lessThanEqual(x, y) greaterThan(y, x)
+#define lessThan(x, y) greaterThan(y, x)
+#define lessThanEqual(x, y) greaterThanEqual(y, x)
 inline int equal(int a, int b) { return (a == b ? 1 : 0); }
 inline int2 equal(int2 a, int2 b) { return int2(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0); }
 inline int3 equal(int3 a, int3 b) { return int3(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0, a.z == b.z ? 1 : 0); }
@@ -82,6 +82,10 @@ inline int equal(float a, float b) { return (a == b ? 1 : 0); }
 inline int2 equal(float2 a, float2 b) { return int2(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0); }
 inline int3 equal(float3 a, float3 b) { return int3(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0, a.z == b.z ? 1 : 0); }
 inline int4 equal(float4 a, float4 b) { return int4(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0, a.z == b.z ? 1 : 0, a.w == b.w ? 1 : 0); }
+inline int equal(bool a, bool b) { return (a == b ? 1 : 0); }
+inline int2 equal(bool2 a, bool2 b) { return int2(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0); }
+inline int3 equal(bool3 a, bool3 b) { return int3(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0, a.z == b.z ? 1 : 0); }
+inline int4 equal(bool4 a, bool4 b) { return int4(a.x == b.x ? 1 : 0, a.y == b.y ? 1 : 0, a.z == b.z ? 1 : 0, a.w == b.w ? 1 : 0); }
 inline int notEqual(int a, int b) { return (a != b ? 1 : 0); }
 inline int2 notEqual(int2 a, int2 b) { return int2(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0); }
 inline int3 notEqual(int3 a, int3 b) { return int3(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0, a.z != b.z ? 1 : 0); }
@@ -90,6 +94,13 @@ inline int notEqual(float a, float b) { return (a != b ? 1 : 0); }
 inline int2 notEqual(float2 a, float2 b) { return int2(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0); }
 inline int3 notEqual(float3 a, float3 b) { return int3(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0, a.z != b.z ? 1 : 0); }
 inline int4 notEqual(float4 a, float4 b) { return int4(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0, a.z != b.z ? 1 : 0, a.w != b.w ? 1 : 0); }
+inline int notEqual(bool a, bool b) { return (a != b ? 1 : 0); }
+inline int2 notEqual(bool2 a, bool2 b) { return int2(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0); }
+inline int3 notEqual(bool3 a, bool3 b) { return int3(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0, a.z != b.z ? 1 : 0); }
+inline int4 notEqual(bool4 a, bool4 b) { return int4(a.x != b.x ? 1 : 0, a.y != b.y ? 1 : 0, a.z != b.z ? 1 : 0, a.w != b.w ? 1 : 0); }
+inline bool2 not(bool2 a) { return bool2(!a.x, !a.y); }
+inline bool3 not(bool3 a) { return bool3(!a.x, !a.y, !a.z); }
+inline bool4 not(bool4 a) { return bool4(!a.x, !a.y, !a.z, !a.w); }
 inline float4 texture2DProj(sampler2D s, float3 c) { return tex2Dproj(s, c); }
 inline float4 texture2DProj(sampler2D s, float4 c) { return tex2Dproj(s, c.xyw); }
 inline float4 texture2DProj(sampler2D s, float4 c, float b) { return tex2Dbias(s, float4(c.xy / c.w, 1, b)); }
@@ -103,6 +114,9 @@ inline float4 textureCube(samplerCUBE x, float3 s) { return texCUBE(x,s); }
 inline float4 textureCube(samplerCUBE x, float4 s) { return texCUBE(x,s); }
 inline float4 textureCube(samplerCUBE x, float3 s, float b) { return texCUBEbias(x,float4(s,b)); }
 inline float4 texture2DLod(sampler2D x, float2 coord, float lod) { return tex2Dlod(x, float4(coord, 0.0f, lod)); }
+inline float4 texture2DProjLod(sampler2D x, float3 coord, float lod) { return tex2Dlod(x, float4(coord.xy / coord.z, 0.0f, lod)); }
+inline float4 texture2DProjLod(sampler2D x, float4 coord, float lod) { return tex2Dlod(x, float4(coord.xy / coord.w, 0.0f, lod)); }
+inline float4 textureCubeLod(samplerCUBE x, float3 coord, float lod) { return texCUBElod(x, float4(coord, lod)); }
 #define dFdx(a) ddx(a)
 #define dFdy(a) ddy(a)
 #define s x
@@ -136,10 +150,18 @@ inline float4 vgl_atan(float4 x) { return atan(x); }
 #define bvec3 bool3
 #define bvec4 bool4
 #define fract(x) frac(x)
-#define mod(x,y) fmod(x,y)
+inline float vgl_mod(float x, float y) { return x - y * floor(x / y); }
+inline float2 vgl_mod(float2 x, float y) { return x - y * floor(x / y); }
+inline float3 vgl_mod(float3 x, float y) { return x - y * floor(x / y); }
+inline float4 vgl_mod(float4 x, float y) { return x - y * floor(x / y); }
+inline float2 vgl_mod(float2 x, float2 y) { return x - y * floor(x / y); }
+inline float3 vgl_mod(float3 x, float3 y) { return x - y * floor(x / y); }
+inline float4 vgl_mod(float4 x, float4 y) { return x - y * floor(x / y); }
+#define mod vgl_mod
 #define mat2 float2x2
 #define mat3 float3x3
 #define mat4 float4x4
+#define matrixCompMult(x, y) ((x) * (y))
 #define matrix _matrix
 #define Matrix _Matrix
 #define sampler _sampler

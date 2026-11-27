@@ -7,6 +7,9 @@
 #include "NL/nlMemory.h"
 #ifdef NP_NATIVE
 #include "platform/assets/np_hook.h" /* platform/assets: byte-order conversion of disc data at load (NPA) */
+#include <stdint.h>
+extern "C" uint64_t NpLoadInflateBegin(void);
+extern "C" void NpLoadInflateEnd(uint64_t t0, unsigned size);
 #endif
 
 
@@ -360,7 +363,15 @@ void OnCompressedFileDataRead(nlFile* file, void* buffer, unsigned int size, uns
     CompressedFileLoad* state = (CompressedFileLoad*)userParam;
 
     ++state->completedReads;
+#ifdef NP_NATIVE
+    {
+        const uint64_t traceT0 = NpLoadInflateBegin();   // 1.3 MSC_LOAD_TRACE: what the [load] lines call inflate (the game thread's time in zlib); 0 and no clock read without it
+        state->inflateState.Process(buffer, size);
+        NpLoadInflateEnd(traceT0, size);
+    }
+#else
     state->inflateState.Process(buffer, size);
+#endif
     state->QueueNextRead(file);
 
     if (state->completedReads == state->readCount)

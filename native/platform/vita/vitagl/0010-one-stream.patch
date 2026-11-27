@@ -1,0 +1,172 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH 10/10] Optional single hardware vertex stream for interleaved draws (vglSetOneStream)
+
+---
+diff -ruN source/custom_shaders.c b/source/custom_shaders.c
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -1491,6 +1491,67 @@
+ 	return GL_TRUE;
+ }
+ 
++// One hardware stream for an interleaved layout (STR-076). With DRAW_SPEEDHACK every attribute of a draw gets a stream of its own, all of them pointing into
++// the same interleaved vertex buffer. vglSetOneStream(GL_TRUE) makes glDrawElements describe such a draw with ONE stream (the lowest attribute offset
++// is the stream's base, the others are attribute offsets inside the vertex) plus one stream per attribute that is disabled (a constant), so the vertex
++// program has fewer streams and the draw sets fewer of them. Draws that do not qualify are made the old way. Off by default.
++static GLboolean vgl_one_stream = GL_FALSE;
++void vglSetOneStream(GLboolean enable) {
++	vgl_one_stream = enable;
++}
++#ifdef DRAW_SPEEDHACK
++// Qualifies and rewrites the draw's attributes / streams (the arrays the speedhack macro filled) into out_attr / out_streams.
++// Returns the number of streams (0: does not qualify, nothing was written). *ptr0 is the pointer of stream 0.
++static uint32_t vgl_collapse_streams(const program *p, const SceGxmVertexAttribute *attributes, const SceGxmVertexStream *streams,
++	SceGxmVertexAttribute *out_attr, SceGxmVertexStream *out_streams, void **ptr0) {
++	vbo *common = NULL;
++	uint32_t stride = 0, base = 0xFFFFFFFFu, active = 0;
++	SceGxmIndexSource index_source = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
++	for (uint32_t i = 0; i < p->attr_num; i++) {
++		uint8_t attr_idx = p->attr_map[i];
++		if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
++			continue;
++		vbo *v = (vbo *)cur_vao->vertex_attrib_vbo[attr_idx];
++		if (!v || (common && v != common) || streams[i].stride == 0 || (stride && streams[i].stride != stride))
++			return 0;
++		if (active && streams[i].indexSource != index_source)
++			return 0;
++		index_source = streams[i].indexSource;
++		common = v;
++		stride = streams[i].stride;
++		uint32_t off = cur_vao->vertex_attrib_offsets[attr_idx];
++		if (off < base)
++			base = off;
++		active++;
++	}
++	if (active < 2)
++		return 0;
++	uint32_t next = 1;
++	GLboolean first = GL_TRUE;
++	for (uint32_t i = 0; i < p->attr_num; i++) {
++		uint8_t attr_idx = p->attr_map[i];
++		out_attr[i] = attributes[i];
++		if (cur_vao->vertex_attrib_state & (1 << attr_idx)) {
++			uint32_t rel = cur_vao->vertex_attrib_offsets[attr_idx] - base;
++			if (rel >= stride)
++				return 0;
++			out_attr[i].streamIndex = 0;
++			out_attr[i].offset = (uint16_t)rel;
++			if (first) {
++				out_streams[0] = streams[i];
++				first = GL_FALSE;
++			}
++		} else {
++			out_attr[i].streamIndex = next;
++			out_streams[next++] = streams[i];
++		}
++	}
++	*ptr0 = (uint8_t *)common->ptr + base;
++	common->last_frame = vgl_framecount;
++	return next;
++}
++#endif
++
+ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, uint32_t top_idx, uint32_t base_idx, SceGxmIndexSource index_type) {
+ #ifdef HAVE_PROFILING
+ 	uint32_t draw_start = sceKernelGetProcessTimeLow();
+@@ -1769,6 +1830,15 @@
+ #else // DRAW_SPEEDHACK
+ 	handle_speedhack_attrib();
+ #endif
++	SceGxmVertexAttribute *attributes_orig = attributes; // (what the draw changed in the VAO's own arrays is put back through these)
++	SceGxmVertexStream *streams_orig = streams;
++	uint32_t stream_num = p->attr_num;
++#ifdef DRAW_SPEEDHACK
++	SceGxmVertexAttribute one_attr[VERTEX_ATTRIBS_NUM];
++	SceGxmVertexStream one_streams[VERTEX_ATTRIBS_NUM];
++	void *one_ptr = NULL;
++	uint32_t collapsed = 0;
++#endif
+ 
+ #ifndef INDICES_SPEEDHACK
+ 	// Check if highest index is small enough for 16 bit usage and if so, downgrade to 16 bit vertex sources for faster emitted code
+@@ -1788,8 +1858,19 @@
+ 	}
+ #endif
+ 
++#ifdef DRAW_SPEEDHACK
++	if (vgl_one_stream && p->attr_num > 1 && !(index_type & 2)) {
++		collapsed = vgl_collapse_streams(p, attributes, streams, one_attr, one_streams, &one_ptr);
++		if (collapsed) {
++			attributes = one_attr;
++			streams = one_streams;
++			stream_num = collapsed;
++		}
++	}
++#endif
++
+ 	// Uploading new vertex program
+-	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog) && vgl_robust_scenes)
++	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, stream_num, &p->vprog) && vgl_robust_scenes)
+ 		return GL_FALSE; // 1.2: a layout that could not be made is not drawn with the previous one's program
+ #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
+ 	vertex_layout_cache_insert(p, VERTEX_LAYOUT_ELEMENTS, (uint8_t)index_type, is_packed, is_full_vbo, attributes, streams);
+@@ -1800,12 +1881,24 @@
+ 	upload_uniforms();
+ 
+ 	// Uploading vertex streams
++#ifdef DRAW_SPEEDHACK
++	if (collapsed) {
++		sceGxmSetVertexStream(gxm_context, 0, one_ptr);
++		uint32_t next = 1;
++		for (int i = 0; i < p->attr_num; i++) {
++			uint8_t attr_idx = p->attr_map[i];
++			if (!(cur_vao->vertex_attrib_state & (1 << attr_idx)))
++				sceGxmSetVertexStream(gxm_context, next++, cur_vao->vertex_attrib_value[attr_idx]);
++		}
++	}
++#endif
+ 	for (int i = 0; i < p->attr_num; i++) {
+ 		uint8_t attr_idx = p->attr_map[i];
+ 		GLboolean is_active = (cur_vao->vertex_attrib_state & (1 << attr_idx)) ? GL_TRUE : GL_FALSE;
+ 		if (is_active) {
+ #ifdef DRAW_SPEEDHACK
+-			sceGxmSetVertexStream(gxm_context, i, ptrs[i]);
++			if (!collapsed)
++				sceGxmSetVertexStream(gxm_context, i, ptrs[i]);
+ #else
+ #ifdef STRICT_DRAW_COMPLIANCE
+ 			sceGxmSetVertexStream(gxm_context, i, is_packed[i] ? ptrs[0] : ptrs[i]);
+@@ -1814,14 +1907,17 @@
+ #endif
+ #endif
+ 		} else {
+-			sceGxmSetVertexStream(gxm_context, i, cur_vao->vertex_attrib_value[attr_idx]);
++#ifdef DRAW_SPEEDHACK
++			if (!collapsed)
++#endif
++				sceGxmSetVertexStream(gxm_context, i, cur_vao->vertex_attrib_value[attr_idx]);
+ 		}
+ 		if (!p->has_unaligned_attrs) {
+-			attributes[i].regIndex = i;
++			attributes_orig[i].regIndex = i;
+ 			if (!is_active) {
+-				streams[i].stride = orig_stride[i];
+-				attributes[i].componentCount = orig_size[i];
+-				attributes[i].format = orig_fmt[i];
++				streams_orig[i].stride = orig_stride[i];
++				attributes_orig[i].componentCount = orig_size[i];
++				attributes_orig[i].format = orig_fmt[i];
+ 			}
+ 		}
+ 	}
+diff -ruN source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1340,6 +1340,7 @@
+ 
+ // Allows vitaGL to use newlib memory once all internal mempools are exhausted. Default value: GL_TRUE.
+ void vglUseExtraMem(GLboolean usage);
++void vglSetOneStream(GLboolean enable); // glDrawElements: one hardware stream for an interleaved layout (DRAW_SPEEDHACK builds only; off by default)
+ 
+ // Simplified function to enable or disable V-Sync. For more fine granularity on the swap interval use eglSwapInterval.
+ void vglWaitVblankStart(GLboolean enable);

@@ -13,22 +13,62 @@ jobs:
       - name: Release, installer-helper and setup tests
         run: python3 -m unittest discover -s tests -v
       - name: Install 32-bit build tools
-        run: sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib clang
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib clang libclang-rt-18-dev
+      - name: Impostor capture lifecycle regression (host32)
+        run: bash native/tools/crowd/run_capture_lifecycle_test.sh "$RUNNER_TEMP/capture-lifecycle"
+      - name: GPU timing sample validity regression (host contract)
+        run: bash renderer/tests/run_vitagl_rt_validity_test.sh
+      - name: A failed render target ends the scene entry (vitaGL 0019)
+        run: bash renderer/tests/run_vitagl_rt_failure_test.sh
+      - name: Picture shader package admission and float fallback regression
+        run: SANITIZE=1 bash renderer/tests/run_picture_half_test.sh
+      - name: Shader forms
+        run: SANITIZE=1 bash renderer/tests/run_shader_forms_test.sh
+      - name: TLS 1.3 allocation-failure cleanup regression (host32)
+        run: |
+          python3 tools/build-mbedtls.py --target host32 --work build/dependencies-tls13
+          bash native/tools/https/run_tls13_transform_test.sh \
+            build/dependencies-tls13/mbedtls/host32 \
+            build/dependencies-tls13/sources/Mbed-TLS_mbedtls build/tls13-transform-test
       - name: Wii SDK layer unit tests (host32)
         run: make -C native/platform/sdk T=host32 B="$PWD/build/sdk-host32" -j2 check
+      - name: Vita platform timer fallback tests
+        run: make -C native/platform/sdk T=host32 PLATFAKE=1 B="$PWD/build/sdk-platform-fake" -j2 check
+      - name: Movie read-admission and queue regression tests
+        run: |
+          make -f tests/movie/thp-tests.mk T=host32 B="$PWD/build/sdk-host32" -j2 "$PWD/build/sdk-host32/tests/test_thp_skip"
+          build/sdk-host32/tests/test_thp_skip
       - name: Camera zoom unit test
         run: |
           cd native
           clang++ -m32 -std=gnu++17 -DNP_NATIVE=1 -Iinclude -Iplatform/sdk/include \
             tools/cam/test_camzoom.cpp platform/compat/np_camzoom.cpp -o "$RUNNER_TEMP/camzoom"
           "$RUNNER_TEMP/camzoom"
-      - name: Frame-rate controller unit test (AUTO 30/60)
+      - name: Frame-rate controller and pipeline gate tests
         run: |
           cd native
           clang++ -std=c++11 -O1 -Iplatform/compat tools/fps/fps_unit.cpp -o "$RUNNER_TEMP/fps_unit"
           "$RUNNER_TEMP/fps_unit"
+          clang++ -std=c++11 -O1 -Iplatform/compat tools/fps/fps_hold30_unit.cpp -o "$RUNNER_TEMP/fps_hold30_unit"
+          "$RUNNER_TEMP/fps_hold30_unit"
+          clang++ -std=c++11 -O1 -D__vita__ -Iinclude -Iplatform/compat -Itools/fps/test_include '-DFPS_SOURCE="../../platform/compat/np_fps.cpp"' '-DPROBE_SOURCE="../../platform/vita/src/np_fps_probe.cpp"' tools/fps/fps_probe_unit.cpp -o "$RUNNER_TEMP/fps_probe_unit"
+          for case in gap failed-seed zero platform-registration; do env -i PATH="$PATH" LC_ALL=C "$RUNNER_TEMP/fps_probe_unit" "$case"; done
+          clang++ -std=c++11 -O2 -Iinclude tools/fps/fps_gate_unit.cpp -o "$RUNNER_TEMP/fps_gate_unit"
+          "$RUNNER_TEMP/fps_gate_unit"
       - name: Settings screen model test
         run: |
           cd native/platform/vita
-          g++ -std=c++17 -O1 -Iinclude -Isrc -I../../include tests/test_settings.cpp src/np_settings.cpp -o "$RUNNER_TEMP/test_settings"
+          g++ -std=c++17 -O1 -pthread -Iinclude -Isrc -I../../include tests/test_settings.cpp src/np_settings.cpp src/vita_plan.cpp -o "$RUNNER_TEMP/test_settings"
           "$RUNNER_TEMP/test_settings"
+      - name: Settings startup and restart integration
+        run: CXX=clang++ SANITIZE=1 python3 native/platform/vita/tests/run_settings_runtime_tests.py
+      - name: Native settings model (rows, labels in three languages, byte-equal saves, with mutants)
+        run: CXX=clang++ python3 native/platform/vita/tests/run_native_settings_tests.py
+      - name: Live settings cells (CROWD, LESS SHAKE, REAR TOUCH apply in a match; first read = the old getenv rule; with mutants)
+        run: CXX=clang++ python3 native/platform/vita/tests/run_live_settings_tests.py
+      - name: Pause-menu settings entry, leave dialog and layout tests (with mutants)
+        run: CXX=clang++ python3 native/platform/vita/tests/run_pause_settings_tests.py
+      - name: Settings prune (retired keys, the five pages, the guard rules; with mutants)
+        run: CXX=clang++ python3 native/platform/vita/tests/run_settings_prune_tests.py
+      - name: Start check for Picture and Language changes (state machine over a fake card, with mutants)
+        run: CXX=clang++ python3 native/platform/vita/tests/run_change_guard_tests.py

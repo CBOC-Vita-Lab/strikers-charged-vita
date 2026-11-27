@@ -1,0 +1,14 @@
+# console-1.2 run mv-base: Movies: stadium previews at the defaults (read first)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route ntour, version payload 1.3, role ab
+# movie14.md: the `[thp-pace]` line of every stadium preview: repeated, late, doubled, longest gap, `recovered ... 0`, `lanes given up 0`; does any repeat exist? If `repeated 0` and `late 0` for all kinds, drop the delay line.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/ntour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_THP_NOWAIT=1
+MSC_VGX_I8CHURN=0

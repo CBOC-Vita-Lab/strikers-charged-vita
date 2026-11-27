@@ -1,0 +1,44 @@
+# UX pictures (tools/mp/ux_shots.py): ONLINE -> HOST A ROOM: connecting, waiting for the partner, Circle
+mash 100 20 scene == 0
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+idle 60
+shot 01-main-menu
+idle 12
+idle 10
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+press 100
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 90
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 90
+press 100
+wait scene == 1 900
+idle 6
+shot 10-host-connecting
+idle 12
+idle 150
+shot 11-host-waiting-partner
+idle 12
+press 200
+wait scene == 1 1200
+idle 90
+shot 12-host-cancelled-back-in-main-menu
+idle 12
+exit

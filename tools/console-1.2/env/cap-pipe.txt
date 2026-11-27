@@ -1,0 +1,15 @@
+# console-1.2 run cap-pipe: 1.3 current with the fourth core asked for: Pipeline Central
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group addon, route cpipe, version payload 1.3, role ab
+# As cap-tour, on the heaviest stadium.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/cpipe.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_VITA_CORE3=1
+MSC_VITA_CORE3_SEND=1
+MSC_VITA_CLOCK_POLICY=max

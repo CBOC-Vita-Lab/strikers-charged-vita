@@ -8,8 +8,8 @@
 #   tools/heavy.sh -t 590 platform/vita/tools/job_vita_final.sh        (resumable: run again after a timeout)
 cd "$(dirname "$0")/../../.."
 export VITASDK=/opt/vitasdk PATH=/opt/vitasdk/bin:$PATH
-R=${R:-/home/claude/msc/build/np/NPV3}
-GX=${GX_VGX:-/home/claude/msc/npw/vgx-npv3}
+R=${R:-/work/msc/build/np/NPV3}
+GX=${GX_VGX:-/work/msc/npw/vgx-npv3}
 MK="make -j2 TARGET=vita GX_VGX=$GX WITH_SDK=1 WITH_GX=1 OPT=-O2\ -ffunction-sections\ -fdata-sections DEBUG=-g0"
 mk() { local root=$1; shift; make -j2 TARGET=vita BUILD_ROOT=$root GX_VGX=$GX WITH_SDK=1 WITH_GX=1 "OPT=-O2 -ffunction-sections -fdata-sections" DEBUG=-g0 "$@" 2>&1 | grep -a -v "^/opt/vitasdk\|^clang\|^arm-vita\|^make\[\|^mkdir\|wchar_t yet\|32-bit enums\|GNU-stack\|NOTE: This\|^env \|^  NP_GAME" | tail -${TAILN:-6}; return ${PIPESTATUS[0]}; }
 echo "== final $(date +%T) np $(git rev-parse --short HEAD)"

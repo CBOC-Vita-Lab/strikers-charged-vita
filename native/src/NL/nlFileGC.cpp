@@ -1,6 +1,7 @@
 #include "revolution/dvd/dvd.h"
 #include "revolution/os/OSInterrupt.h"
 #include "revolution/os/OSThread.h"
+#include "revolution/os/OSTime.h"
 
 #include "NL/nlFileGC.h"
 #include "NL/nlArrayAllocator.h"
@@ -10,6 +11,10 @@
 #include "NL/nlMemory.h"
 #include <stdio.h>
 #include <string.h>
+#if defined(NP_NATIVE)
+#include "np/disc_error.h"
+#include <stdlib.h>
+#endif
 
 class DolphinFile;
 class AsyncManager;
@@ -106,6 +111,9 @@ public:
 
     AsyncEntry* AddEntry(DolphinFile* pFile, ReadAsyncCallback pFunc, void* pBuffer,
         unsigned long position, unsigned long uSize, unsigned long uParam, AsyncReadPhase phase);
+#if defined(NP_NATIVE)
+    bool Reserve(unsigned long entries);
+#endif
     void Service();
     void CancelPendingReads(DolphinFile* pFile, CancelAsyncCallback callback);
     bool Contains(AsyncEntry* entry);
@@ -119,8 +127,30 @@ public:
 
 static AsyncManager* s_pAsyncManager;
 static bool sServicingReads;
+#if defined(NP_NATIVE)
+// NP (MSC_MEGA_CUTLOG): reads the game thread waited for (DolphinFile::Read spins until the disc has delivered), counted for the renderer's
+// [mega-cut] lines. Counting only.
+extern "C" {
+volatile unsigned int np_stat_sync_reads = 0;
+volatile unsigned int np_stat_sync_kib = 0;
+}
+#endif
 // NP: how many AsyncManager::Service calls are active (a completion callback can queue another read).
 static int sNpServiceDepth;
+#if defined(NP_NATIVE)
+// NP: MSC_DVD_TRACE=1 also reports the waits of the calling (game) thread in this file layer: a synchronous read that spins until
+// the disc has delivered, and a request that waits for a free queue entry. One line each, after the wait.
+static bool NpTraceWaits()
+{
+    static int on = -1;
+    if (on < 0)
+    {
+        const char* e = getenv("MSC_DVD_TRACE");
+        on = (e != 0 && *e != 0) ? 1 : 0;
+    }
+    return on != 0;
+}
+#endif
 
 bool IsAsyncReadBusy(AsyncEntry* entry);
 
@@ -197,6 +227,12 @@ void DolphinFile::Read(void* buffer, unsigned int size, unsigned long bufferSize
         tailSize = size - alignedSize;
     }
 
+#if defined(NP_NATIVE)
+    if (!s_pAsyncManager->Reserve(alignedSize != 0 && tailSize != 0 ? 2 : 1))
+    {
+        return;
+    }
+#endif
     unsigned long position = m_Position;
     if (alignedSize != 0)
     {
@@ -212,11 +248,30 @@ void DolphinFile::Read(void* buffer, unsigned int size, unsigned long bufferSize
     }
 
     m_Position += size;
+#if defined(NP_NATIVE)
+    __atomic_fetch_add(&np_stat_sync_reads, 1u, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&np_stat_sync_kib, (unsigned int)((size + 1023u) / 1024u), __ATOMIC_RELAXED);
+    unsigned long npYields = 0;
+    // (a clock read is made only when the trace is on: in the harness's virtual-time runs a read of the clock on the game thread advances the
+    // clock, which shifted the game's time by a tick per synchronous read and so the pictures of animated scenes)
+    const bool npTrace = NpTraceWaits();
+    const OSTime npStart = npTrace ? OSGetTime() : 0;
+#endif
     while (s_pAsyncManager->Contains(finalEntry))
     {
         OSYieldThread();
         s_pAsyncManager->Service();
+#if defined(NP_NATIVE)
+        ++npYields;
+#endif
     }
+#if defined(NP_NATIVE)
+    if (npTrace)
+    {
+        fprintf(stderr, "[nlwait] sync read of entry %d at %lu, %u bytes: the game thread waited %lu ms (%lu yields)\n", mEntryNum, position, size,
+                (unsigned long)OSTicksToMilliseconds(OSGetTime() - npStart), npYields);
+    }
+#endif
 }
 
 void AsyncManager::CancelPendingReads(DolphinFile* pFile, CancelAsyncCallback callback)
@@ -257,6 +312,46 @@ void AsyncManager::CancelPendingReads(DolphinFile* pFile, CancelAsyncCallback ca
     }
 }
 
+#if defined(NP_NATIVE)
+// NP: a read that is split in an aligned head and an unaligned tail (two entries) is admitted as a whole or not at all. A head
+// whose tail was refused (the queue holds 64 entries) never completes: nothing but the tail's completion finishes a READ_HEAD
+// entry, so the request kept its slot and its file's PendingAsync forever, and the caller was told the read was queued. Counts the
+// free entries, waiting for outstanding reads like AddEntry does (not from inside Service). False: nothing was queued, the caller's
+// file position is untouched and the request can be made again.
+bool AsyncManager::Reserve(unsigned long entries)
+{
+    for (unsigned long spins = 0;; spins++)
+    {
+        unsigned long freeEntries = 0;
+        AsyncEntry* e = m_freeEntryList;
+        if (e != 0)
+        {
+            AsyncEntry* start = nlDLRingGetStart(e);
+            AsyncEntry* cur = start;
+            do
+            {
+                freeEntries++;
+                cur = cur->m_next;
+            } while (cur != start && freeEntries < 64);
+        }
+        if (freeEntries >= entries)
+        {
+            if (spins != 0 && NpTraceWaits())
+            {
+                fprintf(stderr, "[nlwait] the queue of 64 reads was full: the game thread waited %lu yields for %lu free entries\n", spins, entries);
+            }
+            return true;
+        }
+        if (sNpServiceDepth != 0 || spins >= 1000000)
+        {
+            return false;
+        }
+        OSYieldThread();
+        Service();
+    }
+}
+#endif
+
 AsyncEntry* AsyncManager::AddEntry(DolphinFile* pFile, ReadAsyncCallback pFunc,
     void* pBuffer, unsigned long position, unsigned long uSize, unsigned long uParam,
     AsyncReadPhase phase)
@@ -265,11 +360,23 @@ AsyncEntry* AsyncManager::AddEntry(DolphinFile* pFile, ReadAsyncCallback pFunc,
     // has already advanced the file position (strikersVita found the same hole in the GameCube
     // port). Wait for outstanding reads instead; not from inside Service itself, where servicing
     // again would walk the list under the outer loop.
+#if defined(NP_NATIVE)
+    unsigned long npSpins = 0;
+#endif
     for (unsigned long spins = 0; m_freeEntryList == 0 && sNpServiceDepth == 0 && spins < 1000000; spins++)
     {
         OSYieldThread();
         Service();
+#if defined(NP_NATIVE)
+        npSpins = spins + 1;
+#endif
     }
+#if defined(NP_NATIVE)
+    if (npSpins != 0 && NpTraceWaits())
+    {
+        fprintf(stderr, "[nlwait] the queue of 64 reads was full: the game thread waited %lu yields for a free entry\n", npSpins);
+    }
+#endif
     if (m_freeEntryList == 0)
     {
         return 0;
@@ -448,6 +555,12 @@ AsyncEntry* nlReadAsync(nlFile* file, void* buffer, unsigned int size,
         tailSize = size - alignedSize;
     }
 
+#if defined(NP_NATIVE)
+    if (!s_pAsyncManager->Reserve(alignedSize != 0 && tailSize != 0 ? 2 : 1))
+    {
+        return 0;
+    }
+#endif
     position = ((DolphinFile*)file)->m_Position;
     AsyncEntry* firstEntry;
     if (alignedSize != 0)
@@ -594,6 +707,9 @@ static unsigned char CheckDVDStatus()
     do
     {
         Status = DVDGetDriveStatus();
+#if defined(NP_NATIVE)
+        if (Status == DVD_STATE_FATAL) NpDiscReportReadError();
+#endif
         u32 statusPlusOne = (u32)(Status + 1);
 
         switch (statusPlusOne)

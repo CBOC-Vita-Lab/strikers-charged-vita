@@ -55,9 +55,14 @@ Replay::Frame::Frame(char* begin, int size, Frame* next)
 
 Replay::Frame* Replay::Next(Frame* frame, int reelIdx) const
 {
+    if (frame == 0)
+    {
+        return 0;
+    }
+
     Frame* current = frame->mNext;
 
-    while (current != mReels[reelIdx].mBegin)
+    while (current != 0 && current != mReels[reelIdx].mBegin)
     {
         if (current->mReelIdx == reelIdx)
         {
@@ -99,6 +104,31 @@ float Replay::TimeOfLastOccurence(unsigned int events) const
 
     return time;
 }
+
+#ifdef NP_NATIVE
+void Replay::TimeOfLastOccurence2(unsigned int eventsA, unsigned int eventsB, float* timeA, float* timeB) const
+{
+    Frame* frame = GetFrame(mReels, mReelIdx);
+    float tA = frame->mTime;
+    float tB = tA;
+
+    while (frame != 0 && frame != mReels[mReelIdx].mLast)
+    {
+        if ((frame->mEvents & eventsA) != 0)
+        {
+            tA = frame->mTime;
+        }
+        if ((frame->mEvents & eventsB) != 0)
+        {
+            tB = frame->mTime;
+        }
+        frame = Next(frame, mReelIdx);
+    }
+
+    *timeA = tA;
+    *timeB = tB;
+}
+#endif
 
 void Replay::NewFrame()
 {

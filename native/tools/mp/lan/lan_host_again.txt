@@ -22,6 +22,24 @@ idle 10
 log STATE pointer on multiplayer
 idle 20
 press 100
+wait scene == 10 || scene == 24 2400
+if scene == 10
+# Explicit mode choices; MSC_NET_MODE host/join shortcuts already enter the lobby.
+log STATE multiplayer mode choice
+wait nbuttons >= 3 900
+idle 60
+mash 4 15 onctx == 1 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 900
+wait nbuttons >= 3 900
+idle 60
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+log chose local nearby
+endif
 wait scene == 24 2400
 log STATE lobby
 idle 120

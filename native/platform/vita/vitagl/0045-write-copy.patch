@@ -1,0 +1,235 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 12:00:00 -0500
+Subject: [PATCH] write copy into the uncached pools (MSC_VITA_WRCOPY, default 0): vglSetWriteCopy(mode) selects sceClibMemcpy (0), whole 64 byte NEON stores (1), 128 byte vstm bursts (2) or sceDmacMemcpy for 8 KiB and more (3) for the stream buffer data (glBufferData/SubData) and the four uniform ring copies; vglWriteCopyVariant and vglWriteCopyStats serve the start-up benchmark and the log (source/utils/wrcopy.[ch])
+
+---
+
+diff --git a/source/buffers.c b/source/buffers.c
+index 9608d5d7..0ba6b854 100644
+--- a/source/buffers.c
++++ b/source/buffers.c
+@@ -435,7 +435,7 @@ inline void glNamedBufferData(GLuint buffer, GLsizei size, const void *data, GLe
+ 	gpu_buf->last_frame = OBJ_NOT_USED;
+ 
+ 	if (data)
+-		vgl_fast_memcpy(gpu_buf->ptr, data, size);
++		vgl_wr_copy(gpu_buf->ptr, data, size); // 0045: NEON bursts into the uncached pool when vglSetWriteCopy asks
+ }
+ 
+ void glBufferData(GLenum target, GLsizei size, const GLvoid *data, GLenum usage) {
+@@ -509,7 +509,7 @@ inline void glNamedBufferSubData(GLuint buffer, GLintptr offset, GLsizeiptr size
+ 	} else
+ #endif
+ 	{
+-		vgl_memcpy((uint8_t *)gpu_buf->ptr + offset, data, size);
++		vgl_wr_copy((uint8_t *)gpu_buf->ptr + offset, data, size); // 0045
+ #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+ 		vgl_stream_touch((uint8_t *)gpu_buf->ptr + offset); // GLB
+ #endif
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 35157fff..2f091afb 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -172,7 +172,7 @@ char vgl_file_cache_path[256];
+ 			sceGxmSetVertexDefaultUniformBuffer(gxm_context, vgl_def_vert_buf); \
+ 		} else { \
+ 			void *buffer = vglReserveVertexUniformBuffer(p->vshader->unif_buf_size); \
+-			vgl_fast_memcpy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
++			vgl_wr_copy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
+ 			p->unif_last[0] = buffer; \
+ 			p->unif_gen[0] = vgl_unif_gen; \
+ 			p->unif_changed[0] = 0; \
+@@ -185,7 +185,7 @@ char vgl_file_cache_path[256];
+ 			sceGxmSetFragmentDefaultUniformBuffer(gxm_context, vgl_def_frag_buf); \
+ 		} else { \
+ 			void *buffer = vglReserveFragmentUniformBuffer(p->fshader->unif_buf_size); \
+-			vgl_fast_memcpy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
++			vgl_wr_copy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
+ 			p->unif_last[1] = buffer; \
+ 			p->unif_gen[1] = vgl_unif_gen; \
+ 			p->unif_changed[1] = 0; \
+@@ -235,12 +235,12 @@ char vgl_file_cache_path[256];
+ 				vglSetUniformData(p->ffp_binds[FFP_NORMAL_MATRIX]->vptr, SCE_GXM_PARAMETER_TYPE_F32, 0, 3, 3, (const float *)normal_matrix, SCE_GXM_PARAMETER_TYPE_F32); \
+ 			} \
+ 		} \
+-		vgl_fast_memcpy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
++		vgl_wr_copy(buffer, p->unif_vbuffer, p->vshader->unif_buf_size); \
+ 		dirty_shader_vert_unifs = GL_FALSE; \
+ 	} \
+ 	if (p->frag_uniforms && dirty_shader_frag_unifs) { \
+ 		void *buffer = vglReserveFragmentUniformBuffer(p->fshader->unif_buf_size); \
+-		vgl_fast_memcpy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
++		vgl_wr_copy(buffer, p->unif_fbuffer, p->fshader->unif_buf_size); \
+ 		dirty_shader_frag_unifs = GL_FALSE; \
+ 	} \
+ 	if (p->vert_ubos) { \
+diff --git a/source/utils/mem_utils.h b/source/utils/mem_utils.h
+index da4e7e33..d090bb75 100644
+--- a/source/utils/mem_utils.h
++++ b/source/utils/mem_utils.h
+@@ -35,6 +35,9 @@
+ #define vgl_fast_memcpy sceClibMemcpy
+ #endif
+ 
++// 0045 (MSC_VITA_WRCOPY): a copy into the uncached pools (stream buffers, uniform ring), see utils/wrcopy.c
++void vgl_wr_copy(void *dst, const void *src, uint32_t n);
++
+ extern vglMemType VGL_MEM_MAIN; // Flag for VRAM usage for allocations
+ 
+ // Support for older vitasdk versions for CI based on ancient builds
+diff --git a/source/utils/wrcopy.c b/source/utils/wrcopy.c
+new file mode 100644
+index 00000000..97580e57
+--- /dev/null
++++ b/source/utils/wrcopy.c
+@@ -0,0 +1,116 @@
++/*
++ * wrcopy.c (0045, MSC_VITA_WRCOPY): copies of frame data INTO the uncached pools (the stream buffers, the uniform ring).
++ *
++ * The circular pool and the uniform ring live in uncached RAM (SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE). The CPU's writes there are not merged into bursts by
++ * sceClibMemcpy's word copy (0.25 GB/s measured on 5 Oct: 3.9 ms per MB; a Vice open-play picture writes ~1.4 MB: 1.05 MB of stream and ~0.36 MB of ring). Whole 64 byte
++ * stores from NEON (two 32 byte aligned vst1, or one 128 byte vstm) leave the write buffer as full lines. The bytes written are the same either way.
++ *
++ * vglSetWriteCopy(mode): 0 sceClibMemcpy (default), 1 two aligned 32 byte NEON stores per 64 bytes, 2 one 16-register vstm per 128 bytes,
++ * 3 sceDmacMemcpy for copies of 8 KiB or more between user addresses (what upstream's vgl_memcpy does for texture data; the DMA engine writes the uncached RAM itself).
++ * vglWriteCopyVariant(mode, dst, src, n): one copy by that variant (the start-up benchmark and its verification, in the game's platform layer).
++ * Copies under VGL_WRCOPY_MIN bytes keep sceClibMemcpy (the call is cheaper than the set-up). The destination's head is copied to a 64 byte boundary by sceClibMemcpy.
++ */
++#include <stdint.h>
++#include <string.h>
++#include <psp2/kernel/clib.h>
++#include <psp2/kernel/dmac.h>
++#include "wrcopy.h"
++
++#define VGL_WRCOPY_MIN 192u
++
++static volatile int vgl_wr_mode = 0;
++uint32_t vgl_wr_stat[4]; // copies and bytes made by a NEON variant, copies and bytes left to sceClibMemcpy (for the log)
++
++static inline void wr_neon64(uint8_t *d, const uint8_t *s, uint32_t blocks) {
++	__asm__ volatile(
++		"1:\n\t"
++		"pld [%1, #256]\n\t"
++		"vld1.8 {d0-d3}, [%1]!\n\t"
++		"vld1.8 {d4-d7}, [%1]!\n\t"
++		"subs %2, %2, #1\n\t"
++		"vst1.64 {d0-d3}, [%0:256]!\n\t"
++		"vst1.64 {d4-d7}, [%0:256]!\n\t"
++		"bne 1b\n\t"
++		: "+r"(d), "+r"(s), "+r"(blocks)
++		:
++		: "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "memory", "cc");
++}
++
++static inline void wr_vstm128(uint8_t *d, const uint8_t *s, uint32_t blocks) {
++	__asm__ volatile(
++		"1:\n\t"
++		"pld [%1, #256]\n\t"
++		"vld1.8 {d0-d3}, [%1]!\n\t"
++		"vld1.8 {d4-d7}, [%1]!\n\t"
++		"vld1.8 {d8-d11}, [%1]!\n\t"
++		"vld1.8 {d12-d15}, [%1]!\n\t"
++		"subs %2, %2, #1\n\t"
++		"vstmia %0!, {d0-d15}\n\t"
++		"bne 1b\n\t"
++		: "+r"(d), "+r"(s), "+r"(blocks)
++		:
++		: "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9", "d10", "d11", "d12", "d13", "d14", "d15", "memory", "cc");
++}
++
++void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n) {
++	uint8_t *d = (uint8_t *)dst;
++	const uint8_t *s = (const uint8_t *)src;
++	if (mode == 3) {
++		if (n >= 0x2000u && (uint32_t)s < 0x81000000u && (uint32_t)d < 0x81000000u && sceDmacMemcpy(d, s, n) >= 0)
++			return;
++		sceClibMemcpy(d, s, n);
++		return;
++	}
++	if (mode != 1 && mode != 2) {
++		sceClibMemcpy(d, s, n);
++		return;
++	}
++	const uint32_t unit = mode == 1 ? 64u : 128u;
++	uint32_t head = (uint32_t)(-(intptr_t)d) & 63u;
++	if (n < head + unit) {
++		sceClibMemcpy(d, s, n);
++		return;
++	}
++	if (head) {
++		sceClibMemcpy(d, s, head);
++		d += head;
++		s += head;
++		n -= head;
++	}
++	const uint32_t blocks = n >> (mode == 1 ? 6 : 7);
++	if (mode == 1)
++		wr_neon64(d, s, blocks);
++	else
++		wr_vstm128(d, s, blocks);
++	d += blocks * unit;
++	s += blocks * unit;
++	n -= blocks * unit;
++	if (n)
++		sceClibMemcpy(d, s, n);
++}
++
++void vglSetWriteCopy(int mode) {
++	vgl_wr_mode = (mode >= 1 && mode <= 3) ? mode : 0;
++}
++
++int vglGetWriteCopy(void) {
++	return vgl_wr_mode;
++}
++
++void vglWriteCopyStats(uint32_t *out4) {
++	for (int i = 0; i < 4; i++)
++		out4[i] = vgl_wr_stat[i];
++}
++
++void vgl_wr_copy(void *dst, const void *src, uint32_t n) {
++	const int m = vgl_wr_mode;
++	if (m == 0 || n < VGL_WRCOPY_MIN) {
++		vgl_wr_stat[2]++;
++		vgl_wr_stat[3] += n;
++		sceClibMemcpy(dst, src, n);
++		return;
++	}
++	vgl_wr_stat[0]++;
++	vgl_wr_stat[1] += n;
++	vglWriteCopyVariant(m, dst, src, n);
++}
+diff --git a/source/utils/wrcopy.h b/source/utils/wrcopy.h
+new file mode 100644
+index 00000000..8411aad2
+--- /dev/null
++++ b/source/utils/wrcopy.h
+@@ -0,0 +1,10 @@
++#ifndef _WRCOPY_H_
++#define _WRCOPY_H_
++#include <stdint.h>
++// 0045 (MSC_VITA_WRCOPY): copies into the uncached pools, see wrcopy.c
++void vgl_wr_copy(void *dst, const void *src, uint32_t n);
++void vglSetWriteCopy(int mode);
++int vglGetWriteCopy(void);
++void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n);
++void vglWriteCopyStats(uint32_t *out4);
++#endif
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 3a4926b3..05547fb5 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1462,6 +1462,12 @@ void vglSetupCachedStream(uint32_t slice_bytes, vglCacheFlushFn flush); // = vgl
+ // The uniform ring (8 MiB in our builds; every draw copies its uniform buffers into it, ~330 KB per open-play frame) in CDRAM (write-combined) instead of the
+ // uncached RAM of the CPU-visible pool. Default: off. Must be called before vglInit*; if the CDRAM block cannot be had the ring stays where it was.
+ void vglSetUniformRingMem(int cdram);
++// 0045 (MSC_VITA_WRCOPY): how data is copied INTO the uncached pools (stream buffers, uniform ring): 0 sceClibMemcpy (default), 1 two aligned 32 byte NEON stores per 64 bytes,
++// 2 one 16-register vstm per 128 bytes, 3 sceDmacMemcpy for 8 KiB and more. The same bytes either way. vglWriteCopyVariant makes one copy with a variant (benchmark and check); vglWriteCopyStats: NEON copies, bytes, other copies, bytes.
++void vglSetWriteCopy(int mode);
++int vglGetWriteCopy(void);
++void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n);
++void vglWriteCopyStats(uint32_t *out4);
+ 
+ // Skip sceGxm calls that would set what the context already has (vertex program, fragment program, vertex streams, fragment textures); the cache is
+ // forgotten at every sceGxmBeginScene / sceGxmEndScene and after calls that change state behind its back. Default: off.

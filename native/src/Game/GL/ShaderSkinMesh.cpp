@@ -11,6 +11,7 @@
 #include "platform/assets/np_endian.h" /* GX vertex arrays stay big-endian (NPA) */
 #include "np/framesend.h"
 #include "np/skingpu.h"
+#include "np/overlap.h"
 #include "np_gx.h"
 #include <stdio.h>
 #endif
@@ -49,11 +50,13 @@ static void NpMorphedPoseOfPacket(unsigned long packetIndex, const nlVector3* po
 #endif
 #ifdef NP_NATIVE
 static void NpMorphPosesRelease(const void* mesh);
+extern "C" void NpSkinLaneDrain(void);
 #endif
 ShaderSkinMesh::~ShaderSkinMesh()
 {
 #ifdef NP_NATIVE
     NpMorphPosesRelease(this);
+    NpSkinLaneDrain();   // (a lane task of this frame may still read the mesh's weights and arrays)
 #endif
     nlDeleteRing(&boneMaps);
     if (boneMatrices != 0)
@@ -224,6 +227,54 @@ void ShaderSkinMesh::SetBoneMatrix(int nodeIndex, const nlMatrix4* matrix)
 
 void ShaderSkinMesh::Pose(cPoseAccumulator* pPoseAccumulator)
 {
+#ifdef NP_NATIVE
+    // MSC_SKIN_POSE_NEEDED: poseMatrices is read only by CopyMatrices (the bones each packet's bone map names) and GetPoseMatrix (no caller): the other
+    // nodes' products were never used. Each named bone is computed once, in the first bone map that names it; a mesh with no bone map computes all
+    if (NpSkinPoseNeeded() && boneMaps != 0)
+    {
+        const int numNodes = pPoseAccumulator->GetNumNodes();
+        unsigned char done[256];
+        const bool prefetchBones = NpPrefetchOn(8);
+        if (numNodes <= 256)
+        {
+            for (int i = 0; i < numNodes; i++)
+            {
+                done[i] = 0;
+            }
+            int named = 0;
+            BoneMapList* node = nlDLRingGetStart(boneMaps);
+            for (int m = 0; m < (int)pModel->GetNumPackets() && node != 0; m++, node = node->m_next)
+            {
+                for (unsigned long k = 0; k < node->m_nBones; k++)
+                {
+                    if (prefetchBones && k + 1 < node->m_nBones)
+                    {
+                        // MSC_PREFETCH bit 8: the next bone's bind matrix (static, read once a picture: out of the caches by then), its result and its node matrix
+                        const int j = (int)node->m_pBoneIndices[k + 1];
+                        if (j >= 0 && j < numNodes)
+                        {
+                            NpPrefetchLines(&boneMatrices[j], sizeof(nlMatrix4), 0);
+                            NpPrefetchLines(&poseMatrices[j], sizeof(nlMatrix4), 1);
+                            NpPrefetchLines(&pPoseAccumulator->GetNodeMatrix(j), sizeof(nlMatrix4), 0);
+                        }
+                    }
+                    const int i = (int)node->m_pBoneIndices[k];
+                    if (i >= 0 && i < numNodes && !done[i])
+                    {
+                        done[i] = 1;
+                        ++named;
+                        nlMultMatrices(poseMatrices[i], boneMatrices[i], pPoseAccumulator->GetNodeMatrix(i));
+                    }
+                }
+            }
+            if (named != 0)
+            {
+                GLSkinMesh::UpdateMorphWeights(pPoseAccumulator);
+                return;
+            }
+        }
+    }
+#endif
     for (int i = 0; i < pPoseAccumulator->GetNumNodes(); i++)
     {
         nlMultMatrices(poseMatrices[i], boneMatrices[i],
@@ -520,6 +571,48 @@ static bool NpSkinFuse()
     return fuse != 0;
 }
 
+// MSC_SKIN_PROF=1 (host measurement aid, Linux only): one line per presented frame with the game thread's CPU time and what part of it the skinning is:
+//   [skinprof] f=<frame> gt_us=<game-thread CPU since the last line> sw_us=<of it in SoftwareSkinModel> task_us=<CPU of the skin tasks, on whichever thread ran
+//   them> wait_us=<wall time the game thread blocked for the lane> tasks=<tasks this frame>
+#if defined(__linux__) && !defined(__vita__)
+#include <time.h>
+namespace
+{
+int sSkinProf = -1;
+unsigned long long sProfTaskNs = 0;   // (added to with __atomic builtins: the lane thread and the game thread)
+unsigned long long sProfSwNs = 0, sProfLastCpu = 0;
+double sProfLastWait = 0.0;
+unsigned long long NpThreadCpuNs()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return (unsigned long long)ts.tv_sec * 1000000000ull + (unsigned long long)ts.tv_nsec;
+}
+bool NpSkinProfOn()
+{
+    if (sSkinProf < 0)
+    {
+        const char* e = getenv("MSC_SKIN_PROF");
+        sSkinProf = (e != 0 && e[0] != 0 && e[0] != '0') ? 1 : 0;
+    }
+    return sSkinProf != 0;
+}
+struct NpProfScope
+{
+    unsigned long long t0;
+    NpProfScope() : t0(NpSkinProfOn() ? NpThreadCpuNs() : 0) {}
+    ~NpProfScope()
+    {
+        if (t0 != 0)
+            sProfSwNs += NpThreadCpuNs() - t0;
+    }
+};
+} // namespace
+#define NP_SKIN_PROF_SCOPE() NpProfScope npProfScope
+#else
+#define NP_SKIN_PROF_SCOPE() ((void)0)
+#endif
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // The skinning of cut-scenes and 3D menus on the helper lane (NPP2; MSC_SKIN_LANE=1, np_framesend.h NpLane*). PrepareToRender allocates the
 // output arrays and copies what the math needs (matrices, morph weights) into a task, in the order the original allocates and with the same
@@ -553,12 +646,15 @@ int sSkinCount;
 
 bool NpSkinLaneOn()
 {
-    return &NpLaneEnabled != 0 && &NpLaneSubmit != 0 && &NpLaneWait != 0 && NpLaneEnabled() != 0;
+    return &NpLaneEnabled != 0 && &NpLaneTrySubmit != 0 && &NpLaneWait != 0 && NpLaneEnabled() != 0;
 }
 
 void NpSkinTaskRun(void* arg)
 {
     NpSkinTask& t = *static_cast<NpSkinTask*>(arg);
+#if defined(__linux__) && !defined(__vita__)
+    const unsigned long long profT0 = NpSkinProfOn() ? NpThreadCpuNs() : 0;
+#endif
     const unsigned long size = t.numVertices * sizeof(nlVector3);
     nlZeroMemory(t.outV, size);
     if (t.outN != 0)
@@ -600,12 +696,32 @@ void NpSkinTaskRun(void* arg)
             }
         }
     }
+#if defined(__linux__) && !defined(__vita__)
+    if (profT0 != 0)
+        __atomic_fetch_add(&sProfTaskNs, NpThreadCpuNs() - profT0, __ATOMIC_RELAXED);
+#endif
 }
 } // namespace
 
 // glSendFrame: everything submitted has finished; then the cache calls of the original, in order
 extern "C" void NpSkinLaneWait(void)
 {
+#if defined(__linux__) && !defined(__vita__)
+    if (NpSkinProfOn())
+    {
+        const unsigned long long now = NpThreadCpuNs();
+        const double waited = &NpLaneWaitedSeconds != 0 ? NpLaneWaitedSeconds() : 0.0;
+        if (sProfLastCpu != 0)
+        {
+            fprintf(stderr, "[skinprof] f=%llu gt_us=%.1f sw_us=%.1f task_us=%.1f wait_us=%.1f tasks=%d\n", np_gx_frame_count(), (now - sProfLastCpu) / 1000.0,
+                sProfSwNs / 1000.0, __atomic_load_n(&sProfTaskNs, __ATOMIC_RELAXED) / 1000.0, (waited - sProfLastWait) * 1e6, sSkinCount);
+        }
+        sProfLastCpu = now;
+        sProfSwNs = 0;
+        __atomic_store_n(&sProfTaskNs, 0ull, __ATOMIC_RELAXED);
+        sProfLastWait = waited;
+    }
+#endif
     if (sSkinCount == 0)
     {
         return;
@@ -623,8 +739,36 @@ extern "C" void NpSkinLaneWait(void)
     sSkinCount = 0;
 }
 
+// All queued tasks are finished (the lane is idle afterwards); the arrays are flushed later, by NpSkinLaneWait.
+extern "C" void NpSkinLaneDrain(void)
+{
+    if (sSkinCount != 0 && &NpLaneWait != 0)
+    {
+        NpLaneWait();
+    }
+}
+
 namespace
 {
+// The tasks of one PrepareToRender call share the mesh's morph buffer (one array, rewritten by every task that has a morph): the game thread must not
+// touch that buffer (CreateMorphBuffer for a packet it skins itself, MorphedBindPose) while an earlier task of the call may still be using it.
+void NpSkinFenceMorph(const nlVector3* morph)
+{
+    if (morph == 0 || sSkinCount == 0)
+    {
+        return;
+    }
+    for (int i = 0; i < sSkinCount; ++i)
+    {
+        if (sSkinTasks[i].morph == morph)
+        {
+            NpSkinLaneDrain();
+            return;
+        }
+    }
+}
+
+// 0 when the pool is used up: that packet is skinned on the game thread (never a wait for the lane; the pool is empty again after the next glSendFrame)
 NpSkinTask* NpSkinTaskAlloc()
 {
     if (sSkinTasks == 0)
@@ -637,7 +781,7 @@ NpSkinTask* NpSkinTaskAlloc()
     }
     if (sSkinCount == kSkinMaxTasks)
     {
-        NpSkinLaneWait();   // the pool is used up: drain the lane (the tasks' memory is free again afterwards)
+        return 0;
     }
     return &sSkinTasks[sSkinCount++];
 }
@@ -908,6 +1052,7 @@ const nlVector3* ShaderSkinMesh::MorphedBindPose(unsigned long packetIndex, unsi
     }
     if (slot->hash != h)
     {
+        NpSkinFenceMorph(morphBuffer);   // (lane tasks of this call may be using the morph buffer)
         CreateMorphBuffer(packetIndex, numVertices);
         for (unsigned long i = 0; i < numVertices; ++i)
         {
@@ -937,6 +1082,9 @@ static void NpMorphPosesRelease(const void* mesh)
 
 void ShaderSkinMesh::SoftwareSkinModel(glModel* model)
 {
+#ifdef NP_NATIVE
+    NP_SKIN_PROF_SCOPE();
+#endif
     nlMatrix4 tempMatrices[32];
     unsigned long size;
     BoneMapList* node = nlDLRingGetStart(boneMaps);
@@ -1029,8 +1177,14 @@ void ShaderSkinMesh::SoftwareSkinModel(glModel* model)
 
 #ifdef NP_NATIVE
         if (laneTask == 0)
+        {
+            if (numActiveMorphs != 0)
+                NpSkinFenceMorph(morphBuffer);   // (earlier packets of this mesh may be queued on the lane, with this buffer)
 #endif
         CreateMorphBuffer(packetIndex, numVertices);
+#ifdef NP_NATIVE
+        }
+#endif
         const nlVector3* inVertices = (const nlVector3*)glFindModelStream(pPacket, 1)->address;
         const float (*pMatrices)[3][4] =
             *(const float (**)[3][4])glGetMaterialParameterData(pPacket, SkinMatricesHash);
@@ -1062,7 +1216,13 @@ void ShaderSkinMesh::SoftwareSkinModel(glModel* model)
                     laneTask->morphWeight[i] = GetMorphWeight(i);
                 }
             }
-            NpLaneSubmit(NpSkinTaskRun, laneTask);
+            if (!NpLaneTrySubmit(NpSkinTaskRun, laneTask))
+            {
+                // The lane is full or cannot run: this packet is skinned here, now (same code, same result). The task stays in the list, so that glSendFrame
+                // flushes its arrays like the others'. Earlier tasks of this call that use the same morph buffer are finished first.
+                NpSkinFenceMorph(laneTask->morph);
+                NpSkinTaskRun(laneTask);
+            }
             node = node->m_next;
             continue;
         }

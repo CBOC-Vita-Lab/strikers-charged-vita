@@ -13,7 +13,10 @@
 #ifdef NP_NATIVE
 #include "np/skingpu.h"
 #include "np/fx.h"
+#include "np/framesend.h"
 extern "C" void np_gx_fx_lowres(unsigned int on) __attribute__((weak)); // platform/gx (np_gx.h): renderer extension record
+extern "C" void np_gx_scene(unsigned int cls) __attribute__((weak));    // (the same)
+extern "C" void np_gx_layer(unsigned int cls, unsigned int layer) __attribute__((weak));   // (the same; W12 FG)
 
 // FX (np/fx.h): the marker is the texture binding's spare byte (written 0 everywhere else and never read), together with the program of
 // the sprite meshes (a binding of another program is not looked at).
@@ -27,6 +30,26 @@ extern "C" void NpFxMarkPacket(glModelPacket* packet)
     if (s_fxProgram[0] == prog || s_fxProgram[1] == prog) return;
     if (s_fxProgram[0] == 0) s_fxProgram[0] = prog;
     else if (s_fxProgram[1] == 0) s_fxProgram[1] = prog;
+}
+// NpFxSetScene is called by the game thread while it builds the frame (GameRenderTask), and in the two-stage pipeline the frame-send job of the previous frame is
+// still recording on the worker then: the recorder has ONE producer, and two threads reserving the same words of the record stream wrote this record over the
+// header of a matrix record (the "corrupt record stream" abort seen in Vita3K runs at about frame 1430). Like the game's other GX calls made during a build, it is queued
+// until the job has been joined and made then, in order (NpFsDefer): the stream is the serial program's, byte for byte, and with no job pending the call is made at once.
+static void NpFxSceneCall(const void* data)
+{
+    unsigned int cls;
+    __builtin_memcpy(&cls, data, sizeof cls);
+    np_gx_scene(cls);
+}
+extern "C" void NpFxSetScene(int cls)
+{
+    if (&np_gx_scene == 0) return;
+    const unsigned int c = static_cast<unsigned int>(cls);
+    NpFsDefer(NpFxSceneCall, &c, sizeof c);
+}
+extern "C" void NpFxSetLayer(int cls, int layer)
+{
+    if (&np_gx_layer != 0) np_gx_layer(static_cast<unsigned int>(cls), static_cast<unsigned int>(layer));
 }
 extern "C" int NpFxPacketMarked(const glModelPacket* packet)
 {

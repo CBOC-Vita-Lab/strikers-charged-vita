@@ -1,0 +1,16 @@
+# console-1.2 run renderrng1: Render random streams, frame-lock countdown and blend made by the simulation task (MSC_RENDER_RNG=1, MSC_FRAMELOCK_STEP=1, MSC_BLEND_STEP=1)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# r15: OFF by default (Fable batch 2); this is the ON side. MSC_RENDER_RNG, MSC_FRAMELOCK_STEP and MSC_BLEND_STEP (simthread10; MSC_VIS_STEP stays off): the simulation steps draw from their own copies of nlDefaultSeed and gEffectsRandomSeed, and the frame-lock countdown that ends a goal or kick-off hold is made by the simulation task instead of the drawing task. Nothing the player sees changes except the cosmetic random sequence (crowd jitter, sound volume and pitch, particle spread). Host proof: the det trace is identical with the drawing skipped on odd pictures or run twice (it moved at step 161 before), and moves again with both switches off. This run is the A/B: both off. With the default the log has [renderrng] and [framelock] lines; here the [renderrng] line says 0/0 and no [framelock] line. No timing difference is expected (a few loads per step): any difference in [lane] game ms or game speed means the switch is not the cause, rerun.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_RENDER_RNG=1
+MSC_FRAMELOCK_STEP=1
+MSC_BLEND_STEP=1

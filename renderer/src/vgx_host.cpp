@@ -42,7 +42,7 @@
 namespace vgx {
 
 bool LogEnabled() {
-    static const bool on = EnvInt("MSC_VGX_LOG", 0) != 0;
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_LOG", 0) != 0));
     return on;
 }
 
@@ -318,7 +318,7 @@ s32 PADGetIndexForPort(u32) { return -1; }
 // yield here (the render thread is handed work synchronously), so the harness
 // build turns the yield into a no-op unless MSC_VGX_YIELD=1.
 extern "C" int sched_yield(void) noexcept {
-    static const bool real = vgx::EnvInt("MSC_VGX_YIELD", 0) != 0;
+    const bool real = static_cast<bool>(VGX_KNOB(vgx::EnvInt("MSC_VGX_YIELD", 0) != 0));
     if (real) std::this_thread::sleep_for(std::chrono::microseconds(50));
     return 0;
 }

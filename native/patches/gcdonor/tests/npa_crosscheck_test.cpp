@@ -2,9 +2,9 @@
 // port_chunk_swap_tree (parse-time) against NPA's npa_convert (load-time, platform/assets), on the real
 // disc files. For every chunk-tree file both convert a private copy; every chunk header my walk reaches
 // must hold the same two words in NPA's output. (Payloads are compared by NPA's own verifiers, not here.)
-//   NPA=/home/claude/msc/npw/NPA/platform/assets
+//   NPA=/work/msc/npw/NPA/platform/assets
 //   gcc -O1 -I$NPA -c $NPA/np_*.c ; g++ -O1 -I<np>/include -I$NPA -o /tmp/xc tests/npa_crosscheck_test.cpp np_*.o
-//   /tmp/xc /home/claude/msc/game/files
+//   /tmp/xc /work/msc/game/files
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -27,7 +27,7 @@ def sha(path):
 def main():
     date = sys.argv[1] if len(sys.argv) > 1 else datetime.date.today().isoformat()
     files = tracked()
-    manifest = {"date": date, "scope": "Source of the release in RELEASE.json (native/, renderer/, dependencies/)",
+    manifest = {"date": date, "scope": "Current source tree (native/, renderer/, dependencies/); packaged runtime provenance is recorded separately in docs/RELEASE.json",
                 "files": [{"path": p, "sha256": sha(p)} for p in files if p.startswith(SOURCE_DIRS)]}
     (ROOT / "docs/SOURCE-MANIFEST.json").write_text(json.dumps(manifest, indent=1) + "\n")
     digests = {p: sha(p) for p in files}   # after SOURCE-MANIFEST.json was rewritten: SHA256SUMS covers it too

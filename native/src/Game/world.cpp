@@ -3,6 +3,13 @@
 #include "NL/gl/gl.h"
 #include "Game/World.h"
 #include "Game/World/WorldEffect.h"
+#include "np/scenecut.h"
+#ifdef NP_NATIVE
+#include "np/cpu22.h"
+#endif
+#include "np/stadiumcut.h"
+#include "Game/Render/StadiumWorldObjects.h"
+#include <math.h>
 
 #include "Game/Drawable/DrawableObj.h"
 #include "Game/Effects/EmissionManager.h"
@@ -45,12 +52,18 @@ World::World(GLResourcePool* pResource)
     , m_pOpaqueView(0)
     , m_pAlphaView(0)
 {
+#ifdef NP_NATIVE
+    NpCpu22DrawEpochBump();
+#endif
     m_pVisibilityTree = 0;
     m_bRenderingEnabled = true;
 }
 
 World::~World()
 {
+#ifdef NP_NATIVE
+    NpCpu22DrawEpochBump();
+#endif
     typedef nlAVLTreeIterator<unsigned long, DrawableObject*,
         DefaultKeyCompare<unsigned long> > DrawableIterator;
 
@@ -84,6 +97,9 @@ World::~World()
 
 void World::AddDrawableObject(DrawableObject* pDrawableObject)
 {
+#ifdef NP_NATIVE
+    NpCpu22DrawEpochBump();   // (MSC_CPU22_POWERUP)
+#endif
     m_drawableMap.Add(pDrawableObject->GetHashID(), pDrawableObject);
 
     if (pDrawableObject->m_uObjectCreationFlags & 2)
@@ -106,6 +122,9 @@ void World::AddDrawableObject(DrawableObject* pDrawableObject)
 
 void World::RemoveDrawableObject(DrawableObject* pObject)
 {
+#ifdef NP_NATIVE
+    NpCpu22DrawEpochBump();
+#endif
     m_drawableMap.Remove(pObject->GetHashID());
     unsigned long uFlags = pObject->m_uObjectCreationFlags;
 
@@ -257,6 +276,9 @@ bool World::LoadObjects(
         {
             pObject = HandleObjectCreation(uType, &context);
         }
+#ifdef NP_NATIVE
+        NpStadiumCensusObject(uType);   // MSC_STADIUM_CENSUS (np/scenecut.h)
+#endif
 
         pObject->m_pWorldContext = this;
         if (pObject != 0)
@@ -379,6 +401,50 @@ void World::InitializeObjects()
     }
 }
 
+#ifdef NP_NATIVE
+// MSC_STADIUM_CUT bit 8 (np/stadiumcut.h): is this plain or stadium drawable too small on the screen to draw? Only static scenery: no animation controller, no banner or blend flags
+// (StadiumWorldDrawable m_uFlags), no model-less object. Projected diameter in pixels of a 960-wide picture, from the camera's distance and the projection's x scale.
+static float NpStadiumCutObjectPx(const DrawableObject* obj, const nlVector3& cam, float xScale);
+static bool NpStadiumCutFarSmall(const DrawableObject* obj, const nlVector3& cam, float xScale)
+{
+    const WorldDrawable* wd = (const WorldDrawable*)obj;
+    if (wd->m_pAnimController != 0 || wd->m_pModel == 0) return false;
+    const float px = NpStadiumCutObjectPx(obj, cam, xScale);
+    return px >= 0.0f && NpStadiumCutFarSmall(px, NpStadiumCutFarPx());
+}
+// The projected diameter in pixels of a 960-wide picture, or -1 when it is not a static plain/stadium drawable or the camera is inside it.
+static float NpStadiumCutObjectPx(const DrawableObject* obj, const nlVector3& cam, float xScale)
+{
+    const WorldDrawable* wd = (const WorldDrawable*)obj;
+    float cx, cy, cz, radius;
+    if (wd->m_uObjectType == WORLD_OBJECT_DRAWABLE)
+    {
+        const nlMatrix4& m = *const_cast<WorldDrawable*>(wd)->GetWorldMatrix();
+        cx = m.e2[3][0]; cy = m.e2[3][1]; cz = m.e2[3][2];
+        radius = wd->m_fBoundingRadius;
+    }
+    else if (wd->m_uObjectType == WORLD_OBJECT_STADIUM_DRAWABLE)
+    {
+        const StadiumWorldDrawable* sd = (const StadiumWorldDrawable*)wd;
+        if ((sd->m_uFlags & 0x3F) != 0) return -1.0f;
+        cx = 0.5f * (sd->m_boundsMin.x + sd->m_boundsMax.x);
+        cy = 0.5f * (sd->m_boundsMin.y + sd->m_boundsMax.y);
+        cz = 0.5f * (sd->m_boundsMin.z + sd->m_boundsMax.z);
+        const float dx = sd->m_boundsMax.x - sd->m_boundsMin.x, dy = sd->m_boundsMax.y - sd->m_boundsMin.y, dz = sd->m_boundsMax.z - sd->m_boundsMin.z;
+        radius = 0.5f * sqrtf(dx * dx + dy * dy + dz * dz);
+    }
+    else
+    {
+        return -1.0f;
+    }
+    if (!(radius > 0.0f)) return -1.0f;
+    const float dx = cx - cam.x, dy = cy - cam.y, dz = cz - cam.z;
+    const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (dist <= radius) return -1.0f;   // the camera is inside it
+    return 2.0f * radius / dist * (xScale < 0.0f ? -xScale : xScale) * 480.0f;
+}
+#endif
+
 void World::Render()
 {
     if (m_pVisibilityTree != 0)
@@ -391,11 +457,35 @@ void World::Render()
     {
         nlDLListIterator<WorldDrawable*> iterator;
         iterator = m_renderObjects.Begin();
+#ifdef NP_NATIVE
+        const bool farCut = NpStadiumCutHas(NP_CUT_FARDECOR) || NpStadiumCutLogObjects();
+        nlMatrix4 cutInv, cutProj;
+        if (farCut)
+        {
+            m_pOpaqueView->m_Interface->GetInverseViewMatrix(cutInv);
+            m_pOpaqueView->m_Interface->GetProjectionMatrix(cutProj);
+        }
+#endif
+        const nlVector4* frustumPlanes = m_pOpaqueView->m_Interface->GetShadowMatrix();
         while (iterator.hasNext())
         {
             if (((DrawableObject*)*iterator)
-                    ->IsVisibleInFrustum(m_pOpaqueView->m_Interface->GetShadowMatrix()))
+                    ->IsVisibleInFrustum(frustumPlanes))
             {
+#ifdef NP_NATIVE
+                if (NpStadiumCutLogObjects())
+                {
+                    const WorldDrawable* wd = (const WorldDrawable*)*iterator;
+                    const float px = NpStadiumCutObjectPx((DrawableObject*)*iterator, *(const nlVector3*)&cutInv.e2[3][0], cutProj.e2[0][0]);
+                    NpStadiumCutLogObject(wd->m_uHashID, (int)wd->m_uObjectType, wd->m_pAnimController != 0, wd->m_uObjectType == WORLD_OBJECT_STADIUM_DRAWABLE ? (int)((const StadiumWorldDrawable*)wd)->m_uFlags : -1, px);
+                }
+                if (NpStadiumCutHas(NP_CUT_FARDECOR) && NpStadiumCutFarSmall((DrawableObject*)*iterator, *(const nlVector3*)&cutInv.e2[3][0], cutProj.e2[0][0]))
+                {
+                    NpStadiumCutCount(NP_CUT_FARDECOR, 1);
+                    iterator.next();
+                    continue;
+                }
+#endif
                 ((DrawableObject*)*iterator)->Draw();
             }
             iterator.next();

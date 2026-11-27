@@ -60,6 +60,7 @@ struct CharacterInfo
     /* 0x58 */ int mAlternateColour;
 };
 
+int GetCharacterCount();   // native port: the table size (without the placeholder entry), for range checks of indices that came off the wire
 const CharacterInfo& GetCharacterInfo(int index);
 int GetCharacterIndexFromCaptain(int captain);
 int GetCharacterIndexFromSidekick(int sidekick);

@@ -245,7 +245,7 @@ int npa_cvt_rlg_chunk(NpaCtx* c, const NpaChunk* root)
             if (cvt_vertex_anim(c, &k)) return c->res->status;
             break;
         default:
-            npa_err(c, NPA_ERR_FORMAT, "rlg: unexpected chunk 0x%x at +0x%zx", k.id, (size_t)(k.hdr - c->base));
+            npa_err(c, NPA_ERR_FORMAT, "rlg: unexpected chunk 0x%x at +0x%lx", k.id, (unsigned long)(k.hdr - c->base));
             return NPA_ERR_FORMAT;
         }
         if (c->res->status < 0) return c->res->status;

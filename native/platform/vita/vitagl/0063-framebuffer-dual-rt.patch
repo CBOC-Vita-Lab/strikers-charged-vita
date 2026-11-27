@@ -1,0 +1,210 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 22:00:00 -0500
+Subject: [PATCH] nxr4b (MSC_VITA_FBO_DUALRT): vglFramebufferDualRT gives a framebuffer object a second render target for the pictures of odd frame number (same colour and depth surfaces, 16 scene slots instead of 8 with two pictures in flight); vglGetDualRTStats; default off
+
+---
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index b6f96e11d..82840a313 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -225,6 +225,8 @@ inline __attribute__((always_inline)) void glGenFramebuffers(GLsizei n, GLuint *
+ 			framebuffers[i].depthbuffer_state = DEPTHBUFFER_MISSING;
+ 			framebuffers[i].depthbuffer_ptr = NULL;
+ 			framebuffers[i].target = NULL;
++			framebuffers[i].target2 = NULL; // 0063
++			framebuffers[i].dual_rt = 0;
+ 			framebuffers[i].tex = NULL;
+ 			framebuffers[i].msaa = msaa_mode;
+ 			framebuffers[i].nodepth = 0;
+@@ -297,6 +299,7 @@ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
+ 			if (fb->target) {
+ 				mark_rt_as_dirty(fb->target);
+ 			}
++			VGL_FB_DROP_RT2(fb); // 0063
+ #ifndef DEPTH_STENCIL_HACK
+ 			if (fb->depthbuffer_ptr) {
+ 				mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+@@ -1060,6 +1063,7 @@ GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples) {
+ 		mark_rt_as_dirty(fb->target);
+ 		fb->target = NULL;
+ 	}
++	VGL_FB_DROP_RT2(fb); // 0063
+ 	if (fb->depthbuffer_ptr) {
+ #ifndef DEPTH_STENCIL_HACK
+ 		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+diff --git a/source/gxm.c b/source/gxm.c
+index b41ce1be4..cbcd4799d 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -568,6 +568,53 @@ static void vgl_rtp_release(SceGxmRenderTarget *rt) {
+ 	sceGxmDestroyRenderTarget(rt);
+ }
+ 
++// 0063 (vglFramebufferDualRT): a framebuffer object with dual_rt keeps a second render target (target2). A render target holds the scene slots (scenesPerFrame of them) and not the colour or depth
++// memory: those are passed to sceGxmBeginScene with every scene. The pictures of even frame number begin their scenes on ->target, those of odd frame number on ->target2, so two pictures in
++// flight never share the slots of one target (16 slots, not 8, for the object). Nothing else changes: same surfaces, same draws, the GPU runs the scenes of one context in order. Off (dual_rt 0, the
++// library's default): the pointer picked is always ->target. A second target that cannot be made falls back to ->target (the object is then as it was).
++static uint32_t vgl_dual_made = 0, vgl_dual_kib = 0, vgl_dual_odd = 0, vgl_dual_fail = 0;
++#ifndef HAVE_SHARED_RENDERTARGETS
++static void vgl_dual_make(framebuffer *fb) {
++	if (fb->target2 || !fb->target)
++		return;
++	if (setup_fbo_render_target_ms(&fb->target2, fb->width, fb->height, gxm_fbo_rt_size, FB_MSAA(fb))) {
++		fb->target2 = NULL;
++		vgl_dual_fail++;
++		return;
++	}
++	SceGxmRenderTargetParams params;
++	vgl_memset(&params, 0, sizeof(params));
++	params.width = fb->width ? fb->width : 1;
++	params.height = fb->height ? fb->height : 1;
++	params.scenesPerFrame = gxm_fbo_rt_size;
++	params.multisampleMode = FB_MSAA(fb);
++	params.driverMemBlock = -1;
++	unsigned int drv = 0;
++	if (!sceGxmGetRenderTargetMemSize(&params, &drv))
++		vgl_dual_kib += (drv + 1023) / 1024;
++	vgl_dual_made++;
++}
++#endif
++static inline SceGxmRenderTarget *vgl_dual_pick(framebuffer *fb, uint32_t frame) {
++#ifndef HAVE_SHARED_RENDERTARGETS
++	if (fb->dual_rt && (frame & 1)) {
++		if (!fb->target2)
++			vgl_dual_make(fb);
++		if (fb->target2) {
++			vgl_dual_odd++;
++			return fb->target2;
++		}
++	}
++#endif
++	return fb->target;
++}
++void vglGetDualRTStats(uint32_t *made, uint32_t *kib, uint32_t *odd_scenes, uint32_t *failed) {
++	if (made) *made = vgl_dual_made;
++	if (kib) *kib = vgl_dual_kib;
++	if (odd_scenes) *odd_scenes = vgl_dual_odd;
++	if (failed) *failed = vgl_dual_fail;
++}
++
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ #define MAX_RENDER_TARGETS_NUM 47 // Maximum amount of dedicated render targets usable for fbos
+ #define MAX_SHARED_RT_SIZE 256 // Maximum  width value in pixels for shared rendertargets usage
+@@ -1246,6 +1293,8 @@ GLboolean scene_reset(void) {
+ 				// 1.3: the result decides, not the pointer: nothing promises what a failed call leaves there (Vita3K leaves a pointer to the block it has just freed)
+ 				if (r)
+ 					active_write_fb->target = NULL;
++				else if (active_write_fb->dual_rt)
++					vgl_dual_make(active_write_fb); // 0063: both targets together, at the moment that already pays for the first one
+ #endif
+ 			}
+ #ifdef RECYCLE_RENDERTARGETS
+@@ -1264,7 +1313,8 @@ GLboolean scene_reset(void) {
+ 			if (active_write_fb->depth_share_w && active_write_fb->depthbuffer_ptr && active_write_fb->depthbuffer_ptr->depthData)
+ 				vgl_depth_share_scene(active_write_fb->depthbuffer_ptr->depthData, active_write_fb); // 0044
+ 			rt_applied = vgl_rt_scene_begin(active_write_fb->depthbuffer_ptr, active_write_fb->width, active_write_fb->height);
+-			scn_begin(active_write_fb->target, 0);
++			SceGxmRenderTarget *scene_rt = vgl_dual_pick(active_write_fb, vgl_framecount); // 0063 (the target of this picture's parity; ->target unless dual_rt)
++			scn_begin(scene_rt, 0);
+ 			if (vgl_fg_on && active_write_fb->tex)
+ 				active_write_fb->tex->fg_rt_frame = vgl_framecount + 1; // 0034
+ 			vgl_mb_scene_begin(active_write_fb->depthbuffer_ptr, rt_applied); // 1.3 MASK_BG (tests.c)
+@@ -1275,7 +1325,7 @@ GLboolean scene_reset(void) {
+ #endif
+ 			int r = sceGxmBeginScene(gxm_context, 0, fbo_rt->rt,
+ #else
+-			int r = sceGxmBeginScene(gxm_context, 0, active_write_fb->target,
++			int r = sceGxmBeginScene(gxm_context, 0, scene_rt,
+ #endif
+ 					NULL, NULL, NULL,
+ 					&active_write_fb->colorbuffer,
+@@ -1714,6 +1764,19 @@ void vglSetupShaderPatcher(uint32_t buffer_mem_size, uint32_t vertex_usse_mem_si
+ 	shader_patcher_fragment_usse_size = fragment_usse_mem_size;
+ }
+ 
++GLboolean vglFramebufferDualRT(GLuint fb_id, GLint on) {
++	framebuffer *fb = (framebuffer *)fb_id;
++	if (!fb || !fb->active)
++		return GL_FALSE;
++#ifdef HAVE_SHARED_RENDERTARGETS
++	return GL_FALSE;
++#else
++	fb->dual_rt = on ? 1 : 0;
++	if (!on)
++		VGL_FB_DROP_RT2(fb);
++	return GL_TRUE;
++#endif
++}
+ void vglSetupRenderTargetScenesNum(uint8_t size_main, uint8_t size_fbos) {
+ #ifndef SKIP_ERROR_HANDLING
+ 	if (size_main > MAX_SCENES_PER_FRAME) {
+diff --git a/source/shared.h b/source/shared.h
+index 83df5e4ae..fd15fb7b8 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -673,6 +673,8 @@ typedef struct {
+ 	int depth_share_w, depth_share_h; // 0044 (vglFramebufferDepthShare): the capacity of the shared depth block this object's depth surface may live in (0: its own)
+ 	int depth_row_w; // 0044: the width the depth surface's rows were laid out for: the shared block's capacity, or the object's own width (0: no surface yet); the effects pass reads rows of VGL_ALIGN(this, 32)
+ 	uint8_t nodepth; // 0038 (vglFramebufferNoDepth): its scenes run with a depth/stencil surface that has no memory (tile memory only), never loaded or stored
++	SceGxmRenderTarget *target2; // 0063 (vglFramebufferDualRT): the second render target of a ping-pong pair, used by the pictures of odd frame number; same colour and depth surfaces, only the scene slots differ
++	uint8_t dual_rt; // 0063: 1 = scenes of odd pictures begin on target2 (made at the first such scene, or with target), 0 = one render target as before
+ } framebuffer;
+ extern uint32_t vgl_nodepth_scenes; // 0038: scenes begun on a framebuffer with nodepth set (rt.c)
+ 
+@@ -1447,6 +1449,14 @@ static inline __attribute__((always_inline)) uint32_t get_color_from_texture(Sce
+ }
+ 
+ extern uint32_t vgl_tiled_read_refused; // 0057 (textures.c)
++// 0063: the second render target of a framebuffer object goes wherever the first one goes (every drop site of fb->target calls this beside it)
++#define VGL_FB_DROP_RT2(fb) \
++	do { \
++		if ((fb)->target2) { \
++			mark_rt_as_dirty((fb)->target2); \
++			(fb)->target2 = NULL; \
++		} \
++	} while (0)
+ extern GLboolean vgl_fb_detach_keep; // 0062 (framebuffers.c): detaching the colour texture (id 0) keeps the object's size, render target and depth surface
+ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(framebuffer *fb, GLenum attachment, texture *tex, GLuint tex_id) {
+ 	VGL_LC_SYNC(); // (LAZY_CLEAR: the restore reads the size of the framebuffer in use)
+@@ -1491,6 +1501,7 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
+ 				mark_rt_as_dirty(fb->target);
+ 				fb->target = NULL;
+ 			}
++			VGL_FB_DROP_RT2(fb);
+ 			fb->tex = NULL;
+ 			return;
+ 		} else if (old_w != fb->width || old_h != fb->height) {
+@@ -1498,6 +1509,7 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
+ 				mark_rt_as_dirty(fb->target);
+ 				fb->target = NULL;
+ 			}
++			VGL_FB_DROP_RT2(fb);
+ 			if (fb->depthbuffer_ptr) {
+ #ifndef DEPTH_STENCIL_HACK
+ 				mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+diff --git a/source/textures.c b/source/textures.c
+index 9e9d106c5..506db4520 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -1836,6 +1836,7 @@ void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
+ 								mark_rt_as_dirty(fb->target);
+ 								fb->target = NULL;
+ 							}
++							VGL_FB_DROP_RT2(fb); // 0063
+ 							fb->tex = NULL;
+ 						} else {
+ 							texture_slots[i].dirty = GL_TRUE;
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 2e38af8b6..5453c8ace 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1431,6 +1431,8 @@ void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t
+ // 0062 (MSC_VITA_FBO_KEEP): glFramebufferTexture2D(GL_COLOR_ATTACHMENT0, texture 0) keeps the framebuffer object's width, height, render target and depth surface (default off: it dropped them, and read
+ // the sizes of texture slot 0 into the object). A later attach of a texture of the same size takes them back, a different size makes them again. Dropped at glDeleteFramebuffers as always.
+ void vglSetFramebufferDetachKeep(GLboolean on);
++GLboolean vglFramebufferDualRT(GLuint fb_id, GLint on); // 0063: 1: this object keeps a second render target (the scene slots only: the colour and depth surfaces are the same) and the pictures of odd frame number begin their scenes on it, so two pictures in flight never share the slots of one target; 0: one target as before. GL_FALSE for an unknown object
++void vglGetDualRTStats(uint32_t *made, uint32_t *kib, uint32_t *odd_scenes, uint32_t *failed); // 0063: second targets made, their driver memory in KiB (sceGxmGetRenderTargetMemSize), scenes begun on a second target, makes that failed
+ GLboolean vglGetFramebufferDetachKeep(void);
+ void vglSetRenderTargetPool(uint32_t count, uint32_t kib); // 0039: keep up to `count` framebuffer render targets (and `kib` KiB of driver memory, 0: no cap) for the next object of the same shape; 0: off (gxm.c)
+ void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now); // 0039: reused, newly made, kept by the collector, let go, kept now, KiB kept now

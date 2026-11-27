@@ -7,14 +7,14 @@
 #   make native-vita                 -> Vita (vitaGL back end, vita/vgx_host_vita.cpp), VitaSDK + clang as in
 #                                       one/vita/Makefile.vita (see native/native-vita.mk)
 #
-#   NOUT=<dir>   output root (default /home/claude/msc/build/np/NPR/vgx); objects and library go to
+#   NOUT=<dir>   output root (default /work/msc/build/np/NPR/vgx); objects and library go to
 #                $(NOUT)/<target>-<backend>/
 #
 # The library contains vgx/src/*.cpp (without the desktop host and the other back end) plus native/*.cpp.
 # vgx_api.cpp is compiled with native/vgx_native_rename.h (see there). Nothing here uses the runtime.
 NTARGET  ?= host32
 NBACKEND ?= gl
-NOUT     ?= /home/claude/msc/build/np/NPR/vgx
+NOUT     ?= /work/msc/build/np/NPR/vgx
 HERE     := $(dir $(lastword $(MAKEFILE_LIST)))
 ROOT     := $(abspath $(HERE)/..)
 SRC      := $(ROOT)/src
@@ -27,7 +27,7 @@ AR       := ar
 
 # Private 32-bit Mesa (EGL, GLESv2, llvmpipe) unpacked from Ubuntu i386 packages: this machine has no i386
 # multiarch. See np/docs/render.md "host32 GL" (tools: native/test/i386_mesa.sh makes it).
-I386ROOT ?= /home/claude/msc/build/np/NPR/i386apt/root
+I386ROOT ?= /work/msc/build/np/NPR/i386apt/root
 I386LIB  := $(I386ROOT)/usr/lib/i386-linux-gnu
 ifeq ($(NTARGET),host32)
   ARCHFLAGS := -m32 -msse2 -mfpmath=sse -I/usr/include/x86_64-linux-gnu

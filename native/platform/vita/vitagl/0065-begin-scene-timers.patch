@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 12:00:00 -0500
+Subject: [PATCH] nxrain25 (begin scene timers): the sceGxmBeginScene calls on the display target and on framebuffer object targets timed alone (vgl_rt_begin_disp_us / vgl_rt_begin_fbo_us with their maxima, vglRtStats fields appended at its end), with the CPU timers only; vgl_rt_cpu_begin_us also holds the depth and render target creation
+
+---
+diff --git a/source/gxm.c b/source/gxm.c
+index 88e2d31d2..c904a720c 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -1265,11 +1265,14 @@ GLboolean scene_reset(void) {
+ 			rt_applied = vgl_rt_scene_begin(&gxm_depth_stencil_surface, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+ 			scn_begin(gxm_render_target, 1);
+ 			vgl_mb_scene_begin(&gxm_depth_stencil_surface, rt_applied); // 1.3 MASK_BG (tests.c)
++			const uint32_t rt_bd0 = rt_time ? vgl_rt_now() : 0; // 0065: only the sceGxmBeginScene call below
+ 			int r = sceGxmBeginScene(gxm_context, 0, gxm_render_target,
+ 				NULL, NULL,
+ 				gxm_sync_objects[gxm_back_buffer_index],
+ 				&gxm_color_surfaces[gxm_back_buffer_index],
+ 				&gxm_depth_stencil_surface);
++			if (rt_time)
++				vgl_rt_begin_split(0, vgl_rt_now() - rt_bd0);
+ #ifdef LOG_ERRORS
+ 			if (r) {
+ 				vgl_log("%s:%d Scene reset failed due to sceGxmBeginScene erroring (%s) on display.\n", __FILE__, __LINE__, get_gxm_error_literal(r));
+@@ -1356,13 +1359,17 @@ GLboolean scene_reset(void) {
+ #ifdef RECYCLE_RENDERTARGETS
+ 			fbo_rt->last_frame = vgl_framecount;
+ #endif
++			const uint32_t rt_bf0 = rt_time ? vgl_rt_now() : 0; // 0065: only the sceGxmBeginScene call below
+ 			int r = sceGxmBeginScene(gxm_context, 0, fbo_rt->rt,
+ #else
++			const uint32_t rt_bf0 = rt_time ? vgl_rt_now() : 0; // 0065: only the sceGxmBeginScene call below
+ 			int r = sceGxmBeginScene(gxm_context, 0, scene_rt,
+ #endif
+ 					NULL, NULL, NULL,
+ 					&active_write_fb->colorbuffer,
+ 					active_write_fb->depthbuffer_ptr);
++			if (rt_time)
++				vgl_rt_begin_split(1, vgl_rt_now() - rt_bf0);
+ #ifdef LOG_ERRORS
+ 			if (r)
+ 				vgl_log("%s:%d Scene reset failed due to sceGxmBeginScene erroring (%s) on framebuffer 0x%08X.\n", __FILE__, __LINE__, get_gxm_error_literal(r), active_write_fb);
+diff --git a/source/rt.c b/source/rt.c
+index f8dcdceea..c37776ac0 100644
+--- a/source/rt.c
++++ b/source/rt.c
+@@ -47,6 +47,9 @@ uint32_t vgl_nodepth_scenes = 0;
+ uint64_t vgl_rt_ds_loaded = 0, vgl_rt_ds_stored = 0, vgl_rt_ds_load_skipped = 0, vgl_rt_ds_store_skipped = 0;
+ uint64_t vgl_rt_cpu_end_us = 0, vgl_rt_cpu_begin_us = 0, vgl_rt_cpu_setup_us = 0;
+ uint32_t vgl_rt_cpu_timed = 0, vgl_rt_cpu_switch_max_us = 0;
++// 0065: vgl_rt_cpu_begin_us lumps the sceGxmBeginScene call with the depth and render target creation before it: these two are the sceGxmBeginScene calls alone (CPU timers only; render thread)
++uint64_t vgl_rt_begin_disp_us = 0, vgl_rt_begin_fbo_us = 0;
++uint32_t vgl_rt_begin_disp_max_us = 0, vgl_rt_begin_fbo_max_us = 0;
+ static float vgl_rt_clock_cost_us = 0.0f;
+ 
+ // per-frame (render thread): written at vglSwapBuffers
+@@ -182,6 +185,18 @@ void vgl_rt_cpu_switch(uint32_t t_end, uint32_t t_begin, uint32_t t_setup) {
+ 		vgl_rt_cpu_switch_max_us = all;
+ }
+ 
++void vgl_rt_begin_split(uint32_t fbo, uint32_t us) {
++	if (fbo) {
++		vgl_rt_begin_fbo_us += us;
++		if (us > vgl_rt_begin_fbo_max_us)
++			vgl_rt_begin_fbo_max_us = us;
++	} else {
++		vgl_rt_begin_disp_us += us;
++		if (us > vgl_rt_begin_disp_max_us)
++			vgl_rt_begin_disp_max_us = us;
++	}
++}
++
+ uint32_t vgl_rt_now(void) { return rt_now(); }
+ 
+ // gxm.c scene_end: sceGxmEndScene with this scene's own fragment notification (GPU timers on)
+@@ -479,4 +494,8 @@ void vglRtGetStats(vglRtStats *s) {
+ 	__sync_synchronize();
+ 	vgl_fast_memcpy(s->cpu_frames, rt_cpu_frames, sizeof(rt_cpu_frames));
+ 	vgl_fast_memcpy(s->gpu_frames, rt_gpu_frames, sizeof(rt_gpu_frames));
++	s->begin_disp_us = vgl_rt_begin_disp_us; // 0065
++	s->begin_fbo_us = vgl_rt_begin_fbo_us;
++	s->begin_disp_max_us = vgl_rt_begin_disp_max_us;
++	s->begin_fbo_max_us = vgl_rt_begin_fbo_max_us;
+ }
+diff --git a/source/shared.h b/source/shared.h
+index 794200d9f..2cac6bfae 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -134,6 +134,7 @@ extern uint32_t vgl_rt_invalidations_skipped;
+ uint32_t vgl_rt_scene_begin(SceGxmDepthStencilSurface *ds, uint32_t w, uint32_t h);
+ void vgl_rt_cpu_switch(uint32_t t_end, uint32_t t_begin, uint32_t t_setup);
+ uint32_t vgl_rt_now(void);
++void vgl_rt_begin_split(uint32_t fbo, uint32_t us); // 0065: the time of one sceGxmBeginScene call alone, display (0) or framebuffer object (1); CPU timers only
+ void vgl_rt_end_scene(SceGxmContext *ctx);
+ void vgl_rt_frame_end(void);
+ extern uint32_t vgl_glb_ring_frame_bytes, vgl_glb_ring_frame_peak, vgl_glb_ring_peak, vgl_glb_ring_wraps, vgl_glb_ring_size;
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 549771b16..754005f40 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1588,6 +1588,8 @@ typedef struct {
+ 	uint32_t cpu_frame_head, gpu_frame_head; // frames written so far into the rings below (index = n % 128)
+ 	vglRtCpuFrame cpu_frames[128];
+ 	vglRtGpuFrame gpu_frames[128];
++	uint64_t begin_disp_us, begin_fbo_us; // 0065 (appended: the layout before it is unchanged): time of the sceGxmBeginScene calls alone on the display target and on framebuffer object targets, with VGL_RT_CPU_TIMERS
++	uint32_t begin_disp_max_us, begin_fbo_max_us;
+ } vglRtStats;
+ void vglRtGetStats(vglRtStats *s);
+ uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out);

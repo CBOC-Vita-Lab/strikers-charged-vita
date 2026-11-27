@@ -1,0 +1,11 @@
+# route files the r17 queue needs on the console (ux0:data/mscharged-perf-test/), uploaded once by `slice.sh routes`
+# route | kit source | runs
+fb-crep.txt | fastboot/routes/fb-crep.txt | crep1
+fb-dump-goal.txt | fastboot/routes/fb-dump-goal.txt | gsdump16
+fb-dump.txt | fastboot/routes/fb-dump.txt | worstgpu1 lock60dump lock60gs-d simt-d dis-on-a dis-off-a dis-off-b dis-on-b ram112-dump nodepth1 rehearse6 loadhold1 pgo-base-wg-a pgo-on-wg-a pgo-base-wg-b pgo-on-wg-b
+fb-lava-goal.txt | fastboot/routes/fb-lava-goal.txt | gslava16
+fb-lava.txt | fastboot/routes/fb-lava.txt | lock60lava
+fb-tour.txt | fastboot/routes/fb-tour.txt | d1 lock60gs-v simt-blk-v simt-v ram112-a scenepin1 scenepin1-2 heldaa13w2 heldaa13w2-2 cutlearn2 cutlearn2-2 pgo-base-d1-a pgo-base-lock60 pgo-on-d1-a pgo-on-lock60 simt-pgo pgo-base-d1-b pgo-on-d1-b
+fb-vice-goal.txt | fastboot/routes/fb-vice-goal.txt | gsvice16
+pipe.txt | routes/pipe.txt | lock60pipe
+tour.txt | routes/tour.txt | lock60tour

@@ -1,0 +1,77 @@
+# Online lobby with the link cut: see online_menu_test.py (case lost). Joiner side.
+# Online joiner through the game's own menus: MULTIPLAYER, JOIN WITH A CODE (the code from the host's invite file via the test keyboard), Join Game.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 10 1200
+log STATE multiplayer mode choice
+wait nbuttons >= 3 900
+idle 60
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+log chose online
+wait scene == 1 900
+wait scene == 10 1200
+log STATE choice popup
+wait nbuttons >= 3 900
+idle 20
+press 4
+idle 60
+press 100
+log chose join
+wait scene == 24 7200
+log STATE lobby
+idle 400
+press 4
+idle 30
+press 100
+log joining
+wait peers >= 2 7200
+log STATE joined
+# The test cuts the route ("down 0") 2 s after the line above. The game's own keep-alive (MSC_LAN_KEEPALIVE_MS) ends the link: its "connection lost"
+# popup (OK), then the lobby offers RECONNECT / LEAVE.
+wait scene == 10 5400
+log STATE connection lost popup
+wait nbuttons >= 1 600
+idle 45
+press 100
+log STATE connection lost answered
+wait scene == 10 && nbuttons >= 2 5400
+log STATE reconnect offered
+idle 60
+press 100
+log chose reconnect
+# the status popup of the rebuild is up for a few seconds: let it come and go, then the lobby (scene 24) is on top again
+idle 150
+wait scene == 24 5400
+log STATE lobby restored
+idle 400
+press 4
+idle 30
+press 100
+log joining again
+wait peers >= 2 5400
+log STATE joined again
+# stay until the host has seen the new partner too
+idle 300
+exit

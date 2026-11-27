@@ -165,6 +165,28 @@ void GXLoadTexObj(const GXTexObj* obj, GXTexMapID map) {
     vgxn_load_tex(static_cast<int>(map), &d);
 }
 
+// np_gx.h: 1.3 MSC_TEX_PRETOUCH. The description goes by value in an extension record (kind 7); the renderer resolves it without touching any texmap's binding.
+extern "C" void np_gx_touch_tex(const void* gxTexObj, unsigned int mode) {
+    unsigned int w[10] = {mode, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (gxTexObj == 0) {
+        vgxn_ext(7, w, 1);
+        return;
+    }
+    const NpTexObj* t = T(reinterpret_cast<const GXTexObj*>(gxTexObj));
+    if (!t->data) return;
+    const float minLod = static_cast<float>(t->minLod) / 16.0f, maxLod = static_cast<float>(t->maxLod) / 16.0f, bias = static_cast<float>(t->lodBias) / 32.0f;
+    w[1] = static_cast<unsigned int>(reinterpret_cast<__SIZE_TYPE__>(t->data));
+    w[2] = static_cast<unsigned int>(t->width) | (static_cast<unsigned int>(t->height) << 16);
+    w[3] = t->format;
+    w[4] = static_cast<unsigned int>(t->wrapS) | (static_cast<unsigned int>(t->wrapT) << 8) | (static_cast<unsigned int>(t->minFilter) << 16) | (static_cast<unsigned int>(t->magFilter) << 24);
+    w[5] = t->mipmap;
+    __builtin_memcpy(&w[6], &minLod, 4);
+    __builtin_memcpy(&w[7], &maxLod, 4);
+    __builtin_memcpy(&w[8], &bias, 4);
+    w[9] = t->tlut;
+    vgxn_ext(7, w, 10);
+}
+
 void GXInitTlutObj(const GXTlutObj* obj, void* palette, GXTlutFmt fmt, u16 entries) {
     NpTlutObj* t = TL(obj);
     t->data = palette;

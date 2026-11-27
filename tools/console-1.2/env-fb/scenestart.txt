@@ -1,0 +1,14 @@
+# console-1.2 run scenestart: Full picture: every held scene starts at 704x400 one sample
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# hold12. Against d1: the cost of the lowest scene level and what the policy climbs to ([hold] held scene step lines).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD_SCENE_START=10

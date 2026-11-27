@@ -6,12 +6,12 @@
 # The mode value and the tag have six characters in every mode: the process layout (the stack position through the size of the environment,
 # which holds the value and the output path) changes the open-play simulation (docs/wave2-NPP.md 7.1), and runs of one binary that are
 # to be compared must have the same layout.
-cd /home/claude/msc/npw/W5PIPE || exit 1
-B=/home/claude/msc/build/np/W5PIPE
+cd /work/msc/npw/W5PIPE || exit 1
+B=/work/msc/build/np/W5PIPE
 V=${V:-a1}; MODES=${MODES:-off thread}
 tools/pipe/plugin_selftest.sh 2>&1 | tail -6   # (seconds: the race-check plugin on the unit test, before the long runs)
 [ -n "$BUILD" ] && { TAILN=6 tools/pipe/build.sh $V ${BUILDVARS:-OPT=-O2 NOPIC=1 LTO=none} || exit 1; }
-NAV=${NAV:-/home/claude/msc/tools/scripts/nav_match60.txt}
+NAV=${NAV:-/work/msc/tools/scripts/nav_match60.txt}
 dirs=
 for m in $MODES; do
   t=$m; [ $m = off ] && t=nofork

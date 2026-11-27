@@ -1,0 +1,109 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: a scene that does not load its depth/stencil surface begins with the background mask set, and the full-target mask quad is left out (vglSetMaskBackground, MASK_BG)
+
+MSC_VGX_VGL_MASKBG (the Galaxy port's MASK_KEEP of its patch 0018, on by default on its console since r84, and its patch 0022 for the display's scene; written again from the description):
+with the RT depth hint a scene need not load its depth/stencil surface and then starts from the background mask (clear); with the scissor test off update_scissor_test drew a
+quad over the whole target to set the mask everywhere (patch 0026's records only help a scene that loads and stores). The background mask is part of the surface the scene is
+begun with, so vgl_mb_scene_begin (called from scene_reset right before sceGxmBeginScene, for framebuffer objects and for the display) sets it for such a scene when the scissor
+test is off, and the first update_scissor_test of the scene leaves the quad out. Every unloaded scene sets the value explicitly (set or clear), so a surface that had it set is
+clear again when the scissor is on or the switch is off. vglSetMaskBackground(mode): 0 (default) draws every quad; bit 0 framebuffer-object scenes; bit 1 the display's scene.
+vglGetMaskBackgroundStats: scenes begun that way, quads left out. Host test: renderer/tests/run_vitagl_maskkeep_test.sh (model of the mask bit with a background value).
+
+diff -ruN a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -735,6 +735,7 @@
+ 				gxm_back_buffer_index = (shared_fb_info.index + 1) % 2;
+ 			}
+ 			rt_applied = vgl_rt_scene_begin(&gxm_depth_stencil_surface, DISPLAY_WIDTH, DISPLAY_HEIGHT);
++			vgl_mb_scene_begin(&gxm_depth_stencil_surface, rt_applied); // 1.3 MASK_BG (tests.c)
+ 			int r = sceGxmBeginScene(gxm_context, 0, gxm_render_target,
+ 				NULL, NULL,
+ 				gxm_sync_objects[gxm_back_buffer_index],
+@@ -793,6 +794,7 @@
+ 				return scene_reset_failed();
+ 			}
+ 			rt_applied = vgl_rt_scene_begin(active_write_fb->depthbuffer_ptr, active_write_fb->width, active_write_fb->height);
++			vgl_mb_scene_begin(active_write_fb->depthbuffer_ptr, rt_applied); // 1.3 MASK_BG (tests.c)
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ 			render_target *fbo_rt = (render_target *)active_write_fb->target;
+ #ifdef RECYCLE_RENDERTARGETS
+diff -ruN a/source/shared.h b/source/shared.h
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -1286,6 +1286,7 @@
+ void vgl_mk_scene_begin(SceGxmDepthStencilSurface *ds); // 1.3 MASK_KEEP (patch 0026): a scene began on `ds` (NULL: none)
+ void vgl_mk_forget(const void *surface); // 1.3 MASK_KEEP: new depth/stencil memory at `surface`
+ void vgl_mk_touch(void); // 1.3 MASK_KEEP: the open scene's mask may have changed outside update_scissor_test
++void vgl_mb_scene_begin(SceGxmDepthStencilSurface *ds, uint32_t rt_applied); // 1.3 MASK_BG (patch 0029): called before sceGxmBeginScene with the surface and the RT hint's decision
+ extern GLboolean vgl_mask_keep;
+ void reset_scissor_test_region(void); // Resets scissor test region to default values
+ void update_scissor_test_uniforms(void); // Updates scissor test region update uniforms
+diff -ruN a/source/tests.c b/source/tests.c
+--- a/source/tests.c
++++ b/source/tests.c
+@@ -131,6 +131,40 @@
+ 	}
+ }
+ 
++/* MASKBG BEGIN */
++// 1.3 MASK_BG (patch 0029; the Galaxy port's MASK_KEEP of its patch 0018 and, for the display's scene, its 0022; written again from their description): a scene that does not load
++// its depth/stencil surface (the RT hint: VGL_RT_NOLOAD) begins from the surface's background mask, which is clear. With the scissor test off, update_scissor_test then draws a quad
++// over the whole target that sets the mask everywhere. The background mask can be made "set" before the scene is begun (it is part of the surface the scene is begun with), and the
++// quad is left out. With the scissor test on the background stays clear and only the region quad is drawn, as before. The value is set for EVERY unloaded scene (set or clear),
++// whatever the switch says, so a surface that had it set while the switch was on is clear again when the switch is off. One use: the first update_scissor_test of the scene takes
++// the mark; a later update (the scissor changed) draws as before.
++// vglSetMaskBackground(mode): 0 (the default) leaves every quad drawn; bit 0 framebuffer-object scenes, bit 1 the display's scene (the present's).
++int vgl_mask_bg = 0;
++uint32_t vgl_mb_stat[2]; // unloaded scenes begun with the background mask set, quads left out
++static const SceGxmDepthStencilSurface *vgl_mb_ds = NULL; // the surface of the scene that began with the mask set (NULL: none, or already taken)
++void vglSetMaskBackground(int mode) {
++	vgl_mask_bg = mode & 3;
++}
++void vglGetMaskBackgroundStats(uint32_t *armed, uint32_t *kept) {
++	if (armed)
++		*armed = vgl_mb_stat[0];
++	if (kept)
++		*kept = vgl_mb_stat[1];
++}
++// gxm.c scene_reset, right before sceGxmBeginScene, for the scene's depth/stencil surface and what the RT hint decided for it
++void vgl_mb_scene_begin(SceGxmDepthStencilSurface *ds, uint32_t rt_applied) {
++	vgl_mb_ds = NULL;
++	if (!ds || !(rt_applied & VGL_RT_NOLOAD))
++		return;
++	const GLboolean set = (vgl_mask_bg & (is_rendering_display ? 2 : 1)) && !scissor_test_state;
++	vglDepthStencilSurfaceSetBackgroundMask(ds, set ? 1 : 0);
++	if (set) {
++		vgl_mb_ds = ds;
++		vgl_mb_stat[0]++;
++	}
++}
++/* MASKBG END */
++
+ // Stencil Test
+ uint8_t stencil_mask_front = 0xFF; // Current in use mask for stencil test on front
+ uint8_t stencil_mask_back = 0xFF; // Current in use mask for stencil test on back
+@@ -418,6 +452,11 @@
+ 		vgl_rt_invalidations_skipped++;
+ 		if (scissor_test_state) {
+ 			vector4f_convert_to_local_space(scissor_test_vertices, region.x, region.y, region.w, region.h);
++		} else if (vgl_mb_ds) {
++			// MASK_BG (patch 0029): the scene began with the background mask set (vgl_mb_scene_begin: scissor test off, nothing loaded), which is what the quad below would make
++			vgl_mb_ds = NULL;
++			vgl_mb_stat[1]++;
++			goto mask_done;
+ 		}
+ 	} else if (scissor_test_state) {
+ #else
+diff -ruN a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1136,6 +1136,8 @@
+ void vglSetViewportExact(GLboolean exact); // 1.3 glViewport halves as floats (patch 0025; default GL_TRUE)
+ void vglSetMaskKeep(GLboolean on); // 1.3 MASK_KEEP (patch 0026; default GL_FALSE): a scissor mask rebuild the depth/stencil surface already holds is not drawn
+ void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept); // 1.3 MASK_KEEP: mask rebuilds drawn and not drawn so far (counted with the switch off too)
++void vglSetMaskBackground(int mode); // 1.3 MASK_BG (patch 0029; default 0): a scene that does not load its depth/stencil surface and has the scissor test off begins with the background mask set, and the full-target quad that sets it is not drawn. Bit 0: framebuffer-object scenes, bit 1: the display's scene
++void vglGetMaskBackgroundStats(uint32_t *armed, uint32_t *kept); // 1.3 MASK_BG: scenes begun that way, quads left out
+ // 1.3 MEMFREE (patch 0028): vglMemFree / vgl_mem_get_free_space without walking the heap. The allocator wrappers keep per pool the usable bytes and the count of live blocks;
+ // a pool's free figure is then (free when empty) - (usable + overhead * count), O(1), where `overhead` is the allocator's per-block cost measured at start-up with probe blocks.
+ // A pool whose probes do not show one constant overhead (or whose statistics call answers nothing: Vita3K) is never answered from the counters.

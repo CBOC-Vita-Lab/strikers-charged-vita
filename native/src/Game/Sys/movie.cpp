@@ -53,6 +53,8 @@ static unsigned int g_uMoviePictures;
 static unsigned int g_uMovieSkips;
 static unsigned int g_uMovieAudioFull;
 static unsigned int g_uMovieReadWaits;
+static unsigned int g_uMovieReadWaitRun;   // consecutive decode calls that found the next frame still being read from the card
+static unsigned int g_uMovieReadWaitMax;   // the longest such run of the movie (a card that stalls freezes picture and sound together)
 #endif
 
 bool MovieInit()
@@ -160,8 +162,9 @@ bool MovieStart(
     g_uLastDecodeRenderTick = g_uRenderTickCount - 1;
 #ifdef NP_NATIVE
     g_uMoviePictures = g_uMovieSkips = g_uMovieAudioFull = g_uMovieReadWaits = 0;
+    g_uMovieReadWaitRun = g_uMovieReadWaitMax = 0;
     fprintf(stderr, "[movie-fix] start %s %ux%u; clock=%s\n", fileName,
-        videoInfo.xSize, videoInfo.ySize, getenv("MSC_MOVIE_CATCHUP") ? getenv("MSC_MOVIE_CATCHUP") : "bounded");
+        static_cast<unsigned>(videoInfo.xSize), static_cast<unsigned>(videoInfo.ySize), getenv("MSC_MOVIE_CATCHUP") ? getenv("MSC_MOVIE_CATCHUP") : "bounded");
 #endif
     g_bFinished = false;
     start = true;
@@ -186,8 +189,8 @@ bool MovieStop()
 #ifdef NP_NATIVE
     // FPS (np/fps.h): the movie's speed in retraces (decodes follow the retrace count, not the drawn frames): a line for the proof runs
     NpFpsMovieEnd(g_uDecodeCount, glxGetFrameCount() - g_uStartFrame);
-    fprintf(stderr, "[movie-fix] consumed=%u pictures=%u skipped=%u audio_full=%u read_waits=%u retraces=%u\n",
-        g_uDecodeCount, g_uMoviePictures, g_uMovieSkips, g_uMovieAudioFull, g_uMovieReadWaits, glxGetFrameCount() - g_uStartFrame);
+    fprintf(stderr, "[movie-fix] consumed=%u pictures=%u skipped=%u audio_full=%u read_waits=%u read_wait_run_max=%u retraces=%u\n",
+        g_uDecodeCount, g_uMoviePictures, g_uMovieSkips, g_uMovieAudioFull, g_uMovieReadWaits, g_uMovieReadWaitMax, static_cast<unsigned>(glxGetFrameCount() - g_uStartFrame));
 #endif
     int lastFrame = THPSimpleGetTotalFrame() - 1;
     int currentFrame = (int)(unsigned int)g_uCurrentFrame;
@@ -317,13 +320,18 @@ bool MoviePlay()
             {
 #ifdef NP_NATIVE
                 if (error == 3) ++g_uMovieAudioFull;
-                if (error == 5) ++g_uMovieReadWaits;
+                if (error == 5)
+                {
+                    ++g_uMovieReadWaits;
+                    if (++g_uMovieReadWaitRun > g_uMovieReadWaitMax) g_uMovieReadWaitMax = g_uMovieReadWaitRun;
+                }
 #endif
                 break;  // backpressure: this packet and its deadline remain pending
             }
             ++g_uDecodeCount;
             ++g_uCurrentFrame;
 #ifdef NP_NATIVE
+            g_uMovieReadWaitRun = 0;
             if (show) ++g_uMoviePictures; else ++g_uMovieSkips;
             g_uNextDecodeFrame = movieClock ? g_uNextDecodeFrame + 2 : frame + 2;
 #else

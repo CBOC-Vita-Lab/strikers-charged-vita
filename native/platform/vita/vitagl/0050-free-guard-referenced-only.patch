@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 12:00:00 -0500
+Subject: [PATCH] free guard, referenced-only mode (vglSetFreeGuardReferencedOnly): with the guard on, only a delete of a block a scene drew into within the last FRAME_PURGE_FREQ presents, or of the bound framebuffer's colour, is held back (and reported); every other delete is immediate as without the guard
+
+MSC_VGX_FREE_GUARD_REF=N. The Galaxy 2.3 crash (graphics memory handed back while the GPU still drew into it) is vitaGL freeing a texture that a scene drew into at once: only a texture that was
+SAMPLED recently is deferred. 0034 holds every delete N presents (memory held longer: lab only). This mode holds only the delete that is that hazard, so on a run that never makes one nothing
+changes (the 0034 tour found none). Needs the 0034 stamp (fg_rt_frame at scene begin), which is on whenever the guard is.
+
+
+0050 also: (a) the allocation recovery of 0036 flushes the held deletes after its GPU finish (vgl_fg_flush_all), so full video memory can reclaim them; (b) in this mode the colour of
+the bound framebuffer no longer holds a delete, only the scene-begin stamp does; (c) glGenTextures clears fg_rt_frame so a reused slot is not held for its previous life.
+
+---
+
+diff -ruN a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -252,6 +252,7 @@
+ static struct { uint8_t kind; uint32_t id; uint32_t due; } fg_ring[FG_RING];
+ static uint32_t fg_ring_n = 0;
+ static uint32_t fg_hold = 0;
++static int fg_ref_only = 0;   // 0047: hold only the deletes that would free a block a scene drew into recently (or the bound framebuffer's colour); every other delete is immediate as before
+ static uintptr_t fg_site[FG_SITES];
+ static uint8_t fg_site_kind[FG_SITES];
+ static vglFreeGuardEvent fg_events[FG_EVENTS];
+@@ -262,6 +263,9 @@
+ 	fg_hold = presents > 0 ? (uint32_t)presents : 0;
+ 	vgl_fg_on = fg_hold ? 1 : 0;
+ }
++void vglSetFreeGuardReferencedOnly(int on) {
++	fg_ref_only = on ? 1 : 0;
++}
+ void vglGetFreeGuardStats(vglFreeGuardStats *out) {
+ 	*out = fg_stats;
+ }
+@@ -293,6 +297,27 @@
+ 		++fg_stats.ring_full;
+ 		return 0;
+ 	}
++	if (fg_ref_only) { // 0047: nothing in this call was drawn into lately: delete now, exactly as without the guard (a call with one such name holds all of its names)
++		int any = 0;
++		for (GLsizei j = 0; j < n && !any; j++) {
++			const GLuint id = ids[j];
++			texture *tex = NULL;
++			if (kind == 0) {
++				if (id > 0 && id < TEXTURES_NUM && texture_slots[id].status == TEX_VALID) {
++					tex = &texture_slots[id];
++					// (0050: the bound framebuffer's colour alone does not hold a delete here: nothing may have been drawn into it; only the scene-begin stamp below does)
++				}
++			} else {
++				framebuffer *fb = (framebuffer *)id;
++				if (fb && fb->active) {
++					tex = fb->tex;
++				}
++			}
++			if (tex && tex->fg_rt_frame && vgl_framecount + 1 - tex->fg_rt_frame <= FRAME_PURGE_FREQ) any = 1;
++		}
++		if (!any)
++			return 0;
++	}
+ 	for (GLsizei j = 0; j < n; j++) {
+ 		const GLuint id = ids[j];
+ 		uint32_t reason = 0, age = 0;
+@@ -350,6 +375,23 @@
+ 	fg_ring_n = keep;
+ 	vgl_fg_flushing = 0;
+ }
++// 0050: the held deletes sit outside the collector, so the allocation recovery (0036) could not reclaim them while memory is full. It calls this after its GPU finish (nothing is
++// drawing any more): every held delete is done now and the collector cycle that follows frees them.
++void vgl_fg_flush_all(void) {
++	if (!fg_ring_n || vgl_fg_flushing)
++		return;
++	vgl_fg_flushing = 1;
++	for (uint32_t i = 0; i < fg_ring_n; i++) {
++		GLuint id = fg_ring[i].id;
++		if (fg_ring[i].kind == 0)
++			glDeleteTextures(1, &id);
++		else
++			glDeleteFramebuffers(1, &id);
++	}
++	fg_stats.recovery_flushed += fg_ring_n;
++	fg_ring_n = 0;
++	vgl_fg_flushing = 0;
++}
+ #ifdef HAVE_PTHREAD
+ pthread_t gc_thread;
+ #else
+diff -ruN a/source/shared.h b/source/shared.h
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -963,6 +963,7 @@
+ // 0034 free guard (MSC_VGX_FREE_GUARD, off by default): see gxm.c
+ extern int vgl_fg_on, vgl_fg_flushing;
+ int vgl_fg_delete(int kind, GLsizei n, const GLuint *ids, void *caller);
++void vgl_fg_flush_all(void); // 0050
+ extern int vgl_gc_failed(void);
+ extern int vgl_gc_recover(void);
+ extern int vgl_gc_retry_pause(void);
+diff -ruN a/source/textures.c b/source/textures.c
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -1734,6 +1734,7 @@
+ 
+ 			// Resetting texture parameters to their default values
+ 			texture_slots[i].dirty = GL_FALSE;
++			texture_slots[i].fg_rt_frame = 0; // 0050: a reused slot has no scene history (0034 stamp)
+ #ifndef TEXTURES_SPEEDHACK
+ 			texture_slots[i].last_frame = OBJ_NOT_USED;
+ #endif
+diff -ruN a/source/utils/gpu_utils.c b/source/utils/gpu_utils.c
+--- a/source/utils/gpu_utils.c
++++ b/source/utils/gpu_utils.c
+@@ -243,6 +243,8 @@
+ 	} else {
+ 		glFinish();
+ 	}
++	if (vgl_fg_on)
++		vgl_fg_flush_all(); // 0050: the free guard's held deletes go to the collector that the next step runs
+ }
+ 
+ static int gc_rec_cycle(void *c) {
+diff -ruN a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1154,6 +1154,7 @@
+ // texture of the framebuffer that is bound is reported as an event (vglFreeGuardTake), once per call site (the return address of the delete) and kind. Off (0, the default) it changes nothing.
+ typedef struct {
+ 	uint32_t deletes, postponed, referenced, ring_full, sites;
++	uint32_t recovery_flushed;   // 0050: held deletes done early by the allocation recovery
+ 	uint32_t purge_peak, rt_purge_peak;   // most elements one picture put on the collector's lists (capacity 16384 and 128: the lists have no bounds check, a longer one writes into the next picture's list)
+ } vglFreeGuardStats;
+ typedef struct {
+@@ -1165,6 +1166,7 @@
+ 	uint32_t frame;    // present count at the delete
+ } vglFreeGuardEvent;
+ void vglSetFreeGuard(int presents);
++void vglSetFreeGuardReferencedOnly(int on); // 0047: with the guard on, hold (and report) only the deletes of a block a scene drew into within the last FRAME_PURGE_FREQ presents or that is bound as a framebuffer's colour; all other deletes happen at once as without the guard. Default 0
+ void vglGetFreeGuardStats(vglFreeGuardStats *out);
+ int vglFreeGuardTake(vglFreeGuardEvent *out); // 1: an event was returned
+ void vglSetMaskBackground(int mode); // 1.3 MASK_BG (patch 0029; default 0): a scene that does not load its depth/stencil surface and has the scissor test off begins with the background mask set, and the full-target quad that sets it is not drawn. Bit 0: framebuffer-object scenes, bit 1: the display's scene

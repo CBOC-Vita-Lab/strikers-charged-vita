@@ -3,9 +3,9 @@
 # XVARS "MSC_FS_FREEGATE=1 MSC_FS_FREEHIST=1"): again with the identical environment, with the environment longer (stack addresses move) and with every
 # game-heap allocation filled with 0xA5. Which frames differ from REF.
 #   tools/heavy.sh -t 600 env V=a8 tools/perf/job_noise2.sh
-cd /home/claude/msc/npw/NPP2 || exit 1
+cd /work/msc/npw/NPP2 || exit 1
 V=${V:-a8}
-B=/home/claude/msc/build/np/NPP2
+B=/work/msc/build/np/NPP2
 REF=$B/runs/$V-nofork
 BASE="MSC_FS_FREEGATE=1 MSC_FS_FREEHIST=1"
 export MAXF=${MAXF:-3500}

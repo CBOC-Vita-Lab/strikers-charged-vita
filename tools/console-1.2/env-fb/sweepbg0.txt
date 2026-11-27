@@ -1,0 +1,15 @@
+# console-1.2 run sweepbg0: Thread sweeps back on the game and render threads
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group hitch, route tour, version payload 1.3, role ab
+# MSC_VITA_SWEEP_BG=0 (the Vita plan sets 1 since wave 9: the two 600-frame thread sweeps, at least 500 system calls each, run on the watch thread every 30 s). Against the default: the `[hitch]` lines and the `[pace] display` fold by picture % 600 (a bin of holds of 3+ at frames 600, 1200 ... with the sweep on the game thread), `[vita] thread sweep ... took` us.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_SWEEP_BG=0
+MSC_HITCH_MS=45

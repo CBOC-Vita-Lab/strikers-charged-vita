@@ -3,11 +3,11 @@
 #   v3k-auto  MSC_FPS=auto      v3k-30  default (MSC_FPS=30)       both with MSC_FPS_LOG=1; the log shows [vi] (the retrace follows the emulator's vblank: its measured rate),
 #   [vgx-vita] display lines (how many vblanks each picture was shown for) and, in auto, the [fps] auto: switches.
 # Output: build/np/W5FPS/lto/vita/pkg/np/mscharged-np.vpk, build/np/W5FPS/v3k-runs/<tag>/{log.txt,run.txt,...}. Never packs or logs the owner's libshacccg.suprx (the emulator profile links it).
-NP=${NP:-/home/claude/msc/npw/W5FPS}
-R=${R:-/home/claude/msc/build/np/W5FPS}
+NP=${NP:-/work/msc/npw/W5FPS}
+R=${R:-/work/msc/build/np/W5FPS}
 T00=$(date +%s)
 export VITASDK=/opt/vitasdk PATH=/opt/vitasdk/bin:$PATH
-export GX_VGX=${GX_VGX:-/home/claude/msc/npw/W5FPS-vgx} VDEPS=/home/claude/msc/build/np/W5GLB/deps-glb
+export GX_VGX=${GX_VGX:-/work/msc/npw/W5FPS-vgx} VDEPS=/work/msc/build/np/W5GLB/deps-glb
 cd $NP || exit 1
 VPK=$R/lto/vita/pkg/np/mscharged-np.vpk
 echo "== vita lab build (LTO) $(date +%T) np $(git rev-parse --short HEAD) vgx $(git -C $GX_VGX rev-parse --short HEAD)"

@@ -1,0 +1,15 @@
+# console-1.2 run freeguard0: Referenced-only free guard off (MSC_VGX_FREE_GUARD_REF=0; plan default 3 since stab13), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group exact, route tour, version payload 1.3, role ab
+# stab13 (vitaGL 0050): the off side of the guard that holds only a delete of a block a scene drew into within the last four presents. On a run that never makes such a delete the two sides are identical (host model, 5 mutants). Expected: no [free-guard] FREE WHILE REFERENCED line on the on side, the same [head] lines.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_VGX_FREE_GUARD_REF=0
+MSC_HEAD_STAT=1

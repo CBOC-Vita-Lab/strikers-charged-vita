@@ -23,7 +23,9 @@
 #include "Game/NetworkRandom.h"
 #include "Game/FE/feMusic.h"
 #include "Game/FriendManager.h"
-#include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+#include "platform/sdk/net/np_lan.h"
+#include "platform/sdk/net/np_online_save.h"
+#include "platform/sdk/net/vlink.h"  // multiplayer (np/patches/mp)
 
 #include "Game/AI/AIPad.h"
 #include "Game/DB/SaveLoad.h"
@@ -41,6 +43,7 @@
 #include "NL/nlTicker.h"
 #include "NL/nlString.h"
 #include "types.h"
+#include "Game/DB/CharacterInfo.h"
 #include "Game/DB/StadiumInfo.h"
 #include "Game/InputRouter.h"
 #include "Game/NetworkInput.h"
@@ -50,6 +53,8 @@
 #include "Game/SharedStaticStorage.h"
 #include "Game/TweakValue.h"
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "Game/BaseGameSceneManager.h"
 #include "Game/FE/tlComponentInstance.h"
 #include "Game/Game.h"
@@ -69,6 +74,7 @@ static TweakBoolBinding s_NoPopupNetworkErrorTweak(
     "g_bNoPopupNetworkError", "Network", &g_bNoPopupNetworkError, true);
 
 static MemoryAllocator s_NetworkAllocator;
+static bool s_NetworkPoolMade;
 
 static inline void PushAllocator(MemoryAllocator* pAllocator)
 {
@@ -82,6 +88,34 @@ static inline void PopAllocator()
     AllocatorStack[AllocatorStackDepth] = 0;
     CurrentAllocator = AllocatorStack[AllocatorStackDepth - 1];
 }
+
+// The block DWC's allocator callbacks draw from (retail: made at boot, 0xB0000 - 0x2A90 bytes in the US region, 0x80000 - 0x37D0 elsewhere).
+static void EnsureNetworkPool()
+{
+    if (s_NetworkPoolMade)
+    {
+        return;
+    }
+    PushAllocator(&VirtualAllocator);
+    if (GetRegion() == GAME_REGION_US)
+    {
+        u32 poolSize = 0xB0000 - 0x2A90;
+        void* pool = nlMalloc(poolSize, 8, false);
+        gNetworkMemoryPool = pool;
+        s_NetworkAllocator.Initialize(pool, poolSize);
+    }
+    else
+    {
+        u32 poolSize = 0x80000 - 0x37D0;
+        void* pool = nlMalloc(poolSize, 8, false);
+        gNetworkMemoryPool = pool;
+        s_NetworkAllocator.Initialize(pool, poolSize);
+    }
+    PopAllocator();
+    s_NetworkPoolMade = true;
+    fprintf(stderr, "[netpool] DWC pool made %s\n", NpNetPoolsAtBoot() ? "at boot (MSC_NET_POOLS_AT_BOOT=1)" : "at its first use");
+}
+
 
 void NetworkSession::Create()
 {
@@ -108,23 +142,13 @@ void NetworkSession::Initialize(bool first)
         mLastTicker = 0;
         mCupMode = 0;
 
-        PushAllocator(&VirtualAllocator);
-        if (GetRegion() == GAME_REGION_US)
+        // (1.3) The 700 KB pool the retail game carved from the virtual arena here, at boot, is made when something first asks for it (EnsureNetworkPool):
+        // the port's DWC_Init ignores the allocator it is given, so nothing ever asks, and single player no longer holds the block.
+        // MSC_NET_POOLS_AT_BOOT=1 brings back the retail moment (this pool and the 200 KB socket pool): the switch of the A/B runs.
+        if (NpNetPoolsAtBoot())
         {
-            u32 poolSize = 0xB0000 - 0x2A90;
-            void* pool = nlMalloc(poolSize, 8, false);
-            gNetworkMemoryPool = pool;
-            s_NetworkAllocator.Initialize(pool, poolSize);
+            EnsureNetworkPool();
         }
-        else
-        {
-            u32 poolSize = 0x80000 - 0x37D0;
-            void* pool = nlMalloc(poolSize, 8, false);
-            gNetworkMemoryPool = pool;
-            s_NetworkAllocator.Initialize(pool, poolSize);
-        }
-        PopAllocator();
-
         mDWCInitialized = 0;
         mLoginRequestStarted = 0;
         mDWCErrorCode = 0;
@@ -235,6 +259,7 @@ void NetworkSession::SendGameStartToEveryone()
     int machineCount = GetMachineRoster()->GetMachineCount();
 
     NetMessageGameStart message;
+    message.mInputDelay = (u8)NpLanChooseInputDelay();   // 0 unless a LAN host chose one (MSC_LAN_INPUT_DELAY)
     message.mRandomSeed = randomSeed;
     message.mMachineIndex = 0;
     message.mMachineCount = machineCount;
@@ -709,6 +734,7 @@ void NetworkSession::InitializeOnline()
     DWC_Init(DWC_SVR_RELEASE, "mschargedwii", gameCode, NetworkAlloc, NetworkFree);
     DWC_SetReportLevel(0);
     mDWCInitialized = 1;
+    NpOnlineSave::Begin();
     mSessionMode = NET_MODE_ONLINE;
 
     gNetworkMessageRegistry->RegisterReceiver(NETMSG_GAME_START, this);
@@ -743,12 +769,13 @@ void NetworkSession::InitializeOnline()
 
 static void* NetworkAlloc(DWCAllocType name, unsigned long size, int align)
 {
+    EnsureNetworkPool();
     return s_NetworkAllocator.Allocate(size, align, false);
 }
 
 static void NetworkFree(DWCAllocType name, void* ptr, unsigned long size)
 {
-    if (ptr == 0)
+    if (ptr == 0 || !s_NetworkPoolMade)
     {
         return;
     }
@@ -1386,7 +1413,15 @@ void NetworkSession::ShutdownOnline()
 {
     if (ResetTask::s_ResetState != RS_STARTRESET)
     {
-        SaveLoad::StartSave(true);
+        // Owner's rule (np_online_save.h): save only when this session changed something, never after an error; MSC_ONLINE_SAVE_ALWAYS=1 = the old way
+        static const bool always = getenv("MSC_ONLINE_SAVE_ALWAYS") && atoi(getenv("MSC_ONLINE_SAVE_ALWAYS")) != 0;
+        NetworkStatsManager* stats = NetworkStatsManager::Instance();
+        const bool changed = stats->mSaveDataChanged;
+        const bool error = NpOnlineSave::ErrorLatch() || stats->mStatsError || VLink::Default().IsLost();
+        const bool save = NpOnlineSave::Wanted(always, changed, error);
+        fprintf(stderr, "[onlinesave] leaving online: changed=%d error=%d always=%d -> %s\n", changed, error, always, save ? "save" : "no save");
+        if (save)
+            SaveLoad::StartSave(true);
     }
     else if (mLobby->mMatchmakingThreadRunning)
     {
@@ -1702,6 +1737,46 @@ int NetworkSession::ProcessMessage(
         }
         else
         {
+            // Native port: StartNetworkedGame indexes mPeers[4] and the peers' channels[4] with the counts of this message as they came off
+            // the wire (the retail game trusted its own host). A host that is not this build could write past both arrays. Refuse such a message
+            // and end the session through the link-lost path instead (the same way as an invalid draft roster, np_lan.cpp).
+            const NetMessageGameStart* start = (const NetMessageGameStart*)message;
+            bool sane = start->mMachineCount >= 1 && start->mMachineCount <= 4 && start->mMachineIndex < start->mMachineCount;
+            if (sane && IsOnlineRankedMatch())
+            {
+                for (int m = 0; m < start->mMachineCount; ++m)
+                {
+                    if (start->mMachinePlayerCounts[m] > 4)
+                    {
+                        sane = false;
+                    }
+                }
+            }
+            // The character and stadium indices go straight into the info tables (the stadium table has no bounds check at all).
+            if (sane)
+            {
+                const int characters = GetCharacterCount();
+                for (int c = 0; c < 4; ++c)
+                {
+                    // (255 stays accepted for an empty sidekick slot: the table lookups below it answer a placeholder entry for any index.)
+                    const bool homeBad = start->mHomeCharacters[c] >= characters && !(c > 0 && start->mHomeCharacters[c] == 0xFF);
+                    const bool awayBad = start->mAwayCharacters[c] >= characters && !(c > 0 && start->mAwayCharacters[c] == 0xFF);
+                    if (homeBad || awayBad)
+                    {
+                        sane = false;
+                    }
+                }
+                if (start->mStadium >= GetStadiumCount())
+                {
+                    sane = false;
+                }
+            }
+            if (!sane)
+            {
+                NpLanLog("refused a game start message: %d machine(s), this one is %d, stadium %d\n", (int)start->mMachineCount, (int)start->mMachineIndex, (int)start->mStadium);
+                NpLanLinkLost("invalid game start");
+                return 1;
+            }
             StartNetworkedGame((NetMessageGameStart*)message);
         }
         mSessionState = NET_SESSION_LOADING;
@@ -1874,6 +1949,14 @@ int NetworkSession::ProcessMessage(
 
     case NETMSG_PAUSE_REQUEST:
     {
+        // Native port: nothing in the game sends a pause request (OnPauseGame is empty; the retail game had no sender either), but a
+        // received one stops the simulation of every console at once with no way to resume (mPausedMachineMask is only ever cleared by
+        // another such message), and the shift below takes its count from the wire. A console that sends one is not this build: ignore it.
+        if (NpLanActive())
+        {
+            NpLanLog("ignored a pause request from machine %d (this build never sends one)\n", machine);
+            break;
+        }
         if ((s8)this->GetLocalMachineId() != 0)
         {
             break;
@@ -1902,6 +1985,11 @@ int NetworkSession::ProcessMessage(
     }
 
     case NETMSG_PAUSE_RESPONSE:
+        if (NpLanActive())
+        {
+            NpLanLog("ignored a pause response from machine %d (this build never sends one)\n", machine);
+            break;
+        }
         if (machine != 0)
         {
             break;
@@ -2127,6 +2215,7 @@ void NetworkSession::StartNetworkedGame(NetMessageGameStart* message)
     tDebugPrintManager::Print(DC_NETWORK, "StartNetworkedGame: Random seed %x NumMachines:%d "
               "MyMachineID:%d\n",
         seed, mMachineCount, mLocalMachineId);
+    NpLanSetAgreedInputDelay(message->mInputDelay);   // before the router's reset below takes its starting delay
     GetInputRouter()->Reset(0);
     NotifyGameStarted(this);
 

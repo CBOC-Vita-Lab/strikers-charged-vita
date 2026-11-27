@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 11:00:00 -0500
+Subject: [PATCH] glFinish ends the open scene and waits with none open (VGL_FINISH_NOSCENE, not compiled by default; after upstream vitaGL 74c5a4a and Galaxy patch 0035)
+
+---
+
+diff --git a/source/gxm.c b/source/gxm.c
+index 49e95f50..20b9d5f4 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -1655,10 +1655,26 @@ void glFinish(void) {
+ 
+ 	// Waiting for GPU to finish drawing jobs
+ 	if (scene_not_flushed) {
++#ifdef VGL_FINISH_NOSCENE
++		// 0052 (upstream 74c5a4a "Fix a potential deadlock in glFinish", adapted): the open scene is ended and the GPU is waited for with no scene open; the next call
++		// that needs a scene starts it through needs_scene_reset. The old text ended the scene, began a new one and called sceGxmFinish inside it.
++		if (needs_end_scene) {
++			scene_end();
++			needs_end_scene = GL_FALSE;
++		}
++		sceGxmFinish(gxm_context);
++		needs_scene_reset = GL_TRUE;
++		dirty_frag_unifs = 0xFFFFFFFF;
++		dirty_vert_unifs = 0xFFFF;
++		dirty_shader_frag_unifs = GL_TRUE;
++		dirty_shader_vert_unifs = GL_TRUE;
++		scene_not_flushed = GL_FALSE;
++#else
+ 		dirty_framebuffer = GL_TRUE;
+ 		scene_reset();
+ 		sceGxmFinish(gxm_context);
+ 		scene_not_flushed = GL_FALSE;
++#endif
+ 	}
+ }
+ 

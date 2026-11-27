@@ -1,0 +1,13 @@
+# console-1.2 run dscn2: Display render target with 2 scenes per frame, Mega Save
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group timing, route mega, version payload 1.3, role ab
+# STR-068/069, Galaxy VITA_DISPLAY_SCENES: the display's own render target may take a second scene in a frame without waiting (default 1). Compare the [lat] p50/p95 and the frame interval p95 with megad1 / megad2; it adds no shader variants.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/mega.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_DISPLAY_SCENES=2

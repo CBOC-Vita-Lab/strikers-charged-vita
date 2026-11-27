@@ -29,6 +29,7 @@
 #include <ode/error.h>
 #include <ode/matrix.h>
 #include "util.h"
+#include "np/gsplit.h"   // MSC_GSPLIT phase markers (no-ops unless NP_NATIVE and MSC_GSPLIT)
 
 
 #define dFabs(x) ((float)__fabs(float(x)))
@@ -556,10 +557,35 @@ static void SOR_LCP(int m, int nb, dRealMutablePtr J, int* jb, dxBody* const* bo
     }
 }
 
+int dxStepBodyNoMove(dxBody* b, dReal h);   // util.cpp
+
+// MSC_SIM26_ISLANDS (util.cpp dxProcessIslands): changedOut = 0 is the stepper as it was; otherwise the bodies are integrated without the dGeomMoved
+// calls of dxStepBody, which would reorder the shared space list from a lane, and changedOut[i] says whether body i's geoms are due one (the caller
+// makes them after the join, island by island, body by body: the same calls in the same order). Everything else is the same code on the same data.
+static void dxQuickStepperImpl(dxWorld* world, dxBody* const* body, int nb,
+    dxJoint* const* _joint, int nj, dReal stepsize, unsigned char* changedOut);
+
 void dxQuickStepper(dxWorld* world, dxBody* const* body, int nb,
     dxJoint* const* _joint, int nj, dReal stepsize)
 {
+    dxQuickStepperImpl(world, body, nb, _joint, nj, stepsize, 0);
+}
+
+void NpSim26QuickStepperDeferred(dxWorld* world, dxBody* const* body, int nb,
+    dxJoint* const* _joint, int nj, dReal stepsize, unsigned char* changedOut)
+{
+    dxQuickStepperImpl(world, body, nb, _joint, nj, stepsize, changedOut);
+}
+
+static void dxQuickStepperImpl(dxWorld* world, dxBody* const* body, int nb,
+    dxJoint* const* _joint, int nj, dReal stepsize, unsigned char* changedOut)
+{
     int i, j;
+    NpGsSeq gsSeq(NPGS_PH_QS_PREP);   // MSC_GSPLIT: preparation / Jacobian / right hand side / SOR / integration
+    NP_GSC(NPGC_ISLANDS, 1);
+    NP_GSC(NPGC_ISL_BODIES, nb);
+    NP_GSC(NPGC_ISL_JOINTS, nj);
+    if (g_npGsOn && (unsigned)nb > g_npGsCnt[NPGC_ISL_MAXBODIES]) g_npGsCnt[NPGC_ISL_MAXBODIES] = (unsigned)nb;
     IFTIMING(dTimerStart("preprocessing");)
 
     dReal stepsize1 = dRecip(stepsize);
@@ -662,6 +688,8 @@ void dxQuickStepper(dxWorld* world, dxBody* const* body, int nb,
         //   (lll) = linear jacobian data
         //   (aaa) = angular jacobian data
         //
+        gsSeq.Next(NPGS_PH_QS_JAC);
+        NP_GSC(NPGC_ISL_ROWS, m);
         IFTIMING(dTimerNow("create J");)
         dSetZero(J, m * 12);
         dxJoint::Info2 Jinfo;
@@ -704,6 +732,7 @@ void dxQuickStepper(dxWorld* world, dxBody* const* body, int nb,
         dIASSERT(jb_ptr == jb + 2 * m);
 
         // compute the right hand side `rhs'
+        gsSeq.Next(NPGS_PH_QS_RHS);
         IFTIMING(dTimerNow("compute rhs");)
         dRealAllocaArray(tmp1, nb * 6);
         // put v/h + invM*fe into tmp1
@@ -741,8 +770,10 @@ void dxQuickStepper(dxWorld* world, dxBody* const* body, int nb,
 #endif
 
         dRealAllocaArray(cforce, nb * 6);
+        gsSeq.Next(NPGS_PH_QS_SOR);
         SOR_LCP(m, nb, J, jb, body, invI, lambda, cforce, rhs, lo, hi, cfm, findex,
             &world->qs);
+        gsSeq.Next(NPGS_PH_QS_INT);
 
 #ifdef WARM_STARTING
         // save lambda for the next iteration
@@ -812,6 +843,7 @@ void dxQuickStepper(dxWorld* world, dxBody* const* body, int nb,
     // compute the velocity update:
     // add stepsize * invM * fe to the body velocity
 
+    gsSeq.Next(NPGS_PH_QS_INT);
     IFTIMING(dTimerNow("compute velocity update");)
     for (i = 0; i < nb; i++)
     {
@@ -841,7 +873,12 @@ void dxQuickStepper(dxWorld* world, dxBody* const* body, int nb,
     // (over the given timestep)
     IFTIMING(dTimerNow("update position");)
     for (i = 0; i < nb; i++)
-        dxStepBody(body[i], stepsize);
+    {
+        if (changedOut)
+            changedOut[i] = (unsigned char)dxStepBodyNoMove(body[i], stepsize);
+        else
+            dxStepBody(body[i], stepsize);
+    }
 
     IFTIMING(dTimerNow("tidy up");)
 

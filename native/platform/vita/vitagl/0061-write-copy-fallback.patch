@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 14:00:00 -0500
+Subject: [PATCH] nxgl25 (MSC_VITA_WRCOPY_FB): wrcopy mode 3 gives a copy the DMA engine does not take to the 64 byte NEON stores instead of sceClibMemcpy (vglSetWriteCopyFallback, default on); DMA / address counters (vglWriteCopyStats8)
+
+---
+diff --git a/source/utils/wrcopy.c b/source/utils/wrcopy.c
+--- a/source/utils/wrcopy.c
++++ b/source/utils/wrcopy.c
+@@ -21,9 +21,13 @@
+ #endif
+ 
+ #define VGL_WRCOPY_MIN 192u
++#ifndef VGL_WR_ADDR
++#define VGL_WR_ADDR(p) ((uint32_t)(uintptr_t)(p)) // (the host test of 0061 replaces it by a fake address map)
++#endif
+ 
+ static volatile int vgl_wr_mode = 0;
+-uint32_t vgl_wr_stat[4]; // copies and bytes made by a NEON variant, copies and bytes left to sceClibMemcpy (for the log)
++uint32_t vgl_wr_stat[8]; // [0..3] copies and bytes made by a NEON variant, copies and bytes made wholly by sceClibMemcpy (under 192 bytes, mode 0, the FB=0 fallback; for the log); 0061: [4] copies and [5] bytes by the DMA engine, [6] copies of 8 KiB+ that were not given to it
++                         // (an address at or above 0x81000000: user memory, the C heap, where every std::vector lives), [7] DMA calls that returned an error
+ 
+ static inline void wr_neon64(uint8_t *d, const uint8_t *s, uint32_t blocks) {
+ 	__asm__ volatile(
+@@ -56,25 +60,56 @@
+ 		: "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9", "d10", "d11", "d12", "d13", "d14", "d15", "memory", "cc");
+ }
+ 
++// 0061: what mode 3 does with a copy the DMA engine does not take (under 8 KiB, an address at or above 0x81000000, or a DMA error). 0045 handed it to sceClibMemcpy, which writes the uncached
++// pools at 0.34-0.41 GB/s (768 byte copies 408-410 MB/s on the console, 6121 / 6122) against 0.60-0.78 GB/s for the 64 byte NEON stores of mode 1. 1 (default): mode 1's copy. 0: sceClibMemcpy as 0045.
++// The bytes written are the same either way. DMA stays for 8 KiB and more between two addresses below 0x81000000.
++static volatile int vgl_wr_fb = 1;
++void vglSetWriteCopyFallback(int on) {
++	vgl_wr_fb = on ? 1 : 0;
++}
++int vglGetWriteCopyFallback(void) {
++	return vgl_wr_fb;
++}
++
+ void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n) {
+ 	uint8_t *d = (uint8_t *)dst;
+ 	const uint8_t *s = (const uint8_t *)src;
+ 	if (mode == 3) {
+-		if (n >= 0x2000u && (uint32_t)s < 0x81000000u && (uint32_t)d < 0x81000000u && sceDmacMemcpy(d, s, n) >= 0)
++		if (n >= 0x2000u) {
++			if (VGL_WR_ADDR(s) < 0x81000000u && VGL_WR_ADDR(d) < 0x81000000u) {
++				if (sceDmacMemcpy(d, s, n) >= 0) {
++					vgl_wr_stat[4]++;
++					vgl_wr_stat[5] += n;
++					return;
++				}
++				vgl_wr_stat[7]++;
++			} else
++				vgl_wr_stat[6]++;
++		}
++		if (!vgl_wr_fb) {
++			vgl_wr_stat[2]++;
++			vgl_wr_stat[3] += n;
++			sceClibMemcpy(d, s, n);
+ 			return;
+-		sceClibMemcpy(d, s, n);
+-		return;
++		}
++		mode = 1;
+ 	}
+ 	if (mode != 1 && mode != 2) {
++		vgl_wr_stat[2]++;
++		vgl_wr_stat[3] += n;
+ 		sceClibMemcpy(d, s, n);
+ 		return;
+ 	}
+ 	const uint32_t unit = mode == 1 ? 64u : 128u;
+ 	uint32_t head = (uint32_t)(-(intptr_t)d) & 63u;
+ 	if (n < head + unit) {
++		vgl_wr_stat[2]++;
++		vgl_wr_stat[3] += n;
+ 		sceClibMemcpy(d, s, n);
+ 		return;
+ 	}
++	vgl_wr_stat[0]++; // 0061: counted where the copy is made: a copy whose bulk is NEON stores is [0]/[1], a copy made wholly by sceClibMemcpy [2]/[3], by the DMA engine [4]/[5]
++	vgl_wr_stat[1] += n;
+ 	if (head) {
+ 		sceClibMemcpy(d, s, head);
+ 		d += head;
+@@ -105,6 +140,10 @@
+ 	for (int i = 0; i < 4; i++)
+ 		out4[i] = vgl_wr_stat[i];
+ }
++void vglWriteCopyStats8(uint32_t *out8) { // 0061: the four above and the DMA counters
++	for (int i = 0; i < 8; i++)
++		out8[i] = vgl_wr_stat[i];
++}
+ 
+ // 0051 (MSC_VITA_TEXCOPY): the contiguous level-0 copy of a texture upload (gpu_alloc_texture, glTexSubImage2D). Mode 0 is exactly what these two sites did before (vgl_fast_memcpy).
+ // The destination is GPU-mapped video memory, where the CPU's stores run at about a third of the DMA engine's speed (339-363 against 866-935 MB/s, 17 Nov console, 8 KiB+).
+@@ -149,7 +188,5 @@
+ 		sceClibMemcpy(dst, src, n);
+ 		return;
+ 	}
+-	vgl_wr_stat[0]++;
+-	vgl_wr_stat[1] += n;
+-	vglWriteCopyVariant(m, dst, src, n);
++	vglWriteCopyVariant(m, dst, src, n); // (0061: the variant counts the copy by the branch it takes)
+ }
+diff --git a/source/utils/wrcopy.h b/source/utils/wrcopy.h
+--- a/source/utils/wrcopy.h
++++ b/source/utils/wrcopy.h
+@@ -7,6 +7,9 @@
+ int vglGetWriteCopy(void);
+ void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n);
+ void vglWriteCopyStats(uint32_t *out4);
++void vglWriteCopyStats8(uint32_t *out8);       // 0061
++void vglSetWriteCopyFallback(int on);          // 0061
++int vglGetWriteCopyFallback(void);
+ // 0051 (MSC_VITA_TEXCOPY): the level-0 copy of a texture upload, see wrcopy.c
+ void vgl_tex_copy(void *dst, const void *src, uint32_t n);
+ void vglSetTextureCopyDma(int mode);
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1480,6 +1480,11 @@
+ int vglGetWriteCopy(void);
+ void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n);
+ void vglWriteCopyStats(uint32_t *out4);
++// 0061 (MSC_VITA_WRCOPY_FB): mode 3 gives a copy the DMA engine does not take (under 8 KiB, an address at or above 0x81000000, an error) to mode 1's NEON stores (1, default) or to sceClibMemcpy (0, as 0045).
++// vglWriteCopyStats8: the four above, then DMA copies, DMA bytes, 8 KiB+ copies not given to the DMA engine because of an address, DMA errors.
++void vglSetWriteCopyFallback(int on);
++int vglGetWriteCopyFallback(void);
++void vglWriteCopyStats8(uint32_t *out8);
+ // 0051 (MSC_VITA_TEXCOPY): the copy of a texture's decoded level 0 into its video memory (glTexImage2D / glTexSubImage2D, one contiguous copy): 0 the library's own copy (default), 1 sceDmacMemcpy for 8 KiB and more
+ // (upstream's vgl_memcpy does this for other copies; these two were left to the CPU), 2 as 1 and every DMA copy is compared with its source and made again by the CPU on a difference (counted).
+ // vglTextureCopyStats: DMA copies, DMA bytes, DMA microseconds, copies left to the CPU, differences, refusals. The same bytes either way.

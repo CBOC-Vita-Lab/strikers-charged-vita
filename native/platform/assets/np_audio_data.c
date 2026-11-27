@@ -154,7 +154,7 @@ int npa_cvt_audio_script(NpaCtx* c, const NpaChunk* k)
     int rc = 0;
     if (size < 0x10 + 8)
     {
-        npa_err(c, NPA_ERR_FORMAT, "audio script blob of %zu bytes", size);
+        npa_err(c, NPA_ERR_FORMAT, "audio script blob of %lu bytes", (unsigned long)size);
         return NPA_ERR_FORMAT;
     }
     if (npa_rd32(d) != 0x4D4D4742u)
@@ -167,7 +167,7 @@ int npa_cvt_audio_script(NpaCtx* c, const NpaChunk* k)
     bind_off = 0x10 + 8 * nent;
     if (nent > 100000 || (size_t)bind_off + 8 > size || bco > size || bco < bind_off + 8)
     {
-        npa_err(c, NPA_ERR_BOUNDS, "audio script: %u entries, byte code at 0x%x in %zu bytes", nent, bco, size);
+        npa_err(c, NPA_ERR_BOUNDS, "audio script: %u entries, byte code at 0x%x in %lu bytes", nent, bco, (unsigned long)size);
         return NPA_ERR_BOUNDS;
     }
     done = (uint8_t*)calloc((size / 4 + 7) / 8 + (size / 2 + 7) / 8 + 8, 1);

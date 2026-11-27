@@ -3,7 +3,7 @@
 set -e
 DT=$(cd "$(dirname "$0")" && pwd)
 cd "$DT/../.."
-BR=${BUILD_ROOT:-/home/claude/msc/build/np/NPG}
+BR=${BUILD_ROOT:-/work/msc/build/np/NPG}
 OUT=$BR/dt; mkdir -p $OUT
 for f in src/Game/AI/SpaceSearch.cpp src/Game/AI/AiUtil.cpp src/Game/AI/Fuzzy.cpp ${EXTRA_SRC}; do
   make -s TARGET=host32 BUILD_ROOT=$BR $BR/host32/obj/$f.o

@@ -76,8 +76,16 @@ uint64_t audio_block() {
     uint64_t t0 = np_time_real_ns();
     // "the DMA block finished": the AX frame callback
     np_irq_enter();
-    if (cb) cb();
-    np_irq_leave();
+    if (np_irq_waitstat()) {   // (MSC_IRQ_WAITSTAT, os_interrupt.cpp: how long the frame callback holds the interrupt lock)
+        const uint64_t h0 = np_time_real_ns();
+        if (cb) cb();
+        const uint64_t held = np_time_real_ns() - h0;
+        np_irq_leave();
+        np_irq_note_hold(held);
+    } else {
+        if (cb) cb();
+        np_irq_leave();
+    }
     AxDspHle::RunPendingMix();
     np_irq_enter();
     AxDspHle::ServiceDeferredCallbacks();

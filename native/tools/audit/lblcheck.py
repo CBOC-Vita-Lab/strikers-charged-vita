@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """lblcheck.py <source.cpp>: (needs the flat DOL image of NPG's tools, dol.flat) compares every `<type> lbl_XXXXXXXX = value;` of the source with the DOL's initial value."""
 import re, struct, sys
-img = open('/home/claude/msc/npw/NPG-tools/dol.flat', 'rb').read(); B = 0x80004000
+img = open('/work/msc/npw/NPG-tools/dol.flat', 'rb').read(); B = 0x80004000
 bad = 0; n = 0; uninit = []
 for line in open(sys.argv[1]):
     m = re.match(r'^\s*(?:static\s+|const\s+)*(float|double|int|unsigned int|unsigned char|u8|u16|u32|s32|short|unsigned short|char|bool|long|unsigned long)\s+lbl_([0-9A-Fa-f]{8})\s*(?:=\s*([^;]+))?;', line)

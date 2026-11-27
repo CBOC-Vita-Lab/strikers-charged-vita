@@ -1,13 +1,13 @@
 #!/bin/bash
 # W5 GLB: the A/B partners of the glb package from the SAME sources with the strict and the perf vitaGL library (lab packages only): tools/heavy.sh -t 900 platform/vita/tools/glb_partners.sh   (in the build root of the glb package: it rebuilds the two vgx objects that see vitaGL.h, so run it in a root nobody else builds in)
 # The vgx objects that see vitaGL.h (the GL back end, the Vita host) and the library are rebuilt for each; the result goes to pkgs/<variant>/lab.{vpk,elf}. The glb packages are in pkgs/glb (built by glb_j1.sh).
-cd /home/claude/msc/npw/W5GLB
+cd /work/msc/npw/W5GLB
 export VITASDK=/opt/vitasdk PATH=/opt/vitasdk/bin:$PATH
-R=/home/claude/msc/build/np/W5GLB
-GX=/home/claude/msc/npw/W5GLB-vgx
+R=/work/msc/build/np/W5GLB
+GX=/work/msc/npw/W5GLB-vgx
 V=$R/lto/vita/gx/vgx/vita-vitagl
 for v in strict perf; do
-  case $v in strict) export VDEPS=/home/claude/msc/build/one/vdeps-strict;; perf) export VDEPS=/home/claude/msc/build/np/VRS/deps-perf;; esac
+  case $v in strict) export VDEPS=/work/msc/build/one/vdeps-strict;; perf) export VDEPS=/work/msc/build/np/VRS/deps-perf;; esac
   echo "== $v $(date +%T) VDEPS=$VDEPS"
   rm -f $V/obj/src/vgx_backend_gl.o $V/obj/vita/vgx_host_vita.o $V/libvgx-native-vita.a
   rm -rf $R/lto/vita/pkg/np/obj

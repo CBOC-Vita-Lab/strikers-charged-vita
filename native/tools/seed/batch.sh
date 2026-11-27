@@ -2,12 +2,12 @@
 # W5-SEED: runs the scenarios of a runs.txt (name script maxframes timeout) one after the other, inside ONE heavy.sh turn:
 #   heavy.sh -t 590 tools/seed/batch.sh [-r regex] [-b budget seconds] [-X exe] runs.txt
 # Skips scenarios that already have rec/<name>.done; stops starting new ones after the budget (default 480 s) so that the turn ends cleanly.
-OUT=${SEED_OUT:-/home/claude/msc/build/np/W5SEED}
-RE=.; BUDGET=480; EXE=/home/claude/msc/build/np/W5SEED/h32/host32/np-host32-full-null
+OUT=${SEED_OUT:-${SEED_ROOT:-/work/msc/build/np/W5SEED}}
+RE=.; BUDGET=480; EXE=${SEED_ROOT:-/work/msc/build/np/W5SEED}/h32/host32/np-host32-full-null
 while getopts "r:b:X:" o; do case $o in r) RE=$OPTARG;; b) BUDGET=$OPTARG;; X) EXE=$OPTARG;; *) exit 2;; esac; done
 shift $((OPTIND-1))
 RUNS=$1; HERE=$(cd "$(dirname "$0")/../.." && pwd)
-S=${SAVE:-/home/claude/msc/build/np/B3/rundata-save}
+S=${SAVE:-/work/msc/build/np/B3/rundata-save}
 T0=$SECONDS; n=0; bad=0
 mkdir -p $OUT/rec
 while read -r name script maxf tmo; do

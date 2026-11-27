@@ -1,0 +1,16 @@
+# console-1.2 run n-hudnative: HUD and menus at the screen's size
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group picture, route nlava, version payload 1.3, role nab
+# The 2D layers go to the display over the upscaled scene. Look at score, clock and menu text, wipes and pause. GPU time should stay within noise: a HUD costs about 1.8x its own pixels, the EFB scene loses them.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/nlava.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_CAMERA_ZOOM=1
+MSC_CAMERA_AUTO=0
+MSC_VGX_HUDNATIVE=1

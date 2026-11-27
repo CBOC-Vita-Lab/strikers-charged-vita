@@ -1,6 +1,7 @@
 #include <revolution/gx.h>
 
 #include "Game/Task/EndFrameTask.h"
+#include "np/gsplit.h"
 
 unsigned char gDrawScreenBorder;
 
@@ -11,6 +12,8 @@ unsigned char gDrawScreenBorder;
 #include "types.h"
 #include "Game/Render/Warble.h"
 #include "Game/SharedStaticStorage.h"
+#include "Game/Render/Amortize.h"
+#include "Game/Render/StillBackdrop.h"
 
 void EndFrameTask::Run(float)
 {
@@ -37,13 +40,22 @@ void EndFrameTask::Run(float)
 
         if (useWarble)
         {
+            NP_GS(NPGS_E_WARBLE);
             UpdateWarbleTexture(&gWarbleEnabled);
             RenderWarbleQuad(&gWarbleEnabled);
         }
 
+        NpGsSeq gsq(NPGS_E_STILL);   // gt27 (MSC_GSPLIT)
+        StillBackdropBeforeSend();   // MSC_MENU_STILL, MSC_PAUSE_STILL
+        AmortizeBeforeSend();        // MSC_AMORT_LOG, MSC_FX_HAZE_CACHE
+        gsq.Next(NPGS_E_SEND);
         glEndFrame();
         g_FrameCounter.StartTimer(1);
         glSendFrame();
+        gsq.Next(NPGS_E_STILL);
+        StillBackdropAfterSend();
+        AmortizeAfterSend();
+        gsq.Next(NPGS_E_TAIL);
 
         if (gpHBMManager != 0 && gpHBMManager->mReady && gpHBMManager->mActive)
         {

@@ -26,7 +26,7 @@ private:
 };
 
 bool IsSmokeTestEnabled();
-void SmokeTestLog(const char* format, ...);
+void SmokeTestLog(const char* format, ...) __attribute__((format(printf, 1, 2)));
 void SmokeTestLogGraphValue(const char* name, const char* units, float value);
 
 #endif // GAME_TASK_SMOKE_TEST_UPDATE_TASK_H

@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 15:00:00 -0500
+Subject: [PATCH] cached stream arena coverage (MSC_VITA_VBUF_CACHED): every glDraw*/vglDrawObjects entry writes back the arena before the draw (the fixed-function path did not), and glMapBuffer/glMapBufferRange/glUnmapBuffer mark the mapped buffer as written again (vgl_stream_touch)
+
+---
+
+diff --git a/source/buffers.c b/source/buffers.c
+index 0ba6b854..71845ff2 100644
+--- a/source/buffers.c
++++ b/source/buffers.c
+@@ -557,6 +557,9 @@ inline void *glMapNamedBuffer(GLuint buffer, GLenum access) {
+ 
+ 	// FIXME: Current implementation doesn't take into account 'last_frame' state
+ 	gpu_buf->mapped = GL_TRUE;
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++	vgl_stream_touch(gpu_buf->ptr); // 0054: a cached-arena buffer written through the map is written back before the next draw
++#endif
+ 	return gpu_buf->ptr;
+ }
+ 
+@@ -592,6 +595,9 @@ inline void *glMapNamedBufferRange(GLuint buffer, GLintptr offset, GLsizeiptr le
+ 
+ 	// FIXME: Current implementation doesn't take into account 'last_frame' state
+ 	gpu_buf->mapped = GL_TRUE;
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++	vgl_stream_touch((uint8_t *)gpu_buf->ptr + offset); // 0054
++#endif
+ 	return (void *)((uint8_t *)gpu_buf->ptr + offset);
+ }
+ 
+@@ -625,6 +631,9 @@ inline GLboolean glUnmapNamedBuffer(GLuint buffer) {
+ 
+ 	gpu_buf->last_frame = OBJ_NOT_USED;
+ 	gpu_buf->mapped = GL_FALSE;
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++	vgl_stream_touch(gpu_buf->ptr); // 0054: the writes made while it was mapped
++#endif
+ 	return GL_TRUE;
+ }
+ 
+diff --git a/source/draw.c b/source/draw.c
+index bcb00fbd..58047128 100644
+--- a/source/draw.c
++++ b/source/draw.c
+@@ -160,6 +160,7 @@ static inline __attribute__((always_inline)) void convert_16_to_8bit_indices(uin
+ 
+ void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifdef HAVE_DLISTS
+ 	// Enqueueing function to a display list if one is being compiled
+@@ -223,6 +224,7 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+ 
+ void glMultiDrawArrays(GLenum mode, const GLint *first, const GLsizei *count, GLsizei drawcount) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifndef SKIP_ERROR_HANDLING
+ 	if (drawcount < 0) {
+@@ -283,6 +285,7 @@ void glMultiDrawArrays(GLenum mode, const GLint *first, const GLsizei *count, GL
+ 
+ void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei primcount) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifndef SKIP_ERROR_HANDLING
+ 	if (phase == MODEL_CREATION) {
+@@ -335,6 +338,7 @@ void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei prim
+ 
+ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_indices) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifdef HAVE_DLISTS
+ 	// Enqueueing function to a display list if one is being compiled
+@@ -393,6 +397,7 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_in
+ 
+ void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_indices, GLint baseVertex) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifndef SKIP_ERROR_HANDLING
+ 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
+@@ -437,6 +442,7 @@ void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLv
+ 
+ void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *gl_indices) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifndef SKIP_ERROR_HANDLING
+ 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
+@@ -483,6 +489,7 @@ void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, G
+ 
+ void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, void *gl_indices, GLint baseVertex) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifndef SKIP_ERROR_HANDLING
+ 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
+@@ -527,6 +534,7 @@ void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsize
+ 
+ void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void *gl_indices, GLsizei primcount) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifndef SKIP_ERROR_HANDLING
+ 	if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT) {
+@@ -566,6 +574,7 @@ void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void
+ 
+ void vglDrawObjects(GLenum mode, GLsizei count) {
+ 	THREAD_SAFE()
++	VGL_STREAM_FLUSH_IF_NEEDED() // 0054: every draw entry, the fixed-function path too (the shader path flushes again, one bool test)
+ 
+ #ifdef ENABLE_LEGACY_PIPELINE
+ #ifndef SKIP_ERROR_HANDLING

@@ -6,8 +6,8 @@
 # MSC_VGX_DLCACHE=0, MSC_VGX_DECODE=0, MSC_VGX_FAST=0 (the display-list cache, the specialised vertex decoder and its fast
 # kernels off), and the arena registered as guest RAM or not (--no-ram).
 here=$(cd "$(dirname "$0")" && pwd)
-OUT=${1:-/home/claude/msc/build/np/NPR/gx}
-RUN=${VGX:-/home/claude/msc/npw/vgx-np}/native/test/run32.sh
+OUT=${1:-/work/msc/build/np/NPR/gx}
+RUN=${VGX:-/work/msc/npw/vgx-np}/native/test/run32.sh
 fails=0
 for t in gx_native_test:test-gl gx_game_test:gt-gl; do
   exe=${t%%:*}; dir=$OUT/${t##*:}

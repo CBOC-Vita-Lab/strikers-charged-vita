@@ -1,0 +1,13 @@
+# console-1.2 run heldaa-same: Replays and cut-scenes keep 2x in every stadium
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route replay, version payload 1.3, role ab
+# MSC_PICTURE_HOLD_MSAA_HELD=same (default auto: Crystal Canyon, The Dump and Sand Tomb draw replays, goal celebrations and walk-outs with one sample and the effects compositor, where the model says 2x with effects in place misses the 30 fps budget). Against the default on The Dump and Sand Tomb goal celebrations: GPU busy ms, late frames in the celebration, the `[fxaa]` lines (samples and compositor runs per scene class); by eye the edges in the celebration.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD_MSAA_HELD=same

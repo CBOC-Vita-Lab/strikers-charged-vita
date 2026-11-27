@@ -9,6 +9,14 @@
 #include "NL/nlMemory.h"
 #include "NL/nlString.h"
 #include "NL/platvmath.h"
+#include "np/overlap.h"
+#include "np/crowdcut.h"
+#include "port/parallel.h"
+#include "Game/PoseAccumulator.h"
+#include "Game/Render/ImpostorModel.h"
+#include "np/perfmode.h"
+#include "np/stadiumcut.h"
+#include "np/scenecut.h"
 #include "Game/Render/CrowdImpostors.h"
 #include "Game/SharedStaticStorage.h"
 #include "Game/World/WorldObject.h"
@@ -242,11 +250,78 @@ ImpostorModel* WorldNPCManager::CreateNPC(
     return model;
 }
 
+namespace
+{
+// MSC_NPC_EVAL_LAZY: the models whose evaluate Update left out on this picture (the render filter hid them)
+const ImpostorModel* sSkippedEval[128];
+int sNumSkippedEval;
+void NoteSkippedEvaluate(const ImpostorModel* model)
+{
+    if (sNumSkippedEval < 128) sSkippedEval[sNumSkippedEval++] = model;
+}
+bool WasSkippedEvaluate(const ImpostorModel* model)
+{
+    for (int i = 0; i < sNumSkippedEval; ++i)
+    {
+        if (sSkippedEval[i] == model) return true;
+    }
+    return false;
+}
+
+struct NpcPoseJob
+{
+    ImpostorModel* models[128];
+    bool evaluate[128];
+    int count;
+};
+int NpcPoseRange(void* opaque, size_t begin, size_t end, uint32_t lane)
+{
+    NpcPoseJob& job = *static_cast<NpcPoseJob*>(opaque);
+    (void)lane;
+    for (size_t i = begin; i < end; ++i)
+    {
+        if (NpPoseJobsBreak() && (i % 3) == 2) continue;   // (proof mutant)
+        job.models[i]->PoseForJob(job.evaluate[i]);
+    }
+    return 1;
+}
+} // namespace
+
 void WorldNPCManager::Render(GLView* view)
 {
     if (gDisableWorldNPCs)
     {
         return;
+    }
+
+    // wave 12, MSC_POSE_JOBS bit 2: the pose of the drawn models (node matrices, skin pose) is made on the job lanes first, then the loop below only builds the packets. A pose is the same function of the same inputs wherever
+    // it runs. MSC_NPC_EVAL_LAZY: a model that Update did not evaluate (its filter hid it then) and that the filter lets through now is evaluated here.
+    bool posed = false;
+    NpcPoseJob job;
+    job.count = 0;
+    if ((NpPoseJobs() & 2) != 0 && PortParallelWorkers() != 0)
+    {
+        bool fits = true;
+        for (ListEntry<ImpostorModel*>* e = mWorldNPCs.m_Head; e != 0; e = e->next)
+        {
+            ImpostorModel* model = e->entry;
+            if (mRenderFilter != 0 && !mRenderFilter(model)) continue;
+            if (job.count == 128 || model->mPoseAccumulator == 0)
+            {
+                fits = false;
+                break;
+            }
+            job.evaluate[job.count] = sNumSkippedEval != 0 && WasSkippedEvaluate(model);
+            job.models[job.count++] = model;
+        }
+        if (fits && job.count != 0)
+        {
+            PortParallelFor((size_t)job.count, 1, NpcPoseRange, &job);
+            for (int i = 0; i < job.count; ++i) ImpostorModel::MarkPosed(job.models[i]);
+            NpPoseJobsCount(2, job.count);
+            NpPoseJobsCount(3, 1);
+            posed = true;
+        }
     }
 
     ListEntry<ImpostorModel*>* entry = mWorldNPCs.m_Head;
@@ -258,19 +333,45 @@ void WorldNPCManager::Render(GLView* view)
             entry = entry->next;
             continue;
         }
-        model->Render(view, 0);
+        if (posed && ImpostorModel::IsPosed(model))
+        {
+            model->RenderSamePose(view);   // (Render(view, 0) with the node matrices and skin pose already made)
+        }
+        else
+        {
+            if (sNumSkippedEval != 0 && WasSkippedEvaluate(model))
+            {
+                model->EvaluatePose();
+                NpPoseJobsCount(5, 1);
+            }
+            model->Render(view, 0);
+        }
         entry = entry->next;
     }
+    if (posed) ImpostorModel::ClearPosed();
 }
 
 void WorldNPCManager::Update(float dt)
 {
+    // MSC_NPC_LAZY (np/overlap.h): Stadium Crowd HIDE leaves out the one Render of these models (GameRenderTask::RenderFrame), the only reader of their pose (MSC_STADIUM_HEAVY does the same);
+    // the animation controllers, whose events and time are not visual only, go on
+    const bool lazy = (NpPerformanceMode() || NpStadiumHeavyCrowd() || NpStadiumCutHas(NP_CUT_WORLDNPC)) && NpNpcLazy();   // (nxvis25: MSC_STADIUM_CUT bit 16 leaves out the same one Render, GameRenderTask NpWin17Stage 0)
+    sNumSkippedEval = 0;   // (MSC_NPC_EVAL_LAZY: this picture's skips)
     for (ListEntry<ImpostorModel*>* entry = mWorldNPCs.m_Head;
         entry != 0; entry = entry->next)
     {
         ImpostorModel* model = entry->entry;
         model->mAnimController->Update(dt);
-        model->EvaluatePose();
+        if (!lazy && NpNpcEvalLazy() && mRenderFilter != 0 && !mRenderFilter(model))
+        {
+            // MSC_NPC_EVAL_LAZY: the render filter hides this model, so nothing reads its pose; if the filter lets it through at the draw (the camera type changed in between) the draw evaluates it
+            NpPoseJobsCount(4, 1);
+            NoteSkippedEvaluate(model);
+        }
+        else if (!lazy)
+        {
+            model->EvaluatePose();
+        }
     }
 }
 

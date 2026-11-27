@@ -1214,6 +1214,60 @@ int dCollideSpherePlane(dxGeom* o1, dxGeom* o2, int flags,
         return 0;
 }
 
+// MSC_PHYS27_PLANE: 1 when the plane collider of the inner geom's class (sphere, box, capsule) returns 0 for `inner` at pos / R and the plane `plane`: the depth
+// tests of dCollideSpherePlane, dCollideBoxPlane and dCollideCCylinderPlane, copied with their expressions (a copy, so the colliders stay untouched). 0 = not
+// known empty (another class, or a contact would be made).
+int NpOdeColumnPlaneEmpty(dGeomID column, const float* position, dGeomID plane);   // ext/dColumn.cpp
+extern int dColumnClassUser;
+int NpOdeStdPlaneEmpty(dxGeom* inner, const dReal* pos, const dReal* R, dxGeom* plane)
+{
+    if (plane->type != dPlaneClass)
+        return 0;
+    dxPlane* pl = (dxPlane*)plane;
+    switch (inner->type)
+    {
+    case dSphereClass:
+    {
+        dxSphere* sphere = (dxSphere*)inner;
+        dReal k = dDOT(pos, pl->p);
+        dReal depth = pl->p[3] - k + sphere->radius;
+        return depth >= 0 ? 0 : 1;
+    }
+    case dBoxClass:
+    {
+        dxBox* box = (dxBox*)inner;
+        const dReal* n = pl->p;
+        dReal Q1 = dDOT14(n, R + 0);
+        dReal Q2 = dDOT14(n, R + 1);
+        dReal Q3 = dDOT14(n, R + 2);
+        dReal A1 = box->side[0] * Q1;
+        dReal A2 = box->side[1] * Q2;
+        dReal A3 = box->side[2] * Q3;
+        dReal B1 = dFabs(A1);
+        dReal B2 = dFabs(A2);
+        dReal B3 = dFabs(A3);
+        dReal depth = pl->p[3] + REAL(0.5) * (B1 + B2 + B3) - dDOT(n, pos);
+        return depth < 0 ? 1 : 0;
+    }
+    case dCCylinderClass:
+    {
+        dxCCylinder* ccyl = (dxCCylinder*)inner;
+        dReal sign = (dDOT14(pl->p, R + 2) > 0) ? REAL(-1.0) : REAL(1.0);
+        dVector3 p;
+        p[0] = pos[0] + R[2] * ccyl->lz * REAL(0.5) * sign;
+        p[1] = pos[1] + R[6] * ccyl->lz * REAL(0.5) * sign;
+        p[2] = pos[2] + R[10] * ccyl->lz * REAL(0.5) * sign;
+        dReal k = dDOT(p, pl->p);
+        dReal depth = pl->p[3] - k + ccyl->radius;
+        return depth < 0 ? 1 : 0;
+    }
+    default:
+        if (inner->type == dColumnClassUser && dColumnClassUser != -1)
+            return NpOdeColumnPlaneEmpty(inner, pos, plane);
+        return 0;
+    }
+}
+
 int dCollideBoxBox(dxGeom* o1, dxGeom* o2, int flags,
     dContactGeom* contact, int skip)
 {

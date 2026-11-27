@@ -40,6 +40,7 @@ inline void Progress(int kind, unsigned done, unsigned total) { const auto& s = 
 
 namespace VitaThreads {
 enum Role { kCollector = VGXN_ROLE_COLLECTOR, kDisplayQueue = VGXN_ROLE_DISPLAY_QUEUE, kPlayer = VGXN_ROLE_PLAYER, kRender = VGXN_ROLE_RENDER };
+constexpr int kPlan = VGXN_ROLE_PLAN;   // CoreMask(role | kPlan): the plan's mask without the fourth core
 int CoreMask(int role);   // services' value, or the standalone plan (render + display queue core 1, collector + player core 2)
 inline void PinCurrentThread(int role) { const auto& s = vgxn_vita::Services(); if (s.pin_current_thread) s.pin_current_thread(role); }
 } // namespace VitaThreads

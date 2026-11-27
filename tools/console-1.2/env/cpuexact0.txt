@@ -1,0 +1,15 @@
+# console-1.2 run cpuexact0: The three wave-13 exact CPU changes off, as 1.3 before them
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_TLS_FAST, MSC_TICKS_FAST and MSC_FPBITS are on in 1.3 (wave 13, cpuexact13): exact (host proofs in docs/TECHNICAL.md: unit tests against copies of the library code, every ns below 2^50, all 2^32 float patterns; det trace equal). The A/B: game thread ms in [lane] and p50 against d1 (estimate 0.1-0.3 ms together). With the default the log has a [tls] line (on, offset, emutls wrapped); here it says off.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_TLS_FAST=0
+MSC_TICKS_FAST=0
+MSC_FPBITS=0

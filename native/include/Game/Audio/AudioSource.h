@@ -7,6 +7,7 @@
 #include "NL/nlSlotPool.h"
 
 class Plat3dSoundSrc;
+#include "Game/Audio/AudioStreamKeep.h"
 class AudioReadState;
 class AudioBankLoader;
 struct AudioStreamChannel;
@@ -220,6 +221,7 @@ public:
     bool m_EndAddressSet : 1;
     /* 0x24 */ AudioReadQueueEntry* m_ReadQueue;
     /* 0x28 */ eAudioSourceState m_PendingState;
+    AudioStreamKeep m_Keep;   // (1.3) starvation that recovers: AudioStreamKeep.h
 };
 
 void SetVoiceInputVolume(AXVPB*, float);

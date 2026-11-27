@@ -1,0 +1,56 @@
+--- a/native/src/Game/LANConnectionMessages.cpp
++++ b/native/src/Game/LANConnectionMessages.cpp
+@@ -1,5 +1,19 @@
+ #include "Game/LANMessages.h"
+ 
++// np: the sizes below come off the wire of a console nobody vetted (any console on the same Wi-Fi or in radio range, with the public fingerprint) and index fields of 8
++// bytes and 7 entries: a larger value would write past the message. Refused like a truncated message (mFailed: MessageRegistry::Dispatch discards it).
++static inline void TransferUserMatchData(
++    NetworkMessageSerializer* serializer, u8* data, u8* size, unsigned long capacity)
++{
++    if (serializer->mDirection == NETWORK_SERIALIZE_READ && *size > capacity)
++    {
++        serializer->mFailed = true;
++        *size = 0;
++        return;
++    }
++    serializer->Transfer(data, *size);
++}
++
+ static inline void SerializeLANPeerMessageInfo(
+     NetworkMessageSerializer* serializer, LANPeerMessageInfo& info)
+ {
+@@ -8,7 +22,7 @@
+     serializer->Transfer(info.mName, sizeof(info.mName));
+     serializer->Transfer(&info.mPeerIndex, sizeof(info.mPeerIndex));
+     serializer->Transfer(&info.mUserMatchDataSize, sizeof(info.mUserMatchDataSize));
+-    serializer->Transfer(info.mUserMatchData, info.mUserMatchDataSize);
++    TransferUserMatchData(serializer, info.mUserMatchData, &info.mUserMatchDataSize, sizeof(info.mUserMatchData));
+ }
+ 
+ NetMessageJoinRequest::NetMessageJoinRequest()
+@@ -22,7 +36,7 @@
+     serializer->Transfer(&mPort, sizeof(mPort));
+     serializer->Transfer(mName, sizeof(mName));
+     serializer->Transfer(&mUserMatchDataSize, sizeof(mUserMatchDataSize));
+-    serializer->Transfer(mUserMatchData, mUserMatchDataSize);
++    TransferUserMatchData(serializer, mUserMatchData, &mUserMatchDataSize, sizeof(mUserMatchData));
+ }
+ 
+ NetMessageJoinResponse::NetMessageJoinResponse()
+@@ -37,8 +51,14 @@
+     serializer->Transfer(&mAccepted, sizeof(mAccepted));
+     serializer->Transfer(mName, sizeof(mName));
+     serializer->Transfer(&mUserMatchDataSize, sizeof(mUserMatchDataSize));
+-    serializer->Transfer(mUserMatchData, mUserMatchDataSize);
++    TransferUserMatchData(serializer, mUserMatchData, &mUserMatchDataSize, sizeof(mUserMatchData));
+     serializer->Transfer(&mPeerCount, sizeof(mPeerCount));
++    if (serializer->mDirection == NETWORK_SERIALIZE_READ && mPeerCount > 6)   // the joiner's mPeerInfoList holds 8: the host's record, these, its own
++    {
++        serializer->mFailed = true;
++        mPeerCount = 0;
++        return;
++    }
+     for (u8 index = 0; index < mPeerCount; ++index)
+     {
+         SerializeLANPeerMessageInfo(

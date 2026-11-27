@@ -3,6 +3,7 @@
 #include "Game/Effects/EmissionManager.h"
 #include "Game/Effects/ParticleSystem.h"
 #include "Game/Effects/EffectsGroup.h"
+#include "Game/Render/Amortize.h"
 #include "Game/PoseAccumulator.h"
 #include "Game/SHierarchy.h"
 #include "Game/SAnim/pnSAnimController.h"
@@ -45,6 +46,9 @@ EmissionController::EmissionController(EffectsGroup* pGroup, EmissionManager* pM
 {
     m_bLingering = m_pGroup->m_bIsLingering != 0;
     m_uUserData = 0;
+#ifdef NP_NATIVE
+    nlVec3Set(m_vDrawOffset, 0.0f, 0.0f, 0.0f);
+#endif
 
     InitializeSystemsFromGroup();
 
@@ -346,6 +350,9 @@ bool fxUpdateParticleSystem(
     controller->ComputePositionAndVelocity(*pSpec, pos, vel);
     pSys->m_vPosition = pos;
     pSys->m_vVelocity = vel;
+#ifdef NP_NATIVE
+    pSys->m_vDrawOffset = controller->m_vDrawOffset;   // (MSC_FX_ATTACH: draw side only)
+#endif
     controller->UpdateParticleSystemDirection(pSpec, pSys);
 
     pSys->UpdateCoordSys();
@@ -523,6 +530,13 @@ int EmissionController::Render()
     {
         ParticleSystem* pSys = *iterator;
         GLView* view = (GLView*)m_pContext;
+#ifdef NP_NATIVE
+        if (!AmortizeHazeRoute(pSys, &view))   // MSC_FX_HAZE_CACHE: this frame shows the held picture
+        {
+            iterator.Step();
+            continue;
+        }
+#endif
         numParticles += pSys->m_bVisible ? pSys->RenderAllParticles(view) : 0;
         iterator.Step();
     }

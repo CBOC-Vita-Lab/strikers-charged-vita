@@ -22,6 +22,7 @@
  */
 
 #include "shared.h"
+#include "utils/geom_fix.h" // 0058
 
 #ifdef HAVE_UNPURE_TEXFORMATS
 #define resolve_tex_target(target, unresolved_action) \
@@ -608,7 +609,7 @@ static inline __attribute__((always_inline)) void _glTexImage2D_FlatIMPL(texture
 	case GL_ALPHA:
 		switch (type) {
 		case GL_UNSIGNED_BYTE:
-			if (internalFormat == GL_RED || internalFormat == GL_ALPHA)
+			if (internalFormat == GL_RED || internalFormat == GL_ALPHA || internalFormat == GL_INTENSITY) // 0053: GL_INTENSITY is U8_RRRR, one byte a texel like U8_R: the bytes go in as they are
 				fast_store = GL_TRUE;
 			else
 				read_cb = read_r8;
@@ -976,6 +977,10 @@ static inline __attribute__((always_inline)) void _glTexSubImage2D(texture *tex,
 	}
 #endif	
 
+	// 0058: a level the texture's chain does not hold has no room in its block (the chain stops where the smaller side reaches 1, and mip_count never counts past it)
+	if (level < 0 || (level > 0 && (level >= tex->mip_count || (uint32_t)level >= vgl_mip_chain_levels(nearest_po2(orig_w), nearest_po2(orig_h)))))
+		return;
+
 #ifdef HAVE_TEX_CACHE
 	restore_tex_cache(tex);
 #endif
@@ -1215,23 +1220,16 @@ static inline __attribute__((always_inline)) void _glTexSubImage2D(texture *tex,
 		}
 		uint32_t mip_w, mip_stride;
 		if (level > 0) {
-			if (po2_w == 0) { // We didn't calculate already the mip jump chain, so we do it now
+			// 0058: the start and the row stride of the level come from one function (utils/geom_fix.h). The stride was left unset when the chain's jumps had been
+			// calculated above, and the width was orig_w / (2 * level), which is not a halving per level from level 3 on.
+			if (po2_w == 0) {
 				po2_w = nearest_po2(orig_w);
 				po2_h = nearest_po2(orig_h);
-				mip_stride = po2_w;
-				uint32_t _mip_h = po2_h;
-				for (int j = 0; j < level; j++) {
-					ptr += MAX(mip_stride, 8) * _mip_h * bpp;
-					mip_stride /= 2;
-					_mip_h /= 2;
-				}
-			} else {
-				for (int j = 0; j < level; j++) {
-					ptr += jumps[j];
-				}
 			}
-			mip_w = orig_w / (2 * level);
-			mip_stride = VGL_ALIGN(mip_stride, 8) * bpp;
+			uint32_t mip_off;
+			vgl_mip_level_geom(po2_w, po2_h, bpp, level, &mip_off, &mip_stride);
+			ptr += mip_off;
+			mip_w = vgl_mip_level_width(orig_w, level);
 		} else {
 			mip_w = orig_w;
 			mip_stride = VGL_ALIGN(orig_w, 8) * bpp;
@@ -1242,7 +1240,7 @@ static inline __attribute__((always_inline)) void _glTexSubImage2D(texture *tex,
 			uint32_t line_size = width * bpp;
 			uint32_t src_stride = (unpack_row_len ? unpack_row_len : width) * bpp;
 			if (xoffset == 0 && src_stride == mip_w * bpp && src_stride == mip_stride) {
-				vgl_fast_memcpy(ptr, data, line_size * height);
+				vgl_tex_copy(ptr, data, line_size * height); // 0051
 			} else {
 				for (int i = 0; i < height; i++) {
 					vgl_fast_memcpy(ptr, data, line_size);
@@ -1734,6 +1732,7 @@ inline __attribute__((always_inline)) void glGenTextures(GLsizei n, GLuint *res)
 
 			// Resetting texture parameters to their default values
 			texture_slots[i].dirty = GL_FALSE;
+			texture_slots[i].fg_rt_frame = 0; // 0050: a reused slot has no scene history (0034 stamp)
 #ifndef TEXTURES_SPEEDHACK
 			texture_slots[i].last_frame = OBJ_NOT_USED;
 #endif
@@ -1803,6 +1802,8 @@ void glBindTexture(GLenum target, GLuint texture) {
 
 void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
 	THREAD_SAFE()
+	if (vgl_fg_on && !vgl_fg_flushing && vgl_fg_delete(0, n, gl_textures, __builtin_return_address(0)))
+		return; // 0034: the guard took the names and deletes them some presents later
 
 #ifndef SKIP_ERROR_HANDLING
 	// Error handling
@@ -1827,7 +1828,7 @@ void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
 						if (fb) {
 							gpu_free_texture(&texture_slots[i]);
 							if (fb->depthbuffer_ptr) {
-								mark_as_dirty(fb->depthbuffer_ptr->depthData);
+								mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
 								fb->depthbuffer_ptr = NULL;
 								fb->depthbuffer_state = DEPTHBUFFER_MISSING;
 							}
@@ -1835,6 +1836,8 @@ void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
 								mark_rt_as_dirty(fb->target);
 								fb->target = NULL;
 							}
+							VGL_FB_DROP_RT2(fb); // 0063
+							fb->data = NULL;
 							fb->tex = NULL;
 						} else {
 							texture_slots[i].dirty = GL_TRUE;
@@ -2711,6 +2714,165 @@ void *vglGetTexPaletteDataPointer(GLenum target) {
 	default:
 		SET_GL_ERROR_WITH_RET(GL_INVALID_ENUM, NULL)
 	}
+}
+
+// 0057 (Strikers 1.3 wave 24, MSC_VITA_ANISO_SCOPE): the texture bound to the active unit goes trilinear (off) or anisotropic again (on) by its descriptor's minification bits alone, the two
+// things vglSetTexMinFilter does with them (utils/gxm_utils.h): a LINEAR minification of a texture whose mip filter is linear is the anisotropic filter vgl_aniso_min (when the texture is
+// large enough, vglAnisoSizeOk), and back. Nothing else is touched; the next draw sends the descriptor. No effect while the anisotropic filter is off (vgl_aniso_min 0) or on a texture
+// that is not trilinear. A glTexParameteri of the minification filter converts the texture again (the caller keeps track of that).
+void vglTexAnisoOff(GLboolean off) {
+	if (!vgl_aniso_min)
+		return;
+	texture_unit *tex_unit = &texture_units[server_texture_unit];
+	texture *tex = &texture_slots[tex_unit->tex_id[0]];
+	if (tex->status != TEX_VALID)
+		return;
+	SceGxmTextureInternal *ti = (SceGxmTextureInternal *)&tex->gxm_tex;
+	if (!(ti->control_words[0] & 0x200))
+		return;
+	const uint32_t minf = (ti->control_words[0] >> 10) & 3;
+	if (off) {
+		if (minf == vgl_aniso_min)
+			ti->control_words[0] = ((SCE_GXM_TEXTURE_FILTER_LINEAR << 10) & 0xC00) | (ti->control_words[0] & 0xFFFFF3FF);
+	} else if (minf == SCE_GXM_TEXTURE_FILTER_LINEAR && vglAnisoSizeOk(&tex->gxm_tex)) {
+		ti->control_words[0] = ((vgl_aniso_min << 10) & 0xC00) | (ti->control_words[0] & 0xFFFFF3FF);
+	}
+}
+
+// 0057 (Strikers 1.3 wave 24, MSC_VGX_TILED_RT, off): tiled colour surfaces for the render targets the renderer asks for. vglSetTiledTargets(1 or 2) allows it; vglTexMakeTiledTarget() then
+// turns the texture bound to the active unit, a fresh RGBA8 render target (glTexImage2D with no data, one level, linear), into 32 x 32 tiles: storage of VGL_ALIGN(w, 32) x VGL_ALIGN(h, 32) texels,
+// zeroed (as the empty linear one was), described by sceGxmTextureInitTiled with the same sampler state; _glFramebufferTexture2D then makes the colour surface SCE_GXM_COLOR_SURFACE_TILED
+// from the texture's type. The GPU stores and reloads whole tiles into contiguous memory instead of 32 rows a pitch apart. NEVER for the display buffers, MSAA or a texture the CPU reads
+// (glReadPixels, glGetTexImage read linear rows: glReadPixels from a tiled framebuffer is refused); a texture sampled by a draw reads it through its descriptor exactly as before.
+uint32_t vgl_tiled_rt = 0;
+uint32_t vgl_tiled_made = 0;
+uint32_t vgl_tiled_read_refused = 0;
+void vglTiledStats(uint32_t *made, uint32_t *refused) {
+	if (made)
+		*made = vgl_tiled_made;
+	if (refused)
+		*refused = vgl_tiled_read_refused;
+}
+void vglSetTiledTargets(GLint mode) { vgl_tiled_rt = (uint32_t)(mode > 0 ? mode : 0); } // 0 off; 1 any size from 32 x 32 (storage padded to whole tiles); 2 only sizes that are whole tiles already (no padding)
+GLboolean vglTexMakeTiledTarget(void) {
+	if (!vgl_tiled_rt)
+		return GL_FALSE;
+	texture_unit *tex_unit = &texture_units[server_texture_unit];
+	texture *tex = &texture_slots[tex_unit->tex_id[0]];
+	if (tex->status != TEX_VALID || !tex->data || tex->palette_data || tex->mip_count != 1)
+		return GL_FALSE;
+	if (sceGxmTextureGetType(&tex->gxm_tex) != SCE_GXM_TEXTURE_LINEAR)
+		return GL_FALSE;
+	const SceGxmTextureFormat fmt = vglGetTexFormat(&tex->gxm_tex);
+	if ((fmt & 0x9F000000) != SCE_GXM_TEXTURE_BASE_FORMAT_U8U8U8U8)
+		return GL_FALSE;
+	uint32_t w, h;
+	vglGetTexSizes(&tex->gxm_tex, &w, &h);
+	if (w < 32 || h < 32 || w > 4096 || h > 4096 || (vgl_tiled_rt == 2 && ((w & 31) || (h & 31))))
+		return GL_FALSE;
+	const uint32_t size = VGL_ALIGN(w, 32) * VGL_ALIGN(h, 32) * 4;
+	void *nd = gpu_alloc_mapped_for_gpu(size);
+	if (!nd)
+		return GL_FALSE;
+	vgl_memset(nd, 0, size);
+	SceGxmTexture nt;
+	if (sceGxmTextureInitTiled(&nt, nd, fmt, w, h, 0) < 0) {
+		vgl_free(nd);
+		return GL_FALSE;
+	}
+	vglSetTexUMode(&nt, tex->u_mode);
+	vglSetTexVMode(&nt, tex->v_mode);
+	vglSetTexMinFilter(&nt, tex->min_filter);
+	vglSetTexMagFilter(&nt, tex->mag_filter);
+	vglSetTexMipFilter(&nt, tex->mip_filter);
+	vglSetTexLodBias(&nt, tex->lod_bias);
+	gpu_free_texture_data(tex);
+	tex->gxm_tex = nt;
+	tex->data = nd;
+	tex->palette_data = NULL;
+	tex->mip_count = 1;
+	tex->status = TEX_VALID;
+#ifndef TEXTURES_SPEEDHACK
+	tex->last_frame = OBJ_NOT_USED;
+#endif
+	vgl_tiled_made++;
+	return GL_TRUE;
+}
+// 1 when the texture on the active unit is tiled (vglTexMakeTiledTarget made it)
+GLboolean vglTexIsTiled(void) {
+	texture_unit *tex_unit = &texture_units[server_texture_unit];
+	texture *tex = &texture_slots[tex_unit->tex_id[0]];
+	return tex->status == TEX_VALID && sceGxmTextureGetType(&tex->gxm_tex) == SCE_GXM_TEXTURE_TILED;
+}
+
+void vglSetupTexture(GLenum target, void *data, SceGxmTextureFormat format, SceGxmTextureType type, GLsizei width, GLsizei height, GLsizei mip_count) {
+	// Aliasing texture unit for cleaner code
+	texture_unit *tex_unit = &texture_units[server_texture_unit];
+	int texture2d_idx;
+	resolve_tex_target(target, SET_GL_ERROR(GL_INVALID_ENUM));
+	texture *tex = &texture_slots[texture2d_idx];
+
+#ifndef SKIP_ERROR_HANDLING
+	if (!data || width <= 0 || height <= 0 || mip_count <= 0 || mip_count > 16) {
+		SET_GL_ERROR(GL_INVALID_VALUE)
+	}
+#endif
+
+	SceGxmTexture new_tex;
+	switch (type) {
+	case SCE_GXM_TEXTURE_SWIZZLED:
+		sceGxmTextureInitSwizzled(&new_tex, data, format, width, height, mip_count);
+		break;
+	case SCE_GXM_TEXTURE_SWIZZLED_ARBITRARY:
+		vglInitSwizzledTexture(&new_tex, data, format, width, height, mip_count);
+		break;
+	case SCE_GXM_TEXTURE_LINEAR:
+		vglInitLinearTexture(&new_tex, data, format, width, height, mip_count);
+		break;
+	case SCE_GXM_TEXTURE_TILED:
+		sceGxmTextureInitTiled(&new_tex, data, format, width, height, mip_count);
+		break;
+	case SCE_GXM_TEXTURE_CUBE:
+		vglInitCubeTexture(&new_tex, data, format, width, height, mip_count);
+		break;
+	default:
+		SET_GL_ERROR_WITH_VALUE(GL_INVALID_ENUM, type)
+	}
+
+	// Preserve GL sampler state across the descriptor replacement.
+	vglSetTexUMode(&new_tex, tex->u_mode);
+	vglSetTexVMode(&new_tex, tex->v_mode);
+	vglSetTexMinFilter(&new_tex, tex->min_filter);
+	vglSetTexMagFilter(&new_tex, tex->mag_filter);
+	vglSetTexMipFilter(&new_tex, tex->mip_filter);
+	vglSetTexLodBias(&new_tex, tex->lod_bias);
+	vglSetTexMipmapCount(&new_tex, tex->use_mips ? mip_count : 0);
+
+	if (tex->status == TEX_VALID) {
+		gpu_free_texture_data(tex);
+	}
+	tex->gxm_tex = new_tex;
+	tex->data = data;
+	tex->palette_data = NULL;
+	tex->format = format;
+	tex->mip_count = mip_count;
+	tex->faces_counter = 0;
+	tex->dirty = GL_FALSE;
+	tex->write_cb = NULL;
+	tex->status = TEX_VALID;
+#ifndef TEXTURES_SPEEDHACK
+	tex->last_frame = OBJ_NOT_USED;
+#endif
+#ifdef HAVE_TEX_CACHE
+	mark_as_cacheable(tex)
+#endif
+}
+
+GLboolean vglSwizzleBoundTexture(void) { // (0020, utils/gpu_utils.c gpu_swizzle_texture)
+	texture_unit *tex_unit = &texture_units[server_texture_unit];
+	int texture2d_idx;
+	resolve_tex_target(GL_TEXTURE_2D, return GL_FALSE);
+	return gpu_swizzle_texture(&texture_slots[texture2d_idx]);
 }
 
 void vglOverloadTexDataPointer(GLenum target, void *data) {

@@ -1,0 +1,13 @@
+# console-1.2 run smoothsteady3: Show clock trusted after 3 evenly held pictures (not 8)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group pacing, route worstgpu, version payload 1.3, role ab
+# MSC_SMOOTH_STEADY=3 (code default 8). The show clock (MSC_SMOOTH_CLOCK) only predicts a picture's show time after this many pictures in a row were held exactly the period; at The Dump (r11: 9.3 % of pictures held 3) a run of 8 is rare, so the clock is mostly idle there. Host model with the r10 statistics: pictures whose motion differs from their hold by more than half a refresh, heavy 24.8 % today, 21.2 % at 8, about 19 % at 3-4. Read [smooth] 'players+ball' share over 0.5 and the clock counters (given a show time, not steady) against the default run at The Dump.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_SMOOTH_STEADY=3

@@ -1,0 +1,16 @@
+# console-1.2 run crowdgov0: Crowd governor off (MSC_CROWD_GOV=0)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_CROWD_GOV=1 is on by default in the player build (w8/crowd25.md; owner 17 Nov: cheaper crowd animation is fine when needed): in live play, while the game thread is the limiting lane and over 87 % of the period, the crowd sprites refresh less often by size class (far first, six levels, the deepest a very slow idle), and come back when there is room. Render only (det trace identical on the host). This run is the A/B: the full crowd always. Against the tour: the [crowdgov] lines (level changes, seconds at each level), [gsplit] crowd-sprites, [head] play with / without a step.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CROWD_GOV=0
+MSC_HEAD_STAT=1
+MSC_GSPLIT=2

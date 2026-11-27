@@ -1,0 +1,13 @@
+# console-1.2 run s-end: Stability: three matches played to their natural end (end-of-game cut-scene, results, menu)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group stability, route cend, version payload 1.3, role nstab
+# The end-of-game cut-scene is where 1.1 crashed in the emulator. Marks end-1..end-3; the third must be followed by script exit.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/cend.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+# (no switch)

@@ -1,0 +1,40 @@
+# fast boot (test only, kit20 r17): pause, VITA SETTINGS, page 2, REAR TOUCH toggled and saved twice (OFF then ON): [live] lines, no restart
+# Derived from fb-live19.txt (emulator-proven preamble: pause, VITA SETTINGS). Row positions: pitch 49 px, row 4 of a page at y=272, so row 3 at 223 and row 5 at 321. Not yet seen on a console: a missing STATE line in the log makes the run INVALID.
+bootmatch 13:3:6 hsk=0,1,2 ask=5,6,7 time=600 skill=3
+wait ingame == 1 4000
+try wait gs == 5 1200
+log STATE open play
+idle 90
+vmash start 120 paused == 1 1500
+log STATE pause pressed
+idle 300
+try wait ovl == 80 600
+idle 200
+touch 480 369 4 30
+log STATE vita settings pressed
+idle 240
+touch 480 369 4 30
+idle 150
+log STATE page 2
+touch 480 223 4 30
+idle 80
+log STATE rear touch toggled once
+touch 480 418 4 30
+idle 150
+vpress cross 3 60
+log STATE saved first
+idle 300
+touch 480 369 4 30
+idle 240
+touch 480 369 4 30
+idle 150
+touch 480 223 4 30
+idle 80
+log STATE rear touch toggled twice
+touch 480 418 4 30
+idle 150
+vpress cross 3 60
+log STATE saved second
+idle 300
+log STATE end
+exit

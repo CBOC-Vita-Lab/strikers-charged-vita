@@ -1,0 +1,85 @@
+# Ranked match through the game's own menus (1.3): MULTIPLAYER -> ONLINE -> RANKED MATCH (the third button) -> Online Central (the game's login
+# and hub, the name from MSC_ONLINE_NAME) -> the hub's RANKED MATCH (SHOnlinePlayerCount) -> one player -> the service's ranked queue pairs the two
+# consoles -> the game's sorted draft -> the match -> the result screens. Both consoles run this script. Scene ids: 1 main menu, 10 popup,
+# 24 network start, 40 online hub, 41 ranked (player count), 49 matchmaking draft, 51 login. gs: 3 end of game, 5 open play.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 10 1200
+log STATE multiplayer mode choice
+wait nbuttons >= 3 900
+idle 60
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+log chose online
+wait scene == 1 900
+wait scene == 10 1200
+log STATE choice popup
+wait nbuttons >= 3 900
+idle 60
+mash 4 15 onctx == 2 300
+idle 10
+press 100
+log chose ranked
+# Online Central: the game's login, a first-time notice (a popup) and the hub
+wait scene == 40 || scene == 10 3600
+if scene == 10
+log STATE first-time notice
+idle 120
+mash 100 40 scene != 10 1200
+endif
+wait scene == 40 3600
+log STATE online hub
+idle 200
+# the hub's RANKED MATCH button (the pad moves the pointer between the hub's buttons: right from FRIEND MATCH)
+vpress right 3 30
+vpress cross 3 60
+tap 0 30 scene == 41 900
+if scene != 41
+log hub pad route did not reach RANKED MATCH: replacing the hub as its button does
+scene 41 pop
+wait scene == 41 600
+endif
+log STATE player count
+idle 150
+press 100
+log chose one player
+wait scene == 24 || scene == 49 2400
+log STATE matchmaking
+wait scene == 49 18000
+log STATE ranked draft
+# no input while the queue searches (Cross there is the scene's cancel); the sorted draft's timers pick for both players
+wait ingame == 1 30000
+log STATE match loading
+wait gs == 5 9000
+log STATE open play
+wait gs == 3 20000
+log STATE match over
+# a ranked match of the service is one game: after the ranking screen the game goes back to Online Central (no second game of a series)
+mash 100 60 ingame == 0 6000
+log STATE results
+wait scene == 40 3000
+log STATE back in Online Central
+idle 900
+log STATE after the match
+exit

@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-void OSReport(const char* message, ...);
+void OSReport(const char* message, ...) __attribute__((format(printf, 1, 2)));
 
 #ifdef __cplusplus
 }

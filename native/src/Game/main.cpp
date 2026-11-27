@@ -18,6 +18,9 @@
 #include "Game/Effects/ParticleSystem.h"
 #ifdef NP_NATIVE
 #include "np/fx.h"
+#include "np/stadiumcut.h"
+#include <stdio.h>
+#include "np/fxtight.h"
 #endif
 #include "Game/GL/GLTexturedColourMeshWriter.h"
 #include "Game/Task/FrontEndTask.h"
@@ -211,10 +214,18 @@ bool RenderParticleSystem(ParticleSystem*, GLView*,
     const nlMatrix4*);
 void BuildParticleQuads(GLTexturedColourMeshWriter*, ParticleSystem*,
     nlDLListSlotPool<Particle*>*, const nlVector3&, const nlVector3&,
-    const nlMatrix4*);
+    const nlMatrix4*
+#ifdef NP_NATIVE
+    , const NpFxTight&
+#endif
+    );
 void BuildParticleQuads(glShadowedTexturedColourModelWriter*, ParticleSystem*,
     nlDLListSlotPool<Particle*>*, const nlVector3&, const nlVector3&,
-    const nlMatrix4*);
+    const nlMatrix4*
+#ifdef NP_NATIVE
+    , const NpFxTight&
+#endif
+    );
 
 int GetRegion()
 {
@@ -658,6 +669,65 @@ static void AddTasks()
     nlTaskManager::AddTask(&Wiper::Instance(), 13, (u32)-1);
 }
 
+#ifdef NP_NATIVE
+// One sprite (np/fx.h, np/fxtight.h): the quad, a polygon on the quad's own texture map, or nothing (one point). t.verts vertices whichever it is: a mesh has one form, and in a
+// triangle list what a sprite does not need is written as empty triangles. A corner is given as a point of the texture: its place on the sprite follows from the quad's corners and
+// the quad's own numbers on the lattice, so the map from position to texture coordinate is the quad's. Corners are stored with positive area; a quad that is not mirrored runs the
+// other way, so they are written backwards, which keeps the front of the sprite for culling.
+template <class W>
+static inline void NpFxWriteSprite(W* w, const NpFxTight& t, const ParticleReturn& ret, const NpTightPoly* p, bool collapse)
+{
+    const int n = t.verts;
+    if (collapse)
+    {
+        for (int i = 0; i < n; ++i)   // collapsed to one point: no fragments (np/fx.h)
+        {
+            w->Texcoord(ret.texcoord[0]);
+            w->Colour(ret.c);
+            w->Vertex(ret.position[0]);
+        }
+        return;
+    }
+    if (!p)
+    {
+        static const unsigned char kTri[6] = { 0, 1, 2, 0, 2, 3 };
+        for (int i = 0; i < n; ++i)
+        {
+            const int c = n == 4 ? i : kTri[i < 6 ? i : 5];
+            w->Texcoord(ret.texcoord[c]);
+            w->Colour(ret.c);
+            w->Vertex(ret.position[c]);
+        }
+        return;
+    }
+    const int q0u = (short)(ret.texcoord[0].x * 1024.0f), q0v = (short)(ret.texcoord[0].y * 1024.0f);
+    const int du = (short)(ret.texcoord[1].x * 1024.0f) - q0u, dv = (short)(ret.texcoord[3].y * 1024.0f) - q0v;
+    const float su = 1.0f / (float)du, sv = 1.0f / (float)dv;
+    const nlVector3& p0 = ret.position[0];
+    const float e1x = ret.position[1].x - p0.x, e1y = ret.position[1].y - p0.y, e1z = ret.position[1].z - p0.z;
+    const float e2x = ret.position[3].x - p0.x, e2y = ret.position[3].y - p0.y, e2z = ret.position[3].z - p0.z;
+    const int c = p->n;
+    const int order = n == 4 ? (c < 4 ? 4 : c) : 3 * (c - 2);
+    for (int i = 0; i < n; ++i)
+    {
+        int corner;   // (of the fan, then what is left is the last corner again)
+        if (i >= order)
+            corner = c - 1;
+        else if (n == 4)
+            corner = i < c ? i : c - 1;
+        else
+            corner = i % 3 == 0 ? 0 : i / 3 + i % 3;
+        if (du < 0)
+            corner = corner == 0 ? 0 : c - corner;
+        const int u = p->uv[corner][0], v = p->uv[corner][1];
+        const float a = (float)(u - q0u) * su, b = (float)(v - q0v) * sv;
+        w->Texcoord(u, v);
+        w->Colour(ret.c);
+        w->Vertex(p0.x + a * e1x + b * e2x, p0.y + a * e1y + b * e2y, p0.z + a * e1z + b * e2z);
+    }
+}
+#endif
+
 bool RenderParticleSystem(ParticleSystem* source, GLView* view,
     nlDLListSlotPool<Particle*>* vertices, const nlVector3& viewRight,
     const nlVector3& viewUp, const nlMatrix4* pCoordSys)
@@ -669,10 +739,50 @@ bool RenderParticleSystem(ParticleSystem* source, GLView* view,
     }
 
     bool isWarble = sWarbleTexture == source->m_pTemplate->m_hTexture;
+#ifdef NP_NATIVE
+    static const bool sCutLog3 = getenv("MSC_STADIUM_CUT_LOG") && getenv("MSC_STADIUM_CUT_LOG")[0] == '3';
+    static const bool sCutLog1 = getenv("MSC_STADIUM_CUT_LOG") && getenv("MSC_STADIUM_CUT_LOG")[0] == '1';
+    if (sCutLog3)   // one frame in 300: every system drawn
+    {
+        static int calls;
+        static int frameCalls;
+        if (NpStadiumCutFrameNo() >= 600 && NpStadiumCutFrameNo() < 1600 && NpStadiumCutNewMax((unsigned)source->m_pTemplate->m_uHashID, (int)source->m_NumParticles) && ++calls)
+        {
+            const EffectsTemplate* t = source->m_pTemplate;
+            fprintf(stderr, "[stadiumcut-sys] template 0x%08x blend %d tex %u layer %d particles %d fountain %.1f life %.1f\n", (unsigned)t->m_uHashID, (int)t->m_eBlend, (unsigned)t->m_hTexture, (int)source->m_uLayer, (int)source->m_NumParticles, t->m_fFountainLife, t->m_rParticleLife.base);
+            (void)frameCalls;
+        }
+    }
+    if (sCutLog1 && source->m_NumParticles >= 6)   // (MSC_STADIUM_CUT_LOG=1: the templates that carry many particles; once each)
+    {
+        const EffectsTemplate* t = source->m_pTemplate;
+        NpStadiumCutLogTemplate((unsigned)t->m_uHashID, (int)t->m_eBlend, (unsigned)t->m_hTexture, t->mProperties[1]->base * t->mProperties[2]->base, t->m_rParticleLife.base, t->m_fFountainLife, (int)source->m_uLayer, (int)source->m_NumParticles);
+    }
+    if (NpStadiumCutHas(NP_CUT_AMBIENTFX) && NpStadiumCutFxHashed((unsigned)source->m_pTemplate->m_uHashID)) return true;   // MSC_STADIUM_CUT bit 32
+    if (isWarble && NpStadiumCutHas(NP_CUT_WARBLE))   // MSC_STADIUM_CUT bit 1: no heat shimmer, so gWarbleEnabled stays false and the pre-warble copy, offset pass and composite are not made
+    {
+        NpStadiumCutCount(NP_CUT_WARBLE, 1);
+        return true;
+    }
+    NpFxTight tight;
+    NpFxTightFor(&tight, source, view);
+    if (isWarble)   // (it draws another texture: quads as ever)
+    {
+        tight.polys = 0;
+        tight.tight = tight.drop = false;
+        tight.verts = 4;
+        tight.gov = 0;
+        tight.offview = 0;   // (MSC_FX_OFFVIEW: it is drawn in the warble layer's own view, not the one the clip was made for)
+    }
+#endif
     if (IsShadowLookupActive() && !isWarble)
     {
         glShadowedTexturedColourModelWriter writer;
-        BuildParticleQuads(&writer, source, vertices, viewRight, viewUp, pCoordSys);
+        BuildParticleQuads(&writer, source, vertices, viewRight, viewUp, pCoordSys
+#ifdef NP_NATIVE
+            , tight
+#endif
+            );
 
         GXShadowedDiffuseParameters* parameters =
             static_cast<GXShadowedDiffuseParameters*>(
@@ -682,7 +792,7 @@ bool RenderParticleSystem(ParticleSystem* source, GLView* view,
         if (writer.End())
         {
 #ifdef NP_NATIVE
-            if (source->m_pTemplate->m_eBlend == EfBlend_Additive)   // FX (np/fx.h): the renderer may draw it at a lower resolution
+            if (source->m_pTemplate->m_eBlend == EfBlend_Additive && tight.mark)   // FX (np/fx.h): the renderer may draw it at a lower resolution
                 NpFxMarkPacket(writer.GetModel()->packets);
 #endif
             view->AttachModel(writer.GetModel(), source->m_uLayer);
@@ -691,7 +801,11 @@ bool RenderParticleSystem(ParticleSystem* source, GLView* view,
     else if (sAllowWarble)
     {
         GLTexturedColourMeshWriter writer;
-        BuildParticleQuads(&writer, source, vertices, viewRight, viewUp, pCoordSys);
+        BuildParticleQuads(&writer, source, vertices, viewRight, viewUp, pCoordSys
+#ifdef NP_NATIVE
+            , tight
+#endif
+            );
 
         if (isWarble && IsWarbleParticleRenderingEnabled())
         {
@@ -714,7 +828,7 @@ bool RenderParticleSystem(ParticleSystem* source, GLView* view,
         if (writer.End())
         {
 #ifdef NP_NATIVE
-            if (!isWarble && source->m_pTemplate->m_eBlend == EfBlend_Additive)   // FX (np/fx.h)
+            if (!isWarble && source->m_pTemplate->m_eBlend == EfBlend_Additive && tight.mark)   // FX (np/fx.h)
                 NpFxMarkPacket(writer.GetModel()->packets);
 #endif
             view->AttachModel(writer.GetModel(), source->m_uLayer);
@@ -726,14 +840,24 @@ bool RenderParticleSystem(ParticleSystem* source, GLView* view,
 void BuildParticleQuads(GLTexturedColourMeshWriter* writer,
     ParticleSystem* source, nlDLListSlotPool<Particle*>* vertices,
     const nlVector3& viewRight, const nlVector3& viewUp,
-    const nlMatrix4* pCoordSys)
+    const nlMatrix4* pCoordSys
+#ifdef NP_NATIVE
+    , const NpFxTight& tight
+#endif
+    )
 {
     ParticleReturn ret;
-    if (writer->Begin(source->m_NumParticles * 4, GLP_QuadList, 0))
+#ifdef NP_NATIVE
+    const bool began = writer->Begin(source->m_NumParticles * tight.verts, tight.verts == 4 ? GLP_QuadList : GLP_TriList, 0);
+#else
+    const bool began = writer->Begin(source->m_NumParticles * 4, GLP_QuadList, 0);
+#endif
+    if (began)
     {
 #ifdef NP_NATIVE
         const NpFxThin thin = NpFxThinFor(source->m_pTemplate, false);
 #endif
+        int written = 0;
         nlDLListIterator<Particle*> iterator;
         iterator = vertices->Begin();
         while (iterator.hasNext())
@@ -742,18 +866,20 @@ void BuildParticleQuads(GLTexturedColourMeshWriter* writer,
             source->UpdateParticle(&ret, pPart, source->m_pTemplate,
                 viewRight, viewUp, pCoordSys);
 #ifdef NP_NATIVE
-            if (NpFxThinParticle(thin, pPart, &ret))
+            bool collapse = NpFxThinParticle(thin, pPart, &ret);
+            const NpTightPoly* poly = 0;
+            if (!collapse)
+                poly = NpFxTightParticle(tight, pPart, &ret, &collapse);
+            if (tight.offview && NpFxOffViewDrop(tight, ret, collapse))   // MSC_FX_OFFVIEW=1 (np/fx.h): not written; the mesh is made as short
             {
-                for (int i = 0; i < 4; ++i)   // collapsed to one point: no fragments (np/fx.h)
-                {
-                    writer->Texcoord(ret.texcoord[0]);
-                    writer->Colour(ret.c);
-                    writer->Vertex(ret.position[0]);
-                }
                 iterator.Step();
                 continue;
             }
-#endif
+            ++written;
+            NpFxWriteSprite(writer, tight, ret, poly, collapse);
+            iterator.Step();
+            continue;
+#else
             for (int i = 0; i < 4; ++i)
             {
                 writer->Texcoord(ret.texcoord[i]);
@@ -761,8 +887,21 @@ void BuildParticleQuads(GLTexturedColourMeshWriter* writer,
                 writer->Vertex(ret.position[i]);
             }
             iterator.Step();
+#endif
         }
 
+#ifdef NP_NATIVE
+        if (tight.offview == 1 && written != source->m_NumParticles)
+        {
+            if (written == 0 && source->m_NumParticles > 0)   // (a mesh that draws nothing keeps one collapsed sprite: the packet, and the runs of effects draws around it, are as they were)
+            {
+                NpFxWriteSprite(writer, tight, ret, 0, true);
+                written = 1;
+            }
+            NpFxTrimPacket(writer->GetModel()->packets, written * tight.verts);
+            writer->count = written * tight.verts;
+        }
+#endif
         glTextureBinding* textureState =
             static_cast<glTextureBinding*>(
                 writer->GetModel()->packets->materialParameters);
@@ -776,14 +915,24 @@ void BuildParticleQuads(GLTexturedColourMeshWriter* writer,
 void BuildParticleQuads(glShadowedTexturedColourModelWriter* writer,
     ParticleSystem* source, nlDLListSlotPool<Particle*>* vertices,
     const nlVector3& viewRight, const nlVector3& viewUp,
-    const nlMatrix4* pCoordSys)
+    const nlMatrix4* pCoordSys
+#ifdef NP_NATIVE
+    , const NpFxTight& tight
+#endif
+    )
 {
     ParticleReturn ret;
-    if (writer->Begin(source->m_NumParticles * 4, 3, 0))
+#ifdef NP_NATIVE
+    const bool began = writer->Begin(source->m_NumParticles * tight.verts, tight.verts == 4 ? 3 : 0, 0);
+#else
+    const bool began = writer->Begin(source->m_NumParticles * 4, 3, 0);
+#endif
+    if (began)
     {
 #ifdef NP_NATIVE
         const NpFxThin thin = NpFxThinFor(source->m_pTemplate, false);
 #endif
+        int written = 0;
         nlDLListIterator<Particle*> iterator;
         iterator = vertices->Begin();
         while (iterator.hasNext())
@@ -792,18 +941,20 @@ void BuildParticleQuads(glShadowedTexturedColourModelWriter* writer,
             source->UpdateParticle(&ret, pPart, source->m_pTemplate,
                 viewRight, viewUp, pCoordSys);
 #ifdef NP_NATIVE
-            if (NpFxThinParticle(thin, pPart, &ret))
+            bool collapse = NpFxThinParticle(thin, pPart, &ret);
+            const NpTightPoly* poly = 0;
+            if (!collapse)
+                poly = NpFxTightParticle(tight, pPart, &ret, &collapse);
+            if (tight.offview && NpFxOffViewDrop(tight, ret, collapse))   // MSC_FX_OFFVIEW=1 (np/fx.h): not written; the mesh is made as short
             {
-                for (int i = 0; i < 4; ++i)   // collapsed to one point: no fragments (np/fx.h)
-                {
-                    writer->Texcoord(ret.texcoord[0]);
-                    writer->Colour(ret.c);
-                    writer->Vertex(ret.position[0]);
-                }
                 iterator.Step();
                 continue;
             }
-#endif
+            ++written;
+            NpFxWriteSprite(writer, tight, ret, poly, collapse);
+            iterator.Step();
+            continue;
+#else
             for (int i = 0; i < 4; ++i)
             {
                 writer->Texcoord(ret.texcoord[i]);
@@ -811,8 +962,21 @@ void BuildParticleQuads(glShadowedTexturedColourModelWriter* writer,
                 writer->Vertex(ret.position[i]);
             }
             iterator.Step();
+#endif
         }
 
+#ifdef NP_NATIVE
+        if (tight.offview == 1 && written != source->m_NumParticles)
+        {
+            if (written == 0 && source->m_NumParticles > 0)   // (a mesh that draws nothing keeps one collapsed sprite: the packet, and the runs of effects draws around it, are as they were)
+            {
+                NpFxWriteSprite(writer, tight, ret, 0, true);
+                written = 1;
+            }
+            NpFxTrimPacket(writer->GetModel()->packets, written * tight.verts);
+            writer->count = written * tight.verts;
+        }
+#endif
         glTextureBinding* textureState =
             static_cast<glTextureBinding*>(
                 writer->GetModel()->packets->materialParameters);

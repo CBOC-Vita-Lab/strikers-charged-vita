@@ -1,14 +1,14 @@
 #!/bin/bash
 # tools/v3k_ch_run.sh <tag> <seconds> [shot-every-seconds] -- <Vita3K args>
 # One Vita3K run in the renderer workstream's PRIVATE emulator profile
-# (/home/claude/msc/build/host-gl-v3k/{pref,xdg}: its own memory card and emulator caches, so
+# (/work/msc/build/host-gl-v3k/{pref,xdg}: its own memory card and emulator caches, so
 # that runs of other workers on v3k/pref are not disturbed; ur0 is a link to v3k/pref/ur0).
 # ALWAYS through the heavy lock, without -p:
-#   /home/claude/msc/tools/heavy.sh -t 600 tools/v3k_ch_run.sh seed1 420 60 -- -r MSCH00002 -l 2
+#   /work/msc/tools/heavy.sh -t 600 tools/v3k_ch_run.sh seed1 420 60 -- -r MSCH00002 -l 2
 # A copy of v3k/run.sh reduced to what is used here. UNTIL="<grep pattern>" ends the run 3 s
 # (UNTIL_EXTRA) after the game's log.txt contains the pattern. Kills only the processes it started.
 # Result: $P/shots/<tag>-<sec>.png, $P/logs/<tag>.{stdout,v3k.log,log.txt}
-P=/home/claude/msc/build/host-gl-v3k; V=/home/claude/msc/v3k
+P=/work/msc/build/host-gl-v3k; V=/work/msc/v3k
 . $V/env.sh
 export XDG_CONFIG_HOME=$P/xdg/config XDG_CACHE_HOME=$P/xdg/cache XDG_DATA_HOME=$P/xdg/data
 export DISPLAY=:78

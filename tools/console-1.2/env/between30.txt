@@ -1,0 +1,13 @@
+# console-1.2 run between30: AUTO holding 30 (A/B of the 1.3 default MSC_FPS_BETWEEN=pace), Pipeline Central
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group pacing, route pipe, version payload 1.3, role ab
+# Against pipe1 (AUTO now rates between 30 and 60 in a match). Read [fps] auto lines (how long it holds 30), [frame-timing] p50 and the share of pictures at 60, 30 and between, and [present] (the cadence: 1-2-3 vblank mix versus 2-2-2).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/pipe.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FPS_BETWEEN=30

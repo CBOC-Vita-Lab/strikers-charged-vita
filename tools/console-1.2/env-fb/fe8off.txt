@@ -1,0 +1,15 @@
+# console-1.2 run fe8off: Front end memos off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_VGX_EXTMEMO and MSC_VGX_DLWATCH are on by default in 1.3 (the light-fact and wide-TEV-register answers of the shader key are kept until a register or light word they read changes; a cached display list is trusted while no write touched a page it uses, instead of summing its page generations on every hit; frame content hashes of a 5000-picture match and the det trace identical on the host, verify runs with no difference). This run is the A/B: both off. Against the tour: the front end's ms in [frame-timing], open play and the goal celebration.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_EXTMEMO=0
+MSC_VGX_DLWATCH=0

@@ -1,0 +1,14 @@
+# console-1.2 run x-bootio: x-bootio
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group night, route npipe, version payload 1.3, role nab
+# traps: the first two start-up file opens fail with EIO; the retry (50 ms apart, up to 3 s) must get the game up. Pass: [bootio] lines, then the route ends. This is the fopen-race fix, on a real Vita's libc.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/npipe.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_BOOTIO_INJECT=2

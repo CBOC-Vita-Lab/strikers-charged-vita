@@ -140,6 +140,53 @@ void ImpostorModel::SetAnimationTime(float time)
     mAnimController->SetTime(time);
 }
 
+// MSC_CROWD_POSEONCE (np/overlap.h, AnimatedImpostorCharacter::Render): the sprite before this one drew the same model in the same pose
+static bool sSamePose;
+
+// MSC_POSE_JOBS: the models whose pose a job made on this picture (game thread only)
+static const ImpostorModel* sPosed[160];
+static int sNumPosed;
+
+void ImpostorModel::MarkPosed(ImpostorModel* model)
+{
+    if (sNumPosed < 160) sPosed[sNumPosed++] = model;
+}
+
+bool ImpostorModel::IsPosed(const ImpostorModel* model)
+{
+    for (int i = 0; i < sNumPosed; ++i)
+    {
+        if (sPosed[i] == model) return true;
+    }
+    return false;
+}
+
+void ImpostorModel::ClearPosed()
+{
+    sNumPosed = 0;
+}
+
+void ImpostorModel::PoseForJob(bool evaluate)
+{
+    if (evaluate)
+    {
+        mPoseAccumulator->InitAccumulators();
+        mPoseTree->Evaluate(1.0f, mPoseAccumulator);
+    }
+    mPoseAccumulator->BuildNodeMatrices(mWorldMatrix);
+    if (mVisible && mSkinMesh != 0)   // (RenderPose: a hidden model or one with no skin mesh is not posed)
+    {
+        mSkinMesh->Pose(const_cast<cPoseAccumulator*>(mPoseAccumulator));
+    }
+}
+
+void ImpostorModel::RenderSamePose(GLView* opaqueView)
+{
+    sSamePose = true;
+    RenderPose(opaqueView, 0, *mPoseAccumulator, &mWorldMatrix);
+    sSamePose = false;
+}
+
 void ImpostorModel::Render(
     GLView* opaqueView, GLView* translucentView)
 {
@@ -165,8 +212,11 @@ void ImpostorModel::RenderPose(GLView* opaqueView,
         return;
     }
 
-    mSkinMesh->Pose(
-        const_cast<cPoseAccumulator*>(&poseAccumulator));
+    if (!sSamePose)
+    {
+        mSkinMesh->Pose(
+            const_cast<cPoseAccumulator*>(&poseAccumulator));
+    }
     mSkinMesh->PrepareToRender();
     glModel* model = glModelDupNoStreams(
         mSkinMesh->GetModel(), false, 0);

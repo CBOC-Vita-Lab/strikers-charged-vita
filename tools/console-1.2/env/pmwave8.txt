@@ -1,0 +1,19 @@
+# console-1.2 run pmwave8: Player draw merging: wave 8 set
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# Wave 8 set, all OFF in the plan until the crowd-band pixels are explained: palette runs and GPU-skin runs from combined buffers (8 + 4 MiB of kept vertices), only the matrices a part names (PALCOMPACT), runs of one material regrouped inside a stretch of opaque player draws (PALREGROUP). Host: 30 to 45 % fewer player draw records in open play, but 1 to 2 crowd-band pixels still differ in 5 of 25 host frames. Against the tour: [lane] backend ms, GPU ms, p50/p99, C heap peak, crowd pictures.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_PALMERGE=1
+MSC_VGX_SKINMERGE=1
+MSC_VGX_PALMERGE_MB=8
+MSC_VGX_SKINMERGE_MB=4
+MSC_VGX_PALCOMPACT=1
+MSC_VGX_PALREGROUP=1
+MSC_VGX_PALMERGE_STATS=1

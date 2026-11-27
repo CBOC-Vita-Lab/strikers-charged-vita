@@ -3,9 +3,9 @@
 # seeds (full list eager / core list eager), packages, and the proof runs of two stadiums the old seed never saw, with the FULL seed.
 #   NOVITA=1 final_v1.sh   : everything but the emulator runs (a dry run of the file handling)
 cd "$(dirname "$0")/../.."
-R=/home/claude/msc/build/np/W5SEED
-LAB=/home/claude/msc/build/np/W5INT/lto/vita/pkg/np/mscharged-np.vpk
-PLAYER=/home/claude/msc/build/np/W5INT/lto/vita/pkg-player/np/mscharged-np.vpk
+R=/work/msc/build/np/W5SEED
+LAB=/work/msc/build/np/W5INT/lto/vita/pkg/np/mscharged-np.vpk
+PLAYER=/work/msc/build/np/W5INT/lto/vita/pkg-player/np/mscharged-np.vpk
 V=; [ "${NOVITA:-0}" = 1 ] && V=echo
 U=$R/union/final
 echo "== lists ($(date +%T))"

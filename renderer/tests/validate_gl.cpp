@@ -4,8 +4,10 @@
 #include <string>
 #include <unistd.h>
 #include "../src/vgx_backend_gl.cpp"
+#include "backend_test_hooks.h"
 
-namespace vgx { bool LogEnabled() { return false; } }
+namespace vgx { bool LogEnabled() { return false; } const char* ShaderListPath() { return ""; } }   // (ShaderListPath, VgxStillArmed: vgx_draw.cpp, not linked here)
+extern "C" int VgxStillArmed(void) { return 0; }
 
 static void Check(bool ok, const char* message) {
     if (!ok) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }

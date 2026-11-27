@@ -1,0 +1,14 @@
+# console-1.2 run holdfixed: Full picture fixed, no shedding
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# The second comparison for the full picture: 960x544 held with every step turned off (no shedding, no size step: what a plain MSC_VITA_RENDER=960x544 does, plus the freeze logic that does nothing here). Against the tour and holdoff: how much of the late-frame count the shedding and the size steps remove; the [hold] 30 s lines show the share of frames over the 60 budget with nothing shed.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD=full
+MSC_PICTURE_HOLD_MAXSTEP=0

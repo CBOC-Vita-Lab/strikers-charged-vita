@@ -37,6 +37,13 @@ public:
     void UpdateAnimation(float dt);
     void EvaluatePose();
     void SetAnimationTime(float time);
+    void RenderSamePose(GLView* opaqueView);
+    // wave 12 (MSC_POSE_JOBS, np/crowdcut.h): the pose of one model made on a job lane: (the evaluate,) the node matrices and the skin mesh's pose, exactly what Render does before RenderPose; writes only this
+    // model's own accumulator and skin mesh. A model posed this way is drawn by RenderSamePose / skipped by AnimatedImpostorCharacter::EvaluatePose until ClearPosed().
+    void PoseForJob(bool evaluate);
+    static void MarkPosed(ImpostorModel* model);
+    static bool IsPosed(const ImpostorModel* model);
+    static void ClearPosed();
     void PlayAnimation(cSAnim& anim, ePlayMode playMode, const AnimRetarget* retarget);
     void ResolveTextures();
 
@@ -69,6 +76,13 @@ public:
     /* 0x70 */ unsigned long mResolvedTexture;
     /* 0x74 */ void (*mModelCallback)(
         ImpostorModel*, glModel*);
+    // MSC_CROWD_GOV (np/crowdgov.h), render bookkeeping: a crowd model is one pose clock for all the sprites that show it. Under the governor its clock only advances when one of its sprites is
+    // redrawn (so the pose a sprite shows is always the pose the clock holds: a section that was frozen resumes from where it froze, never snapping to the live pose).
+    float mGovPending = 0.0f;       // animation time banked while no sprite of the model was redrawn
+    unsigned mGovAdvTick = ~0u;     // the crowd picture on which the clock was last advanced
+    signed char mGovLevel = 0;      // this model's own level (follows the governor one notch at a time, staggered)
+    unsigned char mGovClass = 2;    // size class from the mean height of its sprites' nearest figures (1 near .. 3 far)
+    bool mGovCaptured = false;
 }; // size: 0x78
 
 #endif // GAME_RENDER_IMPOSTOR_MODEL_H

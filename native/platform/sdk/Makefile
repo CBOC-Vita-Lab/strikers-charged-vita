@@ -5,15 +5,15 @@
 #   make T=vita   [-j2]          same with VitaSDK
 #   make T=host32 check          builds and runs the unit tests (armhf: under qemu-arm)
 #
-# Output: $(B) = /home/claude/msc/build/np/NPS/<T>  (libnpsdk.a, obj/, tests/, sdkinc/)
-# Heavy jobs go through /home/claude/msc/tools/heavy.sh (see the notes of the NPS agent).
+# Output: $(B) = /work/msc/build/np/NPS/<T>  (libnpsdk.a, obj/, tests/, sdkinc/)
+# Heavy jobs go through /work/msc/tools/heavy.sh (see the notes of the NPS agent).
 # NPB integration: include sources.mk (the source lists) and the flags below in the main build.
 
 T ?= host32
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 NP ?= $(abspath $(HERE)/../..)
 REF ?= $(NP)/ref/RVL_SDK
-B ?= /home/claude/msc/build/np/NPS/$(T)$(if $(PLATFAKE),vf)
+B ?= /work/msc/build/np/NPS/$(T)$(if $(PLATFAKE),vf)
 SDKINC := $(B)/sdkinc
 
 include $(HERE)/sources.mk
@@ -44,7 +44,7 @@ else ifeq ($(T),armhf)
   ARCH := -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb
   PLAT := $(HERE)/host/np_plat_host.cpp
   LIBS := -lpthread -lm
-  RUN := /home/claude/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf
+  RUN := /work/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf
   PDEF := -DNP_HOST=1 -DNP_TARGET_ARMHF=1 -D_FILE_OFFSET_BITS=64
 else ifeq ($(T),vita)
   VITASDK ?= /opt/vitasdk
@@ -54,7 +54,7 @@ else ifeq ($(T),vita)
   ARCH := -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb
   PLAT := $(HERE)/vita/np_plat_vita.cpp
   # what vita/np_plat_vita.cpp calls (the audio sink and the input source are NPV's: sceAudio, sceCtrl, sceTouch)
-  LIBS := -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceSysmem_stub -lSceIofilemgr_stub -lpthread -lm
+  LIBS := -lSceLibKernel_stub -lSceKernelThreadMgr_stub -lSceSysmem_stub -lSceIofilemgr_stub -lSceJpeg_stub_weak -lpthread -lm
   RUN :=
   PDEF := -DNP_VITA=1 -DNP_TARGET_VITA=1 -fno-aggressive-loop-optimizations
 else
@@ -150,12 +150,28 @@ $(B)/tests/%: $(HERE)/tests/%.cpp $(LIB) $(SDKINC)/.stamp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $< -o $@.o -c
 	$(LD) $(ARCH) $@.o $(LIB) $(LIBS) -o $@
+$(B)/tests/test_disc_error $(B)/tests/test_disc_error_no_hooks: $(B)/tests/%: $(HERE)/tests/%.cpp $(NP)/platform/compat/np_disc_error.cpp $(LIB) $(SDKINC)/.stamp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $< $(NP)/platform/compat/np_disc_error.cpp $(LIB) $(LIBS) -o $@
+$(B)/tests/test_disc_error_no_hooks: $(HERE)/tests/test_disc_error.cpp
 # the game's own movie player on the SDK layer (needs the game's include path for NL headers)
 $(B)/tests/test_thp_player: $(HERE)/tests/game/thp_player.cpp $(LIB) $(SDKINC)/.stamp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -fpermissive $(HERE)/tests/game/thp_player.cpp -c -o $@.o
 	$(LD) $(ARCH) $@.o $(LIB) $(LIBS) -o $@
 TEST_BINS += $(B)/tests/test_thp_player
+# whole movies of the disc through the same player: frames and audio against what the file authors, with hashes (see the file's header)
+$(B)/tests/test_thp_movies: $(HERE)/tests/game/thp_movies.cpp $(HERE)/tests/game/thp_player.cpp $(LIB) $(SDKINC)/.stamp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -fpermissive $(HERE)/tests/game/thp_movies.cpp -c -o $@.o
+	$(LD) $(ARCH) $@.o $(LIB) $(LIBS) -Wl,--wrap=THPAudioDecode -o $@
+TEST_BINS += $(B)/tests/test_thp_movies
+# the game's file layer (nlFileGC.cpp) over the SDK's DVD layer: admission of split asynchronous reads
+$(B)/tests/test_nl_async: $(HERE)/tests/game/nl_async.cpp $(NP)/src/NL/nlFileGC.cpp $(LIB) $(SDKINC)/.stamp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -fpermissive $(HERE)/tests/game/nl_async.cpp -c -o $@.o
+	$(LD) $(ARCH) $@.o $(LIB) $(LIBS) -o $@
+TEST_BINS += $(B)/tests/test_nl_async
 check: $(TEST_BINS)
 	@set -e; for t in $(TEST_BINS); do echo "== $$t"; $(RUN) $$t; done; \
 	echo "== $(B)/tests/test_input_default (NP_PAD_PRESENT=0)"; NP_PAD_PRESENT=0 $(RUN) $(B)/tests/test_input_default off; \

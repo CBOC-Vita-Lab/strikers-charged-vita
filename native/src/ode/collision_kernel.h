@@ -85,6 +85,8 @@ enum
 // the pos and R of the body (if body nonzero).
 // a dGeomID is a pointer to this object.
 
+extern unsigned npGeomEpoch;   // collision_space.cpp
+
 struct dxGeom : public dBase
 {
     int type;          // geom type number, set by subclass constructor

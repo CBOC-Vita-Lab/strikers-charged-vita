@@ -1,3 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 08:41:10 -0400
+Subject: [PATCH] GLB: aligned pool, statistics, cached stream arena, skip-sets
+
+---
+ source/buffers.c         |   7 +-
+ source/custom_shaders.c  |  21 +++++
+ source/gxm.c             |   2 +
+ source/shared.h          |  18 ++++
+ source/utils/gxm_cache.h | 106 +++++++++++++++++++++++
+ source/utils/gxm_utils.c |  20 +++++
+ source/vgl.c             | 177 +++++++++++++++++++++++++++++++++++++++
+ source/vitaGL.h          |  38 +++++++++
+ 8 files changed, 388 insertions(+), 1 deletion(-)
+ create mode 100644 source/utils/gxm_cache.h
+
 diff --git a/source/buffers.c b/source/buffers.c
 index 9ef4257..9608d5d 100644
 --- a/source/buffers.c
@@ -38,10 +55,10 @@ index 9ef4257..9608d5d 100644
  }
  
 diff --git a/source/custom_shaders.c b/source/custom_shaders.c
-index 3b91d11..5e120f6 100644
+index f8729b5..c7a1c47 100644
 --- a/source/custom_shaders.c
 +++ b/source/custom_shaders.c
-@@ -801,6 +801,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
+@@ -806,6 +806,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
  	uint32_t draw_start = sceKernelGetProcessTimeLow();
  #endif
  	program *p = &progs[cur_program - 1];
@@ -49,7 +66,7 @@ index 3b91d11..5e120f6 100644
  
  	// Check if a blend info rebuild is required and upload fragment program
  	setup_frag_program();
-@@ -1059,6 +1060,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean
+@@ -1064,6 +1065,7 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean
  	uint32_t draw_start = sceKernelGetProcessTimeLow();
  #endif
  	program *p = &progs[cur_program - 1];
@@ -57,7 +74,7 @@ index 3b91d11..5e120f6 100644
  
  	// Check if a blend info rebuild is required and upload fragment program
  	setup_frag_program();
-@@ -1346,6 +1348,9 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
+@@ -1351,6 +1353,9 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
  #endif
  	program *p = &progs[cur_program - 1];
  
@@ -67,7 +84,7 @@ index 3b91d11..5e120f6 100644
  	// Check if a blend info rebuild is required and upload fragment program
  	setup_frag_program();
  
-@@ -1683,6 +1688,7 @@ void _vglDrawObjects_CustomShadersIMPL() {
+@@ -1688,6 +1693,7 @@ void _vglDrawObjects_CustomShadersIMPL() {
  	uint32_t draw_start = sceKernelGetProcessTimeLow();
  #endif
  	program *p = &progs[cur_program - 1];
@@ -75,7 +92,7 @@ index 3b91d11..5e120f6 100644
  
  	// Check if a blend info rebuild is required
  	setup_frag_program();
-@@ -2112,6 +2118,21 @@ void glGetAttachedShaders(GLuint prog, GLsizei maxCount, GLsizei *count, GLuint
+@@ -2117,6 +2123,21 @@ void glGetAttachedShaders(GLuint prog, GLsizei maxCount, GLsizei *count, GLuint
  	}
  }
  
@@ -98,7 +115,7 @@ index 3b91d11..5e120f6 100644
  	// Looking for a free program slot
  	GLuint i, j, res = 0xFFFFFFFF;
 diff --git a/source/gxm.c b/source/gxm.c
-index ffa0279..a539e9c 100644
+index 3894e19..bfdccfa 100644
 --- a/source/gxm.c
 +++ b/source/gxm.c
 @@ -814,8 +814,10 @@ void vglSwapBuffers(GLboolean has_commondialog) {
@@ -113,7 +130,7 @@ index ffa0279..a539e9c 100644
  
  	// Marking uniform values as dirty at each frame end just to be safe
 diff --git a/source/shared.h b/source/shared.h
-index 07d8f47..fcc28a5 100644
+index bead4dc..29b132f 100644
 --- a/source/shared.h
 +++ b/source/shared.h
 @@ -109,6 +109,22 @@ extern uint32_t circular_data_pool_size;
@@ -261,10 +278,10 @@ index 0000000..18c4bb5
 +
 +#endif
 diff --git a/source/utils/gxm_utils.c b/source/utils/gxm_utils.c
-index 61803f3..d1de166 100644
+index 30b6248..ec1b677 100644
 --- a/source/utils/gxm_utils.c
 +++ b/source/utils/gxm_utils.c
-@@ -218,15 +218,35 @@ void vglVertexProgramCacheInvalidate(SceGxmShaderPatcherId id) {
+@@ -219,15 +219,35 @@ void vglVertexProgramCacheInvalidate(SceGxmShaderPatcherId id) {
  	sceGxmShaderPatcherForceUnregisterProgram(gxm_shader_patcher, id);
  }
  
@@ -301,7 +318,7 @@ index 61803f3..d1de166 100644
  		static uint32_t last_frame_swap = 0;
  		if (last_frame_swap == vgl_framecount) {
 diff --git a/source/vgl.c b/source/vgl.c
-index bf5e4d4..9126741 100644
+index 10463f8..22d8fa2 100644
 --- a/source/vgl.c
 +++ b/source/vgl.c
 @@ -146,11 +146,19 @@ static uint8_t *circular_data_pool_ptr;
@@ -324,7 +341,7 @@ index bf5e4d4..9126741 100644
  		res = (uint8_t *)gpu_alloc_mapped_for_cpu(size);
  #ifdef LOG_ERRORS
  		if (!res) {
-@@ -428,6 +436,9 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
+@@ -415,6 +423,9 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
  	circular_data_pool_ptr = circular_data_pool;
  	circular_data_pool_limit = (uint8_t *)circular_data_pool + circular_data_pool_size;
  #endif
@@ -334,7 +351,7 @@ index bf5e4d4..9126741 100644
  #endif
  
  	// Init constant index buffers
-@@ -780,6 +791,172 @@ void vglSetTextureCacheFrequency(GLuint freq) {
+@@ -771,6 +782,172 @@ void vglSetTextureCacheFrequency(GLuint freq) {
  #endif
  }
  
@@ -508,10 +525,10 @@ index bf5e4d4..9126741 100644
  #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)
  	vgl_dynamic_wants_scratch = scratch_for_dynamic;
 diff --git a/source/vitaGL.h b/source/vitaGL.h
-index dac9fa0..c3e1aad 100644
+index 9414672..73656d8 100644
 --- a/source/vitaGL.h
 +++ b/source/vitaGL.h
-@@ -1319,6 +1319,44 @@ void vglUseExtraMem(GLboolean usage);
+@@ -1341,6 +1341,44 @@ void vglUseExtraMem(GLboolean usage);
  // Simplified function to enable or disable V-Sync. For more fine granularity on the swap interval use eglSwapInterval.
  void vglWaitVblankStart(GLboolean enable);
  

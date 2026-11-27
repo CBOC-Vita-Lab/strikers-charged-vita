@@ -2,7 +2,7 @@
 """mkindex.py : index the recompiler's shards (function address -> shard file, start line, end line) into index.pkl (not committed)."""
 import re, glob, pickle, os
 idx = {}
-for f in glob.glob('/home/claude/msc/split/gen-trunk/build_shards/base_common/shard_*.cpp'):
+for f in glob.glob('/work/msc/split/gen-trunk/build_shards/base_common/shard_*.cpp'):
     lines = open(f, errors='replace').read().split('\n')
     marks = [i for i, l in enumerate(lines) if l.startswith('#line 1 "func_')]
     for k, i in enumerate(marks):

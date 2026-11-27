@@ -1,0 +1,87 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: the GPU frame record says how much of busy_us the display's scene took (vglRtGpuFrame.display_us)
+
+The display's scene is begun with the back buffer's sync object as its fragment sync (gxm.c scene_reset), so its fragment job is held until the display queue has released
+the buffer, and rt.c counts that hold as busy time (done minus the later of submission and the previous scene's end). Near 60 fps busy_us then follows the frame period with an
+idle GPU. display_us is the part of busy_us that belongs to scenes begun without a framebuffer object; the host subtracts it and adds back the real blit.
+Appended at the end of vglRtGpuFrame, so older readers of the leading fields are unaffected.
+
+diff -ruN a/source/rt.c b/source/rt.c
+--- a/source/rt.c	2026-11-10 23:07:53.826907768 -0500
++++ b/source/rt.c	2026-11-10 23:08:08.185697964 -0500
+@@ -60,7 +60,9 @@
+ 	uint32_t submit_us;
+ 	uint32_t done_us;
+ 	uint8_t timed;
++	uint8_t display; // 0030: the scene drew to the display (its fragment job waits for a display buffer)
+ } rt_scene_rec;
++static uint8_t rt_cur_display = 0; // 0030: set by vgl_rt_scene_begin for the scene being recorded
+ static rt_scene_rec rt_ring[RT_SCENES];
+ static volatile uint32_t rt_produced = 0; // scenes recorded
+ static volatile uint32_t rt_consumed = 0; // scenes the watcher has finished with
+@@ -117,6 +119,7 @@
+ 	}
+ 	vgl_rt_scenes++;
+ 	rt_cpu_frame_scenes++;
++	rt_cur_display = active_write_fb ? 0 : 1;
+ 	if (!active_write_fb)
+ 		vgl_rt_scenes_display++;
+ 	if (!ds)
+@@ -180,6 +183,7 @@
+ 	rt_scene_rec *r = &rt_ring[seq % RT_SCENES];
+ 	r->frame = rt_frame;
+ 	r->done_us = 0;
++	r->display = rt_cur_display;
+ 	// The watcher must not fall a whole slot ring behind: a slot word is rewritten RT_SLOTS scenes later (a wait for the old value would never end).
+ 	if (rt_slots && seq - rt_consumed < RT_SLOTS - 16) {
+ 		SceGxmNotification n;
+@@ -225,7 +229,7 @@
+ }
+ 
+ static int rt_watcher(SceSize args, void *argp) {
+-	uint32_t cur = 0xFFFFFFFF, first_submit = 0, last_submit = 0, last_done = 0, prev_done = 0, busy = 0, scenes = 0, timed = 0, pixel = 0, tiling = 0;
++	uint32_t cur = 0xFFFFFFFF, first_submit = 0, last_submit = 0, last_done = 0, prev_done = 0, busy = 0, scenes = 0, timed = 0, pixel = 0, tiling = 0, display = 0;
+ 	GLboolean have_prev = GL_FALSE;
+ 	for (;;) {
+ 		uint32_t produced = rt_produced;
+@@ -247,6 +251,7 @@
+ 				f->busy_us = busy;
+ 				f->pixel_us = pixel;
+ 				f->tiling_us = tiling;
++				f->display_us = display;
+ 				f->span_us = timed ? last_done - first_submit : 0;
+ 				f->tail_us = timed ? last_done - last_submit : 0;
+ 				f->scenes = scenes;
+@@ -257,7 +262,7 @@
+ 			}
+ 			cur = r->frame;
+ 			first_submit = r->submit_us;
+-			busy = scenes = timed = pixel = tiling = 0;
++			busy = scenes = timed = pixel = tiling = display = 0;
+ 		}
+ 		scenes++;
+ 		last_submit = r->submit_us;
+@@ -283,8 +288,11 @@
+ 			uint32_t start = r->submit_us;
+ 			if (have_prev && (int32_t)(prev_done - start) > 0)
+ 				start = prev_done;
+-			if ((int32_t)(done - start) > 0)
++			if ((int32_t)(done - start) > 0) {
+ 				busy += done - start;
++				if (r->display)
++					display += done - start; // 0030
++			}
+ 			if (rt_vslots) {
+ 				uint32_t pstart = (int32_t)(vdone - start) > 0 ? vdone : start;
+ 				if ((int32_t)(done - pstart) > 0)
+diff -ruN a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h	2026-11-10 23:07:53.830122860 -0500
++++ b/source/vitaGL.h	2026-11-10 23:08:08.190605318 -0500
+@@ -1471,6 +1471,7 @@
+ 	uint32_t busy_us, span_us, tail_us; // see rt.c: GPU busy time, first submission to last completion, last submission to last completion
+ 	uint16_t scenes, timed;
+ 	uint32_t pixel_us, tiling_us; // 0021 vglRtSetSplit: the part of busy_us after each scene's tiling ended; tiling seen after submission (a lower bound: scenes overlap)
++	uint32_t display_us; // 0030: the part of busy_us spent in the display's scene (it includes the wait for a display buffer; subtract it, add back the blit)
+ } vglRtGpuFrame;
+ void vglRtSetSplit(uint32_t enabled);
+ typedef struct {

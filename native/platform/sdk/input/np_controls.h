@@ -29,6 +29,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../../include/np/live_settings.h"
+
 namespace NpControls {
 
 // The Vita's buttons (SCE_CTRL_*, = NP_BTN_* of np_sdk.h) and the GameCube pad bits (PAD_BUTTON_* / PAD_TRIGGER_*).
@@ -53,13 +55,10 @@ inline Layout ConfiguredLayout() {
     }
     return (Layout)v;
 }
-// MSC_REAR_TOUCH: 0 off, 1 on; unset = on with MODERN, off with CLASSIC. Read once.
+// MSC_REAR_TOUCH: 0 off, 1 on; unset = on with MODERN, off with CLASSIC. One shared cell (np/live_settings.h): the first read takes it from the environment, the settings
+// screen changes it live.
 inline bool RearEnabled(Layout layout) {
-    static int v = -2;
-    if (v == -2) {
-        const char* e = getenv("MSC_REAR_TOUCH");
-        v = (e && *e) ? (*e != '0' ? 1 : 0) : -1;
-    }
+    const int v = NpLiveRear();
     return v < 0 ? layout == kModern : v == 1;
 }
 // These options are separate from the ordinary rear-tap shortcuts.
@@ -97,18 +96,57 @@ uint32_t WiiHold(Layout layout, uint32_t vita, uint32_t hold, bool bareRemote);
 // released between two reads would be lost. Given the buffered samples of one read (any order, with their time stamps) returns
 // the buttons to report: the newest sample's, plus every button that was down in a sample newer than the previous read's newest
 // (so a quick tap is reported once, for one read). `lastStamp` carries the newest stamp from read to read. MSC_TAP_LATCH=0 = off.
-inline uint32_t LatchTaps(const uint32_t* buttons, const uint64_t* stamps, int count, uint64_t* lastStamp) {
+// maxGapUs (wave 6, MSC_TAP_GAP_MS, default 250 ms): when the newest sample is more than that after the previous read's (a pause, a Home
+// button suspend, a loading stall) nothing older is added: whatever was pressed before the gap is not a tap of this read, and
+// a button that was released during it must not come back as a press. 0 = no limit (the old rule).
+inline uint32_t LatchTaps(const uint32_t* buttons, const uint64_t* stamps, int count, uint64_t* lastStamp, uint64_t maxGapUs = 0) {
     if (count <= 0) return 0;
     int newest = 0;
     for (int i = 1; i < count; ++i)
         if (stamps[i] > stamps[newest]) newest = i;
     uint32_t out = buttons[newest];
     const uint64_t since = lastStamp ? *lastStamp : 0;
-    if (lastStamp && since != 0)
+    const bool gap = maxGapUs != 0 && since != 0 && stamps[newest] > since && stamps[newest] - since > maxGapUs;
+    if (lastStamp && since != 0 && !gap)
         for (int i = 0; i < count; ++i)
             if (i != newest && stamps[i] > since) out |= buttons[i];
     if (lastStamp) *lastStamp = stamps[newest];
     return out;
+}
+// Wave 9 (pacing, MSC_TAP_CARRY): the pad is read once per simulation step and once at the end of every frame (the menu pad set). A frame that runs NO step (60 pictures a second against the
+// 50 Hz simulation: one frame in six; a free run) reads the pad only at its end, and that read takes the latched samples (a tap down and up since the last read) away from the step that would
+// have seen them: a tap shorter than a refresh was lost to play. TapCarry keeps what such a read latched but no longer shows (not down in its newest sample) and adds it to the next read once.
+// SetHold(true) is called before the end-of-frame read of a frame without a step (and only then); single player only. `BREAK` mutants (test_controls.cpp): 1 never carries, 2 carries every read.
+#ifndef NP_TAPCARRY_BREAK
+#define NP_TAPCARRY_BREAK 0
+#endif
+struct TapCarry {
+    uint32_t carry = 0;
+    bool hold = false;
+    void SetHold(bool on) { hold = on; }
+    // latched: the read's buttons (newest | older taps); newest: the newest sample's buttons. Returns the buttons to report.
+    uint32_t Apply(uint32_t latched, uint32_t newest) {
+        const uint32_t out = latched | carry;
+#if NP_TAPCARRY_BREAK == 1
+        carry = 0;
+#elif NP_TAPCARRY_BREAK == 2
+        carry = out & ~newest;
+#else
+        carry = hold ? (out & ~newest) : 0;
+#endif
+        return out;
+    }
+    void Clear() { carry = 0; hold = false; }
+};
+// MSC_TAP_GAP_MS=<ms> (default 250; 0 = off), in microseconds for LatchTaps (the Vita's sample stamps are microseconds).
+inline uint64_t TapGapUs() {
+    static int64_t v = -1;
+    if (v < 0) {
+        const char* e = getenv("MSC_TAP_GAP_MS");
+        const long ms = (e && *e) ? atol(e) : 250;
+        v = ms > 0 ? (int64_t)ms * 1000 : 0;
+    }
+    return (uint64_t)v;
 }
 inline bool TapLatchEnabled() {
     static int v = -1;
@@ -117,6 +155,47 @@ inline bool TapLatchEnabled() {
         v = !(e && *e == '0');
     }
     return v == 1;
+}
+
+// Wave 24 (feel24, MSC_REAR_LATCH, default 1; 0 = the old single newest sample): a finger that lands on the BACK panel and lifts wholly between two
+// reads is never in any read's newest sample, so the tap (switch player, cycle item) is lost; the front panel has had this latch since 23 Oct. The
+// panel keeps a few samples. TouchSample is one of them. PickLostContact returns the index of the sample to report in place of the newest one, or -1
+// (report the newest as it is): only when the newest sample has NO finger, a sample newer than the previous read's newest has one whose id the previous
+// read did not report (a NEW finger, so a finger that lifts after being reported is not shown a second time and a tap is not delayed by a read), and
+// the gap since the previous read is under maxGapUs (a stall or suspend turns nothing old into a tap). The newest such sample wins.
+struct TouchSample {
+    uint64_t stamp;
+    int count;       // reports in the sample (0..8)
+    int ids[8];
+};
+inline bool RearLatchEnabled() {
+    static int v = -1;
+    if (v < 0) {
+        const char* e = getenv("MSC_REAR_LATCH");
+        v = !(e && *e == '0');
+    }
+    return v == 1;
+}
+inline int PickLostContact(const TouchSample* s, int n, uint64_t lastStamp, const int* prevIds, int prevCount, uint64_t maxGapUs) {
+    if (n <= 0 || lastStamp == 0) return -1;
+    int newest = 0;
+    for (int i = 1; i < n; ++i)
+        if (s[i].stamp > s[newest].stamp) newest = i;
+    if (s[newest].count != 0) return -1;
+    if (maxGapUs != 0 && s[newest].stamp > lastStamp && s[newest].stamp - lastStamp > maxGapUs) return -1;
+    int pick = -1;
+    for (int i = 0; i < n; ++i) {
+        if (i == newest || s[i].stamp <= lastStamp || s[i].count <= 0 || s[i].count > 8) continue;
+        bool fresh = false;
+        for (int k = 0; k < s[i].count && !fresh; ++k) {
+            bool known = false;
+            for (int j = 0; j < prevCount; ++j)
+                if (prevIds[j] == s[i].ids[k]) known = true;
+            if (!known) fresh = true;
+        }
+        if (fresh && (pick < 0 || s[i].stamp > s[pick].stamp)) pick = i;
+    }
+    return pick;
 }
 
 // ---- the rear touchpad ----------------------------------------------------------------------------------------------------

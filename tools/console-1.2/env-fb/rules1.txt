@@ -1,0 +1,15 @@
+# console-1.2 run rules1: 1.1 dynamic resolution rules
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group pacing, route tour, version payload 1.3, role ab
+# CONSOLE-TESTS 1.2 row (1.1 rules for the larger sizes), together with MSC_DYNRES_UNDO=0: the 1.2 controller undoes a step down that bought no GPU time (default on in the player build); here neither 1.2 rule is on, so the run is the whole of the 1.1 dynamic resolution.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_DYNRES_RULES=1
+MSC_DYNRES_UNDO=0

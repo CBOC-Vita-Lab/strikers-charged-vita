@@ -1,0 +1,15 @@
+# console-1.2 run fsheld0: Replay frames sent on the send worker again (MSC_FS_HELD off)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group picture, route crep, version payload 1.3, role ab
+# rep27: MSC_FS_HELD=1 is on in the Vita plan: a replay's frame is sent on the game thread (a replay has no simulation step, core 0 has room) instead of on the frame-send worker, which shares core 1 with the render thread's front end (console 18 Nov s29: replay game thread p50 37-40 ms of which most is the send join, core 1 at 86 %, replay interval p50 47 ms). This run is the A/B off side; run it alternating with the default (2 pairs) on fb-crep at Vice. Compare: replay interval p50/p95 ([frame-timing] task=8), [head] class replay game ms (expect the ON side lower: no join wait; work about 22-28 ms), [lane] cores (core 1 share down in replay windows), [present] held 2/3/4+ in replay windows (more 2s with it ON), the [fs] 'MSC_FS_HELD' counter line in the ON runs. Stop if the ON side's replay game ms p50 is over 33 (the game thread would then be the limit).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FS_HELD=0
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500

@@ -217,6 +217,7 @@ int dGeomGetGFlags(dxGeom* geom)
  */
 void dGeomSetGFlags(dxGeom* geom, int flags)
 {
+    npGeomEpoch++;
     geom->gflags = flags;
 }
 
@@ -331,6 +332,7 @@ void dVector3Add(float* __restrict v1, const float* __restrict v2)
  */
 void dGeomComputeAABB(dxGeom* geomID)
 {
+    npGeomEpoch++;
     geomID->computeAABB();
     geomID->gflags &= 0xFFFFFFFC;
 }

@@ -2,6 +2,7 @@
 #include "Game/AI/ScriptState.h"
 #include "Game/Sys/debug.h"
 #include "Game/AI/AIContext.h"
+#include "np/gsplit.h"   // MSC_GSPLIT
 
 #include "Game/AI/DesireUpdate.inl"
 #include "Game/AI/FuzzyAIRuntime.h"
@@ -207,9 +208,12 @@ void ScriptMachine::Update(float deltaTime)
     bool selectState = false;
     DesireUpdate update(0, -1.0f, -1.0f);
     shdStateMachine* active = mActiveState;
+    NP_GSC(NPGC_AI_SCRIPTS, 1);
 
     if (active != 0)
     {
+        NP_GS(NPGS_AI_F_VMSTATE);
+        NP_GSC(NPGC_AI_VMSTATES, 1);
         UpdateStateMachine(active, &update, true, deltaTime);
         if ((unsigned int)update.GetType() == FT_UNSPECIFIED)
         {
@@ -277,7 +281,11 @@ void ScriptMachine::Update(float deltaTime)
             continue;
         }
 
-        UpdateStateMachine(machine, &update, true, deltaTime);
+        {
+            NP_GS(NPGS_AI_F_VMSTATE);
+            NP_GSC(NPGC_AI_VMSTATES, 1);
+            UpdateStateMachine(machine, &update, true, deltaTime);
+        }
         if (update.mData.i == DESIRE_CONTINUE)
         {
             continue;

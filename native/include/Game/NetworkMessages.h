@@ -12,6 +12,7 @@
 class NetMessageGameStart : public NetworkMessage
 {
 public:
+    NetMessageGameStart() : mInputDelay(0) {}
     virtual void Serialize(NetworkMessageSerializer* serializer);
     virtual int GetType();
 
@@ -27,6 +28,9 @@ public:
     /* 0x1C */ s8 mTournamentSetup[3];
     /* 0x20 */ u32 mSecondGameRandomSeed;
     /* 0x24 */ u32 mThirdGameRandomSeed;
+    // np (A7): the lockstep input delay the host chose for this LAN match (ticks, 1..20; 0 = the game's own default of 4). Every console must start
+    // with the same value, so only the host decides and it travels here (platform/sdk/net/np_lan.cpp NpLanChooseInputDelay).
+    /* 0x28 */ u8 mInputDelay;
 };
 
 struct NetworkDraftSides

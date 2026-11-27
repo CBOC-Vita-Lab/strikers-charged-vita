@@ -5,8 +5,13 @@
 #include "np_vita.h"
 #include "np_vita_internal.h"
 
+#include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <thread>
+
+extern "C" void np_env_lock_stats(unsigned*, unsigned*, unsigned*) __attribute__((weak));   // np_vita_envlock.cpp
 
 namespace VitaPlatform {
 
@@ -89,6 +94,34 @@ bool SelfTest() {
         bool ok = true;
         for (size_t i = 0; i < 100; ++i) ok = ok && out[i] == 1 + i;
         expect(ok, "the job pool runs every item of a job exactly once");
+    }
+
+    // The environment lock (np_vita_envlock.cpp; the SDK's own __env_lock is empty): one thread reads with getenv while this thread sets 400 new names (setenv reallocates the
+    // array each time, the old block is freed) and removes them. Without a working lock a reader walks freed memory: a data abort, or a wrong answer for the one name that stays.
+    // Log line: "[env] self-test". (The control arm without the lock is the host test, native/platform/vita/tests/run_envlock_test.sh: it must not be run on a console.)
+    {
+        setenv("NP_ENVTEST_KEEP", "kept", 1);
+        std::atomic<bool> stop{false};
+        std::atomic<unsigned long> reads{0}, bad{0};
+        std::thread reader([&] {
+            while (!stop.load(std::memory_order_acquire)) {
+                const char* v = std::getenv("NP_ENVTEST_KEEP");
+                if (!v || std::strcmp(v, "kept") != 0) bad.fetch_add(1);
+                reads.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+        char name[32];
+        for (int i = 0; i < 400; ++i) { std::snprintf(name, sizeof(name), "NP_ENVTEST_%03d", i); setenv(name, "1", 1); }
+        for (int i = 0; i < 400; ++i) { std::snprintf(name, sizeof(name), "NP_ENVTEST_%03d", i); unsetenv(name); }
+        stop.store(true, std::memory_order_release);
+        reader.join();
+        unsetenv("NP_ENVTEST_KEEP");
+        unsigned calls = 0, waits = 0, timeouts = 0;
+        if (np_env_lock_stats) np_env_lock_stats(&calls, &waits, &timeouts);
+        std::fprintf(stderr, "[env] self-test: a reader thread did %lu getenv calls while 400 names were set and removed: %lu wrong answers; environment lock %s (%u takes, %u waits, %u timeouts)\n",
+                     reads.load(), bad.load(), np_env_lock_stats ? "present" : "NOT LINKED", calls, waits, timeouts);
+        expect(bad.load() == 0, "getenv answers right while another thread changes the environment");
+        expect(np_env_lock_stats != nullptr, "the environment lock (np_vita_envlock.cpp) is linked");
     }
 
     std::fprintf(stderr, "[vita] platform self-test: %s\n", failures == 0 ? "passed" : "FAILED");

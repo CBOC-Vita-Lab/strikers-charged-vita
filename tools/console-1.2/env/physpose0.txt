@@ -1,0 +1,14 @@
+# console-1.2 run physpose0: Character poses back on the game thread (kill switch MSC_PHYS_POSE=0), split lines on
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group cpu, route tour, version payload 1.3, role ab
+# MSC_PHYS_POSE=1 is on in 1.3 (wave 9, physpar): the ten characters' poses of each simulation step (2.77 of the 4.83 ms 'physics' step of r11) run on the job lanes, committed in body order: the simulation is the same (host proof: det trace and 5204 frame hashes equal over a whole match60 and The Dump, mutants caught). This run is the A/B: against gsplit1-style default runs with MSC_GSPLIT=1 compare the [gsplit-phys] PostUpdate ms a step and the game column of [lane]; with the default the log has a [physpose] line (parallel= steps, lanes=3); here none. Game speed >= 98 percent, no new [hitch], [lat] p50 and p95 down or equal, or the default goes back to 0.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PHYS_POSE=0
+MSC_GSPLIT=1

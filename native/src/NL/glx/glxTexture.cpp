@@ -8,6 +8,7 @@
 #include "NL/gl/glModel.h"
 #include "NL/gl/glState.h"
 #include "NL/gl/glTexture.h"
+#include "NL/gl/glTextureManager.h"
 #include "NL/nlFile.h"
 #include "NL/nlList.h"
 #include "NL/nlMemory.h"
@@ -15,11 +16,14 @@
 
 #include <revolution/os/OSCache_fwd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 #include <string.h>
 #ifdef NP_NATIVE
 #include "np/framesend.h"
 // NP (W5 CTL): the pictures of Wii buttons drawn as the Vita's (platform/sdk/input/np_prompts.cpp, np_prompt_art.h)
 extern "C" const void* NpCtlTextureOverride(unsigned long hash, const void* header) __attribute__((weak));
+extern "C" void np_gx_touch_tex(const void* gxTexObj, unsigned int mode) __attribute__((weak));   // platform/gx (np_gx.h): renderer extension record
 #endif
 
 enum GXTexWrapMode
@@ -347,6 +351,7 @@ void PlatTexture::CreateWithMemory(int width, int height,
     m_Format = format;
     m_SwizzledData = (void*)textureData;
     m_LinearData = 0;
+    m_NpNoTouch = 1;
 }
 
 void PlatTexture::Create(int width, int height, eGXTextureFormat format,
@@ -512,8 +517,22 @@ void glx_BindTexture(
     glTextureManager* textureManager;
     PlatTexture* pTex;
     eGLTextureMode tmode;
-    static unsigned long missingTexture =
-        glGetTexture("font/fixedWidthMedium");
+    // 1.3 armcpu9: this was `static unsigned long missingTexture = glGetTexture(...)`, a guarded static: every call (1100+ a picture) loaded the guard
+    // byte and followed it with `dmb ish`, the acquire the guard needs (a barrier waits for every store before it; about 30 cycles on the Cortex-A9).
+    // The value is now kept in one atomic word, +1 so that 0 means "not worked out yet", read relaxed; the first call still goes through the guarded
+    // static (so glGetTexture runs once, at the same first call, on whichever thread gets there first).
+    static unsigned long sMissingTexturePlus1 = 0;
+    unsigned long missingTexture;
+    {
+        unsigned long known = __atomic_load_n(&sMissingTexturePlus1, __ATOMIC_RELAXED);
+        if (__builtin_expect(known == 0, 0))
+        {
+            static unsigned long once = glGetTexture("font/fixedWidthMedium");
+            known = once + 1;   // (a handle of 0xFFFFFFFF would stay "unknown" and take this path every time: still right)
+            __atomic_store_n(&sMissingTexturePlus1, known, __ATOMIC_RELAXED);
+        }
+        missingTexture = known - 1;
+    }
 
     textureManager = glGetTextureManager();
     pTex = textureManager->GetTexture(textureState);
@@ -566,3 +585,187 @@ void glx_BindTexture(
 
     GXLoadTexObj(textureObject, textureMap);
 }
+
+
+#ifdef NP_NATIVE
+// 1.3 MSC_TEX_PRETOUCH ("no loading in play"): a texture is uploaded by the renderer at its first draw, and the textures of a goal, a Mega Strike or a replay (effects, the cut-scene
+// files the game loads while it plays) are first drawn in play: a hitch there. Each rendered frame outside the front end, a few textures that are registered with the texture
+// manager and not yet shown to the renderer are shown to it with np_gx_touch_tex, which uploads them without a draw and without changing any binding. The ones a match has loaded
+// are done over its loading frames; a texture registered later (a cut-scene's, as its file is read) is done in the frames after, a few at a time, ahead of its first draw.
+//   MSC_TEX_PRETOUCH=0 off (the code default), 1 upload, 2 upload and keep the textures against the renderer's budget until the front end is back (the Vita plan sets 2)
+//   MSC_TEX_PRETOUCH_N=<n>    (retired: the loading scene follows the real frame time, live play 1 a frame, a held scene 2);  MSC_TEX_PRETOUCH_KIB=<k> at most k KiB of RGBA8 a frame (default 0 = by count only: a console upload costs 0.35-0.5 ms a texture whatever its size)
+//   MSC_TEX_PRETOUCH_MIB=<m>  stop after m MiB of RGBA8 in all (default 0 = no limit);  MSC_TEX_PRETOUCH_LOG=1 a [pretouch] line (here and in the renderer)
+struct NpPretouchCall
+{
+    u32 obj[8];
+    u32 mode;
+};
+static void NpPretouchDo(const void* p)
+{
+    const NpPretouchCall* c = (const NpPretouchCall*)p;
+    if (&np_gx_touch_tex != 0)
+    {
+        np_gx_touch_tex(c->mode == 3 ? (const void*)0 : (const void*)c->obj, c->mode == 3 ? 2u : c->mode);
+    }
+}
+static int NpPretouchEnv(const char* name, int def)
+{
+    const char* e = getenv(name);
+    return (e != 0 && *e != 0) ? atoi(e) : def;
+}
+static unsigned long long NpPretouchMs(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000ull + (unsigned long long)(ts.tv_nsec / 1000000);
+}
+// What the loading scene is waiting for (LoadingTask): nonzero while the match's textures are still being shown to the renderer, bounded by 3 s.
+static int sPretouchPending = 0;
+static unsigned sPretouchState = 0;
+static unsigned long long sPretouchLoadStartMs = 0, sPretouchHeldMs = 0;
+static unsigned sPretouchLoadN = 0;
+extern "C" int NpTexPretouchHold(void)
+{
+    if (!sPretouchPending) return 0;
+    const unsigned long long now = NpPretouchMs();
+    if (sPretouchHeldMs == 0) sPretouchHeldMs = now;
+    if (now - sPretouchHeldMs > 3000ull)
+    {
+        fprintf(stderr, "[pretouch] loading hold timed out after %llu ms with textures still to show; they trickle in held scenes\n", now - sPretouchHeldMs);
+        sPretouchPending = 0;
+        return 0;
+    }
+    return 1;
+}
+// scene: 0 front end, 1 the match's loading scene, 2 live play, 3 a held scene (cut-scene, replay, pause)
+extern "C" void NpTexPretouchStep(int scene, unsigned state)
+{
+    sPretouchState = state;
+    static int mode = -1, perFrame = 4, kibPerFrame = 1024, maxMib = 0, logOn = 0;
+    static PlatTexture** touched = 0;
+    static PlatTexture** remainder = 0;
+    static unsigned cap = 0, cursor = 0;
+    static bool inMatch = false, wasLoading = false;
+    static unsigned long long totalKib = 0, touchedN = 0, lastMs = 0;
+    static unsigned loadN = 16, tiny = 0;
+    if (mode < 0)
+    {
+        const char* modeEnv = getenv("MSC_TEX_PRETOUCH");
+        mode = (modeEnv != 0 && *modeEnv != 0) ? atoi(modeEnv) : 0;
+        perFrame = NpPretouchEnv("MSC_TEX_PRETOUCH_N", 4);
+        kibPerFrame = NpPretouchEnv("MSC_TEX_PRETOUCH_KIB", 0);
+        maxMib = NpPretouchEnv("MSC_TEX_PRETOUCH_MIB", 0);
+        logOn = NpPretouchEnv("MSC_TEX_PRETOUCH_LOG", 0);
+        if (mode > 2) mode = 2;
+        if (mode > 0 && &np_gx_touch_tex == 0) mode = 0;
+    }
+    if (mode == 0 || gTextureManager == 0 || gTextureManager->mTextures == 0)
+    {
+        return;
+    }
+    {
+        static int lastScene = -1;
+        if (scene != lastScene && NpPretouchEnv("MSC_TEX_PRETOUCH_LOG", 0))
+            fprintf(stderr, "[pretouch] scene %d -> %d (state 0x%x)\n", lastScene, scene, (unsigned)sPretouchState);
+        lastScene = scene;
+    }
+    if (scene == 0)
+    {
+        if (inMatch)
+        {
+            // the match is over: every pin is let go; what was shown to the renderer is forgotten (the next match shows its own)
+            inMatch = false;
+            NpPretouchCall c;
+            memset(&c, 0, sizeof c);
+            c.mode = 3;
+            if (mode == 2) NpFsDefer(NpPretouchDo, &c, sizeof c);
+            if (touched != 0) memset(touched, 0, cap * sizeof(PlatTexture*));
+            if (remainder != 0) memset(remainder, 0, cap * sizeof(PlatTexture*));
+            cursor = 0;
+            if (logOn) fprintf(stderr, "[pretouch] match over: %llu textures shown to the renderer, %llu MiB of RGBA8, %u tiny (up to 32x32)\n", touchedN, totalKib / 1024, tiny);
+            touchedN = 0;
+            totalKib = 0;
+            tiny = 0;
+            sPretouchPending = 0;
+            sPretouchHeldMs = 0;
+            sPretouchLoadStartMs = 0;
+            wasLoading = false;
+            loadN = 16;
+        }
+        return;
+    }
+    inMatch = true;
+    const unsigned n = gTextureManager->mCapacity;
+    if (touched == 0 || cap != n)
+    {
+        touched = (PlatTexture**)calloc(n, sizeof(PlatTexture*));
+        remainder = (PlatTexture**)calloc(n, sizeof(PlatTexture*));
+        cap = n;
+        cursor = 0;
+        if (touched == 0 || remainder == 0) { cap = 0; return; }
+    }
+    const unsigned long long nowMs = NpPretouchMs();
+    int budget;
+    if (scene == 1)
+    {
+        // the loading scene: as many as the loading frames bear (a console upload costs 0.35-0.5 ms: about 20 ms of uploads is 40-55 textures): the count follows the real time of the last frame
+        if (sPretouchLoadStartMs == 0) sPretouchLoadStartMs = nowMs;
+        if (lastMs != 0)
+        {
+            const unsigned long long dt = nowMs - lastMs;
+            if (dt < 36) loadN = loadN + 4 > 64 ? 64 : loadN + 4;
+            else if (dt > 50) loadN = loadN < 12 ? 8 : loadN - 4;
+        }
+        lastMs = nowMs;
+        budget = (int)loadN;
+        wasLoading = true;
+    }
+    else
+    {
+        lastMs = 0;
+        if (wasLoading)
+        {
+            // the loading scene is over: what it did not reach is the remainder, shown only in held scenes
+            wasLoading = false;
+            unsigned left = 0;
+            for (unsigned k = 0; k < n; ++k)
+            {
+                PlatTexture* t = gTextureManager->mTextures[k];
+                if (t != 0 && touched[k] != t) { remainder[k] = t; ++left; }
+            }
+            sPretouchPending = 0;
+            fprintf(stderr, "[pretouch] %llu textures in %llu ms, loading held %llu ms, %u left for held scenes\n", touchedN, sPretouchLoadStartMs ? nowMs - sPretouchLoadStartMs : 0ull, sPretouchHeldMs ? nowMs - sPretouchHeldMs : 0ull, left);
+        }
+        // live play: one a frame, only of the textures registered after the loading scene (a cut-scene's, as its file is read); a held scene: two
+        budget = scene == 3 ? 2 : 1;
+        (void)perFrame;
+    }
+    if (maxMib > 0 && totalKib >= (unsigned long long)maxMib * 1024ull) return;
+    int done = 0;
+    unsigned kib = 0;
+    unsigned scanned = 0;
+    for (; scanned < n && done < budget; ++scanned)
+    {
+        PlatTexture* t = gTextureManager->mTextures[cursor];
+        const unsigned at = cursor;
+        cursor = (cursor + 1 == n) ? 0 : cursor + 1;
+        if (t == 0 || touched[at] == t) continue;
+        if (t->m_NpNoTouch || t->m_bMissingTexture || t->m_SwizzledData == 0 || t->m_Width == 0 || t->m_Height == 0 || t->m_nPaletteEntries != 0) { touched[at] = t; continue; }
+        if (scene == 2 && remainder[at] == t) continue;   // (the loading scene's remainder waits for a held scene)
+        const unsigned size = ((unsigned)t->m_Width * t->m_Height * 4u) >> 10;
+        if (kibPerFrame > 0 && done > 0 && kib + size > (unsigned)kibPerFrame) { cursor = at; break; }   // (next frame)
+        NpPretouchCall c;
+        memcpy(c.obj, t->m_TexObj, sizeof c.obj);
+        c.mode = (unsigned)mode == 2 ? 1u : 0u;
+        NpFsDefer(NpPretouchDo, &c, sizeof c);
+        touched[at] = t;
+        remainder[at] = 0;
+        kib += size;
+        totalKib += size;
+        ++touchedN;
+        if (t->m_Width <= 32 && t->m_Height <= 32) ++tiny;
+        ++done;
+    }
+    if (scene == 1) sPretouchPending = (scanned >= n && done < budget) ? 0 : 1;   // (the whole list was seen with nothing left to show: the scene may end)
+}
+#endif

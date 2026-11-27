@@ -1,0 +1,13 @@
+# console-1.2 run anisoscope1: Anisotropic filtering only on opaque depth-writing draws, The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route worstgpu, version payload 1.3, role ab
+# tile24 item 2 (vitaGL 0057 vglTexAnisoOff, default off, visible in principle): blended draws (effects, glow, particles, crowd) sample the same textures trilinear; the pitch, stands and ramps keep the filter. Against the default: gpu ms (expect a part of aniso0's gain) and a look at effects with a large texture (rain, haze, glow). Textures used by both kinds of draw change their descriptor each time the kind changes (counted in texParams).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_ANISO_SCOPE=1

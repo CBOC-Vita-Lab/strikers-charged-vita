@@ -20,6 +20,20 @@ enum eCharacterRenderPass
     CRP_Shock = 2,
 };
 
+// MSC_SKIN_POSE_PAR (np/skinpose.h): what Render decided for one character, kept apart from the draw. With `defer` set the skin-mesh poses are not made but
+// listed (types, in the order the serial code makes them), so that the ten characters' poses of a picture can run on the job lanes before the first draw.
+struct NpRenderPlan
+{
+    bool defer;
+    bool shock;      // renderShockModel
+    bool lowPoly;    // sDrawLowPoly
+    int level;       // sDrawLevel
+    int scene;       // sDrawScene
+    int nPose;
+    signed char types[4];
+    bool flatShadow; // MSC_SHADOW_DEADMESH: live play with flat shadows, the shadow mesh is not posed, prepared or copied
+};
+
 class DrawableCharacter
 {
 public:
@@ -34,10 +48,13 @@ public:
     void BuildNodeMatrices(cPoseAccumulator* accumulator);
     void BuildNpcMatrix();
     void Render(cCharacter& source);
+    bool RenderDecide(cCharacter& source, NpRenderPlan& plan);
+    void RenderDraw(cCharacter& source, const NpRenderPlan& plan);
     void SendToGl(cCharacter& source, int renderPass);
     void Grab(SkinAnimatedNPC& npc);
     void Render(SkinAnimatedNPC& npc);
     void Blend(const float* blendFactors, DrawableCharacter& lhs, DrawableCharacter& rhs);
+    bool WillBeDrawn(const cCharacter& source, const nlVector3& bip01) const;
     void EvaluateFrom(const cPoseNode& poseNode, const nlVector3& offset,
         unsigned short facingAngle, float poseScale);
     nlVector3 GetBallPosition();
@@ -63,7 +80,8 @@ public:
     u16 facingDirection;
     u16 headSpin;
     u16 headTilt;
-    char _00E[2];
+    u8 poseCulled;   // (1.3, MSC_POSE_CULL=2) the blended snapshot's pose of this frame was left out; in the old padding: the size is part of the game heap's layout
+    char _00F;
     nlVector3 position;
     nlVector3 bip01Position;
     nlVector3 headPosition;

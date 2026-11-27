@@ -91,7 +91,7 @@ s32 GetStartupErrorCode(s32 soErr, s32 connType)
     case (s32)0x80000000:
         return -50100;
     default:
-        OSReport("Unknown SOStartup Error: %d\n", soErr);
+        OSReport("Unknown SOStartup Error: %d\n", (int)soErr);
         return -50100;
     }
 }

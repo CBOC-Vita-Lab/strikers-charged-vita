@@ -1,0 +1,15 @@
+# console-1.2 run keepoff: Cut-scene files read from the card in play
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route tour, version payload 1.3, role ab
+# MSC_DVD_KEEP_KIB=8192 is on by default in the player build (the goal, Mega Strike and end-of-game cut-scene files, the characters' animations and the defence HUD are read ahead while the walk-out plays and answered from memory after kick-off; 4 MiB of the C heap) and MSC_NIS_PREFETCH / MSC_VITA_STALL_GUARD are on in the code. This run is the A/B: every such file read from the card when the goal or Mega Strike asks. Against the tour: the [hitch] lines at the goal and the Mega Strike cuts (cause wait or upstream), [dvdtrace] / [load] lines with MSC_DVD_TRACE, the heap figures.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_DVD_KEEP_KIB=0
+MSC_NIS_PREFETCH=0
+MSC_VITA_STALL_GUARD=0

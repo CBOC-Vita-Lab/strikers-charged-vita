@@ -1,17 +1,25 @@
 // Frame presenter: see vgx_present.h.
 #include "vgx_present.h"
 #include "vgx_interp.h"
+#include "vgx_arena.h"
 #include "vgx_present_sched.h"
+#include "vgx_smooth.h"
 #include "vgx_common.h"
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <random>
 #include <thread>
+
+extern "C" int NpFpsPresentSyncMode(void) __attribute__((weak));                      // MSC_PRESENT_SYNC: np_fps.cpp
+extern "C" int NpFpsPictureStamp(uint64_t tag, uint16_t* vcount) __attribute__((weak));
+extern "C" void NpSmoothShown(uint64_t tag, uint32_t shown, uint32_t natural, int naturalValid) __attribute__((weak));   // wave 9 (native np_smooth.cpp): the show clock and the [smooth] line
+extern "C" int VgxBackendLivePlay(void) __attribute__((weak));   // vgx_backend_gl.cpp: the scene being executed is live match play (the hold mix of the [present] line)
 
 namespace vgx::rec { void PlayerWaitForData(); }
 namespace vgx { void SetFrameSink(void (*sink)(CmdBuf& buf)); }
@@ -32,6 +40,7 @@ struct Params {
 } g_p;
 
 void InitOnce();
+void ReserveSlots();
 void Init() {
     // (called from the game thread and the render thread at start-up)
     static std::once_flag once;
@@ -58,6 +67,7 @@ void InitOnce() {
         double a = 0, b = 0;
         if (std::sscanf(t, "%lf:%lf", &a, &b) >= 1) { g_p.throttleMs = a; g_p.throttleJitter = b; }
     }
+    ReserveSlots();
     interp::SetMode(1); // (the presenter uses the interpolation module's machinery; its fixed in-between pictures are not used)
 }
 
@@ -80,6 +90,9 @@ struct Slot {
     double g = 0;
 };
 Slot g_slots[3];
+void ReserveSlots() { // (vgx_arena.h: these buffers circulate with the front end's)
+    for (Slot& sl : g_slots) { arena::Reserve(sl.buf, arena::Get()); arena::Track(&sl.buf); }
+}
 uint64_t g_nextId = 1;
 Slot* Find(uint64_t id) {
     for (Slot& s : g_slots) if (s.inUse && s.id == id) return &s;
@@ -200,17 +213,17 @@ void NoteFlags(bool capture, bool skipDraws) {
 }
 
 void Throttle() {
-    static const bool off = [] {
+    const bool off = static_cast<bool>(VGX_KNOB([] {
         const char* t = std::getenv("MSC_VGX_THROTTLE");
         return !(t && *t);
-    }();
+    }()));
     if (off) return;
     Init();
     if (g_p.hz == 0 && g_p.throttleMs == 0 && g_p.throttleJitter == 0) { // (Init stops early without MSC_VGX_PRESENT: read the knob here)
         double a = 0, b = 0;
         if (std::sscanf(std::getenv("MSC_VGX_THROTTLE"), "%lf:%lf", &a, &b) >= 1) { g_p.throttleMs = a; g_p.throttleJitter = b; }
     }
-    static const long from = EnvInt("MSC_VGX_THROTTLE_FROM", 0);
+    const long from = static_cast<long>(VGX_KNOB(EnvInt("MSC_VGX_THROTTLE_FROM", 0)));
     static long n = 0;
     if (++n < from) return;
     if (g_p.throttleMs <= 0 && g_p.throttleJitter <= 0) return;
@@ -264,7 +277,7 @@ void Service() {
     int guard = 0;
     if (g_vblank) {
         // ticks at vblanks: every vper vblanks of the counter; the content clock still advances by the nominal tick
-        const uint32_t vper = static_cast<uint32_t>(60 / g_p.hz > 0 ? 60 / g_p.hz : 1);
+        const uint32_t vper = g_p.hz > 0 && 60 / g_p.hz > 0 ? static_cast<uint32_t>(60 / g_p.hz) : 1u;   // (hz is positive when the scheduler runs; stated so that a zero is 1 on both builds)
         const uint32_t vc = g_vblank();
         if (!g_vcInit) { g_vcInit = true; g_vcNext = vc; }
         while (static_cast<int32_t>(vc - g_vcNext) >= 0) {
@@ -293,6 +306,83 @@ void Service() {
 
 void Idle() {
     rec::PlayerWaitForData(); // (at most a millisecond)
+}
+
+// ---- MSC_PRESENT_SYNC (display-queue thread only) -----------------------------------------------------------------------------------------------------------------
+namespace {
+PresentSync g_sync;
+bool g_syncReady = false, g_syncActive = false;
+uint64_t g_smTag = 0;          // wave 9 (np_smooth.cpp): the picture between SyncTarget and SyncShown, and its ready-after count
+uint32_t g_smNatural = 0;
+bool g_smNaturalValid = false;
+double g_syncWindowAt = 0;
+// 1.3 (wave 8, after Galaxy: the mix of picture holds matters more than the mean fps): "live a/b/c % of N, all a/b/c % of N". Live = match play only (not replays, cut-scenes or menus).
+void HoldMix(const uint64_t* h, char* out, size_t cap, const char* label) {
+    const uint64_t n = h[1] + h[2] + h[3] + h[4];
+    if (!n) { std::snprintf(out, cap, "%s none", label); return; }
+    std::snprintf(out, cap, "%s %.1f / %.1f / %.1f %% of %llu", label, 100.0 * h[1] / n, 100.0 * h[2] / n, 100.0 * (h[3] + h[4]) / n, static_cast<unsigned long long>(n));
+}
+void SyncLog(double now) {
+    const PresentSync::Stats& st = g_sync.GetStats();
+    // gxvita14: static, not 400 bytes of the 4 KiB display-queue thread (SyncShown runs only there, one callback at a time; check_display_stack.sh)
+    static char mix[200], mixLive[100], mixAll[100], smooth[120];
+    HoldMix(st.holdLive, mixLive, sizeof mixLive, "live play");
+    HoldMix(st.hold, mixAll, sizeof mixAll, "all scenes");
+    std::snprintf(mix, sizeof mix, "%s; %s", mixLive, mixAll);
+    {   // gxvita14 (vgx_smooth.h): the window's smoothness score, an estimate from the marginals above; the token abpair.py reads
+        static vgx::smooth::Mix sm;   // (static: the display-queue thread's 4 KiB)
+        for (unsigned i = 0; i < 5; ++i) { sm.hold[i] = st.hold[i]; sm.step[i] = st.step[i]; }
+        sm.judder = st.pairs ? static_cast<double>(st.errSum) / static_cast<double>(st.pairs) : 0.0;
+        sm.secs = (now - g_syncWindowAt) / 1000.0;
+        vgx::smooth::Format(smooth, sizeof smooth, vgx::smooth::Compute(sm));
+    }
+    if (st.pictures) {
+        const double pairs = st.pairs ? static_cast<double>(st.pairs) : 1.0, n = st.stamped ? static_cast<double>(st.stamped) : 1.0;
+        const double latMean = st.latSum / n, latVar = st.latSq / n - latMean * latMean;
+        auto u = [](uint64_t v) { return static_cast<unsigned long long>(v); };
+        std::fprintf(stderr, "[present] %s, %.1f s, %llu pictures (%llu stamped); latency %u vblanks (+%llu -%llu); ready after 0/1/2/3/4/5/6/7+ vblanks %llu/%llu/%llu/%llu/%llu/%llu/%llu/%llu; "
+                     "late %llu (%llu beyond the largest); held 0/1/2/3/4+ vblanks %llu/%llu/%llu/%llu/%llu; game steps 1/2/3/4+ vblanks %llu/%llu/%llu/%llu; judder %.2f vblanks a picture; "
+                     "shown-minus-start %.2f +- %.2f vblanks; waits %llu; hold mix (percent of pictures shown 1 / 2 / 3+ refreshes) %s; %s\n",
+                     g_sync.Aligned() ? "aligned" : "measured", (now - g_syncWindowAt) / 1000.0, u(st.pictures), u(st.stamped), g_sync.Latency(), u(st.raises), u(st.lowers), u(st.natural[0]),
+                     u(st.natural[1]), u(st.natural[2]), u(st.natural[3]), u(st.natural[4]), u(st.natural[5]), u(st.natural[6]), u(st.natural[7]), u(st.misses), u(st.overload), u(st.hold[0]),
+                     u(st.hold[1]), u(st.hold[2]), u(st.hold[3]), u(st.hold[4]), u(st.step[1]), u(st.step[2]), u(st.step[3]), u(st.step[4]), st.errSum / pairs, latMean,
+                     std::sqrt(latVar > 0 ? latVar : 0.0), u(st.waits), mix, smooth);
+    }
+    g_sync.ClearStats();
+}
+} // namespace
+
+uint32_t SyncTarget(uint32_t earliest, uint64_t frameTag) {
+    const int mode = NpFpsPresentSyncMode ? NpFpsPresentSyncMode() : 0;
+    g_syncActive = mode != 0;
+    if (!mode) return earliest;
+    if (!g_syncReady) {
+        g_syncReady = true;
+        const auto knob = [](const char* name, long def) { const long v = EnvInt(name, def); return static_cast<unsigned>(v < 1 ? 1 : v > 32 ? 32 : v); };
+        // MSC_PRESENT_SYNC_START=1 (wave 7; default 0 in the code, the Vita plan turns it on): L starts at 3 (not 4) and tightens over 32-picture windows until it settles (vgx_present_sched.h)
+        const bool start = EnvInt("MSC_PRESENT_SYNC_START", 0) != 0;
+        g_sync.Configure(mode == 2, knob("MSC_PRESENT_SYNC_MIN", 1), knob("MSC_PRESENT_SYNC_MAX", 6), knob("MSC_PRESENT_SYNC_LAT", start ? 3 : 4), knob("MSC_PRESENT_SYNC_RAISE", 4), start);
+    }
+    g_sync.SetAlign(mode == 2);
+    uint16_t stamp = 0;
+    const bool valid = NpFpsPictureStamp && NpFpsPictureStamp(frameTag, &stamp);
+    g_smTag = frameTag;
+    g_smNatural = static_cast<uint16_t>(static_cast<uint16_t>(earliest) - stamp);
+    g_smNaturalValid = valid && g_smNatural <= PresentSync::kSane;
+    return g_sync.Target(earliest, valid, stamp);
+}
+
+void SyncShown(uint32_t shown, bool waited) {
+    if (!g_syncActive) return;
+    if (NpSmoothShown && g_smTag) NpSmoothShown(g_smTag, shown, g_smNatural, g_smNaturalValid ? 1 : 0);   // (the picture SyncTarget was just asked about)
+    g_smTag = 0;
+    g_sync.SetLive(VgxBackendLivePlay ? VgxBackendLivePlay() != 0 : false);
+    g_sync.Shown(shown, waited);
+    const double now = NowMs();
+    if (g_syncWindowAt <= 0) g_syncWindowAt = now;
+    if (now - g_syncWindowAt < 5000.0) return;
+    SyncLog(now);
+    g_syncWindowAt = now;
 }
 
 } // namespace vgx::present

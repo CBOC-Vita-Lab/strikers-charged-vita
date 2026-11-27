@@ -1,0 +1,13 @@
+# console-1.2 run warmorder0: Warm-up list in file order
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route tour, version payload 1.3, role ab
+# MSC_VGX_WARM_ORDER=0 (default 1: programs drawn in a match are marked in the list and linked first at the next start). Against the default after two sessions: the `[match] start` line (programs marked, linked first), 'warm-up queue ended at the slot limit' lines and programs linked during a match.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_WARM_ORDER=0

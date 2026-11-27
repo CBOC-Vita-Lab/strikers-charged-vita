@@ -3,9 +3,9 @@
 #   p-30-auto  host MSC_FPS=30,  joiner MSC_FPS=auto (60 where its frames hold it: the null back end is light, so it goes to 60 after a second)
 #   p-60-30    host MSC_FPS=60,  joiner MSC_FPS=30
 # A pair passes when both exit 0 with the scripts finished and the game's lockstep checksums (every 100 ticks) and the per-tick parts agree: the presentation rate does not touch the lockstep.
-R=${R:-/home/claude/msc/build/np/W5FPS}
+R=${R:-/work/msc/build/np/W5FPS}
 EXE=$R/host32/np-host32-full-null
-cd ${NP:-/home/claude/msc/npw/W5FPS} || exit 1
+cd ${NP:-/work/msc/npw/W5FPS} || exit 1
 [ -x $EXE ] || { echo "no $EXE (job A did not build it)"; exit 1; }
 mkdir -p $R/pairs
 T00=$(date +%s)

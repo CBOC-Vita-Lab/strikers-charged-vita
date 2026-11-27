@@ -5,6 +5,7 @@
 // first). The Vita-only parts are inside `#if defined(__vita__)`.
 #include "np_vita.h"
 #include "np_vita_internal.h"
+#include "np_vita_core3.h"   // (mp18) NpVitaCore3::GuardOnline
 #include "plat_realclock.h"
 #include "vita_lab.h"
 #include "np_vita_settings.h"
@@ -16,6 +17,7 @@
 #include <malloc.h>
 
 #if defined(__vita__)
+extern "C" unsigned int _newlib_heap_size_user;   // np_vita_process.cpp: the C heap's size
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/threadmgr.h>
@@ -32,8 +34,20 @@
 #define NP_VITA_VARIANT "native"
 #endif
 
+// 1.2 (STR-102): the run header of the log (the settings that decide the pace, so logs of two runs can be compared)
+extern "C" int NpFpsDescribe(char* out, int size) __attribute__((weak));
+extern "C" int VgxDynResDescribe(char* out, int size) __attribute__((weak));
+extern "C" int VgxGfxDescribe(char* out, int size) __attribute__((weak));
+extern "C" int NpSettingsDescribe(char* out, int size) __attribute__((weak));
+extern "C" int NpInputDescribe(char* out, int size) __attribute__((weak));
+extern "C" int vgx_vita_describe(char* out, int size) __attribute__((weak));
+extern "C" size_t vgx_host_memory_describe(char* out, size_t cap) __attribute__((weak));   // 1.2: the renderer's frame buffers (vgx_arena.h)
+
 // Multiplayer (platform/sdk/net/np_lan.cpp, wave 5 NET): a LAN match's input delay, starved steps, steps per second and round trip, for the frame line.
 extern "C" int NpLanNetBrief(char* out, int size) __attribute__((weak));
+bool NpLanActive() __attribute__((weak));   // platform/sdk/net/np_lan.cpp (T8: the core 3 guard)
+bool NpOnlineFlowActive() __attribute__((weak));   // platform/sdk/dwc/np_online_flow.cpp
+bool NpLanEntryActive() __attribute__((weak));   // platform/sdk/net/np_lan.cpp (mp18: the multiplayer entry before a session: room, STUN, TURN, the wait)
 
 namespace VitaPlatform {
 namespace {
@@ -117,9 +131,38 @@ void BootStage(const char* text) {
     VitaConsole::Refresh();
 }
 
+// One block of lines: the build, the clocks the system reports, the frame-rate policy, the picture size range, the picture path and the queue.
+void LogRunHeader(const char* when) {
+    char fps[320] = "fps=?", dyn[360] = "dynres=?", host[300] = "picture=?", gfx[320] = "gfx: ?", set[260] = "settings: ?", inp[300] = "controls: ?";
+    if (NpFpsDescribe) NpFpsDescribe(fps, sizeof fps);
+    if (VgxDynResDescribe) VgxDynResDescribe(dyn, sizeof dyn);
+    if (vgx_vita_describe) vgx_vita_describe(host, sizeof host);
+    if (VgxGfxDescribe) VgxGfxDescribe(gfx, sizeof gfx);
+    if (NpSettingsDescribe) NpSettingsDescribe(set, sizeof set);
+    if (NpInputDescribe) NpInputDescribe(inp, sizeof inp);
+#if defined(__vita__)
+    char clocks[96];
+    std::snprintf(clocks, sizeof clocks, "ARM %d MHz, GPU %d MHz, bus %d MHz, GPU xbar %d MHz", scePowerGetArmClockFrequency(), scePowerGetGpuClockFrequency(),
+                  scePowerGetBusClockFrequency(), scePowerGetGpuXbarClockFrequency());
+#else
+    const char clocks[] = "host";
+#endif
+    std::fprintf(stderr, "[run] %s: build %s (%s); clocks %s\n[run] %s\n[run] %s\n[run] %s\n[run] %s\n[run] %s\n[run] %s\n", when, NP_BUILD_VERSION, NP_VITA_VARIANT, clocks, fps, dyn, host, gfx, set, inp);
+}
+
 void OnFramePresented() {
     const uint64_t frames = g_frames.fetch_add(1, std::memory_order_relaxed) + 1;
     VitaBootScreen::Frame(frames);
+    if ((frames & 7u) == 0 && NpLanActive && NpOnlineFlowActive)   // (T8) the fourth core's online guard: nothing happens unless the core rules are on; (mp18) the entry counts too
+        VitaThreads::Core3OnlineStep(NpVitaCore3::GuardOnline(NpLanActive(), NpOnlineFlowActive(), NpLanEntryActive && NpLanEntryActive()));
+    if (frames == 1) LogRunHeader("first frame");   // (also in the quiet player build: its log has no other line of what the run was set to)
+    // 1.2 (MSC_VITA_CORE0_ALONE, on by default in the player build): threads that may run on core 0 with the game; library threads can appear late, so it looks again a few times
+    // 1.3 MSC_VITA_SWEEP_BG=1: the sweep every 600 frames goes to the slow watch thread (np_vita_wire.cpp), the first three stay here. Logging builds time a few sweeps, to judge it.
+    if (frames == 5 || frames == 30 || frames == 120 || (frames % 600 == 0 && !VitaThreads::SweepInBackground())) {
+        const uint64_t t0 = NP_LOGGING && frames <= 1800 ? NowUs() : 0;
+        VitaThreads::KeepCoreZeroForGame(frames == 5);
+        if (t0) std::fprintf(stderr, "[vita] thread sweep at frame %llu took %u us on the game thread\n", static_cast<unsigned long long>(frames), static_cast<unsigned>(NowUs() - t0));
+    }
     if (!NP_LOGGING) return;
     static uint64_t lastUs = NowUs();
     static uint64_t lastCpuUs = ThreadCpuUs();
@@ -150,6 +193,11 @@ void OnFramePresented() {
     VitaConsole::Refresh();
     // A line in the log every 600 frames, so a run leaves a performance record.
     if (frames % 600 == 0) {
+        {   // crash26b: the log path's own line (a stall shows as its absence; the counts say whether the format lock ever waited or gave up)
+            char when[48];
+            std::snprintf(when, sizeof when, "alive at frame %llu", static_cast<unsigned long long>(frames));
+            VitaLog::StdioReport(when);
+        }
         const VitaAudio::Stats audio = VitaAudio::GetStats();
         const struct mallinfo heap = mallinfo();
         std::fprintf(stderr, "[vita] frame %llu: %.1f fps, game thread %.2f ms CPU/frame, audio underruns %u, dropped %u, C heap %u KiB in use (%u KiB taken from the system)\n",
@@ -160,8 +208,11 @@ void OnFramePresented() {
             std::fprintf(stderr, "[vita] frame %llu:%s\n", static_cast<unsigned long long>(frames), lan);
         char when[32];
         std::snprintf(when, sizeof(when), "frame %llu", static_cast<unsigned long long>(frames));
+        if (frames % 6000 == 0) LogRunHeader(when);   // (again every 6000 frames, so a cut piece of a long log still says what it ran with)
         VitaAudio::LogReport(when);
         NpJobsLogStats(when);
+        if (frames == 600 || frames == 7200) VitaThreads::LogThreadTable(when);   // (1.2) priorities and cores as the system has them
+        if (VitaThreads::ThreadCpuOn()) VitaThreads::LogThreadCpu(when);           // (1.3) MSC_VITA_THREAD_CPU: CPU ms by core mask since the last line
         if (VitaMem::Checkpoint) VitaMem::Checkpoint(when);
     }
     lastUs = now;
@@ -169,8 +220,45 @@ void OnFramePresented() {
     lastFrames = frames;
 }
 
+// The memory line: figures only, built on the caller's stack (it runs from the 30-second timer of the stall-watch thread and from a failing allocation).
+size_t MemoryLine(char* out, size_t cap) {
+    if (!out || cap == 0) return 0;
+    const struct mallinfo heap = mallinfo();
+    char vgx[160] = "";
+    if (vgx_host_memory_describe) vgx_host_memory_describe(vgx, sizeof(vgx));
+    int n;
+#if defined(__vita__)
+    SceKernelFreeMemorySizeInfo info;
+    std::memset(&info, 0, sizeof(info));
+    info.size = sizeof(info);
+    const bool haveFree = sceKernelGetFreeMemorySize(&info) >= 0;
+    n = std::snprintf(out, cap, "C heap in use %u KiB (extent %u KiB of %u, free %u KiB in %u pieces, releasable at the top %u KiB); system free main %d KiB, cdram %d KiB; %s",
+                      static_cast<unsigned>(heap.uordblks / 1024), static_cast<unsigned>(heap.arena / 1024), _newlib_heap_size_user / 1024u,
+                      static_cast<unsigned>(heap.fordblks / 1024), static_cast<unsigned>(heap.ordblks), static_cast<unsigned>(heap.keepcost / 1024),
+                      haveFree ? static_cast<int>(info.size_user / 1024) : -1, haveFree ? static_cast<int>(info.size_cdram / 1024) : -1, vgx);
+#else
+    n = std::snprintf(out, cap, "C heap in use %u KiB (extent %u KiB, free %u KiB in %u pieces); %s", static_cast<unsigned>(heap.uordblks / 1024),
+                      static_cast<unsigned>(heap.arena / 1024), static_cast<unsigned>(heap.fordblks / 1024), static_cast<unsigned>(heap.ordblks), vgx);
+#endif
+    return n < 0 ? 0 : (static_cast<size_t>(n) < cap ? static_cast<size_t>(n) : cap - 1);
+}
+
 void ShowFatal(const char* category, const char* details) noexcept {
     VitaLab::EndReason("fatal error: %s", category ? category : "");
+    if (!NP_LOGGING) {
+        // 1.2: the quiet build keeps the reason too (logging builds write the lines below to log.txt). The details' line breaks become " | ".
+        char text[560];
+        size_t n = 0;
+        const char* c = details ? details : "";
+        n = static_cast<size_t>(std::snprintf(text, sizeof(text), "%s: ", category ? category : ""));
+        if (n >= sizeof(text)) n = sizeof(text) - 1;
+        for (; *c && n + 4 < sizeof(text); ++c) {
+            if (*c == '\n') { text[n++] = ' '; text[n++] = '|'; text[n++] = ' '; }
+            else if (*c != '\r') text[n++] = *c;
+        }
+        text[n] = '\0';
+        VitaLog::Event(text);
+    }
     std::fprintf(stderr, "[vita] FATAL: %s\n[vita] %s\n", category ? category : "", details ? details : "");
     std::fflush(stderr);
     VitaLog::Flush();
@@ -196,6 +284,55 @@ extern "C" void NpVitaOnFramePresented(void) {
 
 extern "C" void NpPlatformFatal(const char* category, const char* details) { VitaPlatform::ShowFatal(category, details); }
 
+// 1.2: a request the host heap could not meet (the game's operator new on a thread other than the game thread, nlMemory.cpp): the program ends after
+// this, and without it the player's log said nothing about memory (the caller wrote through a null pointer). One FATAL line with the heap's state,
+// written to the card before the abort.
+extern "C" void NpPlatformHostAllocFailed(size_t size) {
+    char figures[400];
+    VitaPlatform::MemoryLine(figures, sizeof(figures));
+    char text[560];
+    std::snprintf(text, sizeof(text), "FATAL: host heap exhausted: a request for %lu KiB found no room; %s", static_cast<unsigned long>(size / 1024u), figures);
+    VitaLog::Event(text);
+}
+
+// 1.3 MSC_VGX_WARM_HEAP_MIB (vgx_backend_gl.cpp): the C heap's use now.
+extern "C" unsigned NpPlatformHeapUsedKiB(void) {
+#if defined(__vita__)
+    const struct mallinfo heap = mallinfo();
+    return static_cast<unsigned>(heap.uordblks / 1024u);
+#else
+    return 0;
+#endif
+}
+
+// 1.3 wave 10 MSC_VGX_WARM_FLOOR_MIB (vgx_backend_gl.cpp): the C heap's size (the free heap the warm-up leaves is this minus NpPlatformHeapUsedKiB). The host build has no definition and the
+// renderer's weak reference then sets no floor.
+extern "C" unsigned NpPlatformHeapTotalKiB(void) {
+#if defined(__vita__)
+    return _newlib_heap_size_user / 1024u;
+#else
+    return 0;
+#endif
+}
+
+// 1.2 (np/fatal.h): the sink of NpFatalNote, and the stack limit its backtrace scan stays under.
+extern "C" void NpPlatformFatalLine(const char* line) { VitaLog::Event(line); }
+// 1.2: the renderer's and the driver's record of a failure it survived (vgx_backend_gl.cpp QuietNote, vgx_host_vita.cpp msc_vgl_printf).
+extern "C" void NpPlatformNote(const char* line) { VitaLog::Note(line); }
+extern "C" int NpPlatformStackHigh(uintptr_t* high) {
+#if defined(__vita__)
+    SceKernelThreadInfo info;
+    std::memset(&info, 0, sizeof(info));
+    info.size = sizeof(info);
+    if (sceKernelGetThreadInfo(sceKernelGetThreadId(), &info) < 0 || !info.stack || !info.stackSize) return 0;
+    *high = reinterpret_cast<uintptr_t>(info.stack) + info.stackSize;
+    return 1;
+#else
+    (void)high;
+    return 0;
+#endif
+}
+
 // W5 BOOT: a moment of the game's start (np/boot.h NpBootMark: the boot screens, the title screen), with the time since the process started.
 // The game's boot screens end the loading screen.
 extern "C" void NpPlatformBootMark(const char* what) {
@@ -210,9 +347,11 @@ extern "C" void NpPlatformBootMark(const char* what) {
 #if defined(__vita__)
 extern "C" int NpVitaCpuMHz(void) { return scePowerGetArmClockFrequency(); }
 extern "C" void NpVitaKeepAwake(void) { sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT); }
+extern "C" int VgxQuiesceForExit(unsigned ms) __attribute__((weak));   // renderer/src/vgx_play.cpp
 extern "C" void NpPlatformExit(int code) {
+    if (VgxQuiesceForExit) VgxQuiesceForExit(200);   // (the back end finishes its picture before the process goes)
     VitaLab::EndReason("the game left through NpPlatformExit(%d)", code);
-    VitaLog::Flush();
+    VitaLog::FlushBlocking();   // (exit17: Flush() gives up when the writer thread is inside its own write, and the last lines are lost; this waits, bounded)
     sceKernelExitProcess(code);
     for (;;) sceKernelDelayThread(1000000);
 }

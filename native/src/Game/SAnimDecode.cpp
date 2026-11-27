@@ -1,6 +1,7 @@
 #include "Game/SAnimDecode.h"
 
 #include "Game/SAnim.h"
+#include "NL/nlMath.h"
 
 #ifdef NP_NATIVE
 // Native replacements for the paired-single quantised loads (psq_l with GQR6/GQR7 set by
@@ -11,8 +12,30 @@ void SAnimInitGQR()
 {
 }
 
+// MSC_POSE_FAST (nlMath.h). Rot16 and Rot12 in NEON: a 16-bit integer times 2^-15 is exact as a float, and the fixed-point vcvt gives that same float: nothing here rounds, and
+// the smallest non-zero result is 2^-15, far from anything NEON flushes. A key's bytes are read as 4 + 2, never as 8: the last key of an animation may end a page.
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#define NP_SANIM_NEON 1
+#include <arm_neon.h>
+#include <string.h>
+
+static inline void NpStoreS16Q15(float* r, int16x4_t v)
+{
+    vst1q_f32(r, vcvtq_n_f32_s32(vmovl_s16(v), 15));
+}
+#endif
+
 extern "C" void SAnimDecodeRot16(nlQuaternion* result, const void* packed)
 {
+#ifdef NP_SANIM_NEON
+    if (NpPoseFast())
+    {
+        uint64_t k;
+        memcpy(&k, packed, 8);
+        NpStoreS16Q15((float*)result, vreinterpret_s16_u64(vcreate_u64(k)));
+        return;
+    }
+#endif
     const short* p = (const short*)packed;
     float* r = (float*)result;
     r[0] = p[0] * (1.0f / 32768.0f);
@@ -23,6 +46,23 @@ extern "C" void SAnimDecodeRot16(nlQuaternion* result, const void* packed)
 
 extern "C" void SAnimDecodeRot12(nlQuaternion* result, const void* packed)
 {
+#ifdef NP_SANIM_NEON
+    if (NpPoseFast())
+    {
+        // bytes b0..b5 to the little-endian shorts b0:(b1 & F0), b2:(b1 << 4), b3:(b4 & F0), b5:(b4 << 4)
+        static const uint8_t kOrder[8] = { 1, 0, 1, 2, 4, 3, 4, 5 };
+        static const int8_t kShift[8] = { 0, 0, 4, 0, 0, 0, 4, 0 };
+        static const uint8_t kMask[8] = { 0xF0, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF };
+        uint32_t lo;
+        uint16_t hi;
+        memcpy(&lo, packed, 4);
+        memcpy(&hi, (const unsigned char*)packed + 4, 2);
+        uint8x8_t t = vtbl1_u8(vreinterpret_u8_u64(vcreate_u64(lo | ((uint64_t)hi << 32))), vld1_u8(kOrder));
+        t = vand_u8(vshl_u8(t, vld1_s8(kShift)), vld1_u8(kMask));
+        NpStoreS16Q15((float*)result, vreinterpret_s16_u8(t));
+        return;
+    }
+#endif
     const unsigned char* bytes = (const unsigned char*)packed;
     unsigned char unpacked[8];
     unpacked[0] = bytes[0];

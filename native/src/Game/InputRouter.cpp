@@ -8,6 +8,7 @@
 #include "Game/NetworkMessageRegistry.h"
 #include "Game/NetworkSync.h"
 #include "platform/sdk/net/np_lan.h"  // multiplayer (np/patches/mp)
+#include "platform/sdk/net/np_delay19.h"  // delay19: the agreed delay is the multiplier's start and floor
 
 #include <string.h>
 
@@ -355,7 +356,7 @@ void NetworkInputRouter::Reset(int resetQueues)
 {
     InputRouter::Reset(resetQueues);
     mCongested = false;
-    mCongestionMultiplier = fDefCongestionMultiplier;
+    mCongestionMultiplier = NpDelay19::SessionStart(NpLanAgreedInputDelay(), fDefCongestionMultiplier);   // delay19: the host's choice when there is one
     mWasCongested = false;
     mCurrentMessage.Reset(true, true);
     mMessageHeld = 0;
@@ -367,7 +368,7 @@ void NetworkInputRouter::Reset(int resetQueues)
         m_InputQueue[machine].mCount = 0;
     }
     mQueueCursor = 0;
-    mQueueLimit = 4;
+    mQueueLimit = NpLanInitialQueueLimit(4);   // np (A7): the LAN host's choice when it made one, else the game's 4
 }
 
 void NetworkInputRouter::CheckCongestion()
@@ -631,13 +632,13 @@ void NetworkInputRouter::OnInputReady()
 
         if (congested)
         {
-            mCongestionMultiplier = nlMinEquals(fMaxCongestionMultiplier,
+            mCongestionMultiplier = nlMinEquals(NpDelay19::SessionMax(NpLanAgreedInputDelay(), fMaxCongestionMultiplier),
                 mCongestionMultiplier + fCongestionMultiplierIncrement);
         }
         else
         {
-            mCongestionMultiplier = nlMaxEquals(fMinCongestionMultiplier,
-                mCongestionMultiplier - fCongestionMultiplierDecrement);
+            mCongestionMultiplier = nlMaxEquals(NpDelay19::SessionFloor(NpLanAgreedInputDelay(), fMinCongestionMultiplier),
+                mCongestionMultiplier - fCongestionMultiplierDecrement);   // delay19: the floor is the host's choice
         }
 
         if (g_nOverrideTickDelayTarget >= 0)
@@ -685,6 +686,7 @@ void NetworkInputRouter::CheckPeerSynchronization()
                     mRemoteTicks[machine],
                     gInputManager->mFrameProvider->GetFrame());
             }
+            NpLanNoteMismatch(1, mRemoteTicks[localMachine], (unsigned)mRemoteTicks[localMachine], (unsigned)mRemoteTicks[machine]);   // np (mpbeta27): both values to the report
             gNetworkSyncState->OnFrameMismatch(mRemoteTicks[localMachine]);
             mismatch = true;
         }
@@ -699,6 +701,7 @@ void NetworkInputRouter::CheckPeerSynchronization()
                     mNetworkCRCs[machine],
                     gInputManager->mFrameProvider->GetFrame());
             }
+            NpLanNoteMismatch(2, mRemoteTicks[localMachine], (unsigned)mNetworkCRCs[localMachine], (unsigned)mNetworkCRCs[machine]);   // np (mpbeta27)
             gNetworkSyncState->OnChecksumMismatch(mRemoteTicks[localMachine]);
             mismatch = true;
         }
@@ -713,6 +716,7 @@ void NetworkInputRouter::CheckPeerSynchronization()
                     mRandomSeeds[machine],
                     gInputManager->mFrameProvider->GetFrame());
             }
+            NpLanNoteMismatch(3, mRemoteTicks[localMachine], (unsigned)mRandomSeeds[localMachine], (unsigned)mRandomSeeds[machine]);   // np (mpbeta27)
             gNetworkSyncState->OnRandomSeedMismatch(
                 mRemoteTicks[localMachine]);
             mismatch = true;
@@ -765,7 +769,7 @@ void NetworkInputRouter::DebugDraw(int column, int* row)
             machine, inputCount, queueText);
         glFontPrintf(GetDebugFontView(), column, *row,
             inputCount > 0 ? g_SyncTextColour : g_SyncMismatchColour,
-            output);
+            "%s", output);
         ++*row;
     }
 

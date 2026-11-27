@@ -62,6 +62,7 @@
 #include "Game/SH/SHChallengeSelect.h"
 #include "Game/SH/SHStrikerTimesChallenge.h"
 #include "Game/SH/SHPause.h"
+#include "Game/SH/SHVitaSettings.h"
 #include "Game/OverlayHandlerHUD.h"
 #include "Game/OverlayHandlerInGameText.h"
 #include "Game/SH/SHPausePostGame.h"
@@ -235,7 +236,7 @@ SceneEntry SceneEntryTable[] = {
     { SCENE_LESSON, "art/fe/lesson.fen" },
     { SCENE_STRIKERS_101_LESSONS, "art/fe/strikers_101_lessons_v3.fen" },
     { SCENE_LESSON_MOVIE, "art/fe/lessonmovieplayer.fen" },
-    { (SceneList)88, 0 },
+    { SCENE_PAUSE_VITA_SETTINGS, "art/fe/pausemenu_v3.fen" },   // np: the pause panel again, relabelled (SHVitaSettings.cpp)
     { OVERLAY_HUD, "art/fe/hud_2.fen" },
     { OVERLAY_IN_GAME_TEXT, "art/fe/ingame_text.fen" },
     { OVERLAY_POST_GAME_RESULTS, "art/fe/striker_times_2.fen" },
@@ -556,6 +557,9 @@ BaseSceneHandler* BaseGameSceneManager::Push(SceneList newscene, ScreenMovement 
         break;
     case SCENE_STRIKERS_101_PAUSE:
         newHandler = new (nlMalloc(sizeof(PauseMenuScene), 8, false)) PauseMenuScene();
+        break;
+    case SCENE_PAUSE_VITA_SETTINGS:
+        newHandler = new (nlMalloc(sizeof(VitaSettingsScene), 8, false)) VitaSettingsScene();
         break;
     case SCENE_LESSON_MOVIE:
         newHandler = new (nlMalloc(sizeof(LessonMoviePlayerScene), 8, false)) LessonMoviePlayerScene();

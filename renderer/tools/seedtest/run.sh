@@ -20,8 +20,8 @@ sed -n "${a},$((b-1))p" $F > part_seed.inc; sed -n "${c},$((d-1))p" $F > part_bu
 cp $T/shim.h $T/test_copy.cpp $T/test_lazy.cpp .
 key=$(basename $(ls -d $SEED/*/ | head -1))
 DEF=-DFOLDER="\"ux0:data/mscharged/shadercache/$key\""
-g++ -std=c++20 -O1 -w "$DEF" -I/home/claude/msc/deps/xxHash -o t1 test_copy.cpp
-g++ -std=c++20 -O1 -w "$DEF" -I/home/claude/msc/deps/xxHash -o t2 test_lazy.cpp
+g++ -std=c++20 -O1 -w "$DEF" -I/work/msc/deps/xxHash -o t1 test_copy.cpp
+g++ -std=c++20 -O1 -w "$DEF" -I/work/msc/deps/xxHash -o t2 test_lazy.cpp
 mkdir -p r1/app0/shadercache r1/ux0/data/mscharged; cp -a $SEED/$key r1/app0/shadercache/; echo eboot > r1/app0/eboot.bin
 ./t1 $W/r1 again touch
 echo "ux0 after the three starts: $(find r1/ux0 -name '*.gxp' | wc -l) files, $(find r1/ux0/data/mscharged/shadercache/$key -type d | wc -l) folders; seed: $(find $SEED -name '*.gxp' | wc -l) files"

@@ -1,0 +1,16 @@
+# console-1.2 run n-aniso0: Distant textures plain (anisotropic filtering off)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group picture, route nlava, version payload 1.3, role nab
+# Settings row DISTANT TEXTURES OFF. Untested on a console either way: does the filter cost frame time, does it look right (looks run).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/nlava.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_CAMERA_ZOOM=1
+MSC_CAMERA_AUTO=0
+MSC_VITA_ANISO=0

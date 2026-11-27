@@ -1,0 +1,10 @@
+# fast boot (test only): Vice: play until the player's captain has taken a Mega Strike, then 40 s more (launch, Mega scene, result, celebration and replay if it scores)
+# Run: emu.sh <tag> <vpk> <this file> <seconds> <routes/fb-mega-full.txt>   (the route is the console-1.2 route mega_strike_route.txt, from its `wait ingame == 1` line on)
+# ---- the fast boot is switched on by the route's first line (`bootmatch vice:3:6 ...`): in the emulator the Vita build's env file did not deliver MSC_BOOT_MATCH ----
+# ---- route and logging: as the console-1.2 reference runs ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-mega-full.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_RENDER=320x224

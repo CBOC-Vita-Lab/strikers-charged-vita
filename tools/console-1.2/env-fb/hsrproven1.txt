@@ -1,0 +1,15 @@
+# console-1.2 run hsrproven1: Blended draws proven opaque drawn without the blend (MSC_VGX_HSR_PROVEN=1), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group exact, route tour, version payload 1.3, role ab
+# exact17: OFF, exact (the draw's blend function only, no shader text change, so the pack is unaffected). No verify mode: the [hsrcount] line says how many blended draws the key's numbers prove (alpha 1). By eye: no missing or opaque-looking smoke, glow or shadow. The GPU ms and the late pictures against d1 say whether hidden-surface removal pays.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_HSR_PROVEN=1
+MSC_VGX_HSR_COUNT=1

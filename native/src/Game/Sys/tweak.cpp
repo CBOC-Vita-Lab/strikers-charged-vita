@@ -52,7 +52,7 @@ int nlScreenPrint(eGLView view, int x, int y, bool bFromTop,
     glFontBegin(false);
     bool bPrevVirtualCoords = glFontVirtualCoordinates(true);
     int result = glFontPrintf(
-        GetDebugFontView(), view, x, y, textColour, printbuf);
+        GetDebugFontView(), view, x, y, textColour, "%s", printbuf);
     glFontEnd();
     glFontVirtualCoordinates(bPrevVirtualCoords);
     glStateRestore(state);

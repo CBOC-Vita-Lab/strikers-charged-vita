@@ -1,0 +1,152 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] gpuscene20: vglRtSceneKinds, GPU time per kind of scene (target size, display)
+
+MSC_VITA_RT_SCENES (the port's switch; needs vglRtSetSplit(1) and the GPU timers). The watcher thread adds each scene's busy / tiling / pixel microseconds to a
+cumulative table of 16 kinds (width, height, display) and one "other"; vglRtSceneKinds copies it out. Without the split nothing is kept. Plain-C slot table in
+rt_kinds.h (host test native/tools/vitagl/run_rt_kinds_test.sh).
+
+
+diff --git a/dependencies/vitaGL/source/rt.c b/dependencies/vitaGL/source/rt.c
+index 3bc3bed6..f8dcdcee 100644
+--- a/dependencies/vitaGL/source/rt.c
++++ b/dependencies/vitaGL/source/rt.c
+@@ -27,6 +27,7 @@
+  *    complete when the watcher looked says how often it lagged).
+  */
+ #include "shared.h"
++#include "rt_kinds.h" // 0043
+ 
+ uint32_t vgl_rt_flags = 0;
+ uint32_t vgl_aniso_min = 0; // utils/gxm_utils.h vglSetTexMinFilter
+@@ -64,8 +65,13 @@ typedef struct {
+ 	uint32_t done_us;
+ 	uint8_t timed;
+ 	uint8_t display; // 0030: the scene drew to the display (its fragment job waits for a display buffer)
++	uint16_t w, h;   // 0043: the target the scene drew to
+ } rt_scene_rec;
+ static uint8_t rt_cur_display = 0; // 0030: set by vgl_rt_scene_begin for the scene being recorded
++static uint16_t rt_cur_w = 0, rt_cur_h = 0; // 0043: the same, the size
++// 0043 (MSC_VITA_RT_SCENES): GPU time per kind of scene, cumulative, written by the watcher thread only (needs the split: the vertex notifications). Index RT_KIND_SLOTS = "other".
++static rt_kind_key rt_kind_tab[RT_KIND_SLOTS];
++static vglRtSceneKind rt_kinds[RT_KIND_SLOTS + 1];
+ static rt_scene_rec rt_ring[RT_SCENES];
+ static volatile uint32_t rt_produced = 0; // scenes recorded
+ static volatile uint32_t rt_consumed = 0; // scenes the watcher has finished with
+@@ -123,6 +129,8 @@ uint32_t vgl_rt_scene_begin(SceGxmDepthStencilSurface *ds, uint32_t w, uint32_t
+ 	vgl_rt_scenes++;
+ 	rt_cpu_frame_scenes++;
+ 	rt_cur_display = active_write_fb ? 0 : 1;
++	rt_cur_w = (uint16_t)w;
++	rt_cur_h = (uint16_t)h;
+ 	if (!active_write_fb)
+ 		vgl_rt_scenes_display++;
+ 	if (!ds)
+@@ -194,6 +202,8 @@ void vgl_rt_end_scene(SceGxmContext *ctx) {
+ 	r->frame = rt_frame;
+ 	r->done_us = 0;
+ 	r->display = rt_cur_display;
++	r->w = rt_cur_w;
++	r->h = rt_cur_h;
+ 	// The watcher must not fall a whole slot ring behind: a slot word is rewritten RT_SLOTS scenes later (a wait for the old value would never end).
+ 	if (rt_slots && seq - rt_consumed < RT_SLOTS - 16) {
+ 		SceGxmNotification n;
+@@ -309,6 +319,23 @@ static int rt_watcher(SceSize args, void *argp) {
+ 					pixel += done - pstart;
+ 				if ((int32_t)(vdone - r->submit_us) > 0)
+ 					tiling += vdone - r->submit_us;
++				{ // 0043: the same per kind of scene (size, display)
++					const uint32_t k = rt_kind_slot(rt_kind_tab, r->w, r->h, r->display);
++					vglRtSceneKind *e = &rt_kinds[k];
++					if (k < RT_KIND_SLOTS) {
++						e->w = rt_kind_tab[k].w;
++						e->h = rt_kind_tab[k].h;
++						e->display = rt_kind_tab[k].display;
++					}
++					e->used = 1;
++					e->scenes++;
++					if ((int32_t)(done - start) > 0)
++						e->busy_us += done - start;
++					if ((int32_t)(done - pstart) > 0)
++						e->pixel_us += done - pstart;
++					if ((int32_t)(vdone - r->submit_us) > 0)
++						e->tiling_us += vdone - r->submit_us;
++				}
+ 			}
+ 			prev_done = done;
+ 			have_prev = GL_TRUE;
+@@ -352,6 +379,16 @@ int vglRtWaitScenesDone(uint32_t target, uint32_t timeout_us) {
+ 	}
+ }
+ 
++// 0043: the cumulative per-kind table (RT_KIND_SLOTS + 1 entries, the last is "other"); returns the entries copied (0 without the split). The caller subtracts an earlier copy to get a window.
++uint32_t vglRtSceneKinds(vglRtSceneKind *out, uint32_t max) {
++	if (!rt_vslots || !max)
++		return 0;
++	const uint32_t n = max < RT_KIND_SLOTS + 1 ? max : RT_KIND_SLOTS + 1;
++	__sync_synchronize();
++	vgl_fast_memcpy(out, rt_kinds, n * sizeof(vglRtSceneKind));
++	return n;
++}
++
+ void vglRtSetSplit(uint32_t enabled) { rt_split = enabled ? GL_TRUE : GL_FALSE; } // (default off; before vglRtSetup)
+ 
+ void vglRtSetup(uint32_t flags, int watcher_priority, int watcher_affinity) {
+diff --git a/dependencies/vitaGL/source/rt_kinds.h b/dependencies/vitaGL/source/rt_kinds.h
+new file mode 100644
+index 00000000..3bec5eff
+--- /dev/null
++++ b/dependencies/vitaGL/source/rt_kinds.h
+@@ -0,0 +1,35 @@
++/*
++ * rt_kinds.h (vitaGL 0043, Strikers 1.3): the table that keeps GPU time per kind of scene. A kind is the size of the target the scene drew to and whether it
++ * was the display. The table has RT_KIND_SLOTS slots, filled in order of first use; a scene whose kind finds no free slot goes to the extra "other" entry
++ * (index RT_KIND_SLOTS). Plain C with no vitaGL or sceGxm types, so that a host test can compile it (native/tools/vitagl/rt_kinds_test.c).
++ */
++#ifndef RT_KINDS_H
++#define RT_KINDS_H
++#include <stdint.h>
++
++#define RT_KIND_SLOTS 16
++
++typedef struct {
++	uint16_t w, h;
++	uint8_t display;
++	uint8_t used;
++} rt_kind_key;
++
++// The slot of (w, h, display) in tab[RT_KIND_SLOTS], claiming a free one when the kind is new; RT_KIND_SLOTS (= "other") when all are taken by other kinds.
++static inline uint32_t rt_kind_slot(rt_kind_key *tab, uint32_t w, uint32_t h, uint32_t display) {
++	const uint16_t kw = (uint16_t)w, kh = (uint16_t)h;
++	const uint8_t kd = display ? 1 : 0;
++	for (uint32_t i = 0; i < RT_KIND_SLOTS; i++) {
++		if (!tab[i].used) {
++			tab[i].w = kw;
++			tab[i].h = kh;
++			tab[i].display = kd;
++			tab[i].used = 1;
++			return i;
++		}
++		if (tab[i].w == kw && tab[i].h == kh && tab[i].display == kd)
++			return i;
++	}
++	return RT_KIND_SLOTS;
++}
++#endif
+diff --git a/dependencies/vitaGL/source/vitaGL.h b/dependencies/vitaGL/source/vitaGL.h
+index d2ee05b8..7f5f291a 100644
+--- a/dependencies/vitaGL/source/vitaGL.h
++++ b/dependencies/vitaGL/source/vitaGL.h
+@@ -1519,6 +1519,13 @@ typedef struct {
+ 	uint32_t display_us; // 0030: the part of busy_us spent in the display's scene (it includes the wait for a display buffer; subtract it, add back the blit)
+ } vglRtGpuFrame;
+ void vglRtSetSplit(uint32_t enabled);
++typedef struct { // 0043 vglRtSceneKinds: cumulative GPU time of the scenes of one kind (target size, display or not), microseconds as the watcher saw them
++	uint64_t busy_us, tiling_us, pixel_us;
++	uint32_t scenes;
++	uint16_t w, h;
++	uint8_t display, used, pad[2];
++} vglRtSceneKind;
++uint32_t vglRtSceneKinds(vglRtSceneKind *out, uint32_t max); // (needs vglRtSetSplit(1) and the GPU timers); 17 entries, the last is "other" (kinds beyond 16)
+ typedef struct {
+ 	uint32_t version, flags;
+ 	uint32_t scenes, scenes_display, scenes_noload, scenes_noload_auto, scenes_nostore, hints_given, hints_used;

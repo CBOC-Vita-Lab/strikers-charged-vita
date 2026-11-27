@@ -132,6 +132,9 @@ static inline __attribute__((always_inline)) SceGxmTransferFormat tex_format_to_
 	}
 }
 
+// The texture's linear levels go to the swizzled layout (0020)
+GLboolean gpu_swizzle_texture(texture *tex);
+
 // Alloc a texture
 void gpu_alloc_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const void *data, texture *tex, uint8_t src_bpp, uint32_t (*read_cb)(void *), void (*write_cb)(void *, uint32_t), GLboolean fast_store);
 

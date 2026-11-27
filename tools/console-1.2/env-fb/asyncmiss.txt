@@ -1,0 +1,15 @@
+# console-1.2 run asyncmiss: New shaders compiled in the background (forced misses)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# exit17 (the 23 Nov console run stalled in this run: the whole run sat in the start-up warm-up, 'PREPARING THE SHADERS', 1190 of 5608 units, every fragment program compiled on the render thread at ~350 ms with '[vgx-sync] still waiting' up to 10 s, 225 s, no route): FS_PROJ rewrites the fragment text of every program that reads a projective coordinate, so with the default MSC_WARM_CAP 400 the picture-1 warm-up (compiles on the render thread BY DESIGN, with a progress bar) missed the pack for all of them and never reached the match. MSC_WARM_CAP=40 makes only 40 programs at picture 1 (about 15 s) and leaves the rest of the list to first use, which is where the background path (AsyncShaderSlot) applies: look for the '[warm]' line (40 asked, the rest left to first use) and then '[vgx] async-shaders-5s:' lines in the match. MSC_VGX_ASYNC_SHADERS (on, the Galaxy port's r101): MSC_VGX_FS_PROJ=1 (off; it only rewrites the fragment programs that read a projective coordinate, so it makes fragment programs the pack does not hold, met in play; MSC_VGX_DISCARD_BLEND is on in the plan since wave 16 and the pack has its programs, so it can no longer force misses). Check the '[genstat] ... MSC_VGX_FS_PROJ: N fragment shaders with texture2DProj' line: N above 0 or there were no forced misses. Delete the card's shader cache first for a second go (the console's cache keeps what it compiled). Read the '[vgx] async-shaders-5s:' lines (compiled in the background, draws skipped, longest wait, blocking path counts), any 'GUEST' or crash, the C heap line, and the [frame-timing] max / p99 of the first match windows against d1: a 40-190 ms compile on the render thread was the 1.2 behaviour. Look at the shots for objects that are missing for more than a moment (a skipped draw is left out at most 0.4 s). A crash or a picture fault in the first match here means MSC_VGX_ASYNC_SHADERS=0 in the release.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_FS_PROJ=1
+MSC_WARM_CAP=40

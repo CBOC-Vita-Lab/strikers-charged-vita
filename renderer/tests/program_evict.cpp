@@ -60,6 +60,7 @@ void Check(bool ok, const char* message) {
 #define glUseProgram TestUseProgram
 #define glGetProgramiv TestGetProgramiv
 #define glDrawElements TestDrawElements
+extern "C" int VgxStillArmed(void) { return 0; }   // (vgx_draw.cpp; the test links no front end)
 #include "../src/vgx_backend_gl.cpp"
 #undef glCreateProgram
 #undef glDeleteProgram
@@ -68,11 +69,132 @@ void Check(bool ok, const char* message) {
 #undef glUseProgram
 #undef glGetProgramiv
 #undef glDrawElements
+#include "backend_test_hooks.h"
 
-namespace vgx { bool LogEnabled() { return false; } }
-namespace vgx::rec { double TakePlayerIdleMs() { return 0; } bool TakePipeWaitMs(double*, double*) { return false; } }
+namespace vgx { bool LogEnabled() { return false; } const char* ShaderListPath() { return ""; } }   // (vgx_draw.cpp, not linked here)
+
+// program_evict quiet <scene>: 1.3 MSC_VGX_RECLAIM_QUIET. Cap 50 and 50 warmed programs, old enough to delete by frame 700; from there one new program a frame, in frames of
+// `scene`. Outside a match (scene 0) the count is trimmed as soon as it passes the cap; in a match (1, 2, 3) nothing is deleted until it passes the cap by 64.
+// program_evict full: Galaxy's missing-ground failure, on this design: a warm-up that fills vitaGL's whole table, then 100 new programs drawn in the next frame: every draw
+// happens, in that frame (the warm-up's programs do not block them: the no-free-slot net takes them, GetProgram).
+static int QuietMain(int scene) {
+    setenv("MSC_VGX_MAXPROGRAMS", "50", 1);
+    constexpr unsigned kVs = 20, kFs = 20;
+    std::vector<vgx::ShaderSource> shaders(kVs + kFs);
+    for (unsigned i = 0; i < kVs; ++i) { shaders[i].fragment = false; shaders[i].id = static_cast<uint16_t>(i); shaders[i].text = "void main() { }\n"; }
+    for (unsigned i = 0; i < kFs; ++i) { shaders[kVs + i].fragment = true; shaders[kVs + i].id = static_cast<uint16_t>(i); shaders[kVs + i].text = "void main() { }\n"; }
+    {
+        vgx::CmdBuf b;
+        b.frame = 1;
+        b.targets.push_back(vgx::SetTargetCmd{});
+        b.cmds.push_back(vgx::Cmd{vgx::CMD_SET_TARGET, 0});
+        for (unsigned i = 0; i < kVs + kFs; ++i) { b.shaders.push_back(&shaders[i]); b.cmds.push_back(vgx::Cmd{vgx::CMD_SHADER, i}); }
+        for (unsigned n = 0; n < 50; ++n) b.cmds.push_back(vgx::Cmd{vgx::CMD_PROGRAM, ((n % kVs) << 16) | (n / kVs)});
+        vgx::backend::Execute(b);
+    }
+    Check(vgx::backend::GetStats().programs == 50 && deletes == 0, "the warm-up linked up to the cap");
+    unsigned next = 50, peak = 0, firstDelete = 0;
+    auto frame = [&](unsigned f, bool fresh) {
+        vgx::CmdBuf b;
+        b.frame = f;
+        b.scene = static_cast<uint8_t>(scene);
+        b.vtx.assign(256, 0);
+        b.idx = {0, 1, 2};
+        vgx::DrawRec r;
+        const unsigned n = fresh ? next++ : 0;
+        r.vsId = static_cast<uint16_t>(n % kVs); r.fsId = static_cast<uint16_t>(n / kVs); r.vtxCount = 3; r.idxCount = 3;
+        b.draws.push_back(r);
+        b.cmds.push_back(vgx::Cmd{vgx::CMD_DRAW, 0});
+        vgx::backend::Execute(b);
+        if (vgx::backend::GetStats().programs > peak) peak = vgx::backend::GetStats().programs;
+    };
+    for (unsigned f = 2; f < 700; ++f) frame(f, false);
+    for (unsigned f = 700; f < 780 && next < kVs * kFs; ++f) {
+        frame(f, true);
+        if (deletes && !firstDelete) firstDelete = vgx::backend::GetStats().programs + deletes;
+    }
+    const bool quiet = scene != 0 && std::getenv("MSC_VGX_RECLAIM_QUIET") == nullptr;
+    std::printf("scene %d: %u deleted, count at the first delete %u, peak %u\n", scene, deletes, firstDelete, peak);
+    Check(deletes > 0, "the count was trimmed in the end");
+    Check(quiet ? firstDelete == 50 + 64 + 2 : firstDelete == 50 + 2, "the first delete comes at the frame after the limit in force was passed");
+    Check(glErrors == 0 && drawsOnDead == 0, "no GL error, every draw had a live program");
+    std::puts("PASS: housekeeping deletes wait for a quiet frame");
+    return 0;
+}
+// program_evict ledger: 1.3 (wave 8) the per-match ledger lines. Five frames of match play (scene 1), then 1,900 of the menus (scene 0): one "[match] #1 start" and one "end" line, and the
+// "[acts-match]" lines with a DID NOTHING list (no switch is on in a host test, so the list may be empty: "every switch that is on acted").
+// The test's caller (run_program_evict_test.sh) greps the stderr.
+static int LedgerMain() {
+    setenv("MSC_VGX_MAXPROGRAMS", "50", 1);
+    setenv("MSC_VGX_ATLATE", "2", 1);   // on, and no draw sinks in this stream: it must be in the DID NOTHING list
+    std::vector<vgx::ShaderSource> shaders(2);
+    shaders[0].fragment = false; shaders[0].id = 0; shaders[0].text = "void main() { }\n";
+    shaders[1].fragment = true; shaders[1].id = 0; shaders[1].text = "void main() { }\n";
+    {
+        vgx::CmdBuf b;
+        b.frame = 1;
+        b.targets.push_back(vgx::SetTargetCmd{});
+        b.cmds.push_back(vgx::Cmd{vgx::CMD_SET_TARGET, 0});
+        for (unsigned i = 0; i < 2; ++i) { b.shaders.push_back(&shaders[i]); b.cmds.push_back(vgx::Cmd{vgx::CMD_SHADER, i}); }
+        vgx::backend::Execute(b);
+    }
+    for (unsigned f = 2; f < 1910; ++f) {
+        vgx::CmdBuf b;
+        b.frame = f;
+        b.scene = f < 7 ? 1 : 0;
+        b.vtx.assign(256, 0);
+        b.idx = {0, 1, 2};
+        vgx::DrawRec r;
+        r.vsId = 0; r.fsId = 0; r.vtxCount = 3; r.idxCount = 3;
+        b.draws.push_back(r);
+        b.cmds.push_back(vgx::Cmd{vgx::CMD_DRAW, 0});
+        vgx::backend::Execute(b);
+    }
+    std::puts("PASS: ledger run done");
+    return 0;
+}
+static int FullMain() {
+    setenv("MSC_VGX_MAXPROGRAMS", "2000", 1);    // (past the table: the warm-up fills it)
+    constexpr unsigned kVs = 60, kFs = 60;
+    std::vector<vgx::ShaderSource> shaders(kVs + kFs);
+    for (unsigned i = 0; i < kVs; ++i) { shaders[i].fragment = false; shaders[i].id = static_cast<uint16_t>(i); shaders[i].text = "void main() { }\n"; }
+    for (unsigned i = 0; i < kFs; ++i) { shaders[kVs + i].fragment = true; shaders[kVs + i].id = static_cast<uint16_t>(i); shaders[kVs + i].text = "void main() { }\n"; }
+    {
+        vgx::CmdBuf b;
+        b.frame = 1;
+        b.targets.push_back(vgx::SetTargetCmd{});
+        b.cmds.push_back(vgx::Cmd{vgx::CMD_SET_TARGET, 0});
+        for (unsigned i = 0; i < kVs + kFs; ++i) { b.shaders.push_back(&shaders[i]); b.cmds.push_back(vgx::Cmd{vgx::CMD_SHADER, i}); }
+        for (unsigned n = 0; n < kSlots; ++n) {
+            b.cmds.push_back(vgx::Cmd{vgx::CMD_PROGRAM, ((n % kVs) << 16) | (n / kVs)});
+            b.variants.push_back(vgx::VariantCmd{static_cast<uint16_t>(n % kVs), static_cast<uint16_t>(n / kVs), 0, 0});
+            b.cmds.push_back(vgx::Cmd{vgx::CMD_VARIANT, static_cast<uint32_t>(b.variants.size() - 1)});
+        }
+        vgx::backend::Execute(b);
+    }
+    Check(liveCount == kSlots, "the warm-up filled the table");
+    const unsigned drawn0 = draws;
+    vgx::CmdBuf b;
+    b.frame = 2;
+    b.vtx.assign(256, 0);
+    b.idx = {0, 1, 2};
+    for (unsigned n = kSlots; n < kSlots + 100; ++n) {
+        vgx::DrawRec r;
+        r.vsId = static_cast<uint16_t>(n % kVs); r.fsId = static_cast<uint16_t>(n / kVs); r.vtxCount = 3; r.idxCount = 3;
+        b.draws.push_back(r);
+        b.cmds.push_back(vgx::Cmd{vgx::CMD_DRAW, static_cast<uint32_t>(b.draws.size() - 1)});
+    }
+    vgx::backend::Execute(b);
+    std::printf("table full after the warm-up: %u draws of new programs in the next frame, %u programs deleted, %u GL errors\n", draws - drawn0, deletes, glErrors);
+    Check(draws - drawn0 == 100 && glErrors == 0 && drawsOnDead == 0, "no draw waits for the warm-up's programs to age");
+    std::puts("PASS: warm-up programs never block a real draw");
+    return 0;
+}
 
 int main(int argc, char** argv) {
+    if (argc > 2 && !std::strcmp(argv[1], "quiet")) return QuietMain(std::atoi(argv[2]));
+    if (argc > 1 && !std::strcmp(argv[1], "full")) return FullMain();
+    if (argc > 1 && !std::strcmp(argv[1], "ledger")) return LedgerMain();
     const char* capArg = argc > 1 ? argv[1] : "200";
     const unsigned nProg = argc > 2 ? static_cast<unsigned>(std::atoi(argv[2])) : 1054;
     const unsigned frames = argc > 3 ? static_cast<unsigned>(std::atoi(argv[3])) : 4300;

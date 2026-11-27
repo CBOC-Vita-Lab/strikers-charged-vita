@@ -1,0 +1,21 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: a failed sceGxmCreateRenderTarget ends the scene entry, whatever it left in the pointer
+
+scene_reset logged the call's result and then tested the pointer. Nothing says a failed call leaves that pointer alone: Vita3K fails with a pointer to the block it has
+just freed, and the next sceGxmBeginScene crashed the emulator (runs gal2-sev, still-e). With the pointer cleared the failure takes the 1.2 path (scene_reset_failed: no scene,
+the operations of this framebuffer skipped for the frame, tried again next frame). No compile option and no shader compilation changes: the cache identity stays the same.
+
+
+diff --git a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -772,6 +772,9 @@ GLboolean scene_reset(void) {
+ 					vgl_log("%s:%d Failed to create a rendertarget of size %dx%d for framebuffer 0x%08X (%s).\n", __FILE__, __LINE__, active_write_fb->width, active_write_fb->height, active_write_fb, get_gxm_error_literal(r));
+ 				}
+ #endif
++				// 1.3: the result decides, not the pointer: nothing promises what a failed call leaves there (Vita3K leaves a pointer to the block it has just freed)
++				if (r)
++					active_write_fb->target = NULL;
+ #endif
+ 			}
+ #ifdef RECYCLE_RENDERTARGETS

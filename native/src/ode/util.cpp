@@ -12,6 +12,7 @@
 #include "joint.h"
 #include "objects.h"
 #include "util.h"
+#include "np/gsplit.h"   // MSC_GSPLIT phase markers
 
 #define ALLOCA   dALLOCA16
 #define dFabs(x) ((float)__fabs(float(x)))
@@ -78,7 +79,18 @@ void dInternalHandleAutoDisabling(dxWorld* world, dReal stepsize)
 /**
  * Offset/Address/Size: 0xDC | 0x8035831C | size: 0x3B4
  */
+// MSC_SIM26_ISLANDS: dxStepBody without the dGeomMoved calls at its end; returns whether they were due (the caller makes them, in the same order)
+int dxStepBodyNoMove(dxBody* b, dReal h);
 void dxStepBody(dxBody* b, dReal h)
+{
+    if (dxStepBodyNoMove(b, h))
+    {
+        for (dxGeom* geom = b->geom; geom; geom = dGeomGetBodyNext(geom))
+            dGeomMoved(geom);
+    }
+}
+
+int dxStepBodyNoMove(dxBody* b, dReal h)
 {
     int j;
     unsigned char changed = 0;
@@ -183,12 +195,8 @@ void dxStepBody(dxBody* b, dReal h)
         changed = 1;
     }
 
-    // notify all attached geoms that this body has moved
-    if (changed)
-    {
-        for (dxGeom* geom = b->geom; geom; geom = dGeomGetBodyNext(geom))
-            dGeomMoved(geom);
-    }
+    // notify all attached geoms that this body has moved (dxStepBody, or the island step of MSC_SIM26_ISLANDS after its join)
+    return changed;
 }
 
 // this groups all joints and bodies in a world into islands. all objects
@@ -205,6 +213,201 @@ void dxStepBody(dxBody* b, dReal h)
 /**
  * Offset/Address/Size: 0x490 | 0x803586D0 | size: 0x438
  */
+// ---- MSC_SIM26_ISLANDS (wave 12, sim26): the islands of a step on the job lanes ----
+// Each island (the bodies and joints reachable from one another; here mostly one character body with its character joint, or the ball) is
+// stepped by dxQuickStepper from its own bodies and joints only, and no body or joint is in two islands. 1: the island search runs first, as
+// before but without stepping (it reads only tags and the joint graph; the stepper's tag writes are undone right after it anyway); then the
+// islands are stepped on the lanes (NpParallelFor, the caller is lane 0), each with the stepper's own code on its own data; then, on this thread,
+// in island order, the dGeomMoved calls each body's integration would have made (they move geoms to the front of the shared space list: the order
+// matters, so they are made after the join, in the old order) and the old tag / enabled-flag resets. =2 verify: the islands are stepped on the
+// lanes, the results (every body's position, rotation, quaternion and velocities, and the joint feedback) hashed, restored, stepped again
+// serially and compared ([sim26isl] wrong must be 0). No lanes, a stepper other than dxQuickStepper, or more islands than kNpIslMax: the old loop.
+// MSC_SIM26_ISLANDS_BREAK=1: proof mutant (the first island's first body skips its geom notification).
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include "quickstep.h"
+extern "C" {
+typedef void (*NpRangeFn)(void* ctx, size_t begin, size_t end, uint32_t lane);
+unsigned NpJobsLanes(void) __attribute__((weak));
+unsigned NpParallelFor(size_t count, size_t minPerLane, NpRangeFn fn, void* ctx) __attribute__((weak));
+}
+void NpSim26QuickStepperDeferred(dxWorld* world, dxBody* const* body, int nb, dxJoint* const* _joint, int nj, dReal stepsize, unsigned char* changedOut);
+
+namespace
+{
+enum { kNpIslMax = 64 };
+struct NpIslJob
+{
+    dxWorld* world;
+    dReal stepsize;
+    dxBody** bodies;
+    dxJoint** joints;
+    int bOff[kNpIslMax + 1];
+    int jOff[kNpIslMax + 1];
+    unsigned char* changed;
+};
+int sNpIslMode = -1, sNpIslBreak = 0;
+unsigned long long sNpIslSteps, sNpIslParallel, sNpIslIslands, sNpIslSerial, sNpIslVerified, sNpIslWrong;
+
+void NpIslRange(void* opaque, size_t begin, size_t end, uint32_t)
+{
+    NpIslJob& job = *static_cast<NpIslJob*>(opaque);
+    for (size_t k = begin; k < end; k++)
+        NpSim26QuickStepperDeferred(job.world, job.bodies + job.bOff[k], job.bOff[k + 1] - job.bOff[k], job.joints + job.jOff[k], job.jOff[k + 1] - job.jOff[k], job.stepsize,
+            job.changed + job.bOff[k]);
+}
+
+// verify: what a step of the islands writes into the bodies and the joint feedback
+uint64_t NpIslHash(dxBody** bodies, int nb, dxJoint** joints, int nj)
+{
+    uint64_t h = 1469598103934665603ull;
+    for (int i = 0; i < nb; i++)
+    {
+        const unsigned char* p = (const unsigned char*)bodies[i];
+        for (size_t k = 0; k < sizeof(dxBody); k++)
+            h = (h ^ p[k]) * 1099511628211ull;
+    }
+    for (int i = 0; i < nj; i++)
+        if (joints[i]->feedback)
+        {
+            const unsigned char* p = (const unsigned char*)joints[i]->feedback;
+            for (size_t k = 0; k < sizeof(dJointFeedback); k++)
+                h = (h ^ p[k]) * 1099511628211ull;
+        }
+    return h;
+}
+
+int NpIslMode()
+{
+    if (sNpIslMode < 0)
+    {
+        const char* e = getenv("MSC_SIM26_ISLANDS");
+        sNpIslMode = (e && (e[0] == '1' || e[0] == '2')) ? e[0] - '0' : 0;
+        const char* k = getenv("MSC_SIM26_ISLANDS_BREAK");
+        sNpIslBreak = (k && k[0] == '1') ? 1 : 0;
+    }
+    return sNpIslMode;
+}
+
+// 1 = done here; 0 = take the old loop
+int NpIslProcess(dxWorld* world, dReal stepsize)
+{
+    if (NpParallelFor == 0 || NpJobsLanes == 0 || NpJobsLanes() < 2)
+        return 0;
+    dxBody *b, *bb;
+    dxJoint* j;
+    dxBody** body = (dxBody**)ALLOCA(world->nb * sizeof(dxBody*));
+    dxJoint** joint = (dxJoint**)ALLOCA((world->nj > 0 ? world->nj : 1) * sizeof(dxJoint*));
+    unsigned char* changed = (unsigned char*)ALLOCA(world->nb > 0 ? world->nb : 1);
+    NpIslJob job;
+    job.world = world;
+    job.stepsize = stepsize;
+    job.bodies = body;
+    job.joints = joint;
+    job.changed = changed;
+    int nIsl = 0, bcount = 0, jcount = 0;
+
+    // the search of the old loop, the stepper call replaced by noting the island (the stepper's tag writes, undone right after it, never reached it)
+    for (b = world->firstbody; b; b = (dxBody*)b->next)
+        b->tag = 0;
+    for (j = world->firstjoint; j; j = (dxJoint*)j->next)
+        j->tag = 0;
+    int stackalloc = (world->nj < world->nb) ? world->nj : world->nb;
+    dxBody** stack = (dxBody**)ALLOCA((stackalloc > 0 ? stackalloc : 1) * sizeof(dxBody*));
+    for (bb = world->firstbody; bb; bb = (dxBody*)bb->next)
+    {
+        if (bb->tag || (bb->flags & dxBodyDisabled))
+            continue;
+        if (nIsl == kNpIslMax)
+            return -1;   // too many islands: the caller must redo the step the old way from untouched state (nothing was stepped yet)
+        bb->tag = 1;
+        int stacksize = 0;
+        b = bb;
+        job.bOff[nIsl] = bcount;
+        job.jOff[nIsl] = jcount;
+        body[bcount++] = bb;
+        goto quickstart;
+        while (stacksize > 0)
+        {
+            b = stack[--stacksize];
+            body[bcount++] = b;
+        quickstart:
+            for (dxJointNode* n = b->firstjoint; n; n = n->next)
+            {
+                if (!n->joint->tag)
+                {
+                    n->joint->tag = 1;
+                    joint[jcount++] = n->joint;
+                    if (n->body && !n->body->tag)
+                    {
+                        n->body->tag = 1;
+                        stack[stacksize++] = n->body;
+                    }
+                }
+            }
+        }
+        nIsl++;
+    }
+    job.bOff[nIsl] = bcount;
+    job.jOff[nIsl] = jcount;
+
+    if (sNpIslMode == 2)
+    {
+        // verify: save every island body and feedback, step on the lanes, hash, restore, step serially (same deferred stepper), hash, compare
+        dxBody* saved = (dxBody*)malloc(sizeof(dxBody) * (bcount > 0 ? bcount : 1));
+        dJointFeedback* savedFb = (dJointFeedback*)malloc(sizeof(dJointFeedback) * (jcount > 0 ? jcount : 1));
+        for (int i = 0; i < bcount; i++)
+            memcpy(&saved[i], body[i], sizeof(dxBody));
+        for (int i = 0; i < jcount; i++)
+            if (joint[i]->feedback)
+                memcpy(&savedFb[i], joint[i]->feedback, sizeof(dJointFeedback));
+        NpParallelFor((size_t)nIsl, 1, NpIslRange, &job);
+        const uint64_t h1 = NpIslHash(body, bcount, joint, jcount);
+        for (int i = 0; i < bcount; i++)
+            memcpy(body[i], &saved[i], sizeof(dxBody));
+        for (int i = 0; i < jcount; i++)
+            if (joint[i]->feedback)
+                memcpy(joint[i]->feedback, &savedFb[i], sizeof(dJointFeedback));
+        NpIslRange(&job, 0, (size_t)nIsl, 0);
+        const uint64_t h2 = NpIslHash(body, bcount, joint, jcount);
+        sNpIslVerified++;
+        if (h1 != h2)
+            sNpIslWrong++;
+        free(saved);
+        free(savedFb);
+    }
+    else
+        NpParallelFor((size_t)nIsl, 1, NpIslRange, &job);
+
+    // after the join, in island order: each island's geom notifications (dxStepBody's, body by body), then the old loop's resets
+    for (int k = 0; k < nIsl; k++)
+    {
+        for (int i = job.bOff[k]; i < job.bOff[k + 1]; i++)
+        {
+            if (sNpIslBreak == 1 && k == 0 && i == job.bOff[k])
+                continue;   // proof mutant
+            if (changed[i])
+            {
+                for (dxGeom* geom = body[i]->geom; geom; geom = dGeomGetBodyNext(geom))
+                    dGeomMoved(geom);
+            }
+        }
+        for (int i = job.bOff[k]; i < job.bOff[k + 1]; i++)
+        {
+            body[i]->tag = 1;
+            body[i]->flags &= ~dxBodyDisabled;
+        }
+        for (int i = job.jOff[k]; i < job.jOff[k + 1]; i++)
+            joint[i]->tag = 1;
+    }
+    sNpIslParallel++;
+    sNpIslIslands += (unsigned)nIsl;
+    return 1;
+}
+} // namespace
+
 void dxProcessIslands(dxWorld* world, dReal stepsize, dstepper_fn_t stepper)
 {
     dxBody *b, *bb, **body;
@@ -214,8 +417,23 @@ void dxProcessIslands(dxWorld* world, dReal stepsize, dstepper_fn_t stepper)
     if (world->nb <= 0)
         return;
 
+    NP_GS(NPGS_PH_ISLANDS);   // MSC_GSPLIT: island search; the stepper marks its own parts
     // handle auto-disabling of bodies
     dInternalHandleAutoDisabling(world, stepsize);
+
+    // MSC_SIM26_ISLANDS: the islands on the job lanes (above); every other case falls through to the old loop
+    if (NpIslMode() != 0 && stepper == dxQuickStepper)
+    {
+        if (++sNpIslSteps % 600 == 0)
+        {
+            printf("[sim26isl] mode=%d break=%d steps=%llu on the lanes=%llu islands=%llu old loop=%llu verify=%llu wrong=%llu\n", sNpIslMode, sNpIslBreak, sNpIslSteps, sNpIslParallel,
+                sNpIslIslands, sNpIslSerial, sNpIslVerified, sNpIslWrong);
+            fflush(stdout);
+        }
+        if (NpIslProcess(world, stepsize) == 1)
+            return;
+        sNpIslSerial++;
+    }
 
     // make arrays for body and joint lists (for a single island) to go into
     body = (dxBody**)ALLOCA(world->nb * sizeof(dxBody*));

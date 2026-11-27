@@ -1,0 +1,14 @@
+# console-1.2 run aa4: Full 960x544, 4x anti-aliasing
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# Owner's setup 3: 4 samples, given up 4 -> 2 -> 1 when frames run late. Against aa2: the cost of 4x (estimate: +40 percent of the pixel part) and how long the policy keeps it; the video memory line (4x + 2x + 1x targets, about 16.3 MiB more than aa0, an estimate: if the console has less free than 12 MiB + a target the '[hold] no 4x render target' line says which count was left out).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD=full
+MSC_PICTURE_HOLD_MSAA=4

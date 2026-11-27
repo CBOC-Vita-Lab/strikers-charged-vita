@@ -1,0 +1,17 @@
+# console-1.2 run wrcopybench: be24 WRCOPY: start-up benchmark only (MSC_VITA_WRCOPY=bench)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group be24, route gsvice, version payload 1.3, role ab
+# Read the `[wrcopy]` line: MB/s of plain, NEON 64, vstm 128 and DMA copies into an uncached block, each verified. A MISMATCH disqualifies the variant (then no WRCOPY run follows). Changes nothing else; the run answers whether the uncached write rate is the bottleneck (a variant over 1.3x plain says yes). Read `[beph]` (render-thread CPU per picture by preparation step, command kind and draw phase; stream bytes by draw class) and `[lane]` be CPU, Vice goal scenario, live play pictures. Pass rule: no new [hitch], no fault, the picture as in the base run.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was fb-vice-goal.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-vice-goal.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=2
+MSC_VGX_BEPH=1
+MSC_VGX_GXM_DIRECT=1
+MSC_VITA_WRCOPY=bench

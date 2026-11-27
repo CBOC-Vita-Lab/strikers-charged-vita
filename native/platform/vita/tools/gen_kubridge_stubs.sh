@@ -6,7 +6,7 @@
 #   gen_kubridge_stubs.sh <outdir>
 set -e
 OUT=${1:?outdir}
-KUBRIDGE=${KUBRIDGE:-/home/claude/research/vita-refs/bythos14_kubridge}
+KUBRIDGE=${KUBRIDGE:-/work/research/vita-refs/bythos14_kubridge}
 VBIN=${VBIN:-/opt/vitasdk/bin}
 rm -rf "$OUT" && mkdir -p "$OUT/gen"
 # vita-elf-export turns the export list into an import database; its "elf" argument is only hashed

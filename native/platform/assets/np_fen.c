@@ -295,10 +295,10 @@ int npa_convert_fen_impl(NpaCtx* c, uint8_t* p, size_t size)
     tabLen = npa_rd32(p + 12);
     if ((uint64_t)16 + dataLen + tabLen > size || (dataLen & 3) || (tabLen & 3))
     {
-        npa_err(c, NPA_ERR_BOUNDS, "fen sizes: data %u table %u in a %zu byte file", dataLen, tabLen, size);
+        npa_err(c, NPA_ERR_BOUNDS, "fen sizes: data %u table %u in a %lu byte file", dataLen, tabLen, (unsigned long)size);
         return NPA_ERR_BOUNDS;
     }
-    NPA_EXPECT(c, (uint64_t)16 + dataLen + tabLen == size, "fen has %zu trailing bytes", size - 16 - dataLen - tabLen);
+    NPA_EXPECT(c, (uint64_t)16 + dataLen + tabLen == size, "fen has %lu trailing bytes", (unsigned long)(size - 16 - dataLen - tabLen));
     image = p + 16;
     table = image + dataLen;
     ntab = tabLen / 4;

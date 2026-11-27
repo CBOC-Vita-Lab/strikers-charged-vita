@@ -112,16 +112,20 @@ extern GLboolean vgl_stream_wants_scratch;
 // GLB: statistics, cached stream arena (vgl.c)
 #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
 extern uint32_t vgl_glb_pool_overruns, vgl_glb_pool_overrun_bytes, vgl_glb_pool_frame_peak, vgl_glb_pool_peak, vgl_glb_pool_odd;
-extern GLboolean vgl_stream_cached, vgl_stream_unflushed;
+extern GLboolean vgl_stream_cached, vgl_stream_unflushed, vgl_stream_scene_mode;
+extern uint32_t vgl_stream_scene_flushes;
 uint8_t *vgl_reserve_stream_pool(uint32_t size);
 void vgl_stream_flush(void);
 void vgl_glb_frame_end(void);
 void vgl_stream_next_slice(void);
 void vgl_stream_init(int count);
 void vgl_stream_touch(const void *addr);
-#define VGL_STREAM_FLUSH_IF_NEEDED() if (vgl_stream_unflushed) vgl_stream_flush();
+GLboolean vgl_stream_is_cached_addr(const void *addr);
+#define VGL_STREAM_FLUSH_IF_NEEDED() if (vgl_stream_unflushed && !vgl_stream_scene_mode) vgl_stream_flush(); // 0060: scene mode writes back at the scene submit instead
+#define VGL_STREAM_SCENE_SUBMIT() if (vgl_stream_unflushed) { vgl_stream_scene_flushes++; vgl_stream_flush(); } // 0060: gxm.c scene_end, right before sceGxmEndScene
 #else
 #define VGL_STREAM_FLUSH_IF_NEEDED()
+#define VGL_STREAM_SCENE_SUBMIT()
 #endif
 void vgl_glb_count_tables(uint32_t *progs, uint32_t *shaders, uint32_t *progs_max, uint32_t *shaders_max); // custom_shaders.c
 // RT: scene depth/stencil load and store, scene and GPU timers (rt.c)
@@ -131,6 +135,7 @@ extern uint32_t vgl_rt_invalidations_skipped;
 uint32_t vgl_rt_scene_begin(SceGxmDepthStencilSurface *ds, uint32_t w, uint32_t h);
 void vgl_rt_cpu_switch(uint32_t t_end, uint32_t t_begin, uint32_t t_setup);
 uint32_t vgl_rt_now(void);
+void vgl_rt_begin_split(uint32_t fbo, uint32_t us); // 0065: the time of one sceGxmBeginScene call alone, display (0) or framebuffer object (1); CPU timers only
 void vgl_rt_end_scene(SceGxmContext *ctx);
 void vgl_rt_frame_end(void);
 extern uint32_t vgl_glb_ring_frame_bytes, vgl_glb_ring_frame_peak, vgl_glb_ring_peak, vgl_glb_ring_wraps, vgl_glb_ring_size;
@@ -215,6 +220,7 @@ typedef enum {
 
 // Texture object struct
 typedef struct texture {
+	uint32_t fg_rt_frame; // 0034 free guard: frame + 1 of the last scene that drew into this texture (0: never); written only with the guard on
 #ifndef TEXTURES_SPEEDHACK
 	uint32_t last_frame;
 #endif
@@ -329,7 +335,7 @@ extern int NEW_DISPLAY_HEIGHT; // Requested new display height in pixels
 
 // Custom shaders pipeline shader cache settings
 #ifdef HAVE_SHADER_CACHE
-#define SHADER_CACHE_MAGIC 2
+#define SHADER_CACHE_MAGIC 3
 extern char vgl_shader_cache_path[256];
 #endif
 
@@ -483,35 +489,67 @@ extern GLboolean prim_is_non_native; // Flag for when a primitive not supported 
 
 extern size_t max_vcache_size;
 extern size_t max_fcache_size;
-static inline __attribute__((always_inline)) void patch_vertex_program(SceGxmShaderPatcherId id, const SceGxmVertexAttribute *attr, uint32_t attr_num, const SceGxmVertexStream *stream, uint32_t stream_num, SceGxmVertexProgram **prog) {
+// 1.2: both return the sceGxm result (0 = made); a program that was not made is not published by the callers that check it (custom_shaders.c)
+extern GLboolean vgl_robust_scenes; // gxm.c vglSetRobustScenes: the 1.2 failure handling (scene entry, shader patching) is on
+extern uint32_t vgl_shader_patch_failures;
+// 1.3 wave 10 (0035): the patcher's and the render target's own cost, microseconds in sceKernelGetProcessTimeWide: [0] vertex program creates, [1] fragment program creates, [2] render target creates; read and reset by vglPatchTimingTake
+extern uint32_t vgl_patch_calls[3];
+extern uint64_t vgl_patch_us[3];
+extern uint32_t vgl_patch_max_us[3];
+#include <psp2/kernel/processmgr.h>
+static inline __attribute__((always_inline)) void vgl_patch_note(int k, uint64_t t0) {
+	uint64_t d = sceKernelGetProcessTimeWide() - t0;
+	vgl_patch_calls[k]++;
+	vgl_patch_us[k] += d;
+	if (d > vgl_patch_max_us[k])
+		vgl_patch_max_us[k] = (uint32_t)d;
+}
+// 1.3 wave 11 (0040): the rest of the back end's own cost for a new program, microseconds like the three above: [0] sceGxmShaderPatcherRegisterProgram (a shader), [1] glLinkProgram (the whole call: shader cache or pack read, registration, uniform and attribute set-up),
+// [2] the first vglDrawElementsDirect draw of a program since it was linked (the whole draw: includes the vertex and fragment program creates counted in [0] and [1] above); read and reset by vglBackendTimingTake
+extern uint32_t vgl_bt_calls[3];
+extern uint64_t vgl_bt_us[3];
+extern uint32_t vgl_bt_max_us[3];
+static inline __attribute__((always_inline)) void vgl_bt_note(int k, uint64_t t0) {
+	uint64_t d = sceKernelGetProcessTimeWide() - t0;
+	vgl_bt_calls[k]++;
+	vgl_bt_us[k] += d;
+	if (d > vgl_bt_max_us[k])
+		vgl_bt_max_us[k] = (uint32_t)d;
+}
+static inline __attribute__((always_inline)) int vgl_register_program(const SceGxmProgram *prog, SceGxmShaderPatcherId *id) {
+	uint64_t t0 = sceKernelGetProcessTimeWide();
+	int r = sceGxmShaderPatcherRegisterProgram(gxm_shader_patcher, prog, id);
+	vgl_bt_note(0, t0);
+	return r;
+}
+static inline __attribute__((always_inline)) int patch_vertex_program(SceGxmShaderPatcherId id, const SceGxmVertexAttribute *attr, uint32_t attr_num, const SceGxmVertexStream *stream, uint32_t stream_num, SceGxmVertexProgram **prog) {
+	uint64_t t0 = sceKernelGetProcessTimeWide();
 	int r = vglCreateVertexProgram(id, attr, attr_num, stream, stream_num, prog);
-#ifdef LOG_ERRORS
+	vgl_patch_note(0, t0);
 	if (r) {
+		vgl_shader_patch_failures++;
+#ifdef LOG_ERRORS
 		vgl_log("Vertex shader patching failed (%s) on shader 0x%X with %d attributes and %d streams.\n", get_gxm_error_literal(r), id, attr_num, stream_num);
-		return;
-	}
 #endif
+	}
+	return r;
 }
-static inline __attribute__((always_inline)) void patch_fragment_program(SceGxmShaderPatcherId id, SceGxmOutputRegisterFormat fmt, SceGxmMultisampleMode msaa_mode, const SceGxmBlendInfo *blend_cfg, const SceGxmProgram *vertex_link, SceGxmFragmentProgram **prog) {
+static inline __attribute__((always_inline)) int patch_fragment_program(SceGxmShaderPatcherId id, SceGxmOutputRegisterFormat fmt, SceGxmMultisampleMode msaa_mode, const SceGxmBlendInfo *blend_cfg, const SceGxmProgram *vertex_link, SceGxmFragmentProgram **prog) {
+	uint64_t t0 = sceKernelGetProcessTimeWide();
 	int r = sceGxmShaderPatcherCreateFragmentProgram(gxm_shader_patcher, id, fmt, msaa_mode, blend_cfg, vertex_link, prog);
-#ifdef LOG_ERRORS
+	vgl_patch_note(1, t0);
 	if (r) {
+		vgl_shader_patch_failures++;
+#ifdef LOG_ERRORS
 		vgl_log("Fragment shader patching failed (%s) on shader 0x%X.\n", get_gxm_error_literal(r), id);
-		return;
-	}
 #endif
+	}
+	return r;
 }
 
-#define recalculate_normal_matrix() \
-	matrix3x3 inverted; \
-	matrix3x3 top_modelview_matrix; \
-	vgl_fast_memcpy(top_modelview_matrix[0], modelview_matrix[0], sizeof(float) * 3); \
-	vgl_fast_memcpy(top_modelview_matrix[1], modelview_matrix[1], sizeof(float) * 3); \
-	vgl_fast_memcpy(top_modelview_matrix[2], modelview_matrix[2], sizeof(float) * 3); \
-	matrix3x3_invert(inverted, top_modelview_matrix); \
-	matrix3x3_transpose(normal_matrix, inverted);
+#define recalculate_normal_matrix() matrix4x4_normal_matrix(normal_matrix, modelview_matrix)
 
-#define rebuild_frag_shader(x, y, z, w) patch_fragment_program(x, w, msaa_mode, &blend_info.info, z, y) // Creates a new patched fragment program with proper blend settings
+#define rebuild_frag_shader(x, y, z, w) patch_fragment_program(x, w, cur_msaa, &blend_info.info, z, y) // Creates a new patched fragment program with proper blend settings
 
 #ifdef HAVE_SOFTFP_ABI
 extern __attribute__((naked)) void sceGxmSetViewport_sfp(SceGxmContext *context, float xOffset, float xScale, float yOffset, float yScale, float zOffset, float zScale);
@@ -633,7 +671,14 @@ typedef struct {
 	int stride;
 	void *data;
 	texture *tex;
+	SceGxmMultisampleMode msaa; // this framebuffer's own multisampling (vglFramebufferMultisample), msaa_mode for a new one
+	int depth_share_w, depth_share_h; // 0044 (vglFramebufferDepthShare): the capacity of the shared depth block this object's depth surface may live in (0: its own)
+	int depth_row_w; // 0044: the width the depth surface's rows were laid out for: the shared block's capacity, or the object's own width (0: no surface yet); the effects pass reads rows of VGL_ALIGN(this, 32)
+	uint8_t nodepth; // 0038 (vglFramebufferNoDepth): its scenes run with a depth/stencil surface that has no memory (tile memory only), never loaded or stored
+	SceGxmRenderTarget *target2; // 0063 (vglFramebufferDualRT): the second render target of a ping-pong pair, used by the pictures of odd frame number; same colour and depth surfaces, only the scene slots differ
+	uint8_t dual_rt; // 0063: 1 = scenes of odd pictures begin on target2 (made at the first such scene, or with target), 0 = one render target as before
 } framebuffer;
+extern uint32_t vgl_nodepth_scenes; // 0038: scenes begun on a framebuffer with nodepth set (rt.c)
 
 // Query struct
 typedef struct {
@@ -879,8 +924,23 @@ extern const char *ffp_bind_names[FFP_BINDS_NUM];
 // Internal stuffs
 extern GLboolean vgl_has_cdlg_support;
 extern uint32_t gxm_param_buf_size; // Param buffer size for sceGxm
+extern uint32_t vgl_pb_lpddr_shrink; // 0042: video memory bytes a caller counted as free that the parameter buffer took after all
 extern GLboolean skip_viewport_override;
 extern GLboolean dirty_scissor_state;
+#ifdef LAZY_CLEAR
+/*
+ * 1.2 LAZY_CLEAR (patch 0015, runtime switch vglSetLazyClear): glClear leaves the sceGxm state it set for its quad (viewport, cull, depth function, depth bias, polygon mode,
+ * fragment program enable, default uniform buffers) in place and records that in vgl_lc_pending; the restore from the GL state happens (vgl_lc_flush) before
+ * anything that could depend on that state: the next draw or scene change (scene_reset), a scene end, every setter of that state, a scissor update. Clears that follow
+ * each other set and restore nothing between them.
+ */
+extern GLboolean vgl_lc_on, vgl_lc_in_clear;
+extern uint32_t vgl_lc_pending;
+void vgl_lc_flush(void);
+#define VGL_LC_SYNC() do { if (vgl_lc_pending) vgl_lc_flush(); } while (0)
+#else
+#define VGL_LC_SYNC() do { } while (0)
+#endif
 extern uint8_t texcoord_idxs[TEXTURE_COORDS_NUM];
 extern uint8_t texcoord_fixed_idxs[TEXTURE_COORDS_NUM];
 extern uint8_t ffp_vertex_attrib_fixed_mask;
@@ -889,6 +949,9 @@ extern legacy_vtx_attachment current_vtx;
 extern void *frag_uniforms;
 extern void *vert_uniforms;
 extern SceGxmMultisampleMode msaa_mode;
+extern SceGxmMultisampleMode cur_msaa; // the multisample mode of the framebuffer in use (gxm.c scene_reset)
+#define FB_MSAA(fb) ((fb)->msaa)
+SceGxmFragmentProgram *vgl_msaa_fp(int blit, GLboolean is_float); // the clear (0) / blit (1) fragment program for cur_msaa
 extern void *gxm_color_surfaces_addr[DISPLAY_MAX_BUFFER_COUNT]; // Display color surfaces memblock starting addresses
 extern SceGxmColorSurface gxm_color_surfaces[DISPLAY_MAX_BUFFER_COUNT]; // Display color surfaces
 extern unsigned int gxm_back_buffer_index; // Display back buffer id
@@ -904,9 +967,15 @@ extern uint16_t *default_line_strips_idx_ptr; // sceGxm mapped progressive indic
 extern int garbage_collector(unsigned int args, void *arg); // Garbage collector function
 #endif
 extern SceUID gc_mutex[2]; // Garbage collector mutex
+// 0034 free guard (MSC_VGX_FREE_GUARD, off by default): see gxm.c
+extern int vgl_fg_on, vgl_fg_flushing;
+int vgl_fg_delete(int kind, GLsizei n, const GLuint *ids, void *caller);
+void vgl_fg_flush_all(void); // 0050
 extern int vgl_gc_failed(void);
 extern int vgl_gc_recover(void);
 extern int vgl_gc_retry_pause(void);
+extern uint32_t vgl_gc_pause_ms; // 0036
+extern void vgl_gc_note_legacy(void);
 extern GLboolean has_cached_mem; // Flag for whether to use cached memory for mempools or not
 extern uint8_t gxm_display_buffer_count; // Display buffers count
 
@@ -1247,10 +1316,11 @@ void init_gxm(void); // Inits sceGxm
 void init_gxm_context(SceGxmContext **ctx, uint8_t ctx_slot); // Inits sceGxm context
 void create_display_render_target(void); // Creates render target for the display
 void init_display_color_surfaces(GLboolean is_swap); // Creates color surfaces for the display
-void init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil); // Creates depth and stencil surfaces
+GLboolean init_depth_stencil_buffer_ms(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil, SceGxmMultisampleMode mode); // ... for a given multisample mode
+GLboolean init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil); // Creates depth and stencil surfaces
 void init_display_depth_stencil_surfaces(void); // Creates depth and stencil surfaces for the display
 void start_shader_patcher(void); // Creates a shader patcher instance
-void scene_reset(void); // Resets drawing scene if required
+GLboolean scene_reset(void); // Resets drawing scene if required. 1.2: false = no scene could be started, the caller skips what it was going to submit
 GLboolean start_shader_compiler(void); // Starts a shader compiler instance
 
 /* framebuffers.c */
@@ -1266,6 +1336,13 @@ GLboolean change_stencil_config(SceGxmStencilOp *cfg, GLenum new_cfg); // Change
 GLboolean change_stencil_func_config(SceGxmStencilFunc *cfg, GLenum new_cfg); // Changes current in use stencil test function value
 void update_alpha_test_settings(void); // Changes current in use alpha test operation value
 void update_scissor_test(void); // Changes current in use scissor test region
+void vgl_mk_scene_begin(SceGxmDepthStencilSurface *ds); // 1.3 MASK_KEEP (patch 0026): a scene began on `ds` (NULL: none)
+GLboolean vgl_depth_share_get(int cw, int ch, SceGxmMultisampleMode mode, SceGxmDepthStencilSurface *out, const void *fb); // 0044 (mem_utils.c)
+void vgl_depth_share_scene(const void *mem, const void *fb); // 0044
+void vgl_mk_forget(const void *surface); // 1.3 MASK_KEEP: new depth/stencil memory at `surface`
+void vgl_mk_touch(void); // 1.3 MASK_KEEP: the open scene's mask may have changed outside update_scissor_test
+void vgl_mb_scene_begin(SceGxmDepthStencilSurface *ds, uint32_t rt_applied); // 1.3 MASK_BG (patch 0029): called before sceGxmBeginScene with the surface and the RT hint's decision
+extern GLboolean vgl_mask_keep;
 void reset_scissor_test_region(void); // Resets scissor test region to default values
 void update_scissor_test_uniforms(void); // Updates scissor test region update uniforms
 void invalidate_viewport(void); // Invalidates currently set viewport
@@ -1373,7 +1450,18 @@ static inline __attribute__((always_inline)) uint32_t get_color_from_texture(Sce
 	}
 }
 
+extern uint32_t vgl_tiled_read_refused; // 0057 (textures.c)
+// 0063: the second render target of a framebuffer object goes wherever the first one goes (every drop site of fb->target calls this beside it)
+#define VGL_FB_DROP_RT2(fb) \
+	do { \
+		if ((fb)->target2) { \
+			mark_rt_as_dirty((fb)->target2); \
+			(fb)->target2 = NULL; \
+		} \
+	} while (0)
+extern GLboolean vgl_fb_detach_keep; // 0062 (framebuffers.c): detaching the colour texture (id 0) keeps the object's size, render target and depth surface
 static inline __attribute__((always_inline)) void _glFramebufferTexture2D(framebuffer *fb, GLenum attachment, texture *tex, GLuint tex_id) {
+	VGL_LC_SYNC(); // (LAZY_CLEAR: the restore reads the size of the framebuffer in use)
 	// Extracting texture data
 	int old_w = fb->width, old_h = fb->height;
 	SceGxmTextureFormat fmt = vglGetTexFormat(&tex->gxm_tex);
@@ -1381,8 +1469,25 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
 	// Detecting requested attachment
 	switch (attachment) {
 	case GL_COLOR_ATTACHMENT0:
+		// 0062: detaching (texture id 0) used to read the sizes of texture slot 0 into fb->width / fb->height (and stride, data, format) BEFORE the id was looked at, and to drop the render target at once; the
+		// next attach then found a "different size" and dropped the depth surface too. With vgl_fb_detach_keep the detach only lets go of the texture: width, height, target and depth surface stay, and a later
+		// attach of a texture of the same size (the samples are the object's own) takes them back; a different size drops them as before. The object has no colour surface to draw into until then (gxm.c scene_reset).
+		if (tex_id == 0 && vgl_fb_detach_keep) {
+			if (fb->tex) {
+				fb->tex->ref_counter--;
+				if (fb->tex->dirty && fb->tex->ref_counter == 0) {
+					gpu_free_texture(fb->tex);
+				}
+			}
+			fb->data = NULL;
+			fb->tex = NULL;
+			if (in_use_framebuffer == fb) dirty_framebuffer = GL_TRUE; // nxr6b: the scene running into this object has lost its colour surface: the next draw must go through scene_reset (which refuses it: no colour texture)
+			return;
+		}
 		vglGetTexSizes(&tex->gxm_tex, &fb->width, &fb->height);
-		fb->stride = VGL_ALIGN(fb->width, 8) * tex_format_to_bytespp(fmt);
+		// 0057: a tiled texture (vglTexMakeTiledTarget) is a tiled colour surface, rows of VGL_ALIGN(width, 32) texels
+		const int tiled_rt = sceGxmTextureGetType(&tex->gxm_tex) == SCE_GXM_TEXTURE_TILED;
+		fb->stride = VGL_ALIGN(fb->width, tiled_rt ? 32 : 8) * tex_format_to_bytespp(fmt);
 		fb->data = vglGetTexData(&tex->gxm_tex);
 		fb->format = tex->format;
 
@@ -1400,6 +1505,8 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
 				mark_rt_as_dirty(fb->target);
 				fb->target = NULL;
 			}
+			VGL_FB_DROP_RT2(fb);
+			fb->data = NULL;
 			fb->tex = NULL;
 			return;
 		} else if (old_w != fb->width || old_h != fb->height) {
@@ -1407,9 +1514,10 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
 				mark_rt_as_dirty(fb->target);
 				fb->target = NULL;
 			}
+			VGL_FB_DROP_RT2(fb);
 			if (fb->depthbuffer_ptr) {
 #ifndef DEPTH_STENCIL_HACK
-				mark_as_dirty(fb->depthbuffer_ptr->depthData);
+				mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
 #endif
 				fb->depthbuffer_ptr = NULL;
 				fb->depthbuffer_state &= ~DEPTHBUFFER_READY;
@@ -1424,10 +1532,10 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
 		fb->is_float = tex->format == SCE_GXM_TEXTURE_FORMAT_F16F16F16F16_RGBA;
 
 		// Allocating colorbuffer
-		sceGxmColorSurfaceInit(&fb->colorbuffer, get_color_from_texture(fmt), SCE_GXM_COLOR_SURFACE_LINEAR,
-			msaa_mode == SCE_GXM_MULTISAMPLE_NONE ? SCE_GXM_COLOR_SURFACE_SCALE_NONE : SCE_GXM_COLOR_SURFACE_SCALE_MSAA_DOWNSCALE,
+		sceGxmColorSurfaceInit(&fb->colorbuffer, get_color_from_texture(fmt), tiled_rt ? SCE_GXM_COLOR_SURFACE_TILED : SCE_GXM_COLOR_SURFACE_LINEAR,
+			FB_MSAA(fb) == SCE_GXM_MULTISAMPLE_NONE ? SCE_GXM_COLOR_SURFACE_SCALE_NONE : SCE_GXM_COLOR_SURFACE_SCALE_MSAA_DOWNSCALE,
 			fb->is_float ? SCE_GXM_OUTPUT_REGISTER_SIZE_64BIT : SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,
-			fb->width, fb->height, VGL_ALIGN(fb->width, 8), fb->data);
+			fb->width, fb->height, VGL_ALIGN(fb->width, tiled_rt ? 32 : 8), fb->data);
 		
 		// Invalidating current framebuffer if we update its bound texture to force a scene reset
 		if (in_use_framebuffer == active_write_fb) {

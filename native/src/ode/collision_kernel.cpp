@@ -157,6 +157,30 @@ static void initColliders()
     setAllColliders(dGeomTransformClass, &dCollideTransform);
 }
 
+
+// MSC_PHYS27_PLANE: 1 when dCollide(o1, o2) surely returns 0 and has no other effect: no collider is registered for the pair of classes (plane-plane, ...), or
+// the pair is a plane and a transform whose cached AABB lies clear of the plane's half space (collision_transform.cpp). Conservative: 0 = ask dCollide.
+int NpOdeTransformPlaneNoContact(dxGeom* tr, dxGeom* pl);
+int NpOdeColumnPlaneEmpty(dGeomID column, const float* position, dGeomID plane);   // ext/dColumn.cpp
+extern int dColumnClassUser;
+int NpOdeNoContact(dxGeom* o1, dxGeom* o2)
+{
+    const int t1 = o1->type, t2 = o2->type;
+    if (t1 < 0 || t1 >= dGeomNumClasses || t2 < 0 || t2 >= dGeomNumClasses || !colliders_initialized)
+        return 0;
+    if (colliders[t1][t2].fn == 0)
+        return 1;
+    if (t1 == dPlaneClass && t2 == dGeomTransformClass)
+        return NpOdeTransformPlaneNoContact(o2, o1);
+    if (t2 == dPlaneClass && t1 == dGeomTransformClass)
+        return NpOdeTransformPlaneNoContact(o1, o2);
+    if (t1 == dPlaneClass && t2 == dColumnClassUser && dColumnClassUser != -1)
+        return NpOdeColumnPlaneEmpty(o2, o2->pos, o1);
+    if (t2 == dPlaneClass && t1 == dColumnClassUser && dColumnClassUser != -1)
+        return NpOdeColumnPlaneEmpty(o1, o1->pos, o2);
+    return 0;
+}
+
 int dCollide(dxGeom* o1, dxGeom* o2, int flags, dContactGeom* contact,
     int skip)
 {
@@ -324,6 +348,7 @@ void dGeomSetBody(dxGeom* g, dxBody* b)
         dGeomMoved(g);
         if (g->body != b)
         {
+            npGeomEpoch++;   // body identity is copied by the flat broad phase
             g->bodyRemove();
             g->bodyAdd(b);
         }
@@ -337,6 +362,7 @@ void dGeomSetBody(dxGeom* g, dxBody* b)
             g->R = pr->R;
             memcpy(g->pos, g->body->pos, sizeof(dVector3));
             memcpy(g->R, g->body->R, sizeof(dMatrix3));
+            npGeomEpoch++;
             g->bodyRemove();
         }
         // dGeomMoved() should not be called if the body is being set to 0, as the
@@ -467,6 +493,7 @@ void dGeomSetCategoryBits(dxGeom* g, unsigned long bits)
     dAASSERT(g);
     CHECK_NOT_LOCKED(g->parent_space);
     g->category_bits = bits;
+    npGeomEpoch++;   // the flat broad phase copies the bits (MSC_ODE_BPFULL)
 }
 
 void dGeomSetCollideBits(dxGeom* g, unsigned long bits)
@@ -474,6 +501,7 @@ void dGeomSetCollideBits(dxGeom* g, unsigned long bits)
     dAASSERT(g);
     CHECK_NOT_LOCKED(g->parent_space);
     g->collide_bits = bits;
+    npGeomEpoch++;
 }
 
 unsigned long dGeomGetCategoryBits(dxGeom* g)
@@ -491,12 +519,14 @@ unsigned long dGeomGetCollideBits(dxGeom* g)
 void dGeomEnable(dxGeom* g)
 {
     dAASSERT(g);
+    npGeomEpoch++;
     g->gflags |= GEOM_ENABLED;
 }
 
 void dGeomDisable(dxGeom* g)
 {
     dAASSERT(g);
+    npGeomEpoch++;
     g->gflags &= ~GEOM_ENABLED;
 }
 

@@ -434,8 +434,14 @@ inline void glNamedBufferData(GLuint buffer, GLsizei size, const void *data, GLe
 	gpu_buf->size = size;
 	gpu_buf->last_frame = OBJ_NOT_USED;
 
-	if (data)
-		vgl_fast_memcpy(gpu_buf->ptr, data, size);
+	if (data) {
+#if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+		if (from_stream_arena && vgl_stream_is_cached_addr(gpu_buf->ptr))
+			vgl_fast_memcpy(gpu_buf->ptr, data, size); // int31: CPU write into cached USER_RW arena (never sceDmacMemcpy behind D-cache)
+		else
+#endif
+			vgl_wr_copy(gpu_buf->ptr, data, size); // 0045: NEON bursts into the uncached pool when vglSetWriteCopy asks
+	}
 }
 
 void glBufferData(GLenum target, GLsizei size, const GLvoid *data, GLenum usage) {
@@ -492,11 +498,24 @@ inline void glNamedBufferSubData(GLuint buffer, GLintptr offset, GLsizeiptr size
 #endif
 
 		// Copying up previous data combined to modified data
-		if (offset > 0)
-			vgl_memcpy(ptr, gpu_buf->ptr, offset);
-		vgl_memcpy(ptr + offset, data, size);
-		if (gpu_buf->size - size - offset > 0)
-			vgl_memcpy(ptr + offset + size, (uint8_t *)gpu_buf->ptr + offset + size, gpu_buf->size - size - offset);
+		// int32 (Carbon S2): never call sceDmacMemcpy behind dirty ARM D-cache on cached USER_RW stream arena buffers
+#if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+		if (vgl_stream_is_cached_addr(gpu_buf->ptr) || vgl_stream_is_cached_addr(ptr)) {
+			if (offset > 0)
+				vgl_fast_memcpy(ptr, gpu_buf->ptr, offset);
+			vgl_fast_memcpy(ptr + offset, data, size);
+			if (gpu_buf->size - size - offset > 0)
+				vgl_fast_memcpy(ptr + offset + size, (uint8_t *)gpu_buf->ptr + offset + size, gpu_buf->size - size - offset);
+			vgl_stream_touch(ptr);
+		} else
+#endif
+		{
+			if (offset > 0)
+				vgl_memcpy(ptr, gpu_buf->ptr, offset);
+			vgl_memcpy(ptr + offset, data, size);
+			if (gpu_buf->size - size - offset > 0)
+				vgl_memcpy(ptr + offset + size, (uint8_t *)gpu_buf->ptr + offset + size, gpu_buf->size - size - offset);
+		}
 
 		// Marking previous content for deletion
 #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)
@@ -509,9 +528,14 @@ inline void glNamedBufferSubData(GLuint buffer, GLintptr offset, GLsizeiptr size
 	} else
 #endif
 	{
-		vgl_memcpy((uint8_t *)gpu_buf->ptr + offset, data, size);
 #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+		if (vgl_stream_is_cached_addr((uint8_t *)gpu_buf->ptr + offset))
+			vgl_fast_memcpy((uint8_t *)gpu_buf->ptr + offset, data, size); // int31: CPU write into cached USER_RW arena
+		else
+			vgl_wr_copy((uint8_t *)gpu_buf->ptr + offset, data, size); // 0045
 		vgl_stream_touch((uint8_t *)gpu_buf->ptr + offset); // GLB
+#else
+		vgl_wr_copy((uint8_t *)gpu_buf->ptr + offset, data, size); // 0045
 #endif
 	}
 }
@@ -557,6 +581,9 @@ inline void *glMapNamedBuffer(GLuint buffer, GLenum access) {
 
 	// FIXME: Current implementation doesn't take into account 'last_frame' state
 	gpu_buf->mapped = GL_TRUE;
+#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+	vgl_stream_touch(gpu_buf->ptr); // 0054: a cached-arena buffer written through the map is written back before the next draw
+#endif
 	return gpu_buf->ptr;
 }
 
@@ -592,6 +619,9 @@ inline void *glMapNamedBufferRange(GLuint buffer, GLintptr offset, GLsizeiptr le
 
 	// FIXME: Current implementation doesn't take into account 'last_frame' state
 	gpu_buf->mapped = GL_TRUE;
+#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+	vgl_stream_touch((uint8_t *)gpu_buf->ptr + offset); // 0054
+#endif
 	return (void *)((uint8_t *)gpu_buf->ptr + offset);
 }
 
@@ -625,6 +655,9 @@ inline GLboolean glUnmapNamedBuffer(GLuint buffer) {
 
 	gpu_buf->last_frame = OBJ_NOT_USED;
 	gpu_buf->mapped = GL_FALSE;
+#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+	vgl_stream_touch(gpu_buf->ptr); // 0054: the writes made while it was mapped
+#endif
 	return GL_TRUE;
 }
 

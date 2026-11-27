@@ -1,0 +1,15 @@
+# console-1.2 run hsrfacts1: As hsrproven1 plus the texture and vertex-colour facts (MSC_VGX_HSR_FACTS=1), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group exact, route tour, version payload 1.3, role ab
+# exact17: FACTS adds to the proof (textures with all texels opaque, vertex colour from the material and ambient registers). [hsrcount] must show more proven draws than hsrproven1; same picture by eye.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_HSR_PROVEN=1
+MSC_VGX_HSR_FACTS=1
+MSC_VGX_HSR_COUNT=1

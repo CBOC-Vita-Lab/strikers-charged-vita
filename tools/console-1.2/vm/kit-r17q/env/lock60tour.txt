@@ -1,0 +1,16 @@
+# console-1.2 run lock60tour: LOCKED 60, tour (menus, play, Mega Strike, replay)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group lock60, route tour, version payload 1.3, role ab
+# Against d1 and dmid. Read the same lines per scene class: [lock60] scene and `ended` lines carry the class (menu, play, replay, cut, mega, heavy) with its measured frames and share over the 60 budget. Menus and replays may relieve to 30 (a [fps] lock60 relief line that ends with the scene); open play must not. Late-frame counts per class against d1. r17 pass rule (plan-wave17 section 3 + split17 + head17): p50 16.7 ms, late under 2 %, no relief in open play, `[head]` game-thread p95 under 14.5 ms, and `[split] held == finished, leaked 0` (INVALID if the `[head]` or `[split]` line is missing: MSC_HEAD_STAT=1 is in the env).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_FX_STAT=1
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500

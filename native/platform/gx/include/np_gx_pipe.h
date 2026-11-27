@@ -29,6 +29,9 @@ void FinishRaw();
 } // namespace vgx
 
 extern "C" void np_gx_pipe_stray(unsigned int bytes);
+// `count` vertices of `comps` 16-bit indices, each the vertex's number: the loop of a material program's DrawDirect in one call (gx_core.cpp). The same bytes and the same
+// end of the primitive as the writes one by one, which it falls back to when the open primitive is not exactly that long.
+extern "C" void np_gx_pipe_seq16(unsigned int count, unsigned int comps);
 
 static inline void np_gx_raw_write8(unsigned int v) {
     vgx::hle::RawCursor& c = vgx::hle::g_rawCur;

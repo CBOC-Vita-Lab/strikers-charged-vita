@@ -1,0 +1,14 @@
+# console-1.2 run zero1: Blended draws that provably change nothing are not drawn, The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route worstgpu, version payload 1.3, role ab
+# tile24 item 4 (exact by the blend arithmetic: final alpha 0 with SRC_ALPHA, or alpha and colour 0 with ONE/ONE; draws that write depth are never cut). The [zerodraw] line says how many such draws a picture holds; gain = their pixels, read [lane] gpu ms. Pictures must be unchanged.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_ZERODRAW=1
+MSC_VGX_ZERO_COUNT=1

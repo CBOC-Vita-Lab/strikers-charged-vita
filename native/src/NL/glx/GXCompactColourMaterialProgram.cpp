@@ -84,13 +84,7 @@ void GXCompactColourMaterialProgram::DrawIndexed(const glModelPacket* packet)
 void GXCompactColourMaterialProgram::DrawDirect(const glModelPacket* packet)
 {
     GXBegin(glxGetPrimitiveType((unsigned char)packet->primType), GX_VTXFMT0, packet->numUniqueVertices);
-
-    for (unsigned short i = 0; i < packet->numUniqueVertices; ++i)
-    {
-        WGPIPE.us = i;
-        WGPIPE.us = i;
-        WGPIPE.us = i;
-    }
+    np_gx_pipe_seq16(packet->numUniqueVertices, 3);
 }
 
 void GXCompactColourMaterialProgram::BindParameters(const glModelPacket* packet)

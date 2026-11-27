@@ -1,0 +1,590 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 12:00:00 -0400
+Subject: [PATCH] Failures that must not take the game down: scene entry, shader patching, GPU timer ring
+
+ - gxm.c: init_depth_stencil_buffer returns false (and keeps nothing) when the depth or stencil surface cannot be allocated, where it
+   used to memset a NULL pointer. scene_reset returns GLboolean: no memory for a framebuffer's depth or render target, or a refused
+   sceGxmBeginScene, leaves no open scene (the state vglSwapBuffers leaves) and is not tried again for that framebuffer before the next frame.
+   Draws, clears and blits skip themselves on the false (draw.c, misc.c, framebuffers.c). vglSetRobustScenes(0) restores the old behaviour.
+ - draw.c: the draw is submitted only if the program for it exists (is_draw_legal is checked in every build; it was ignored with SKIP_ERROR_HANDLING).
+ - custom_shaders.c / shared.h: a fragment program that could not be patched is not published with the key that says it is current (the draw was
+   made with the previous blend function, or with no program at all); a vertex program that could not be patched is not drawn with the
+   previous layout's program. Both patch functions return the sceGxm result and count failures (vglRobustFailures).
+ - rt.c: a scene is never recorded over the GPU timer record the watcher still holds (vglRtSetRingGuard, default on); the frames that lost a
+   record are published with timed = 0 (vglRtRingDrops).
+
+---
+  source/custom_shaders.c | 37 ++++++++++++++++++++-------
+  source/draw.c           | 55 ++++++++++++++++++---------------------
+  source/framebuffers.c   |  5 +++-
+  source/gxm.c            | 68 ++++++++++++++++++++++++++++++++++++++++++++++---
+  source/misc.c           |  3 ++-
+  source/rt.c             | 27 ++++++++++++++++++++
+  source/shared.h         | 25 ++++++++++--------
+  source/vitaGL.h         |  6 +++++
+  8 files changed, 172 insertions(+), 54 deletions(-)
+
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 13b0d40..b03795c 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -244,13 +244,29 @@ char vgl_file_cache_path[256];
+ 	}
+ #endif
+ 	
+-#define setup_frag_program() \
++// 1.2 (vglSetRobustScenes): the program for the current blend function and target format is made first and published, together with the key that says
++// it is the current one, only when sceGxm made it. A program that could not be made (the shader patcher's memory is full) used to leave the key saying
++// "up to date" over the previous program (the draw then used the wrong blend function for as long as the key stayed) or, for a program's first draw,
++// over nothing (sceGxmSetFragmentProgram(NULL)). Now the draw is skipped (`failed`) and the next draw tries again.
++#define setup_frag_program_tx(failed) \
+ 	if ((p->blend_info.raw != blend_info.raw) || (is_fbo_float != p->is_fbo_float)) { \
+-		p->is_fbo_float = is_fbo_float; \
+-		p->blend_info.raw = blend_info.raw; \
+-		rebuild_frag_shader(p->fshader->id, &p->fprog, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4); \
++		if (vgl_robust_scenes) { \
++			SceGxmFragmentProgram *rebuilt = NULL; \
++			if (rebuild_frag_shader(p->fshader->id, &rebuilt, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4) || !rebuilt) { \
++				failed; \
++			} \
++			p->fprog = rebuilt; \
++			p->is_fbo_float = is_fbo_float; \
++			p->blend_info.raw = blend_info.raw; \
++		} else { \
++			p->is_fbo_float = is_fbo_float; \
++			p->blend_info.raw = blend_info.raw; \
++			rebuild_frag_shader(p->fshader->id, &p->fprog, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4); \
++		} \
+ 	} \
+ 	sceGxmSetFragmentProgram(gxm_context, p->fprog);
++#define setup_frag_program() setup_frag_program_tx(return GL_FALSE) // (in the functions that return GLboolean: the draw is skipped by their callers)
++#define setup_frag_program_void() setup_frag_program_tx(return) // (the others: the program is not published, nothing is skipped)
+ 	
+ #define align_attributes(attributes, streams) \
+ 	if (p->has_unaligned_attrs) { \
+@@ -935,7 +951,7 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
+ 	VGL_STREAM_FLUSH_IF_NEEDED() // GLB
+ 
+ 	// Check if a blend info rebuild is required and upload fragment program
+-	setup_frag_program();
++	setup_frag_program_void();
+ 
+ 	// Uploading fragment textures on relative texture units
+ 	for (int i = 0; i < p->max_frag_texunit_idx; i++) {
+@@ -1149,7 +1165,8 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
+ #endif
+ 
+ 	// Uploading new vertex program
+-	patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
++	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog) && vgl_robust_scenes)
++		return; // 1.2: a layout that could not be made is not drawn with the previous one's program
+ #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
+ 	vertex_layout_cache_insert(p, VERTEX_LAYOUT_MULTI_DRAW, 0, is_packed, GL_FALSE, attributes, streams);
+ #endif
+@@ -1431,7 +1448,8 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean
+ #endif
+ 
+ 	// Uploading new vertex program
+-	patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
++	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog) && vgl_robust_scenes)
++		return GL_FALSE; // 1.2: a layout that could not be made is not drawn with the previous one's program
+ #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
+ 	vertex_layout_cache_insert(p, VERTEX_LAYOUT_ARRAYS, layout_variant, is_packed, GL_FALSE, attributes, streams);
+ #endif
+@@ -1771,7 +1789,8 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
+ #endif
+ 
+ 	// Uploading new vertex program
+-	patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog);
++	if (patch_vertex_program(p->vshader->id, attributes, p->attr_num, streams, p->attr_num, &p->vprog) && vgl_robust_scenes)
++		return GL_FALSE; // 1.2: a layout that could not be made is not drawn with the previous one's program
+ #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
+ 	vertex_layout_cache_insert(p, VERTEX_LAYOUT_ELEMENTS, (uint8_t)index_type, is_packed, is_full_vbo, attributes, streams);
+ #endif
+@@ -1822,7 +1841,7 @@ void _vglDrawObjects_CustomShadersIMPL() {
+ 	VGL_STREAM_FLUSH_IF_NEEDED() // GLB
+ 
+ 	// Check if a blend info rebuild is required
+-	setup_frag_program();
++	setup_frag_program_void();
+ 
+ 	// Setting up required vertex shader
+ 	sceGxmSetVertexProgram(gxm_context, p->vprog);
+diff --git a/source/draw.c b/source/draw.c
+index 20104ef..bcb00fb 100644
+--- a/source/draw.c
++++ b/source/draw.c
+@@ -175,7 +175,8 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+ #endif
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 	GLboolean is_draw_legal = GL_TRUE;
+ 
+ 	if (cur_program != 0)
+@@ -186,9 +187,7 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+ 		_glDrawArrays_FixedFunctionIMPL(first, count);
+ 	}
+ 
+-#ifndef SKIP_ERROR_HANDLING
+-	if (is_draw_legal)
+-#endif
++	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
+ 	{
+ 		uint16_t *ptr;
+ 		switch (mode) {
+@@ -231,7 +230,8 @@ void glMultiDrawArrays(GLenum mode, const GLint *first, const GLsizei *count, GL
+ 	}
+ #endif
+ 
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 	
+ 	GLint lowest = 0x7FFFFFFF;
+ 	GLsizei highest = 0, highest_count = 0;
+@@ -295,12 +295,11 @@ void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei prim
+ #endif
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 	GLboolean is_draw_legal = _glDrawArrays_CustomShadersIMPL(first, count, GL_TRUE);
+ 
+-#ifndef SKIP_ERROR_HANDLING
+-	if (is_draw_legal)
+-#endif
++	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
+ 	{
+ 		uint16_t *ptr;
+ 		switch (mode) {
+@@ -354,7 +353,8 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_in
+ 
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 	GLboolean is_draw_legal = GL_TRUE;
+ 
+ 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
+@@ -375,9 +375,7 @@ void glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *gl_in
+ 		_glDrawElements_FixedFunctionIMPL(src, count, 0, 0, type != GL_UNSIGNED_INT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
+ 	}
+ 
+-#ifndef SKIP_ERROR_HANDLING
+-	if (is_draw_legal)
+-#endif
++	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
+ 	{
+ 		if (type == GL_UNSIGNED_SHORT) {
+ 			setup_elements_indices(uint16_t);
+@@ -408,7 +406,8 @@ void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLv
+ 
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 	GLboolean is_draw_legal = GL_TRUE;
+ 
+ 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
+@@ -421,9 +420,7 @@ void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, const GLv
+ 		_glDrawElements_FixedFunctionIMPL(src, count, 0, baseVertex, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
+ 	}
+ 
+-#ifndef SKIP_ERROR_HANDLING
+-	if (is_draw_legal)
+-#endif
++	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
+ 	{
+ 		if (type == GL_UNSIGNED_INT) {
+ 			setup_elements_indices(uint32_t);
+@@ -455,7 +452,8 @@ void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, G
+ 
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 	GLboolean is_draw_legal = GL_TRUE;
+ 
+ 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
+@@ -468,9 +466,7 @@ void glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, G
+ 		_glDrawElements_FixedFunctionIMPL(src, count, end + 1, 0, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
+ 	}
+ 
+-#ifndef SKIP_ERROR_HANDLING
+-	if (is_draw_legal)
+-#endif
++	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
+ 	{
+ 		if (type == GL_UNSIGNED_INT) {
+ 			setup_elements_indices(uint32_t);
+@@ -500,7 +496,8 @@ void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsize
+ 
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 	GLboolean is_draw_legal = GL_TRUE;
+ 
+ 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
+@@ -513,9 +510,7 @@ void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end, GLsize
+ 		_glDrawElements_FixedFunctionIMPL(src, count, end + baseVertex + 1, baseVertex, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INDEX_16BIT : SCE_GXM_INDEX_SOURCE_INDEX_32BIT);
+ 	}
+ 
+-#ifndef SKIP_ERROR_HANDLING
+-	if (is_draw_legal)
+-#endif
++	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
+ 	{
+ 		if (type == GL_UNSIGNED_INT) {
+ 			setup_elements_indices(uint32_t)
+@@ -547,15 +542,14 @@ void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void
+ 
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 
+ 	vbo *gpu_buf = (vbo *)cur_vao->index_array_unit;
+ 	uint16_t *src = gpu_buf ? (uint16_t *)((uint8_t *)gpu_buf->ptr + (uint32_t)gl_indices) : (uint16_t *)gl_indices;
+ 	GLboolean is_draw_legal = _glDrawElements_CustomShadersIMPL(src, count, 0, 0, type == GL_UNSIGNED_SHORT ? SCE_GXM_INDEX_SOURCE_INSTANCE_16BIT : SCE_GXM_INDEX_SOURCE_INSTANCE_32BIT);
+ 
+-#ifndef SKIP_ERROR_HANDLING
+-	if (is_draw_legal)
+-#endif
++	if (is_draw_legal) // 1.2: also without error handling: a draw whose program could not be made is not submitted
+ 	{
+ 		if (type == GL_UNSIGNED_INT) {
+ 			setup_elements_indices(uint32_t);
+@@ -584,7 +578,8 @@ void vglDrawObjects(GLenum mode, GLsizei count) {
+ 
+ 	SceGxmPrimitiveType gxm_p;
+ 	gl_primitive_to_gxm(mode, gxm_p, count);
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: nothing is submitted
+ 
+ 	texture_unit *tex_unit = &texture_units[0];
+ 	if (cur_program != 0) {
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index 918a928..d5f859c 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -822,7 +822,10 @@ void glBlitNamedFramebuffer(GLuint readFramebuffer, GLuint drawFramebuffer, GLin
+ 		SET_GL_ERROR_WITH_VALUE(GL_INVALID_OPERATION, mask)
+ 	}
+ 
+-	scene_reset();
++	if (!scene_reset()) { // 1.2: no scene could be started: the blit is skipped
++		active_write_fb = real_write_fb;
++		return;
++	}
+ 
+ 	// Invalidating viewport and culling
+ 	invalidate_viewport();
+diff --git a/source/gxm.c b/source/gxm.c
+index 9c43b0b..d1855a9 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -67,6 +67,21 @@ GLboolean dirty_query = GL_FALSE; // Flag whether occlusion queries needs result
+ static GLboolean needs_end_scene = GL_FALSE; // Flag for gxm end scene requirement at scene reset
+ static GLboolean needs_scene_reset = GL_TRUE; // Flag for when a scene reset is required
+ static GLboolean scene_not_flushed = GL_FALSE; // Flag for when a scene had been forcibly flushed as last operation
++// 1.2 robust scene entry (vglSetRobustScenes, default on): see scene_reset
++GLboolean vgl_robust_scenes = GL_TRUE;
++static GLboolean scene_fail_valid = GL_FALSE; // the last scene entry that failed: for which framebuffer and in which frame
++static framebuffer *scene_fail_fb = NULL;
++static uint32_t scene_fail_frame = 0;
++static uint32_t vgl_scene_failures = 0;
++uint32_t vgl_shader_patch_failures = 0; // shared.h patch_vertex_program / patch_fragment_program
++void vglSetRobustScenes(uint32_t enabled) { vgl_robust_scenes = enabled ? GL_TRUE : GL_FALSE; }
++uint32_t vglRobustFailures(uint32_t *scene_begins, uint32_t *shader_patches) {
++	if (scene_begins)
++		*scene_begins = vgl_scene_failures;
++	if (shader_patches)
++		*shader_patches = vgl_shader_patch_failures;
++	return vgl_scene_failures + vgl_shader_patch_failures;
++}
+ 
+ SceGxmContext *gxm_context; // sceGxm context instance
+ GLenum vgl_error = GL_NO_ERROR; // Error returned by glGetError
+@@ -517,7 +532,9 @@ void init_display_color_surfaces(GLboolean is_swap) {
+ 	}
+ }
+ 
+-void init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil) {
++// 1.2: false when the surface could not be made (no memory); `surface` is then untouched and nothing allocated is kept. (With vglSetRobustScenes(0) the
++// allocations are not checked, as before.)
++GLboolean init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil) {
+ 	// Calculating sizes for depth and stencil surfaces
+ 	unsigned int depth_stencil_width = VGL_ALIGN(w, SCE_GXM_TILE_SIZEX);
+ #ifndef DEPTH_STENCIL_HACK
+@@ -530,6 +547,10 @@ void init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface
+ 
+ 	// Allocating depth surface
+ 	void *depth_buffer = gpu_alloc_mapped_aligned_for_gpu(SCE_GXM_DEPTHSTENCIL_SURFACE_ALIGNMENT, 4 * depth_stencil_samples);
++	if (!depth_buffer && vgl_robust_scenes) {
++		vgl_log("%s:%d Failed to allocate the %u byte depth surface of a %ux%u framebuffer.\n", __FILE__, __LINE__, 4 * depth_stencil_samples, w, h);
++		return GL_FALSE;
++	}
+ 
+ #ifdef STORE_DEPTH_STENCIL
+ 	// Initializing mask update bit to 1
+@@ -540,6 +561,11 @@ void init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface
+ 	// Allocating stencil surface
+ #ifndef DEPTH_STENCIL_HACK
+ 	void *stencil_buffer = has_stencil ? gpu_alloc_mapped_aligned_for_gpu(SCE_GXM_DEPTHSTENCIL_SURFACE_ALIGNMENT, depth_stencil_samples) : NULL;
++	if (has_stencil && !stencil_buffer && vgl_robust_scenes) {
++		vgl_log("%s:%d Failed to allocate the %u byte stencil surface of a %ux%u framebuffer.\n", __FILE__, __LINE__, depth_stencil_samples, w, h);
++		mark_as_dirty(depth_buffer); // (never used by a scene: the collector frees it)
++		return GL_FALSE;
++	}
+ #endif
+ 
+ 	// Initializing depth and stencil surfaces
+@@ -558,6 +584,7 @@ void init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface
+ 	sceGxmDepthStencilSurfaceSetForceLoadMode(surface, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_ENABLED);
+ 	sceGxmDepthStencilSurfaceSetForceStoreMode(surface, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_ENABLED);
+ #endif
++	return GL_TRUE;
+ }
+ 
+ void init_display_depth_stencil_surfaces(void) {
+@@ -616,7 +643,30 @@ static inline __attribute__((always_inline)) void scene_end(void) {
+ 		sceDisplayWaitVblankStartMulti(vsync_interval);
+ }
+ 
+-void scene_reset(void) {
++// 1.2: a scene entry that could not be completed (no memory for the framebuffer's depth/stencil surface or render target, or sceGxmBeginScene refused).
++// There is no open scene afterwards, which is the state vglSwapBuffers leaves: the previous scene (if any) was ended, needs_scene_reset makes the next
++// attempt start a scene from nothing, and the callers (draws, clears, blits) skip themselves on the false it returns. The same framebuffer is not tried
++// again before the next frame: an allocation that failed has already been through the allocator's recovery (a GPU finish and delayed retries), which
++// costs seconds, and a draw call after draw call must not each pay for that.
++static GLboolean scene_reset_failed(void) {
++	scene_fail_valid = GL_TRUE;
++	scene_fail_fb = active_write_fb;
++	scene_fail_frame = vgl_framecount;
++	needs_end_scene = GL_FALSE;
++	needs_scene_reset = GL_TRUE;
++	vgl_scene_failures++;
++	vgl_rt_hint_valid = GL_FALSE; // (the operation that the hint was for is skipped)
++	vgl_rt_clear_full = GL_FALSE;
++	return GL_FALSE;
++}
++
++GLboolean scene_reset(void) {
++	if (vgl_robust_scenes && scene_fail_valid && scene_fail_frame == vgl_framecount && scene_fail_fb == active_write_fb &&
++		(in_use_framebuffer != active_write_fb || needs_scene_reset || dirty_framebuffer || dirty_query)) {
++		vgl_rt_hint_valid = GL_FALSE;
++		vgl_rt_clear_full = GL_FALSE;
++		return GL_FALSE;
++	}
+ 	if (in_use_framebuffer != active_write_fb || needs_scene_reset || dirty_framebuffer || dirty_query) {
+ 		// RT: timers of the scene change (rt.c)
+ 		const GLboolean rt_time = (vgl_rt_flags & VGL_RT_CPU_TIMERS) != 0;
+@@ -676,6 +726,8 @@ void scene_reset(void) {
+ 				vgl_log("%s:%d Scene reset failed due to sceGxmBeginScene erroring (%s) on display.\n", __FILE__, __LINE__, get_gxm_error_literal(r));
+ 			}
+ #endif
++			if (r && vgl_robust_scenes)
++				return scene_reset_failed();
+ 		} else {
+ 			// Double check that colorsurface and target texture are synced
+ 			if (sceGxmColorSurfaceGetData(&active_write_fb->colorbuffer) != active_write_fb->tex->data) {
+@@ -684,7 +736,10 @@ void scene_reset(void) {
+ 			
+ 			// If the depthbuffer is dirty, we re-gen it
+ 			if (!(active_write_fb->depthbuffer_state & DEPTHBUFFER_READY)) {
+-				init_depth_stencil_buffer(active_write_fb->width, active_write_fb->height, &active_write_fb->depthbuffer, active_write_fb->depthbuffer_state == DEPTHBUFFER_WANTS_STENCIL);
++				if (!init_depth_stencil_buffer(active_write_fb->width, active_write_fb->height, &active_write_fb->depthbuffer, active_write_fb->depthbuffer_state == DEPTHBUFFER_WANTS_STENCIL) && vgl_robust_scenes) {
++					vgl_log("%s:%d Scene reset failed: no depth/stencil surface for framebuffer 0x%08X (%dx%d).\n", __FILE__, __LINE__, active_write_fb, active_write_fb->width, active_write_fb->height);
++					return scene_reset_failed();
++				}
+ 				active_write_fb->depthbuffer_ptr = &active_write_fb->depthbuffer;
+ 				active_write_fb->depthbuffer_state |= DEPTHBUFFER_READY;
+ 			}
+@@ -711,6 +766,10 @@ void scene_reset(void) {
+ 				}
+ 			}
+ #endif
++			if (!active_write_fb->target && vgl_robust_scenes) {
++				vgl_log("%s:%d Scene reset failed: no render target for framebuffer 0x%08X (%dx%d).\n", __FILE__, __LINE__, active_write_fb, active_write_fb->width, active_write_fb->height);
++				return scene_reset_failed();
++			}
+ 			rt_applied = vgl_rt_scene_begin(active_write_fb->depthbuffer_ptr, active_write_fb->width, active_write_fb->height);
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ 			render_target *fbo_rt = (render_target *)active_write_fb->target;
+@@ -728,6 +787,8 @@ void scene_reset(void) {
+ 			if (r)
+ 				vgl_log("%s:%d Scene reset failed due to sceGxmBeginScene erroring (%s) on framebuffer 0x%08X.\n", __FILE__, __LINE__, get_gxm_error_literal(r), active_write_fb);
+ #endif
++			if (r && vgl_robust_scenes)
++				return scene_reset_failed();
+ 		}
+ 
+ 		if (rt_time)
+@@ -777,6 +838,7 @@ void scene_reset(void) {
+ 	if (dirty_scissor_state) {
+ 		update_scissor_test();
+ 	}
++	return GL_TRUE;
+ }
+ 
+ /*
+diff --git a/source/misc.c b/source/misc.c
+index 71b09c0..fbc7fee 100644
+--- a/source/misc.c
++++ b/source/misc.c
+@@ -654,7 +654,8 @@ void glClear(GLbitfield mask) {
+ 		vgl_rt_clear_full = (mask & GL_DEPTH_BUFFER_BIT) && depth_mask_state && !scissor_test_state &&
+ 			(!stencil || ((mask & GL_STENCIL_BUFFER_BIT) && (stencil_mask_front_write & 0xFF) == 0xFF && (stencil_mask_back_write & 0xFF) == 0xFF));
+ 	}
+-	scene_reset();
++	if (!scene_reset())
++		return; // 1.2: no scene could be started: the clear is skipped
+ 
+ 	// Invalidating viewport and culling
+ 	invalidate_viewport();
+diff --git a/source/rt.c b/source/rt.c
+index 8685034..c13a4d7 100644
+--- a/source/rt.c
++++ b/source/rt.c
+@@ -70,10 +70,19 @@ static SceUID rt_sema = -1, rt_thread = -1;
+ static uint32_t rt_frame = 0; // render thread: frames (vglSwapBuffers) so far
+ static vglRtGpuFrame rt_gpu_frames[RT_FRAMES];
+ static volatile uint32_t rt_gpu_frame_head = 0;
++static uint32_t rt_gpu_frame_ids[RT_FRAMES]; // the render frame (rt_frame) each published GPU frame record belongs to
++// RING GUARD (1.2): a scene is never recorded over a record the watcher has not finished with (see vgl_rt_end_scene). A scene that is not recorded is
++// counted here, and the GPU frame it belongs to is published with timed = 0 (its busy time would be missing a scene).
++static GLboolean rt_ring_guard = GL_TRUE;
++static volatile uint32_t rt_ring_drops = 0;
++static uint32_t rt_drop_mark[RT_FRAMES]; // frame number + 1, by frame number % RT_FRAMES: the frames that lost a record
+ static volatile uint32_t rt_gpu_scenes_timed = 0, rt_gpu_scenes_untimed = 0, rt_gpu_scenes_late = 0;
+ 
+ static inline uint32_t rt_now(void) { return sceKernelGetProcessTimeLow(); }
+ 
++void vglRtSetRingGuard(uint32_t enabled) { rt_ring_guard = enabled ? GL_TRUE : GL_FALSE; } // (default on; 0 = the 1.1 behaviour; before vglRtSetup)
++uint32_t vglRtRingDrops(void) { return rt_ring_drops; }
++
+ uint32_t vgl_rt_ds_bytes(uint32_t w, uint32_t h, GLboolean stencil) {
+ 	uint32_t n = VGL_ALIGN(w, SCE_GXM_TILE_SIZEX) * VGL_ALIGN(h, SCE_GXM_TILE_SIZEY);
+ 	if (msaa_mode == SCE_GXM_MULTISAMPLE_2X)
+@@ -153,6 +162,17 @@ uint32_t vgl_rt_now(void) { return rt_now(); }
+ // gxm.c scene_end: sceGxmEndScene with this scene's own fragment notification (GPU timers on)
+ void vgl_rt_end_scene(SceGxmContext *ctx) {
+ 	const uint32_t seq = rt_produced;
++	if (rt_ring_guard && seq - rt_consumed >= RT_SCENES) {
++		// The watcher still holds the record this scene would take (it keeps a pointer to it across the notification wait). Writing over it would
++		// make the watcher answer for the wrong scene: its wait ends when the old scene is done and it then sets a notification value of the new one,
++		// which certifies scenes that are not finished (query_fence also guards the uniform buffers' reuse). The scene is submitted with the plain
++		// fence and has no record; recording resumes when the watcher has caught up. Nothing is dropped from the GPU's work.
++		sceGxmEndScene(ctx, NULL, &query_fence);
++		if (rt_ring_drops != 0xFFFFFFFFu)
++			rt_ring_drops++;
++		rt_drop_mark[rt_frame % RT_FRAMES] = rt_frame + 1;
++		return;
++	}
+ 	rt_scene_rec *r = &rt_ring[seq % RT_SCENES];
+ 	r->frame = rt_frame;
+ 	r->done_us = 0;
+@@ -217,6 +237,7 @@ static int rt_watcher(SceSize args, void *argp) {
+ 				f->tail_us = timed ? last_done - last_submit : 0;
+ 				f->scenes = scenes;
+ 				f->timed = timed;
++				rt_gpu_frame_ids[rt_gpu_frame_head % RT_FRAMES] = cur;
+ 				__sync_synchronize();
+ 				rt_gpu_frame_head++;
+ 			}
+@@ -297,6 +318,12 @@ uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out) {
+ 		return 0;
+ 	__sync_synchronize();
+ 	*out = rt_gpu_frames[(h - 1) % RT_FRAMES];
++	// A frame that lost a scene's record has a busy time that leaves that scene out: not offered as a measurement.
++	if (rt_ring_drops) {
++		const uint32_t fid = rt_gpu_frame_ids[(h - 1) % RT_FRAMES];
++		if (rt_drop_mark[fid % RT_FRAMES] == fid + 1)
++			out->timed = 0;
++	}
+ 	return h;
+ }
+ 
+diff --git a/source/shared.h b/source/shared.h
+index 67ec3df..eb08475 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -483,23 +483,28 @@ extern GLboolean prim_is_non_native; // Flag for when a primitive not supported
+ 
+ extern size_t max_vcache_size;
+ extern size_t max_fcache_size;
+-static inline __attribute__((always_inline)) void patch_vertex_program(SceGxmShaderPatcherId id, const SceGxmVertexAttribute *attr, uint32_t attr_num, const SceGxmVertexStream *stream, uint32_t stream_num, SceGxmVertexProgram **prog) {
++// 1.2: both return the sceGxm result (0 = made); a program that was not made is not published by the callers that check it (custom_shaders.c)
++extern GLboolean vgl_robust_scenes; // gxm.c vglSetRobustScenes: the 1.2 failure handling (scene entry, shader patching) is on
++extern uint32_t vgl_shader_patch_failures;
++static inline __attribute__((always_inline)) int patch_vertex_program(SceGxmShaderPatcherId id, const SceGxmVertexAttribute *attr, uint32_t attr_num, const SceGxmVertexStream *stream, uint32_t stream_num, SceGxmVertexProgram **prog) {
+ 	int r = vglCreateVertexProgram(id, attr, attr_num, stream, stream_num, prog);
+-#ifdef LOG_ERRORS
+ 	if (r) {
++		vgl_shader_patch_failures++;
++#ifdef LOG_ERRORS
+ 		vgl_log("Vertex shader patching failed (%s) on shader 0x%X with %d attributes and %d streams.\n", get_gxm_error_literal(r), id, attr_num, stream_num);
+-		return;
+-	}
+ #endif
++	}
++	return r;
+ }
+-static inline __attribute__((always_inline)) void patch_fragment_program(SceGxmShaderPatcherId id, SceGxmOutputRegisterFormat fmt, SceGxmMultisampleMode msaa_mode, const SceGxmBlendInfo *blend_cfg, const SceGxmProgram *vertex_link, SceGxmFragmentProgram **prog) {
++static inline __attribute__((always_inline)) int patch_fragment_program(SceGxmShaderPatcherId id, SceGxmOutputRegisterFormat fmt, SceGxmMultisampleMode msaa_mode, const SceGxmBlendInfo *blend_cfg, const SceGxmProgram *vertex_link, SceGxmFragmentProgram **prog) {
+ 	int r = sceGxmShaderPatcherCreateFragmentProgram(gxm_shader_patcher, id, fmt, msaa_mode, blend_cfg, vertex_link, prog);
+-#ifdef LOG_ERRORS
+ 	if (r) {
++		vgl_shader_patch_failures++;
++#ifdef LOG_ERRORS
+ 		vgl_log("Fragment shader patching failed (%s) on shader 0x%X.\n", get_gxm_error_literal(r), id);
+-		return;
+-	}
+ #endif
++	}
++	return r;
+ }
+ 
+ #define recalculate_normal_matrix() matrix4x4_normal_matrix(normal_matrix, modelview_matrix)
+@@ -1240,10 +1245,10 @@ void init_gxm(void); // Inits sceGxm
+ void init_gxm_context(SceGxmContext **ctx, uint8_t ctx_slot); // Inits sceGxm context
+ void create_display_render_target(void); // Creates render target for the display
+ void init_display_color_surfaces(GLboolean is_swap); // Creates color surfaces for the display
+-void init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil); // Creates depth and stencil surfaces
++GLboolean init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil); // Creates depth and stencil surfaces
+ void init_display_depth_stencil_surfaces(void); // Creates depth and stencil surfaces for the display
+ void start_shader_patcher(void); // Creates a shader patcher instance
+-void scene_reset(void); // Resets drawing scene if required
++GLboolean scene_reset(void); // Resets drawing scene if required. 1.2: false = no scene could be started, the caller skips what it was going to submit
+ GLboolean start_shader_compiler(void); // Starts a shader compiler instance
+ 
+ /* framebuffers.c */
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index e158cd4..6f592cb 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1420,6 +1420,12 @@ typedef struct {
+ } vglRtStats;
+ void vglRtGetStats(vglRtStats *s);
+ uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out);
++void vglRtSetRingGuard(uint32_t enabled); // 1.2: default 1; 0 = a full timer ring is overwritten as before. Call before vglRtSetup.
++uint32_t vglRtRingDrops(void);            // scenes that were submitted without a timer record because the watcher still held the oldest one
++// 1.2 (source/gxm.c): scene entry that fails (no memory for a framebuffer object's depth/stencil or render target, or sceGxmBeginScene refuses) leaves no
++// open scene and makes the draw, clear or blit that asked skip itself; the same framebuffer is tried again in the next frame at the earliest.
++void vglSetRobustScenes(uint32_t enabled); // default 1; 0 = the 1.1 behaviour (before any drawing)
++uint32_t vglRobustFailures(uint32_t *scene_begins, uint32_t *shader_patches); // scene entries refused / shader programs not made, so far (returns their sum)
+ void vglRtSceneProgress(uint32_t *submitted, uint32_t *done); // scenes ended / seen completed by the GPU watcher (GPU timers on; else 0 / 0)
+ void vglSetAnisotropicFilter(uint32_t sceFilter); // 0 off; 2 or 3: the minification filter of trilinear textures (see utils/gxm_utils.h) // the newest finished GPU frame; returns frames finished so far (0: none)
+ 

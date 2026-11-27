@@ -1,0 +1,20 @@
+# console-1.2 run betweenold: Free-run gate as before wave 9 (26.7 / 30 ms, 6 s cool-down, ladder by the 30 budget)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group pacing, route tour, version payload 1.3, role ab
+# The wave 9 plan: the free run (UP TO 60) is entered under 20 ms of the busiest stage, left over 25 ms for 60 frames, 45 s before the next try (doubled for a failed one), and the ladder judges a free run by 24 ms, so a scene of 20-30 ms keeps a clean 30 at full quality instead of a 1/2 mix at 36-46 pictures a second. This is the old gate. Against the default in a heavy stadium: `[fps] between:` lines (how often it switched, at what time), the `[pace]` display line (the share of 1 and 2 refresh holds in live play) and by eye whether the cadence is even; `[dynres]` levels while free.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FPS_BETWEEN_ENTER=26.7
+MSC_FPS_BETWEEN_LEAVE=30
+MSC_FPS_BETWEEN_COOL=6
+MSC_FPS_BETWEEN_COOLMAX=96
+MSC_FPS_BETWEEN_FAIL=30
+MSC_FPS_BETWEEN_OUT=20
+MSC_DYNRES_PACED_UP_MS=0

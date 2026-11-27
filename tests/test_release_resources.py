@@ -27,6 +27,10 @@ class ReleaseResourceTests(unittest.TestCase):
             "taiHEN-MIT.txt": ["Copyright (c) 2016 Yifan Lu", "Permission is hereby granted"],
             "math-neon-MIT.txt": ["Lachlan Tychsen-Smith", "Permission is hereby granted"],
             "zlib.txt": ["1995-2004 Jean-loup Gailly and Mark Adler", "This notice may not be removed"],
+            "GPL-3.0.txt": ["GNU GENERAL PUBLIC LICENSE", "Version 3"],
+            "LGPL-2.1.txt": ["GNU LESSER GENERAL PUBLIC LICENSE", "Version 2.1"],
+            "GCC-runtime-exception.txt": ["GCC RUNTIME LIBRARY EXCEPTION", "Version 3.1", "No Weakening of GCC Copyleft"],
+            "vitaGL-bundled-notices.txt": ["Harm Hanemaaijer", "Chukong Technologies", "Permission is hereby granted"],
         }
         for name, phrases in expected.items():
             path = ROOT / "licenses" / name
@@ -34,6 +38,18 @@ class ReleaseResourceTests(unittest.TestCase):
                 self.assertTrue(path.is_file(), name + " is missing")
                 for phrase in phrases:
                     self.assertIn(phrase, path.read_text())
+
+    def test_notices_name_every_static_library_with_its_terms(self):
+        text = (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
+        rows = {line.split("|")[1].strip(): line for line in text.splitlines() if line.startswith("| ")}
+        self.assertIn("LGPL", rows["vitaGL"])
+        self.assertNotIn("GPL-3.0, text in", rows["vitaGL"])
+        self.assertIn("LGPL-3.0", rows["vitaShaRK"])
+        self.assertIn("GPL-3.0", rows["SceShaccCgExt"])
+        for library in ("libSceShaccCgExt.a", "libvitashark.a", "libvitaGL.a", "libmathneon.a", "libpthread.a", "libstdc++.a", "libgcc.a", "libc.a", "libm.a"):
+            self.assertIn(library, text)
+        for section in ("What a release must ship", "Source route", "Relinking route", "For the owner to decide"):
+            self.assertIn(section, text)
 
 
 if __name__ == "__main__":

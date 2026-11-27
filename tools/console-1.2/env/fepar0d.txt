@@ -1,0 +1,14 @@
+# console-1.2 run fepar0d: Front-end decode worker off (MSC_VGX_FEPAR=0), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group exact, route worstgpu, version payload 1.3, role ab
+# fepar25: the same off side at The Dump (the lane lines in play against worstgpu1 with MSC_VGX_FE_SPLIT=1).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_FEPAR=0
+MSC_VGX_FE_SPLIT=1

@@ -1,0 +1,15 @@
+# console-1.2 run polishoff: Sharpening ease, HD fade and still tolerance off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route tour, version payload 1.3, role ab
+# MSC_SHARPEN_EASE=20 (sharpening strength eased over 20 pictures at a size step), MSC_HDTEX_FADE=8 (an HD texture that arrives late is sampled one level coarser and eases in over 8 pictures) and MSC_STILL_TOL=1 (only with STILL BACKDROPS on) are the defaults; this run is the old behaviour. By eye: a size step and a character's first seconds.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_SHARPEN_EASE=0
+MSC_HDTEX_FADE=0
+MSC_STILL_TOL=0

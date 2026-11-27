@@ -1,0 +1,14 @@
+# console-1.2 run x-freeguard3: x-freeguard3
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group night, route ntour, version payload 1.3, role nab
+# MSC_VGX_FREE_GUARD=3: vitaGL holds every glDeleteTextures / glDeleteFramebuffers 3 presents and reports a delete of a block a scene drew into recently. Judge: no 'FREE WHILE REFERENCED' line, no crash, memory (the held blocks stay 3 presents longer).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/ntour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_VGX_FREE_GUARD=3

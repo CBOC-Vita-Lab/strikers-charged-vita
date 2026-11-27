@@ -1,0 +1,15 @@
+# console-1.2 run heldaa13: Replays and cut-scenes as r15 (MSC_PICTURE_HOLD_MSAA_HELD=auto: 2x at Vice), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r16, route tour, version payload 1.3, role ab
+# Owner 14 Nov 16:55: held scenes one sample everywhere is the r16 default. This is the r15 side: Vice replays and cut-scenes at 2x. Against d1: held-scene fps, [fxaa] compositor acted counts, and the swap cost at the first cut ([cuts] first use).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD_MSAA_HELD=auto
+MSC_HITCH_LINES=1500

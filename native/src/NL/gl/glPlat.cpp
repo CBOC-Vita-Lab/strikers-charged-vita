@@ -1,4 +1,7 @@
+#include <unistd.h>
+#include <stdlib.h>
 #include <revolution/gx/GXPixel.h>
+#include "np/gsplit.h"
 #include <revolution/gx/GXFrameBuf.h>
 #include <revolution/vi/vi_fwd.h>
 #include <revolution/gx/GXMisc_fwd.h>
@@ -30,6 +33,7 @@
 #include <string.h>
 #include "np/framesend.h"
 #include "np/fps.h"
+#include "np/bg30.h"
 #include "Game/Effects/EmissionManager.h"
 #include "Game/GameObjectLighting.h"
 #include "Game/HBMManager.h"
@@ -266,7 +270,7 @@ bool glplatStartup(gl_ScreenInfo* screenInfo)
     glx_ClearXFB(framebufferMemory);
     glx_ClearXFB(glx_FrameBuffer[1]);
 
-    tDebugPrintManager::Print(DC_GL, "%uKB used for FB and FIFO\n", totalSize >> 10, glx_FIFOSize >> 10);
+    tDebugPrintManager::Print(DC_GL, "%uKB used for FB and FIFO\n", totalSize >> 10);
     glx_InitGX();
     VISetNextFrameBuffer(glx_FrameBuffer[0]);
     glxSwapSetBlack(true);
@@ -371,13 +375,13 @@ static void glx_SendView(GLView* view)
             {
                 if (targetMode != 9)
                 {
-                    if (targetMode != 10)
+                    if (targetMode != 10 && targetMode != GLViewTarget_Mode11)
                     {
                         return;
                     }
                 }
             }
-            glplatCopyTargetToTexture(target, targetMode != 8, targetMode == 10);
+            glplatCopyTargetToTexture(target, targetMode != 8, targetMode == 10 || targetMode == GLViewTarget_Mode11, targetMode == GLViewTarget_Mode11);
         }
     }
 }
@@ -467,6 +471,7 @@ unsigned long long gSendForks;
 unsigned long gSendSnapFailsSeen;      // GLSnapshotFailures() at the last fork
 unsigned long long gSendSerialised;    // frames joined at once after a snapshot that did not fit
 int gSendMaxViews;
+unsigned long long gSendHeldPlain;   // rep27 (MSC_FS_HELD): of gSendNotForked[0], frames of a held scene (replay / cut-scene) sent on the game thread on purpose
 unsigned long long gSendNotForked[4];   // frames of an enabled mode that were sent the plain way: state not forked, indicator / capture, HBM, border
 
 void* RLViewVtable()
@@ -529,12 +534,79 @@ void AddTree(SendSnapshot& snap, GLPacketSorterTree* tree)
     snap.trees[snap.treeCount++] = tree;
 }
 
+// cpu60-25 (MSC_SNAP_SKIPEMPTY, default 1; =0 the old loop): of the ~100 views a picture the send visits, about three in four have nothing to draw, clear or copy
+// (host fb-tour: 72.8 % of 232,000 views). Their send is a render-target note (GLXTarget::Activate sets a pointer), a viewport, a scissor, the fog state and the
+// fx layer note, every one of which the NEXT view that sends something sets again before its first use, so such a view in front of one that does is left out of
+// the snapshot (no copy of the view and of its camera's two matrices on the game thread, no records and no calls in the job) when that view is an RLView that runs
+// its BeginRender (see the loop). The empty views AFTER the last view that
+// sends something are snapshotted as before: the state the frame leaves behind (fog, viewport) is what the draws after the send (home button menu, indicators) see.
+// A left-out view gets the triangle count 0 its send would have set. MSC_SNAP_SKIPEMPTY_BREAK=1 (proof only): every fifth view that has packets is left out too, the
+// frame hashes must change.
+int SnapSkipEmptyMode()
+{
+    static int on = -1;
+    if (on < 0)
+    {
+        const char* e = getenv("MSC_SNAP_SKIPEMPTY");
+        on = (e != 0 && e[0] == '0') ? 0 : 1;
+    }
+    return on;
+}
+int SnapSkipEmptyBreak()
+{
+    static int b = -1;
+    if (b < 0)
+    {
+        const char* e = getenv("MSC_SNAP_SKIPEMPTY_BREAK");
+        b = (e != 0 && e[0] == '1') ? 1 : 0;
+    }
+    return b;
+}
+unsigned long long sSkipViewsSeen, sSkipViewsLeftOut, sSkipPictures;
+
+// the shadow of one view the send visits (the part of the old loop body after the viewport test)
+void MakeShadow(SendSnapshot& snap, GLView* live, bool pipe, void* rlVtable)
+{
+    ViewShadow& shadow = *NextShadow(snap);
+    shadow.live = live;
+    const size_t bytes = (*reinterpret_cast<void**>(live) == rlVtable) ? sizeof(RLView) : sizeof(GLView);
+    memcpy(static_cast<void*>(shadow.object), static_cast<const void*>(live), bytes);
+    GLViewInterface* source = live->m_Interface;
+    if (source != 0)
+    {
+        source->GetViewMatrix(shadow.iface.mView);
+        source->GetProjectionMatrix(shadow.iface.mProjection);
+        shadow.View()->m_Interface = &shadow.iface;
+    }   // (a view without an interface keeps none: the plain path never asks a view without packets for its matrices)
+    shadow.View()->m_Unknown38 = live;   // GLViewIdentity()
+    if (pipe)
+    {
+        // the live view gets a clean tree for the next frame's packets; the job walks (and then clears) the old one
+        GLPacketSorterTree* taken = NpViewTakeTree(live);
+        if (taken != 0)
+        {
+            AddTree(snap, taken);
+            shadow.View()->m_Sorters = taken;
+        }
+        else
+        {
+            shadow.View()->m_Sorters = NpViewEmptyTree();   // (nothing was attached: the shadow must not share the tree the next frame fills)
+        }
+    }
+}
+
 void SnapshotViews(SendSnapshot& snap, bool pipe)
 {
     void* rlVtable = RLViewVtable();
     snap.count = 0;
     snap.treeCount = 0;
     snap.pipe = pipe;
+    const bool skipEmpty = pipe && SnapSkipEmptyMode() != 0;
+    const bool skipBreak = skipEmpty && SnapSkipEmptyBreak() != 0;
+    const int kMaxPending = 256;
+    GLView* pending[kMaxPending];   // the views with nothing to send that wait for the next view that sends something
+    int numPending = 0;
+    unsigned seenBreak = 0;
     GLViewIterator iterator(&gRootView);
     for (; !iterator.IsDone(); iterator.Next())
     {
@@ -553,33 +625,55 @@ void SnapshotViews(SendSnapshot& snap, bool pipe)
             }
             continue;
         }
-        ViewShadow& shadow = *NextShadow(snap);
-        shadow.live = live;
-        const size_t bytes = (*reinterpret_cast<void**>(live) == rlVtable) ? sizeof(RLView) : sizeof(GLView);
-        memcpy(static_cast<void*>(shadow.object), static_cast<const void*>(live), bytes);
-        GLViewInterface* source = live->m_Interface;
-        if (source != 0)
+        if (skipEmpty)
         {
-            source->GetViewMatrix(shadow.iface.mView);
-            source->GetProjectionMatrix(shadow.iface.mProjection);
-            shadow.View()->m_Interface = &shadow.iface;
-        }   // (a view without an interface keeps none: the plain path never asks a view without packets for its matrices)
-        shadow.View()->m_Unknown38 = live;   // GLViewIdentity()
-        if (pipe)
-        {
-            // the live view gets a clean tree for the next frame's packets; the job walks (and then clears) the old one
-            GLPacketSorterTree* taken = NpViewTakeTree(live);
-            if (taken != 0)
+            ++sSkipViewsSeen;
+            if (NpViewSendsNothing(live))
             {
-                AddTree(snap, taken);
-                shadow.View()->m_Sorters = taken;
+                if (numPending < kMaxPending)
+                {
+                    pending[numPending++] = live;
+                    continue;
+                }
+                // (the table is full: the views waiting go the old way, in their order, then this one)
+                for (int k = 0; k < numPending; ++k)
+                    MakeShadow(snap, pending[k], pipe, rlVtable);
+                numPending = 0;
+                MakeShadow(snap, live, pipe, rlVtable);
+                continue;
             }
-            else
+            // this view sends something. The empty views before it are left out only if its send sets again everything theirs sets: an RLView whose Iterate runs
+            // (visible, and the picture is not a light one that skips background layers) calls BeginRender, which sets the fog state unconditionally; a plain
+            // GLView draws with the fog state the views before it left (the Dump's frame hashes differed when this was not asked: the first version left them out
+            // before any view).
+            if (numPending != 0)
             {
-                shadow.View()->m_Sorters = NpViewEmptyTree();   // (nothing was attached: the shadow must not share the tree the next frame fills)
+                if (*reinterpret_cast<void**>(live) == rlVtable && live->m_Visible && NpBg30SendLight() == 0)
+                {
+                    for (int k = 0; k < numPending; ++k)
+                        pending[k]->m_TriangleCount = 0;
+                    sSkipViewsLeftOut += numPending;
+                }
+                else
+                {
+                    for (int k = 0; k < numPending; ++k)
+                        MakeShadow(snap, pending[k], pipe, rlVtable);
+                }
+                numPending = 0;
+            }
+            if (skipBreak && (++seenBreak % 5) == 0)
+            {
+                GLPacketSorterTree* taken = NpViewTakeTree(live);   // (proof mutant: the view's packets are not sent)
+                if (taken != 0)
+                    AddTree(snap, taken);
+                continue;
             }
         }
+        MakeShadow(snap, live, pipe, rlVtable);
     }
+    for (int k = 0; k < numPending; ++k)   // (the empty views at the end of the list: sent as before)
+        MakeShadow(snap, pending[k], pipe, rlVtable);
+    ++sSkipPictures;
     if (snap.count > gSendMaxViews)
     {
         gSendMaxViews = snap.count;
@@ -668,9 +762,12 @@ extern "C" void NpGlSendLogStats(void)
     NpGlxFrameStats();
     NpViewTreeStats();
     fprintf(stderr, "[fs]   views: up to %d sent per frame, %d shadow objects made\n", gSendMaxViews, gSendSnapshot.capacity);
+    if (sSkipPictures != 0)
+        fprintf(stderr, "[fs]   MSC_SNAP_SKIPEMPTY=%d: %.1f views a picture with a viewport, %.1f of them left out of the snapshot (nothing to send, a later view sends)\n", SnapSkipEmptyMode(), (double)sSkipViewsSeen / (double)sSkipPictures, (double)sSkipViewsLeftOut / (double)sSkipPictures);
     fprintf(stderr, "[fs]   frames joined at once because a packet copy did not fit the frame arena: %llu\n", gSendSerialised);
     fprintf(stderr, "[fs]   frames sent as a job: %llu; sent the plain way although the mode is on: state not forked %llu, indicator or capture %llu, HBM %llu, border %llu\n",
             gSendForks, gSendNotForked[0], gSendNotForked[1], gSendNotForked[2], gSendNotForked[3]);
+    if (gSendHeldPlain != 0) fprintf(stderr, "[fs]   of the state-not-forked frames, held scenes sent on the game thread (MSC_FS_HELD): %llu\n", gSendHeldPlain);
 }
 
 // Tries to send the frame as a job. The caller (glSendFrame) has not yet counted the frame; returns false when the frame has to be
@@ -685,6 +782,12 @@ bool glplatSendFrameForked()
     if (tasks == 0 || (tasks->mCurrentState & (u32)NpFsStates()) == 0)
     {
         ++gSendNotForked[0];
+        if (tasks != 0 && &NpFsHeldStates != 0 && (tasks->mCurrentState & (u32)NpFsHeldStates()) != 0)
+        {
+            ++gSendHeldPlain;   // rep27 (MSC_FS_HELD)
+            if (gSendHeldPlain == 1 || gSendHeldPlain % 1800 == 0)
+                fprintf(stderr, "[fs] MSC_FS_HELD: %llu held-scene frames sent on the game thread so far (task state 0x%X)\n", gSendHeldPlain, (unsigned)tasks->mCurrentState);
+        }
         return false;
     }
     if (glxSwapLoadingIndicator() || glxSwapScreenCaptureWanted())
@@ -710,9 +813,11 @@ bool glplatSendFrameForked()
         NpFsAfterJoin(SendAfterJoin);
     }
     NpFsJoin();   // (a job from an earlier frame is long joined at the task boundary, or, in the two-stage pipeline, it is this join that ends it)
-    glxSwapPost(true);
+    { NP_GS(NPGS_WAIT_SWAP); glxSwapPost(true); }   // (frame24: MSC_GSPLIT booked this wait as end-frame 'send': the draw-done and pacing wait is not CPU)
     const bool pipe = NpFsPipe() != 0;
+    NpGsSeq gsq(NPGS_E_SNAPVIEWS);   // gt27 (MSC_GSPLIT): the send's parts on the game thread
     SnapshotViews(gSendSnapshot, pipe);
+    gsq.Next(NPGS_E_ATFORK);
     glxSwapPreFork();
     StadiumTimeAtFork();
     EmissionLightsAtFork();
@@ -726,6 +831,7 @@ bool glplatSendFrameForked()
     bool serialise = false;
     if (pipe)
     {
+        gsq.Next(NPGS_E_PKTREFRESH);
         GLRefreshPacketSnapshots();   // the copies the sorters hold: what the persistent packets hold at the end of the build
         // A packet or skin buffer the arena had no room to copy is sent from the persistent original: such a frame is joined right after
         // the fork, so the next build does not overlap it (a slow frame instead of a race).
@@ -736,9 +842,12 @@ bool glplatSendFrameForked()
             serialise = true;
             ++gSendSerialised;
         }
+        gsq.Next(NPGS_E_FORK);
         glplatFrameAllocForkFlip();   // the next frame builds in the other half of the frame arena
     }
+    gsq.Next(NPGS_E_FORK);
     NpFsFork(SendJob, &gSendSnapshot);
+    gsq.Next(NPGS_E_HOOK);
     // The frame hook (nav script, state hash, frame limit) runs here, on the game thread, where the serial order runs it: the
     // script's pad state for the next frame has to be set before the next PlatPadUpdateTask. A frame limit that ends the run
     // drains the job first (np_harness.cpp Finish).
@@ -746,22 +855,24 @@ bool glplatSendFrameForked()
     {
         NpFramePresentedFromGame();
     }
+    gsq.Next(NPGS_E_SENDTAIL);
     if (serialise)
     {
         NpFsJoin();
     }
-    NpFpsLateWaitAfterSend();   // W5 RT (MSC_LATE_WAIT=1, np/fps.h): the 30 fps wait, now that the frame is on its way
+    { NP_GS(NPGS_WAIT_PACE); NpFpsLateWaitAfterSend(); }   // W5 RT (MSC_LATE_WAIT=1, np/fps.h): the 30 fps wait, now that the frame is on its way (frame24: tagged as a wait for MSC_GSPLIT)
     return true;
 }
 #endif
 
 void glplatSendFrame()
 {
-    glxSwapPost(true);
+    { NP_GS(NPGS_WAIT_SWAP); glxSwapPost(true); }
     glx_SendViews();
     glxSwapPre(true);
     glplatFrameAllocNextFrame();
 #ifdef NP_NATIVE
+    NP_GS(NPGS_WAIT_PACE);
     NpFpsLateWaitAfterSend();   // W5 RT (MSC_LATE_WAIT=1, np/fps.h): the 30 fps wait, now that the frame is on its way
 #endif
 }
@@ -771,6 +882,23 @@ void glplatAbortFrame()
     glplatFrameAllocNextFrame();
     glxSwapWaitDrawDone();
     VIWaitForRetrace();
+}
+
+void glplatAbortFrameFast()
+{
+    glplatFrameAllocNextFrame();
+    glxSwapWaitDrawDone();
+#ifdef NP_NATIVE
+    // MSC_DISCARD_FAST_YIELD_US (default 1000): an unpaced discarded frame sleeps this long, so the loop does not spin on its core and starve the lower-priority threads there (loaders, audio)
+    static int sYieldUs = -1;
+    if (sYieldUs < 0)
+    {
+        const char* e = getenv("MSC_DISCARD_FAST_YIELD_US");
+        sYieldUs = (e != 0 && *e != 0) ? atoi(e) : 1000;
+        if (sYieldUs < 0) sYieldUs = 0;
+    }
+    if (sYieldUs > 0) usleep((useconds_t)sYieldUs);
+#endif
 }
 
 void glplatFinish()

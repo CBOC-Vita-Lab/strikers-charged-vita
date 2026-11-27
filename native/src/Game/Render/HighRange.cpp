@@ -15,6 +15,24 @@
 #include "NL/nlMemory.h"
 #include "NL/nlPrint.h"
 #include "NL/nlString.h"
+#include "np/scenecut.h"
+
+#ifdef NP_NATIVE
+#include <stdio.h>
+// MSC_FX_GLOW=half (np/scenecut.h): the chain stops one level early
+// MSC_FX_GLOW_DEAD=1 (np/scenecut.h): the same stop one level early, but only when the composite does not read the last level (exact)
+static inline int GlowHalf()
+{
+    if (NpSceneGlowHalf()) return 1;
+    if (!NpSceneGlowDead() || !NpSceneGlowDeadUnused(*GetHighRangeTweaks()->miHighRangeIndex.m_pValue)) return 0;
+    return 1;
+}
+// MSC_FX_GLOW_COARSE (np/scenecut.h): the game's coarse route, four passes in place of six
+static inline bool GlowFine(HighRangeTweaks* t) { return *t->mbFineHighRange.m_pValue && !NpSceneGlowCoarse(); }
+#else
+static inline int GlowHalf() { return 0; }
+static inline bool GlowFine(HighRangeTweaks* t) { return *t->mbFineHighRange.m_pValue; }
+#endif
 
 HighRange gHighRange;
 
@@ -185,7 +203,7 @@ void InitializeHighRange(HighRange* state)
 void SetHighRangeTargetsEnabled(
     HighRange* state, int enabled)
 {
-    bool fineHighRange = *GetHighRangeTweaks()->mbFineHighRange.m_pValue;
+    bool fineHighRange = GlowFine(GetHighRangeTweaks());
     for (int i = 0; i < 7; ++i)
     {
         GLView* view = state->mViews[i];
@@ -200,12 +218,16 @@ void SetHighRangeTargetsEnabled(
             state->mViews[i]->m_Target = 0;
         }
     }
+    if (GlowHalf())
+    {
+        state->mViews[6]->m_Target = 0;
+    }
 }
 
 void CompositeHighRange(HighRange*)
 {
     glPoly2 poly;
-    int index = *GetHighRangeTweaks()->miHighRangeIndex.m_pValue;
+    int index = NpSceneCompositeLevel(GlowHalf(), *GetHighRangeTweaks()->miHighRangeIndex.m_pValue);
 
     glSetDefaultState(false);
     glSetCurrentTexture(gHighRange.mTextures[index], GLTT_Diffuse);
@@ -244,21 +266,142 @@ void CompositeHighRange(HighRange*)
     }
 }
 
+#ifdef NP_NATIVE
+// MSC_HELD_GLOW_HALF: once a picture (every picture, glow or not, so that the count of a held scene starts at its first picture); true when this picture's chain is to be skipped.
+// A skip is allowed only when the chain was really drawn within the last two pictures of this held scene (a chain that has not run yet has nothing to show: the first walk-out pictures of the
+// host run read an empty level, the composite then lost the whole glow for one picture).
+static int sGlowTick = 0, sGlowDrawnAt = -100, sHeldPics = 0;
+int HighRangeHeldSkip(int held)
+{
+    if (!held)
+    {
+        sHeldPics = 0;
+        sGlowTick = 0;
+        sGlowDrawnAt = -100;
+        return 0;
+    }
+    ++sGlowTick;
+    return NpSceneGlowSkipPicture(NpSceneGlowRate(), sHeldPics++) && NpSceneGlowRate() > 0 && sGlowTick - sGlowDrawnAt <= (NpSceneGlowRate() >= 3 ? 3 : 2);   // (held25 MSC_HELD_GOV_EFFECTS: rate 3 = every 4th picture, three skipped in a row)
+}
+static int sLiveRun = 0, sLiveTick = 0, sLiveDrawnAt = -100;
+extern "C" int VgxGlowHalfPlay(void) __attribute__((weak));   // renderer (vgx_backend_gl.cpp, MSC_GLOW_HALF_PLAY=1): the ladder's glow step is in force
+int HighRangeLiveSkip(int live)
+{
+    static unsigned sCounted = 0;
+    const int mode = NpSceneGlowPlay();
+    if (!live || mode <= 0 || (mode == 1 && !(&VgxGlowHalfPlay != 0 && VgxGlowHalfPlay())))
+    {
+        sLiveRun = 0;
+        sLiveTick = 0;
+        sLiveDrawnAt = -100;
+        return 0;
+    }
+    ++sLiveTick;
+    // the chain is skipped only when it was really drawn within the last two pictures (the first picture of a run is drawn in full)
+    const int skip = NpSceneGlowPlaySkipPicture(sLiveRun++) && sLiveTick - sLiveDrawnAt <= 2;
+    if (skip && (++sCounted == 1 || sCounted % 600 == 0))
+        fprintf(stderr, "[glow] MSC_GLOW_HALF_PLAY=%d: %u live-play glow chains skipped (the composite reads the previous picture's chain)\n", mode, sCounted);
+    return skip;
+}
+void HighRangeChainDrawn()
+{
+    if (sGlowTick > 0) sGlowDrawnAt = sGlowTick;
+    if (sLiveTick > 0) sLiveDrawnAt = sLiveTick;
+}
+// the blur passes are not made: their views carry no target, so no pass and no copy; level 0 (the capture of the EFB) keeps its target unless MSC_GLOW_L0OFF (gem2a: nothing reads it on a
+// picture that does not run the chain, so its copy and scene are left out too)
+void HighRangeChainOff(HighRange* state)
+{
+    static unsigned sSkipped = 0, sClearOnly = 0;
+    for (int i = NpSceneGlowL0Off() ? 0 : 1; i < 7; ++i)
+        state->mViews[i]->m_Target = 0;
+    // MSC_GLOW_L0OFF=2 (nxr4b): level 0's copy is not needed (nothing reads hr320d on a picture that skips the chain, unless the composite itself reads level 0: index 0) but its clear of the EFB's
+    // alpha plane is (the shadow volumes count in it): the view keeps a target of mode 11, the copy is marked clear-only and the renderer keeps the clear inside the EFB's scene.
+    if (NpSceneGlowL0Mode() == 2 && *GetHighRangeTweaks()->miHighRangeIndex.m_pValue >= 1)
+    {
+        state->mViews[0]->m_Target = GLViewTarget_Mode11;
+        ++sClearOnly;
+    }
+    if (++sSkipped == 1 || sSkipped % 600 == 0)
+        fprintf(stderr, "[glow] MSC_HELD_GLOW_HALF=%d: %u held-scene glow chains skipped (the composite reads the previous picture's chain)%s\n", NpSceneGlowRate(), sSkipped,
+                NpSceneGlowL0Off() ? ", level 0 capture left out too (MSC_GLOW_L0OFF=1: no alpha clear either, NOT exact)" : (NpSceneGlowL0Mode() == 2 ? ", level 0 copy left out, its alpha clear kept in the scene (MSC_GLOW_L0OFF=2)" : ""));
+    if (sClearOnly && (sClearOnly == 1 || sClearOnly % 600 == 0))
+        fprintf(stderr, "[glow] MSC_GLOW_L0OFF=2: %u level-0 copies marked clear-only\n", sClearOnly);
+}
+// MSC_HELD_GLOW_STAGGER (gem2a): the pair of pictures of MSC_HELD_GLOW_HALF=1 shares the chain: the drawn picture makes the capture and the steps down (levels 0..3), the skipped one the steps
+// up (levels 4..6, from level 3 of the picture before). The composite reads level 6 on both: the skipped picture's fresh one, the drawn picture's the one before. Only the fine route and a
+// composite that reads the last level; everything else keeps the all-or-nothing form. Returns true when it drew (or left out) the chain.
+static int sStaggerPrev = 0;   // 0 none yet / a held scene began, 1 steps down drawn, 2 steps up drawn, 3 the whole chain drawn
+bool HighRangeStaggerOn(int held)
+{
+    if (!held) { sStaggerPrev = 0; return false; }
+    HighRangeTweaks* t = GetHighRangeTweaks();
+    return NpSceneGlowStagger() && (NpSceneGlowRate() == 1 || (NpSceneGlowStaggerAllRates() && NpSceneGlowRate() >= 1)) && GlowFine(t) && (!GlowHalf() || (NpSceneGlowStaggerDead() && !NpSceneGlowHalf() && NpSceneGlowDeadUnused(*t->miHighRangeIndex.m_pValue))) && *t->miHighRangeIndex.m_pValue >= (GlowHalf() ? 5 : 6);
+}
+void HighRangeChainFull() { sStaggerPrev = 3; }
+bool HighRangeChainStagger(HighRange* state, int skipped)
+{
+    static unsigned sDown = 0, sUp = 0;
+    const int fineLevels[7] = { 0, 1, 2, 3, 4, 5, 6 };
+    // int28: honour kNpGlowWarm (do not run 5 consecutive down-only passes freezing levels 4..6 during walk-out fade-in)
+    if (sStaggerPrev == 0 || sHeldPics <= kNpGlowWarm) return false;   // (no whole chain drawn yet, or still in walk-out warm-up)
+    if (skipped && sStaggerPrev == 2 && NpSceneGlowStaggerAllRates()) return false;   // (nxr4b MSC_HELD_GLOW_STAGGER=2: only the picture right after the steps down makes the steps up; the later skipped pictures of a rate 2 / 3 run take the old form)
+    const int from = skipped ? 4 : 1, to = skipped ? (GlowHalf() ? 5 : 6) : 3;   // (MSC_HELD_GLOW_STAGGER_DEAD: the dead last level is not drawn)
+    for (int i = 0; i < 7; ++i)
+        state->mViews[i]->m_Target = (i >= from && i <= to) || (!skipped && i == 0) ? 10 : 0;
+    // int28 (real-Vita visual fix: stadium entry / DK fly-in shadow flicker & flashing):
+    // mViews[0] clears the EFB alpha plane where shadow volumes count. When skipped==true (steps up only), leaving m_Target=0
+    // skipped the EFB alpha clear on alternating frames; preserve the clear via GLViewTarget_Mode11 (same as HighRangeChainOff).
+    if (skipped)
+    {
+        if (NpSceneGlowL0Mode() == 2 && *GetHighRangeTweaks()->miHighRangeIndex.m_pValue >= 1)
+            state->mViews[0]->m_Target = GLViewTarget_Mode11;
+        else if (!NpSceneGlowL0Off())
+            state->mViews[0]->m_Target = 10;
+    }
+    for (int i = from; i <= to; ++i)
+        RenderHighRangePass(state, fineLevels[i], fineLevels[i - 1]);
+    sStaggerPrev = skipped ? 2 : 1;
+    unsigned& n = skipped ? sUp : sDown;
+    if (++n == 1 || n % 600 == 0)
+        fprintf(stderr, "[glow] MSC_HELD_GLOW_STAGGER: %u pictures with the steps %s only (%u down, %u up so far)\n", n, skipped ? "up (levels 4..6)" : "down (capture, levels 1..3)", sDown, sUp);
+    return true;
+}
+#endif
+
 void RenderHighRangeChain(HighRange* state)
 {
     int fineLevels[7] = { 0, 1, 2, 3, 4, 5, 6 };
     int coarseLevels[5] = { 0, 1, 2, 5, 6 };
+#ifdef NP_NATIVE
+    if (!NpSceneGlowHalf() && GlowHalf())
+    {   // (counter of MSC_FX_GLOW_DEAD: chains drawn without the last level, which the composite does not read)
+        static unsigned sDeadChains = 0;
+        if (++sDeadChains == 1 || sDeadChains % 600 == 0)
+            fprintf(stderr, "[glow] MSC_FX_GLOW_DEAD: %u glow chains drawn without their last level (the composite reads level %d)\n", sDeadChains, *GetHighRangeTweaks()->miHighRangeIndex.m_pValue);
+    }
+#endif
 
-    if (*GetHighRangeTweaks()->mbFineHighRange.m_pValue)
+    if (GlowFine(GetHighRangeTweaks()))
     {
-        for (int i = 1; i < 7; ++i)
+        const int levels = GlowHalf() ? 6 : 7;
+        for (int i = 1; i < levels; ++i)
         {
             RenderHighRangePass(state, fineLevels[i], fineLevels[i - 1]);
         }
     }
     else
     {
-        for (int i = 1; i < 5; ++i)
+#ifdef NP_NATIVE
+        if (NpSceneGlowCoarse() && *GetHighRangeTweaks()->mbFineHighRange.m_pValue)
+        {   // (counter of MSC_FX_GLOW_COARSE: chains drawn on the coarse route, two passes fewer than the fine one)
+            static unsigned sCoarseChains = 0;
+            if (++sCoarseChains == 1 || sCoarseChains % 600 == 0)
+                fprintf(stderr, "[glow] MSC_FX_GLOW_COARSE: %u glow chains drawn on the 4-pass route (%u passes not drawn)\n", sCoarseChains, sCoarseChains * 2);
+        }
+#endif
+        const int levels = GlowHalf() ? 4 : 5;
+        for (int i = 1; i < levels; ++i)
         {
             RenderHighRangePass(state, coarseLevels[i], coarseLevels[i - 1]);
         }

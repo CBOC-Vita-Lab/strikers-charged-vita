@@ -38,8 +38,8 @@ int npa_cvt_sanim_chunk(NpaCtx* c, const NpaChunk* root)
     if (r < 0) return c->res->status;
     if (!have_obj || !have_props)
     {
-        npa_err(c, NPA_ERR_FORMAT, "sanim at +0x%zx lacks object (0x17001) or node properties (0x17003)",
-                (size_t)(root->hdr - c->base));
+        npa_err(c, NPA_ERR_FORMAT, "sanim at +0x%lx lacks object (0x17001) or node properties (0x17003)",
+                (unsigned long)(root->hdr - c->base));
         return NPA_ERR_FORMAT;
     }
     NPA_EXPECT(c, obj.dsize == SANIM_OBJECT_SIZE, "sanim object is %u bytes, expected 0x58", obj.dsize);
@@ -162,7 +162,7 @@ int npa_cvt_sanim_chunk(NpaCtx* c, const NpaChunk* root)
             break;
         }
         default:
-            npa_err(c, NPA_ERR_FORMAT, "sanim: unexpected chunk 0x%x at +0x%zx", k.id, (size_t)(k.hdr - c->base));
+            npa_err(c, NPA_ERR_FORMAT, "sanim: unexpected chunk 0x%x at +0x%lx", k.id, (unsigned long)(k.hdr - c->base));
             return NPA_ERR_FORMAT;
         }
         if (c->res->status < 0) return c->res->status;

@@ -15,7 +15,7 @@
 # HLE=1 additionally compiles runtime/src/hle/gx from the worktree (wt/gx) into
 # the build directory and links those objects instead of the prebuilt ones
 # (needed once the submission path in the HLE layer is changed).
-MSC    ?= /home/claude/msc
+MSC    ?= /work/msc
 FROZEN ?= $(MSC)/frozen/host
 PORT   ?= $(MSC)/wt/gx
 DEPS   ?= $(MSC)/deps

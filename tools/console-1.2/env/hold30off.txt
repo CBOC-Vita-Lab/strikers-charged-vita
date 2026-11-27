@@ -1,0 +1,13 @@
+# console-1.2 run hold30off: Ladder steps down on one GPU spike at 30 again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# MSC_DYNRES_HOLD30=4 (on, the Galaxy port's hold30): at 30 the mean-over-90 % step waits for 4 measured frames over 90 %. Against d1: the number of 'the GPU is over its budget' level changes a minute in open play (the host model: 0.7 a minute on one-frame spikes at 65 % load without it, none with it), the mean scale, and late frames (must not rise).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_DYNRES_HOLD30=0

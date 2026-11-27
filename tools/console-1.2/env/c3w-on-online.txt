@@ -1,0 +1,14 @@
+# console-1.2 run c3w-on-online: Fourth core (MSC_VITA_CORE3_WORK=3): open the online hub (MANUAL)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route onhub, version payload 1.3, role manual
+# core3x15.md: open the online hub: threads leave core 3 (the guard line) and come back 3 s later. NEEDS CapUnlocker.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/on-hub.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_CORE3=1
+MSC_VITA_CORE3_WORK=3

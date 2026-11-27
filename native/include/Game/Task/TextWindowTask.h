@@ -33,6 +33,6 @@ private:
     u32 mHeld;
 };
 
-void PrintTextWindowMessage(const char* format, ...);
+void PrintTextWindowMessage(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
 #endif // GAME_TEXT_WINDOW_TASK_H

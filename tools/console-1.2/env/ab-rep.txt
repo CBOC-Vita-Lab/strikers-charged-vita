@@ -1,0 +1,15 @@
+# console-1.2 run ab-rep: In-run A/B in the replay route: mid-scene flush, shadow redraw every 2nd frame, far players with the open-play mesh
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group ab15, route replay, version payload 1.3, role ab
+# Replaces midflush-replay and replay2 (6 min), shadow2 and farlod12 (12 min). Only the windows inside a replay or cut-scene can show the shadow and far-LOD keys (the game reads them there only): the draw-count guard of abpair leaves out neighbours of another scene, so read `n` and expect 3-6 usable b windows a key; where it says too few windows, run `farlod12` / `shadow2` as before. Read: abpair.py --inrun LOG (key, metric, diff b minus a, 90 % interval, verdict); the `[ab] flip` lines show the clock of each flip, `[lane] ... ab KEY=v a wN` the windows. Replaces the pairs listed in w8/ab15.md and w8/ab15b.md.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_AB=MSC_VGX_MIDFLUSH,0,30003;MSC_SHADOW_EVERY,1,2;MSC_REPLAY_FARLOD,0,12
+MSC_AB_START_S=20
+MSC_AB_REPEATS=4

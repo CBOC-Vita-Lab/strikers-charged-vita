@@ -34,6 +34,9 @@ public:
     bool mInitialized;
     bool mVisible;
     char _01E[2];
+#ifdef NP_NATIVE
+    u32 mSnapGen = 0;
+#endif
 };
 
 

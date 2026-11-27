@@ -1,0 +1,14 @@
+# console-1.2 run vpexact0: Viewports halved as integers again (the 1-px line)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# MSC_VGX_VP_EXACT (on, vitaGL 0025): odd-sized viewports exact. Look for a 1-px dark line on the right or bottom edge of glow, shadows and copies when the picture is below 960x544 (the ladder's 0.86 floor). The log's [gxm-direct] viewports line says which rounding is in force.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_VP_EXACT=0

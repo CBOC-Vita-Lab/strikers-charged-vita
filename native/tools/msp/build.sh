@@ -1,5 +1,5 @@
 #!/bin/bash
-# MSP: build an executable of THIS worktree into /home/claude/msc/build/np/MSP/<target>/ (incremental; call again after a timeout).
+# MSP: build an executable of THIS worktree into /work/msc/build/np/MSP/<target>/ (incremental; call again after a timeout).
 #   tools/heavy.sh -t 1500 tools/msp/build.sh host32            # np-host32-full-null  (vgx null back end; scripted matches, virtual time)
 #   tools/heavy.sh -t 1500 tools/msp/build.sh armhf             # np-armhf-full        (O2, NOPIC, ThinLTO: the console configuration under qemu-arm)
 # armhf builds host32 first (one heavy slot gives both executables; NO_HOST32=1 skips that).
@@ -11,7 +11,7 @@ if [ $T = armhf ] && [ -z "$NO_HOST32" ]; then
   [ -x "$(dirname "$0")/after_host32.sh" ] && { "$(dirname "$0")/after_host32.sh"; echo "== after_host32 rc=$?"; }
 fi
 NP=$(cd "$(dirname "$0")/../.." && pwd)
-B=${BUILD_ROOT:-/home/claude/msc/build/np/MSP}
+B=${BUILD_ROOT:-/work/msc/build/np/MSP}
 mkdir -p $B; cd $NP || exit 1
 echo "== build $T $* $(date +%T)"
 if [ $T = host32 ]; then

@@ -4,9 +4,9 @@
 #   nofork, MSC_SKIN_LANE=1    the software skinning of cut-scenes and 3D menus on the helper lane: equal pictures? how much off the game thread?
 #   thread, MSC_SKIN_LANE=1    both second-core features at once
 #   tools/heavy.sh -t 700 env V=a9 SRC=<snapshot> BUILD=1 tools/pipe/job_skin.sh
-cd /home/claude/msc/npw/W5PIPE || exit 1
+cd /work/msc/npw/W5PIPE || exit 1
 V=${V:-a9}
-B=/home/claude/msc/build/np/W5PIPE
+B=/work/msc/build/np/W5PIPE
 [ -n "$BUILD" ] && { TAILN=6 tools/pipe/build.sh $V ${BUILDVARS:-OPT=-O2 NOPIC=1 LTO=none} || exit 1; }
 export MAXF=${MAXF:-4400}
 echo "=== $V nofork lane0 $(date +%T)"; V=$V TAG=nofork FS=nofork XVARS="MSC_SKIN_LANE=0" FSTAIL=2 tools/pipe/job_one.sh

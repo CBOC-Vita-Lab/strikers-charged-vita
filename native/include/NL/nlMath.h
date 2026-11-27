@@ -600,6 +600,28 @@ void RotateVector(nlVector3& result, const nlVector3& v, nlQuaternion& q);
 void nlQuatNLerp(nlQuaternion& out, const nlQuaternion& q1, const nlQuaternion& q2, float t);
 void nlQuatInverse(nlQuaternion& out, const nlQuaternion& in);
 void nlQuatNormalize(nlQuaternion& out, const nlQuaternion& in);
+bool nlQuatRenormalize(nlQuaternion& q);   // nlQuatNLerp(q, q, finite, +-0), or false: math.cpp
+
+extern int gNpPoseFast;   // MSC_POSE_FAST, math.cpp
+int NpPoseFastInit();
+inline bool NpPoseFast() { return (gNpPoseFast < 0 ? NpPoseFastInit() : gNpPoseFast) != 0; }
+
+// MSC_PREFETCH (1.3 armcpu9, default 0): software prefetch of data the next loop iterations will touch, on the Cortex-A9 (no hardware prefetcher in the L1, L2 misses ~60 cycles).
+// Bit 1: BuildNodeMatrices (the node matrices written one picture ago, the accumulators read); bit 2: DrawableCharacter::Blend (the two snapshots and the target);
+// bit 4: the recorder's write pointer (renderer/src/vgx_rec.h, set from the same key); bit 8: ShaderSkinMesh::Pose (bind matrices, results). A prefetch changes no value: only timing. The host cache model (callgrind, A9-like L1)
+// puts PSMTX44Concat / BuildNodeMatrices / DrawableCharacter::Blend / InitAccumulators among the top data-miss sites of the game thread (w8/armcpu.md).
+extern int gNpPrefetch;
+int NpPrefetchInit();
+inline bool NpPrefetchOn(int bit) { return ((gNpPrefetch < 0 ? NpPrefetchInit() : gNpPrefetch) & bit) != 0; }
+inline void NpPrefetchLines(const void* p, unsigned bytes, int forWrite)
+{
+    if (forWrite)
+        for (unsigned o = 0; o < bytes; o += 32)
+            __builtin_prefetch(static_cast<const char*>(p) + o, 1);
+    else
+        for (unsigned o = 0; o < bytes; o += 32)
+            __builtin_prefetch(static_cast<const char*>(p) + o, 0);
+}
 void nlCartesianToPolar(nlPolar& out, const nlVector3& in);
 void nlAddPolarToCartesian(nlVector3& result, const nlPolar& polar);
 void nlPolarToCartesian(nlVector3& v, const nlPolar& polar);

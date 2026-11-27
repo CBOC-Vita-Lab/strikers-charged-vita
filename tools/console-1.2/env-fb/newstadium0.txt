@@ -1,0 +1,14 @@
+# console-1.2 run newstadium0: Ladder keeps its level across a stadium change
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# MSC_DYNRES_NEWSTADIUM (on): a new stadium starts the size ladder at the game's own size (Galaxy's GXV_AUTOQ_NEWSTAGE). The menus are GPU-heavy (about 40 ms), so the match may start low without it. Compare the [vgx] dynamic resolution lines and the first 30 s of the match's picture size with d1.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_DYNRES_NEWSTADIUM=0

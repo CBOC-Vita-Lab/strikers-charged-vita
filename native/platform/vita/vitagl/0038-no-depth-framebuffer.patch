@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 12:00:00 -0500
+Subject: [PATCH] no depth/stencil memory for a framebuffer object (vglFramebufferNoDepth, vglFramebufferDepthStats; MSC_VGX_NODEPTH_PASS)
+
+---
+
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -218,6 +218,7 @@
+ 			framebuffers[i].target = NULL;
+ 			framebuffers[i].tex = NULL;
+ 			framebuffers[i].msaa = msaa_mode;
++			framebuffers[i].nodepth = 0;
+ 		}
+ 		if (j >= n)
+ 			break;
+@@ -1049,3 +1050,53 @@
+ 		dirty_framebuffer = GL_TRUE;
+ 	return GL_TRUE;
+ }
++
++/* 0038: no depth/stencil memory for this framebuffer object. Its scenes run with a depth/stencil surface that has no data (upstream's DEPTH_STENCIL_HACK, for
++ * this object alone): depth lives in the tile memory of the scene, nothing is loaded from or stored to memory, and a partial render (parameter buffer full)
++ * would have nothing to spill to. For objects whose scenes never test or write depth (copies, blurs, composites), which then cost no 4 bytes a sample.
++ * Best called before the object's first scene; a surface it already has is handed to the garbage collector and the next scene begins without one.
++ * Returns GL_FALSE for an unknown object. */
++GLboolean vglFramebufferNoDepth(GLuint fb_id, GLint on) {
++	THREAD_SAFE()
++
++	framebuffer *fb = (framebuffer *)fb_id;
++	if (!fb || !fb->active)
++		return GL_FALSE;
++	const uint8_t want = on ? 1 : 0;
++	if (fb->nodepth == want)
++		return GL_TRUE;
++	fb->nodepth = want;
++	if (fb->depthbuffer_ptr) {
++#ifndef DEPTH_STENCIL_HACK
++		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
++#endif
++		fb->depthbuffer_ptr = NULL;
++	}
++	fb->depthbuffer_state &= ~DEPTHBUFFER_READY;
++	if (fb == in_use_framebuffer)
++		dirty_framebuffer = GL_TRUE;
++	return GL_TRUE;
++}
++
++// 0038: what the live framebuffer objects hold (a read of the table, no counters to keep): KiB of depth (+ stencil) memory, objects with a surface that has memory,
++// objects whose surface has none, and the scenes begun on such surfaces since start
++void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes) {
++	uint32_t kib = 0, w = 0, wo = 0;
++	for (int i = 0; i < BUFFERS_NUM; i++) {
++		const framebuffer *fb = &framebuffers[i];
++		if (!fb->active || !fb->depthbuffer_ptr || !(fb->depthbuffer_state & DEPTHBUFFER_READY))
++			continue;
++		if (!fb->depthbuffer_ptr->depthData) {
++			wo++;
++			continue;
++		}
++		const uint32_t m = FB_MSAA(fb) == SCE_GXM_MULTISAMPLE_4X ? 4 : (FB_MSAA(fb) == SCE_GXM_MULTISAMPLE_2X ? 2 : 1);
++		const uint64_t samples = (uint64_t)VGL_ALIGN(fb->width, SCE_GXM_TILE_SIZEX) * VGL_ALIGN(fb->height, SCE_GXM_TILE_SIZEY) * m;
++		kib += (uint32_t)((samples * (fb->depthbuffer_ptr->stencilData ? 5 : 4)) >> 10);
++		w++;
++	}
++	if (kib_with) *kib_with = kib;
++	if (objs_with) *objs_with = w;
++	if (objs_without) *objs_without = wo;
++	if (nodepth_scenes) *nodepth_scenes = vgl_nodepth_scenes;
++}
+diff --git a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -942,7 +942,15 @@
+ 			}
+ 			
+ 			// If the depthbuffer is dirty, we re-gen it
+-			if (!(active_write_fb->depthbuffer_state & DEPTHBUFFER_READY)) {
++			if (!(active_write_fb->depthbuffer_state & DEPTHBUFFER_READY) && active_write_fb->nodepth) {
++				// 0038: no depth or stencil memory for this framebuffer (vglFramebufferNoDepth): a surface with no data, never loaded or stored
++				vglDepthStencilSurfaceInit(&active_write_fb->depthbuffer, SCE_GXM_DEPTH_STENCIL_FORMAT_DF32M, SCE_GXM_DEPTH_STENCIL_SURFACE_LINEAR,
++					FB_MSAA(active_write_fb) == SCE_GXM_MULTISAMPLE_4X ? VGL_ALIGN(active_write_fb->width, SCE_GXM_TILE_SIZEX) * 2 : VGL_ALIGN(active_write_fb->width, SCE_GXM_TILE_SIZEX), NULL, NULL);
++				sceGxmDepthStencilSurfaceSetForceLoadMode(&active_write_fb->depthbuffer, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_DISABLED);
++				sceGxmDepthStencilSurfaceSetForceStoreMode(&active_write_fb->depthbuffer, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_DISABLED);
++				active_write_fb->depthbuffer_ptr = &active_write_fb->depthbuffer;
++				active_write_fb->depthbuffer_state |= DEPTHBUFFER_READY;
++			} else if (!(active_write_fb->depthbuffer_state & DEPTHBUFFER_READY)) {
+ 				if (!init_depth_stencil_buffer_ms(active_write_fb->width, active_write_fb->height, &active_write_fb->depthbuffer, active_write_fb->depthbuffer_state == DEPTHBUFFER_WANTS_STENCIL, FB_MSAA(active_write_fb)) && vgl_robust_scenes) {
+ 					vgl_log("%s:%d Scene reset failed: no depth/stencil surface for framebuffer 0x%08X (%dx%d).\n", __FILE__, __LINE__, active_write_fb, active_write_fb->width, active_write_fb->height);
+ 					return scene_reset_failed();
+diff --git a/source/rt.c b/source/rt.c
+--- a/source/rt.c
++++ b/source/rt.c
+@@ -42,6 +42,7 @@
+ 
+ // cumulative counters (render thread)
+ uint32_t vgl_rt_scenes = 0, vgl_rt_scenes_display = 0, vgl_rt_scenes_noload = 0, vgl_rt_scenes_noload_auto = 0, vgl_rt_scenes_nostore = 0, vgl_rt_hints_given = 0, vgl_rt_hints_used = 0;
++uint32_t vgl_nodepth_scenes = 0;
+ uint64_t vgl_rt_ds_loaded = 0, vgl_rt_ds_stored = 0, vgl_rt_ds_load_skipped = 0, vgl_rt_ds_store_skipped = 0;
+ uint64_t vgl_rt_cpu_end_us = 0, vgl_rt_cpu_begin_us = 0, vgl_rt_cpu_setup_us = 0;
+ uint32_t vgl_rt_cpu_timed = 0, vgl_rt_cpu_switch_max_us = 0;
+@@ -126,6 +127,13 @@
+ 		vgl_rt_scenes_display++;
+ 	if (!ds)
+ 		return hints;
++	if (!ds->depthData) {
++		// 0038 (vglFramebufferNoDepth): nothing to load or store; the scene begins as one whose depth was not loaded
++		sceGxmDepthStencilSurfaceSetForceLoadMode(ds, SCE_GXM_DEPTH_STENCIL_FORCE_LOAD_DISABLED);
++		sceGxmDepthStencilSurfaceSetForceStoreMode(ds, SCE_GXM_DEPTH_STENCIL_FORCE_STORE_DISABLED);
++		vgl_nodepth_scenes++;
++		return hints | VGL_RT_NOLOAD;
++	}
+ 	const uint32_t bytes = vgl_rt_ds_bytes(w, h, ds->stencilData != NULL);
+ 	if (vgl_rt_flags & (VGL_RT_HINTS | VGL_RT_AUTO_NOLOAD)) {
+ 		// set both modes explicitly for every scene (the surface keeps them until the next scene on it)
+diff --git a/source/shared.h b/source/shared.h
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -649,7 +649,9 @@
+ 	void *data;
+ 	texture *tex;
+ 	SceGxmMultisampleMode msaa; // this framebuffer's own multisampling (vglFramebufferMultisample), msaa_mode for a new one
++	uint8_t nodepth; // 0038 (vglFramebufferNoDepth): its scenes run with a depth/stencil surface that has no memory (tile memory only), never loaded or stored
+ } framebuffer;
++extern uint32_t vgl_nodepth_scenes; // 0038: scenes begun on a framebuffer with nodepth set (rt.c)
+ 
+ // Query struct
+ typedef struct {
+diff --git a/source/utils/mem_utils.h b/source/utils/mem_utils.h
+--- a/source/utils/mem_utils.h
++++ b/source/utils/mem_utils.h
+@@ -63,7 +63,9 @@
+ // 0022 (upstream fbb190f): a depth/stencil surface goes to the collector with its stencil, which was leaked (0.5 MiB at 960x544, one sample; 2 MiB at 4x) each time a framebuffer object with one was deleted or re-attached
+ #define mark_depth_stencil_as_dirty(s) \
+ 	do { \
+-		mark_as_dirty((s)->depthData); \
++		if ((s)->depthData) { /* 0038: a nodepth surface has no memory */ \
++			mark_as_dirty((s)->depthData); \
++		} \
+ 		if ((s)->stencilData) { \
+ 			mark_as_dirty((s)->stencilData); \
+ 		} \
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1406,6 +1406,8 @@
+ // Loads the depth buffer of the currently bound renderbuffer into the currently bound GL texture.
+ void vglTexImageDepthBuffer(GLenum target);
+ GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples); // 1, 2 or 4 samples a pixel for this framebuffer object alone (framebuffers.c)
++GLboolean vglFramebufferNoDepth(GLuint fb_id, GLint on); // 0038: 1: this framebuffer object's scenes get no depth/stencil memory (tile memory only: nothing loaded or stored; for objects whose scenes never test or write depth). 0: as before. GL_FALSE for an unknown object
++void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes); // 0038: depth/stencil memory (KiB) of the live framebuffer objects that have a surface, how many have one, how many run without (nodepth), scenes begun without
+ int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
+ 
+ // Makes vitaGL use cached memory instead of uncached memory for its internal memory pools. Must be called before vglInit*.

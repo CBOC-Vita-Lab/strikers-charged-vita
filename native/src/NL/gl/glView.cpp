@@ -371,11 +371,19 @@ void GLView::AttachModel(const glModel* model, unsigned long layer)
     }
 }
 
+#ifdef NP_NATIVE
+extern "C" int NpBg30ViewSkip(const void* view) __attribute__((weak));   // 1.3 MSC_BG30 (Game/Render/RLView.cpp): a background view of a light picture
+#endif
+
 void GLView::Iterate(GLViewPacketCallback callback)
 {
     m_TriangleCount = 0;
     if (!m_Visible)
         return;
+#ifdef NP_NATIVE
+    if (NpBg30ViewSkip != 0 && NpBg30ViewSkip(this))
+        return;
+#endif
 
     BeginRender();
 
@@ -517,6 +525,13 @@ GLPacketSorterTree* NpViewTakeTree(GLView* view)
     view->m_Sorters = fresh;
     ++sTreesSwapped;
     return tree;
+}
+
+// cpu60-25 (MSC_SNAP_SKIPEMPTY), game thread, at the fork: glx_SendView of this view would do nothing a later view's send does not do again (see glPlat.cpp SnapshotViews)
+bool NpViewSendsNothing(const GLView* view)
+{
+    return view->m_Sorters->m_Root == 0 && !view->m_ClearDepth && !view->m_ClearColour && !view->m_Unknown32
+        && view->m_Target != 8 && view->m_Target != 9 && view->m_Target != 10 && view->m_Target != GLViewTarget_Mode11;
 }
 
 // the job (no game heap): clear a tree it was given and keep it for a later fork

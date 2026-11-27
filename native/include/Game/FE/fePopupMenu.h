@@ -158,6 +158,7 @@ enum ePopupMenu
     POPUP_DELETED_MII = 140,
     POPUP_LOW_BATTERY = 141,
     POPUP_E3_THANKS_FOR_PLAYING = 142,
+    POPUP_NP_TEXT = 143,   // np: a popup whose message and buttons are plain text set at run time (platform/sdk/net/np_menu_ui.cpp)
 };
 
 struct Popup
@@ -182,6 +183,7 @@ public:
     void OnOptionPointerEnter(unsigned int index, void* context);
     void OnOptionPointerLeave(unsigned int index, void* context);
     void OnOptionPointerPress(unsigned int index, void* context);
+    void NpSetMessage(const unsigned short* text);   // np: replaces the message of a popup that is on screen (same layout; platform/sdk/net/np_menu_ui.cpp)
     ePopupMenu GetType() const { return mType; }
 
     // Never called. R4QE01 keeps the implicit nlColour copy-assignment that

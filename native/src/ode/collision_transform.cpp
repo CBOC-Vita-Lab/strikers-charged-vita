@@ -174,6 +174,20 @@ int dCollideTransform(dxGeom* o1, dxGeom* o2, int flags,
     return n;
 }
 
+
+// MSC_PHYS27_PLANE (wave 12, phys27): 1 when dCollide(plane, transform) provably returns 0. dCollideTransform collides the inner geom at final_pos / final_R
+// (valid while the AABB is: no GEOM_AABB_BAD) with the plane, so the answer is that of the inner geom's plane collider; NpOdeStdPlaneEmpty
+// (collision_std.cpp) evaluates the depth test of dCollideSpherePlane / BoxPlane / CCylinderPlane with the same expressions on the same operands and says
+// 1 only where the collider would return 0 (same compiled arithmetic, so the same decision on every input, no margin). Pure: reads, writes nothing.
+int NpOdeStdPlaneEmpty(dxGeom* inner, const dReal* pos, const dReal* R, dxGeom* plane);
+int NpOdeTransformPlaneNoContact(dxGeom* tr, dxGeom* pl)
+{
+    dxGeomTransform* t = (dxGeomTransform*)tr;
+    if ((t->gflags & GEOM_AABB_BAD) || !t->obj)
+        return 0;
+    return NpOdeStdPlaneEmpty(t->obj, t->final_pos, t->final_R, pl);
+}
+
 //****************************************************************************
 // public API
 

@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 08:41:10 -0400
+Subject: [PATCH] Fix the source region of FBO->FBO blits (reference fix of the old base, absent from the public history)
+ blits (reference commit cdbba42, never in the public history)
+
+---
+ source/framebuffers.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index 56ccd51..918a928 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -885,8 +885,8 @@ void glBlitNamedFramebuffer(GLuint readFramebuffer, GLuint drawFramebuffer, GLin
+ 		texcoord.x /= (float)read_fb->width;
+ 		texcoord.y /= (float)read_fb->width;
+ #ifndef HAVE_UNFLIPPED_FBOS
+-		texcoord.z = ((float)read_fb->height - (float)srcY0) / (float)read_fb->height;
+-		texcoord.w = ((float)read_fb->height - (float)srcY1) / (float)read_fb->height;
++		texcoord.z = (float)srcY1 / (float)read_fb->height;
++		texcoord.w = (float)srcY0 / (float)read_fb->height;
+ #else
+ 		texcoord.z = ((float)read_fb->height - (float)srcY1) / (float)read_fb->height;
+ 		texcoord.w = ((float)read_fb->height - (float)srcY0) / (float)read_fb->height;

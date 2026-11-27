@@ -1,0 +1,128 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: vglSwizzleBoundTexture: a linear texture and its levels go to the swizzled layout through the transfer queue
+
+MSC_VGX_TEXSWIZZLE. Power-of-two sizes, 1, 2 and 4 bytes a texel; anything else stays as it was. Nothing calls it unless the renderer asks.
+
+
+diff --git a/source/textures.c b/source/textures.c
+index 0864ddf..fd9ad25 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -2776,6 +2776,13 @@ void vglSetupTexture(GLenum target, void *data, SceGxmTextureFormat format, SceG
+ #endif
+ }
+ 
++GLboolean vglSwizzleBoundTexture(void) { // (0020, utils/gpu_utils.c gpu_swizzle_texture)
++	texture_unit *tex_unit = &texture_units[server_texture_unit];
++	int texture2d_idx;
++	resolve_tex_target(GL_TEXTURE_2D, return GL_FALSE);
++	return gpu_swizzle_texture(&texture_slots[texture2d_idx]);
++}
++
+ void vglOverloadTexDataPointer(GLenum target, void *data) {
+ 	THREAD_SAFE()
+ 
+diff --git a/source/utils/gpu_utils.c b/source/utils/gpu_utils.c
+index fc186a0..3e021eb 100644
+--- a/source/utils/gpu_utils.c
++++ b/source/utils/gpu_utils.c
+@@ -942,6 +942,72 @@ void gpu_alloc_mipmaps(int level, texture *tex) {
+ 	}
+ }
+ 
++// 0020 (Mario Strikers Charged, MSC_VGX_TEXSWIZZLE): the texture bound to the active unit, in the linear layout gpu_alloc_texture and gpu_alloc_mipmaps leave, goes to the swizzled layout the
++// sampler's caches are built for. Imagination's SGX OpenGL ES guide: the driver "uses a twiddled layout (i.e. following a plane-filling curve) to greatly improve memory access locality";
++// vitaGL leaves every uncompressed texture linear (compressed ones already go through this same transfer). Levels go through the transfer queue, so the layout is the hardware's own, also
++// for non-square sizes. Same texels; a level costs one transfer, and the call waits for the queue: the old block is freed here, and a scene must not sample a half-written copy.
++// Power-of-two sizes only (an arbitrary size is a different layout). Anything else, or no memory, or a refused transfer: GL_FALSE and the texture stays as it was.
++GLboolean gpu_swizzle_texture(texture *tex) {
++	if (tex->status != TEX_VALID || !tex->data || tex->palette_data)
++		return GL_FALSE;
++	SceGxmTextureInternal *ti = (SceGxmTextureInternal *)&tex->gxm_tex;
++	if ((ti->control_words[1] & 0xE0000000) != SCE_GXM_TEXTURE_LINEAR)
++		return GL_FALSE;
++	SceGxmTextureFormat format = vglGetTexFormat(&tex->gxm_tex);
++	const uint32_t bpp = tex_format_to_bytespp(format);
++	if (bpp != 2 && bpp != 4) // (swz20: no 1 byte a texel, as Galaxy, whose swizzled upload has run on the console without a fallback)
++		return GL_FALSE;
++	uint32_t w, h;
++	vglGetTexSizes(&tex->gxm_tex, &w, &h);
++	if (w < 8 || h < 8 || (w & (w - 1)) || (h & (h - 1)) || w > 1024 || h > 1024) // (swz20: 8 to 1024 a side, as Galaxy)
++		return GL_FALSE;
++	const uint32_t levels = tex->mip_count ? tex->mip_count : 1;
++	uint32_t size = 0, lw = w, lh = h;
++	for (uint32_t i = 0; i < levels; i++) {
++		size += lw * lh * bpp;
++		lw = lw > 1 ? lw / 2 : 1;
++		lh = lh > 1 ? lh / 2 : 1;
++	}
++	uint8_t *dst = (uint8_t *)gpu_alloc_mapped_for_gpu(size);
++	if (!dst)
++		return GL_FALSE;
++	const SceGxmTransferFormat raw = bpp == 4 ? SCE_GXM_TRANSFER_FORMAT_RAW32 : bpp == 2 ? SCE_GXM_TRANSFER_FORMAT_RAW16 : SCE_GXM_TRANSFER_FORMAT_U8_R;
++	uint8_t *src = (uint8_t *)tex->data, *out = dst;
++	int rc = 0;
++	lw = w;
++	lh = h;
++	for (uint32_t i = 0; i < levels && rc >= 0; i++) {
++		const uint32_t src_stride = VGL_ALIGN(lw, 8) * bpp; // (as gpu_alloc_texture and gpu_alloc_mipmaps lay a level out)
++		rc = sceGxmTransferCopy(lw, lh, 0, 0, SCE_GXM_TRANSFER_COLORKEY_NONE, raw, SCE_GXM_TRANSFER_LINEAR, src, 0, 0, src_stride, raw, SCE_GXM_TRANSFER_SWIZZLED, out, 0, 0, lw * bpp, NULL, 0, NULL);
++		src += src_stride * lh;
++		out += lw * lh * bpp;
++		lw = lw > 1 ? lw / 2 : 1;
++		lh = lh > 1 ? lh / 2 : 1;
++	}
++	sceGxmTransferFinish();
++	if (rc < 0) {
++		vgl_free(dst);
++		return GL_FALSE;
++	}
++	SceGxmTexture probe; // (swz20: the SDK's own initialiser must accept it before the descriptor is committed, as Galaxy checks)
++	if (sceGxmTextureInitSwizzled(&probe, dst, format, w, h, tex->use_mips ? tex->mip_count : 1) != 0) {
++		vgl_free(dst);
++		return GL_FALSE;
++	}
++	SceGxmTexture new_tex;
++	vglInitSwizzledTexture(&new_tex, dst, format, w, h, tex->use_mips ? tex->mip_count : 0);
++	vglSetTexUMode(&new_tex, tex->u_mode);
++	vglSetTexVMode(&new_tex, tex->v_mode);
++	vglSetTexMinFilter(&new_tex, tex->min_filter);
++	vglSetTexMagFilter(&new_tex, tex->mag_filter);
++	vglSetTexMipFilter(&new_tex, tex->mip_filter);
++	vglSetTexLodBias(&new_tex, tex->lod_bias);
++	void *old = tex->data;
++	tex->gxm_tex = new_tex;
++	tex->data = dst;
++	vgl_free(old); // (no scene has seen it: this is the upload that made it, and the transfers are done)
++	return GL_TRUE;
++}
++
+ void gpu_free_palette(void *pal) {
+ 	// Deallocating palette memblock and object
+ 	if (pal != NULL)
+diff --git a/source/utils/gpu_utils.h b/source/utils/gpu_utils.h
+index 8abf57b..2b44336 100644
+--- a/source/utils/gpu_utils.h
++++ b/source/utils/gpu_utils.h
+@@ -132,6 +132,9 @@ static inline __attribute__((always_inline)) SceGxmTransferFormat tex_format_to_
+ 	}
+ }
+ 
++// The texture's linear levels go to the swizzled layout (0020)
++GLboolean gpu_swizzle_texture(texture *tex);
++
+ // Alloc a texture
+ void gpu_alloc_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const void *data, texture *tex, uint8_t src_bpp, uint32_t (*read_cb)(void *), void (*write_cb)(void *, uint32_t), GLboolean fast_store);
+ 
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index ee6b8b4..4e68be5 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1257,6 +1257,7 @@ void vglSetupTexture(GLenum target, void *data, SceGxmTextureFormat format, SceG
+ 
+ // Replaces original texture data pointer with a new one in a GL texture.
+ void vglOverloadTexDataPointer(GLenum target, void *data);
++GLboolean vglSwizzleBoundTexture(void); // 0020: the bound linear texture and its mip levels go to the swizzled layout (MSC_VGX_TEXSWIZZLE)
+ 
+ // Replaces original texture palette data pointer with a new one in a GL texture.
+ void vglOverloadTexPaletteDataPointer(GLenum target, void *data);

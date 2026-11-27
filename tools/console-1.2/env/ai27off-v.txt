@@ -1,0 +1,20 @@
+# console-1.2 run ai27off-v: AI cuts of ai27 off (MSC_AI27_*=0), LOCKED 60 Vice with split lines
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route tour, version payload 1.3, role ab
+# ai27: the OFF side of MSC_AI27_SORT / VCOPY / AVOID / CTRL (exact: host det trace and frame hashes equal on five routes). Alternate with lock60gs-v (ON), at least two pairs. Read [gsplit-ai] ai ms per STEP (ON expected about 0.1-0.2 ms lower; host ESTIMATE in w8/ai27.md: -53 k of 1.62 M instr a step) and its vm-states / script lines.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_HEAD_STAT=1
+MSC_GSPLIT=2
+MSC_FX_STAT=1
+MSC_AI27_SORT=0
+MSC_AI27_VCOPY=0
+MSC_AI27_AVOID=0
+MSC_AI27_CTRL=0

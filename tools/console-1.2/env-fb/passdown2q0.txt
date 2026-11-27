@@ -1,0 +1,14 @@
+# console-1.2 run passdown2q0: Glow steps of two quads drawn in two scenes again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route replay, version payload 1.3, role ab
+# MSC_VGX_PASSDOWN_TWOQUADS=0 (default 1: the glow chain's steps in The Dump and Sand Tomb, drawn as two quads, are drawn straight at half scale like Vice's, 13 scenes of a celebration become 7; host: 21 to 15 scenes at The Dump frame 2290, pictures identical at 3 frames). Against the default on goal celebrations at The Dump and Sand Tomb: GPU busy ms and late frames in the celebration, the glow edge by eye.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was replay.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_PASSDOWN_TWOQUADS=0

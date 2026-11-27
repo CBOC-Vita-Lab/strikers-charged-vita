@@ -379,13 +379,13 @@ void NPCManager::BeginLoadNPCTemplate()
     }
 
     char path[256];
-    nlSNPrintf(path, sizeof(path), "art/animation/%s.sanim.zlib", mPendingTemplate->mName, mPendingTemplate->mName);
+    nlSNPrintf(path, sizeof(path), "art/animation/%s.sanim.zlib", mPendingTemplate->mName);
     if (nlLoadCompressedFileAsync(path, OnNPCAnimationsLoaded, &mPendingTemplate->mInventorySAnim, 0x20, AllocateStart, 0x40000, 0, 0, 0, 0, &StandardAllocator))
     {
         mPendingTemplate->mAnimationLoadStarted = true;
     }
 
-    nlSNPrintf(path, sizeof(path), "art/animation/%s.shier", mPendingTemplate->mName, mPendingTemplate->mName);
+    nlSNPrintf(path, sizeof(path), "art/animation/%s.shier", mPendingTemplate->mName);
     cInventory<cSHierarchy>* pInventory = mPendingTemplate->mPersistent
                                             ? mPersistentHierarchies
                                             : mTransientHierarchies;

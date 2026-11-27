@@ -1,0 +1,15 @@
+# console-1.2 run pgo16-vice-pgo-a: PGO16 A/B at Vice play: PGO eboot, run a (only the eboot differs between the sides)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route tour, version payload 1.3, role ab
+# pgo16.md: accept plain -> PGO: 1-step game thread p50 down >= 0.8 ms; PGO -> ordered PGO: down >= 0.3 ms; no new fault in 60 s. Read the game thread/step p50 and the `[gsplit-pic]` 1-step row at play. The batch alternates the packages A B B A A B (3 pairs); compare with `abpair.py --paired`. Package: s35-pgo.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_GSPLIT=2

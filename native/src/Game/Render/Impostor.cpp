@@ -3,6 +3,7 @@
 
 #include "Game/Render/ImpostorCharacter.h"
 #include "Game/SharedStaticStorage.h"
+#include "np/crowdcut.h"
 
 Impostor::Impostor()
 {
@@ -24,6 +25,7 @@ Impostor::Impostor()
 
 void Impostor::Reset()
 {
+    ++gNpCrowdStructGen;   // MSC_CROWD_VISFAST: the figure lists are rebuilt
     mpCharacter = 0;
     mpSprite = 0;
     mWidth = 0.0f;
@@ -43,6 +45,7 @@ void Impostor::Reset()
 void Impostor::Set(ImpostorCharacter* character, const nlVector3& position,
     float width, float height, u16 angle)
 {
+    ++gNpCrowdStructGen;
     mpCharacter = character;
     mpSprite = 0;
     mWidth = width;

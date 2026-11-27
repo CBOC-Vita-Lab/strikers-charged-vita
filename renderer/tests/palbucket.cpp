@@ -61,6 +61,13 @@ int main(int argc, char** argv) {
             }
             Check(!Has(s, "u_pal[60]") && !Has(s, "u_pal[96]"), "no full-size array in a bucket");
         }
+        { // 1.3 MSC_VGX_PALMERGE: a palette run's record, 60 position rows (u_pal[120]), the members' rows below the clamp
+            ShaderSource s60;
+            GenerateVertexShader(MakeKey(2, 60, lit), s60);
+            Check(s60.nPal == 120 && Has(s60, "uniform vec4 u_pal[120];") && Has(s60, "if (pi > 57) pi = 57;"), "palRows 60: 120 rows, row <= 57");
+            if (lit) Check(Has(s60, "int ni = 60 + pi;"), "palRows 60: the normal rows from row 60");
+            Check(s60.nPal != kPalRowsFull, "palRows 60 is not taken for the full palette (nPal 96)");
+        }
         ShaderSource s30;
         GenerateVertexShader(MakeKey(2, 0, lit), s30);
         Check(s30.nPal == 60 && Has(s30, "uniform vec4 u_pal[60];") && Has(s30, "if (pi > 27) pi = 27;"), "palRows 0 is the whole short palette (60 rows, row <= 27)");

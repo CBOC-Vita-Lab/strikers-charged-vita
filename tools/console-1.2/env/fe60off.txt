@@ -1,0 +1,16 @@
+# console-1.2 run fe60off: Front end cuts off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_VGX_SKINDIRECT, SKINMEMO, BUILDFAST and FASTIDX are on by default in the player build (record-player thread about 11 % lighter in the goal celebration on the host; identical pictures). This run is the A/B: the old front end. Against the tour: the front end's ms in [frame-timing], mainly at a goal's start and in the celebration.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_SKINDIRECT=0
+MSC_VGX_SKINMEMO=0
+MSC_VGX_BUILDFAST=0
+MSC_VGX_FASTIDX=0

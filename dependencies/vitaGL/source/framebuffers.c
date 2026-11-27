@@ -106,6 +106,9 @@ GLboolean _glReadPixels_gpu(GLint x, GLint y, GLsizei width, GLsizei height, GLe
 	
 	void *dst;
 	if (active_read_fb) {
+		if (!active_read_fb->tex || !active_read_fb->data) {
+			return GL_FALSE;
+		}
 		SceGxmTransferFormat src_fmt = tex_format_to_transfer(active_read_fb->format);
 		if (src_fmt == 0xFFFFFFFF) {
 			return GL_FALSE;
@@ -198,6 +201,15 @@ GLboolean _glReadPixels_gpu(GLint x, GLint y, GLsizei width, GLsizei height, GLe
  * ------------------------------
  */
 
+// 0062 (MSC_VITA_FBO_KEEP): see _glFramebufferTexture2D (shared.h). Off (default in the library): the detach drops the render target as before.
+GLboolean vgl_fb_detach_keep = GL_FALSE;
+void vglSetFramebufferDetachKeep(GLboolean on) {
+	vgl_fb_detach_keep = on ? GL_TRUE : GL_FALSE;
+}
+GLboolean vglGetFramebufferDetachKeep(void) {
+	return vgl_fb_detach_keep;
+}
+
 inline __attribute__((always_inline)) void glGenFramebuffers(GLsizei n, GLuint *ids) {
 	THREAD_SAFE()
 
@@ -216,7 +228,13 @@ inline __attribute__((always_inline)) void glGenFramebuffers(GLsizei n, GLuint *
 			framebuffers[i].depthbuffer_state = DEPTHBUFFER_MISSING;
 			framebuffers[i].depthbuffer_ptr = NULL;
 			framebuffers[i].target = NULL;
+			framebuffers[i].target2 = NULL; // 0063
+			framebuffers[i].dual_rt = 0;
 			framebuffers[i].tex = NULL;
+			framebuffers[i].msaa = msaa_mode;
+			framebuffers[i].nodepth = 0;
+			framebuffers[i].depth_share_w = framebuffers[i].depth_share_h = 0; // 0044
+			framebuffers[i].depth_row_w = 0;
 		}
 		if (j >= n)
 			break;
@@ -251,6 +269,9 @@ void glGenRenderbuffers(GLsizei n, GLuint *ids) {
 
 void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
 	THREAD_SAFE()
+	if (vgl_fg_on && !vgl_fg_flushing && vgl_fg_delete(1, n, ids, __builtin_return_address(0)))
+		return; // 0034: the guard took the names and deletes them some presents later
+	VGL_LC_SYNC(); // (the restore reads the framebuffer in use)
 
 #ifndef SKIP_ERROR_HANDLING
 	if (n < 0) {
@@ -259,7 +280,9 @@ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
 #endif
 	while (n > 0) {
 		framebuffer *fb = (framebuffer *)ids[--n];
-		if (fb) {
+		// 0032: a framebuffer that is not active was deleted already (a stale or repeated name): its render target and depth surface went to the
+		// garbage collector then, and a second delete queued both again (a double free when the collector ran)
+		if (fb && fb->active) {
 			// Check if the framebuffer is currently bound
 			if (fb == active_read_fb) {
 				active_read_fb = NULL;
@@ -279,11 +302,15 @@ void glDeleteFramebuffers(GLsizei n, const GLuint *ids) {
 			if (fb->target) {
 				mark_rt_as_dirty(fb->target);
 			}
+			VGL_FB_DROP_RT2(fb); // 0063
 #ifndef DEPTH_STENCIL_HACK
 			if (fb->depthbuffer_ptr) {
-				mark_as_dirty(fb->depthbuffer_ptr->depthData);
+				mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
 			}
 #endif
+			fb->target = NULL;
+			fb->depthbuffer_ptr = NULL;
+			fb->depthbuffer_state = DEPTHBUFFER_MISSING;
 		}
 	}
 }
@@ -365,7 +392,7 @@ void glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbu
 	// Discarding any previously bound hidden depth buffers
 	if (fb->depthbuffer_ptr) {
 #ifndef DEPTH_STENCIL_HACK
-		mark_as_dirty(fb->depthbuffer_ptr->depthData);
+		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
 #endif
 	}
 	fb->depthbuffer_ptr = NULL;
@@ -397,7 +424,7 @@ void glNamedFramebufferRenderbuffer(GLuint target, GLenum attachment, GLenum ren
 	// Discarding any previously bound hidden depth buffers
 	if (fb->depthbuffer_ptr) {
 #ifndef DEPTH_STENCIL_HACK
-		mark_as_dirty(fb->depthbuffer_ptr->depthData);
+		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
 #endif
 		fb->depthbuffer_ptr = NULL;
 	}
@@ -581,6 +608,17 @@ void glGetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment, GLe
 
 void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *data) {
 	THREAD_SAFE()
+
+	if (active_read_fb) {
+		if (!active_read_fb->tex || !active_read_fb->data) {
+			return;
+		}
+		// 0057: the CPU reads linear rows; a tiled colour surface (vglTexMakeTiledTarget) is not one: nothing is read
+		if (sceGxmTextureGetType(&active_read_fb->tex->gxm_tex) == SCE_GXM_TEXTURE_TILED) {
+			vgl_tiled_read_refused++;
+			return;
+		}
+	}
 
 	/*
 	 * Callbacks are actually used to just perform down/up-sampling
@@ -800,6 +838,16 @@ void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format
 void vglReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *data) {
 	THREAD_SAFE()
 
+	if (active_read_fb) {
+		if (!active_read_fb->tex || !active_read_fb->data) {
+			return;
+		}
+		if (sceGxmTextureGetType(&active_read_fb->tex->gxm_tex) == SCE_GXM_TEXTURE_TILED) { // 0057
+			vgl_tiled_read_refused++;
+			return;
+		}
+	}
+
 	GLboolean res = _glReadPixels_gpu(x, y, width, height, format, type, data, GL_TRUE);
 #ifndef SKIP_ERROR_HANDLING
 	if (!res) {
@@ -819,10 +867,20 @@ void glBlitNamedFramebuffer(GLuint readFramebuffer, GLuint drawFramebuffer, GLin
 	case GL_COLOR_BUFFER_BIT:
 		break;
 	default:
+		active_write_fb = real_write_fb;
 		SET_GL_ERROR_WITH_VALUE(GL_INVALID_OPERATION, mask)
 	}
 
-	scene_reset();
+	framebuffer *read_fb = (framebuffer *)readFramebuffer;
+	if (readFramebuffer && !read_fb->tex) {
+		active_write_fb = real_write_fb;
+		return;
+	}
+
+	if (!scene_reset()) { // 1.2: no scene could be started: the blit is skipped
+		active_write_fb = real_write_fb;
+		return;
+	}
 
 	// Invalidating viewport and culling
 	invalidate_viewport();
@@ -841,14 +899,9 @@ void glBlitNamedFramebuffer(GLuint readFramebuffer, GLuint drawFramebuffer, GLin
 
 	// Set framebuffer blit shader
 	sceGxmSetVertexProgram(gxm_context, blit_vertex_program_patched);
-	if (is_fbo_float) {
-		sceGxmSetFragmentProgram(gxm_context, blit_fragment_program_float_patched);
-	} else {
-		sceGxmSetFragmentProgram(gxm_context, blit_fragment_program_patched);
-	}
+	sceGxmSetFragmentProgram(gxm_context, vgl_msaa_fp(1, is_fbo_float));
 	
 	// Set fragment texture to read framebuffer bound color attachment
-	framebuffer *read_fb = (framebuffer *)readFramebuffer;
 	SceGxmTexture *tex = readFramebuffer ? &read_fb->tex->gxm_tex : &gxm_color_surfaces[display_read_mode == GL_BACK ? gxm_back_buffer_index : gxm_front_buffer_index].backgroundTex;
 	if (filter == GL_LINEAR) {
 		vglSetTexMagFilter(tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
@@ -964,11 +1017,14 @@ int vglStrikersBindFramebufferDepth(GLuint fb_id) {
 	framebuffer *fb = (framebuffer *)fb_id;
 	if (!fb || !fb->active || !fb->depthbuffer_ptr || !(fb->depthbuffer_state & DEPTHBUFFER_READY) || !fb->depthbuffer_ptr->depthData)
 		return 0;
+	if (FB_MSAA(fb) != SCE_GXM_MULTISAMPLE_NONE)
+		return 0; // (a multisampled depth buffer is not laid out as a linear texture)
 	texture_unit *tex_unit = &texture_units[server_texture_unit];
 	texture *tex = &texture_slots[tex_unit->tex_id[0]];
 	if (tex->data)
 		return 0; // (a texture with storage of its own is never repointed)
-	const int row = VGL_ALIGN(fb->width, SCE_GXM_TILE_SIZEX);
+	// 0044 (A1): rows are laid out for the width the surface was made for: the shared block's capacity when it lives in one (a smaller picture is a window onto it), else the object's width
+	const int row = VGL_ALIGN(fb->depth_row_w > 0 ? fb->depth_row_w : fb->width, SCE_GXM_TILE_SIZEX);
 	// (no store-mode change here: it would alter a surface whose scene may still be open; the caller's scene hints store the depth)
 	if (sceGxmTextureInitLinear(&tex->gxm_tex, fb->depthbuffer_ptr->depthData, SCE_GXM_TEXTURE_FORMAT_DF32M, row, fb->height, 0) < 0)
 		return 0;
@@ -1003,4 +1059,109 @@ void glReadBuffer(GLenum mode) {
 		}
 #endif
 	}
+}
+
+/* Per-framebuffer multisampling: 1, 2 or 4 samples a pixel for the framebuffer object `fb_id` (a glGenFramebuffers name), whatever the global mode
+ * (vglInit's msaa) is. Its render target and hidden depth buffer (2x / 4x the samples; DF32M, the 4x one twice as wide) are the object's own and are
+ * made for the mode at its next scene; the colour surface is set up again on the same texture with a hardware down-scale when multisampled, so the
+ * samples are averaged into the texture when a scene stores it and the texture (what copies sample, what glReadPixels reads) only ever holds the
+ * resolved picture. What the texture held stays: the next scene loads it. Every fragment program follows the framebuffer in use (cur_msaa). Best
+ * called before the object's first scene (no render target to let go); the old ones are handed to the garbage collector otherwise.
+ * Returns GL_FALSE for an unknown object. */
+GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples) {
+	THREAD_SAFE()
+
+	framebuffer *fb = (framebuffer *)fb_id;
+	if (!fb || !fb->active)
+		return GL_FALSE;
+	const SceGxmMultisampleMode m = samples >= 4 ? SCE_GXM_MULTISAMPLE_4X : (samples >= 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
+	if (FB_MSAA(fb) == m)
+		return GL_TRUE;
+	fb->msaa = m;
+	if (fb->target) {
+		mark_rt_as_dirty(fb->target);
+		fb->target = NULL;
+	}
+	VGL_FB_DROP_RT2(fb); // 0063
+	if (fb->depthbuffer_ptr) {
+#ifndef DEPTH_STENCIL_HACK
+		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+#endif
+		fb->depthbuffer_ptr = NULL;
+	}
+	fb->depthbuffer_state &= ~DEPTHBUFFER_READY;
+	if (fb->tex)
+		_glFramebufferTexture2D(fb, GL_COLOR_ATTACHMENT0, fb->tex, 1);
+	if (fb == in_use_framebuffer)
+		dirty_framebuffer = GL_TRUE;
+	return GL_TRUE;
+}
+
+/* 0038: no depth/stencil memory for this framebuffer object. Its scenes run with a depth/stencil surface that has no data (upstream's DEPTH_STENCIL_HACK, for
+ * this object alone): depth lives in the tile memory of the scene, nothing is loaded from or stored to memory, and a partial render (parameter buffer full)
+ * would have nothing to spill to. For objects whose scenes never test or write depth (copies, blurs, composites), which then cost no 4 bytes a sample.
+ * Best called before the object's first scene; a surface it already has is handed to the garbage collector and the next scene begins without one.
+ * Returns GL_FALSE for an unknown object. */
+GLboolean vglFramebufferNoDepth(GLuint fb_id, GLint on) {
+	THREAD_SAFE()
+
+	framebuffer *fb = (framebuffer *)fb_id;
+	if (!fb || !fb->active)
+		return GL_FALSE;
+	const uint8_t want = on ? 1 : 0;
+	if (fb->nodepth == want)
+		return GL_TRUE;
+	fb->nodepth = want;
+	if (fb->depthbuffer_ptr) {
+#ifndef DEPTH_STENCIL_HACK
+		mark_depth_stencil_as_dirty(fb->depthbuffer_ptr);
+#endif
+		fb->depthbuffer_ptr = NULL;
+	}
+	fb->depthbuffer_state &= ~DEPTHBUFFER_READY;
+	if (fb == in_use_framebuffer)
+		dirty_framebuffer = GL_TRUE;
+	return GL_TRUE;
+}
+
+// 0038: what the live framebuffer objects hold (a read of the table, no counters to keep): KiB of depth (+ stencil) memory, objects with a surface that has memory,
+// objects whose surface has none, and the scenes begun on such surfaces since start
+void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes) {
+	uint32_t kib = 0, w = 0, wo = 0;
+	for (int i = 0; i < BUFFERS_NUM; i++) {
+		const framebuffer *fb = &framebuffers[i];
+		if (!fb->active || !fb->depthbuffer_ptr || !(fb->depthbuffer_state & DEPTHBUFFER_READY))
+			continue;
+		if (!fb->depthbuffer_ptr->depthData) {
+			wo++;
+			continue;
+		}
+		const uint32_t m = FB_MSAA(fb) == SCE_GXM_MULTISAMPLE_4X ? 4 : (FB_MSAA(fb) == SCE_GXM_MULTISAMPLE_2X ? 2 : 1);
+		const uint64_t samples = (uint64_t)VGL_ALIGN(fb->width, SCE_GXM_TILE_SIZEX) * VGL_ALIGN(fb->height, SCE_GXM_TILE_SIZEY) * m;
+		kib += (uint32_t)((samples * (fb->depthbuffer_ptr->stencilData ? 5 : 4)) >> 10);
+		w++;
+	}
+	if (kib_with) *kib_with = kib;
+	if (objs_with) *objs_with = w;
+	if (objs_without) *objs_without = wo;
+	if (nodepth_scenes) *nodepth_scenes = vgl_nodepth_scenes;
+}
+
+/* 0044 (MSC_VGX_LADDER_ALIAS): the depth surface of this framebuffer object is a window onto one block shared by every object of the same multisample mode that asks for the same
+ * capacity (cw x ch pixels, the largest picture size of the ladder): its surface is the same memory with the same stride (cw), used for a smaller picture. Only one picture size
+ * is drawn at a time and the GPU runs scenes in order; the caller clears the depth at every size change (nothing reads a depth surface across a size change). The block is made at
+ * the first scene of the first user, at capacity size, and freed with its last user. A depth surface that exists is not touched (call before the object's first scene, or after
+ * vglFramebufferMultisample); cw = 0 turns it off for this object. An object that does not fit the capacity, or one that wants a stencil, keeps its own surface.
+ * Returns GL_FALSE for an unknown object. */
+GLboolean vglFramebufferDepthShare(GLuint fb_id, GLint cw, GLint ch) {
+	THREAD_SAFE()
+
+	framebuffer *fb = (framebuffer *)fb_id;
+	if (!fb || !fb->active)
+		return GL_FALSE;
+	if (cw < 0 || ch < 0)
+		cw = ch = 0;
+	fb->depth_share_w = cw;
+	fb->depth_share_h = ch;
+	return GL_TRUE;
 }

@@ -1,0 +1,294 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: vglMemFree and vgl_mem_get_free_space answered from running counters, not by walking the heap (vglSetMemFreeMode, MEMFREE)
+
+MSC_VGX_VGL_MEMFREE (Galaxy console, 9-10 Nov: its patch 0031, "2 us per question" against a walk that took the back end from 17 to 34 ms per picture; written again from the description):
+sceClibMspaceMallocStats walks every chunk of the mspace, so each free-memory question cost time in proportion to the blocks the game had loaded. The allocator
+wrappers (vgl_malloc, calloc, memalign, realloc, free) now keep per pool the usable bytes and the number of live blocks (sceClibMspaceMallocUsableSize), and
+vgl_mem_get_free_space answers  free_when_empty - (usable + overhead * blocks).  The per-block overhead and the empty figure are measured at pool creation by
+probe blocks (malloc and memalign of 1 .. 64 KiB): every probe must grow current_in_use by its usable size plus ONE constant and the pool must return to its start
+figure when they are freed; a pool that fails (a statistics call that counts requests, or answers nothing, as Vita3K's) keeps the walk. vglSetMemFreeMode(0) (library
+default) walks as before; 1 answers from the counters; 2 answers with the walked figure and compares it with the counters (vglGetMemFreeStats: checks, differences,
+checks skipped because another thread allocated meanwhile, the largest difference, which pools are counted). Counters are atomics, since the collector thread frees.
+Host test: renderer/tests/run_vitagl_memfree_test.sh.
+
+diff -ruN a/source/utils/mem_utils.c b/source/utils/mem_utils.c
+--- a/source/utils/mem_utils.c
++++ b/source/utils/mem_utils.c
+@@ -398,6 +398,161 @@
+ }
+ #endif
+ 
++#ifndef HAVE_CUSTOM_HEAP
++/* MEMFREE BEGIN */
++// 1.3 MEMFREE (patch 0028): the free figure of a pool without walking its heap. sceClibMspaceMallocStats walks every chunk of the mspace, so its cost grows with the number of
++// blocks (textures, vertex data, render targets) and vglMemFree / vgl_mem_get_free_space paid it on every question. Every block comes through the wrappers below, so each pool
++// keeps the usable bytes and the number of its live blocks; with the allocator's per-block overhead (measured at start-up, see vgl_mf_init) the free figure is
++//     free = free_when_empty - (usable_bytes + overhead * live_blocks)
++// which is what capacity - current_in_use is, without the walk. Exact when the overhead is one constant (checked by the probes; a pool that fails them keeps the walk).
++// Mode 2 (vglSetMemFreeMode) also walks, compares, counts differences and answers with the walked figure.
++#define VGL_MF_POOLS VGL_MEM_EXTERNAL
++static uint32_t mf_usable[VGL_MF_POOLS]; // sum of sceClibMspaceMallocUsableSize over the live blocks of the pool
++static uint32_t mf_live[VGL_MF_POOLS]; // live blocks
++static uint32_t mf_empty_free[VGL_MF_POOLS]; // capacity - current_in_use of the empty pool
++static uint32_t mf_overhead[VGL_MF_POOLS]; // allocator bytes per block on top of its usable size
++static uint32_t mf_inflight[VGL_MF_POOLS]; // wrapper calls between their allocator call and their count update (mode 2 skips a check made then)
++static uint32_t mf_gen[VGL_MF_POOLS]; // counted operations (mode 2: a check across a change is skipped)
++static uint8_t mf_ok[VGL_MF_POOLS]; // the counters can answer for this pool
++static int mf_mode = 0;
++static uint32_t mf_n_fast = 0, mf_n_walk = 0, mf_n_checks = 0, mf_n_bad = 0, mf_n_raced = 0;
++static int32_t mf_worst = 0;
++
++void vglSetMemFreeMode(int mode) {
++	mf_mode = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
++}
++
++void vglGetMemFreeStats(uint32_t *fast, uint32_t *walked, uint32_t *checks, uint32_t *mismatches, uint32_t *raced, int32_t *worst, uint32_t *pools) {
++	if (fast)
++		*fast = mf_n_fast;
++	if (walked)
++		*walked = mf_n_walk;
++	if (checks)
++		*checks = mf_n_checks;
++	if (mismatches)
++		*mismatches = mf_n_bad;
++	if (raced)
++		*raced = mf_n_raced;
++	if (worst)
++		*worst = mf_worst;
++	if (pools) {
++		uint32_t m = 0;
++		for (int i = 0; i < VGL_MF_POOLS; i++)
++			m |= mf_ok[i] ? (1u << i) : 0;
++		*pools = m;
++	}
++}
++
++static size_t vgl_mf_walk(vglMemType type) {
++	SceClibMspaceStats stats;
++	sceClibMspaceMallocStats(mempool_mspace[type], &stats);
++	return stats.capacity - stats.current_in_use;
++}
++
++// Called when a pool's mspace has just been made (nothing allocated from it yet): measures the allocator's overhead with probe blocks and decides whether the counters can be used.
++// A probe is a block of its own size (malloc and memalign); after each one current_in_use must have grown by usable size + one constant, and after all are freed it must be back.
++static void vgl_mf_init(vglMemType type) {
++	mf_ok[type] = 0;
++	mf_usable[type] = mf_live[type] = mf_inflight[type] = mf_gen[type] = 0;
++	void *ms = mempool_mspace[type];
++	if (!ms)
++		return;
++	SceClibMspaceStats st;
++	st.capacity = 0;
++	st.current_in_use = 0;
++	sceClibMspaceMallocStats(ms, &st);
++	const uint32_t cap = st.capacity, base = st.current_in_use;
++	if (!cap || base > cap)
++		return; // (no statistics: the host emulator) -> the walk stays
++	static const uint32_t sizes[] = { 1, 24, 100, 1000, 4096, 65536 };
++	static const uint32_t aligns[] = { 0, 0, 16, 256, 4096, 0 }; // (0: malloc)
++	void *blk[sizeof(sizes) / sizeof(sizes[0])] = {};
++	uint32_t ov = 0, got = 0, in_use = base;
++	GLboolean good = GL_TRUE;
++	for (uint32_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]) && good; i++) {
++		blk[i] = aligns[i] ? sceClibMspaceMemalign(ms, aligns[i], sizes[i]) : sceClibMspaceMalloc(ms, sizes[i]);
++		if (!blk[i])
++			continue; // (a pool too small for this probe: the others decide)
++		SceClibMspaceStats a;
++		sceClibMspaceMallocStats(ms, &a);
++		const uint32_t u = sceClibMspaceMallocUsableSize(blk[i]);
++		const uint32_t delta = a.current_in_use - in_use;
++		in_use = a.current_in_use;
++		if (delta < u || a.capacity != cap) {
++			good = GL_FALSE;
++			break;
++		}
++		if (!got++)
++			ov = delta - u;
++		else if (delta - u != ov)
++			good = GL_FALSE;
++	}
++	for (uint32_t i = sizeof(sizes) / sizeof(sizes[0]); i-- > 0;)
++		if (blk[i])
++			sceClibMspaceFree(ms, blk[i]);
++	SceClibMspaceStats e;
++	sceClibMspaceMallocStats(ms, &e);
++	if (!good || got < 3 || e.current_in_use != base || e.capacity != cap) {
++		vgl_log("%s:%d: pool %d: free figure kept on the heap walk (%u probes, overhead %u, in use %u of %u -> %u)\n", __FILE__, __LINE__, (int)type, got, ov, base, cap, e.current_in_use);
++		return;
++	}
++	mf_empty_free[type] = cap - base;
++	mf_overhead[type] = ov;
++	mf_ok[type] = 1;
++}
++
++static inline GLboolean vgl_mf_begin(vglMemType type) {
++	if ((unsigned)type >= VGL_MF_POOLS || !mf_ok[type])
++		return GL_FALSE;
++	__atomic_fetch_add(&mf_inflight[type], 1, __ATOMIC_SEQ_CST);
++	return GL_TRUE;
++}
++
++// `du`: usable bytes gained (negative: lost); `dl`: blocks gained.
++static inline void vgl_mf_end(vglMemType type, GLboolean tracked, int32_t du, int32_t dl) {
++	if (!tracked)
++		return;
++	__atomic_fetch_add(&mf_usable[type], (uint32_t)du, __ATOMIC_SEQ_CST);
++	__atomic_fetch_add(&mf_live[type], (uint32_t)dl, __ATOMIC_SEQ_CST);
++	__atomic_fetch_add(&mf_gen[type], 1, __ATOMIC_SEQ_CST);
++	__atomic_fetch_sub(&mf_inflight[type], 1, __ATOMIC_SEQ_CST);
++}
++
++static inline void *vgl_mf_took(vglMemType type, GLboolean tracked, void *ptr) {
++	vgl_mf_end(type, tracked, ptr && tracked ? (int32_t)sceClibMspaceMallocUsableSize(ptr) : 0, ptr ? 1 : 0);
++	return ptr;
++}
++
++static size_t vgl_mf_free(vglMemType type) {
++	const uint32_t i0 = __atomic_load_n(&mf_inflight[type], __ATOMIC_SEQ_CST), g0 = __atomic_load_n(&mf_gen[type], __ATOMIC_SEQ_CST);
++	const uint32_t live = __atomic_load_n(&mf_live[type], __ATOMIC_SEQ_CST), usable = __atomic_load_n(&mf_usable[type], __ATOMIC_SEQ_CST);
++	const uint32_t used = usable + mf_overhead[type] * live;
++	const size_t fast = used < mf_empty_free[type] ? mf_empty_free[type] - used : 0;
++	if (mf_mode < 2) {
++		mf_n_fast++;
++		return fast;
++	}
++	const size_t walked = vgl_mf_walk(type);
++	mf_n_walk++;
++	const uint32_t i1 = __atomic_load_n(&mf_inflight[type], __ATOMIC_SEQ_CST), g1 = __atomic_load_n(&mf_gen[type], __ATOMIC_SEQ_CST);
++	if (i0 || i1 || g0 != g1) {
++		mf_n_raced++;
++		return fast;
++	}
++	mf_n_checks++;
++	if (walked != fast) {
++		const int32_t d = (int32_t)fast - (int32_t)walked;
++		if (!mf_n_bad++ || (d < 0 ? -d : d) > (mf_worst < 0 ? -mf_worst : mf_worst))
++			mf_worst = d;
++		if (mf_n_bad <= 8)
++			vgl_log("%s:%d: MEMFREE pool %d: counters say %u free, the walk says %u (%d, %u blocks, %u usable bytes, overhead %u)\n", __FILE__, __LINE__, (int)type, (unsigned)fast,
++				(unsigned)walked, d, live, usable, mf_overhead[type]);
++	}
++	return walked;
++}
++/* MEMFREE END */
++#endif
++
+ #ifdef PHYCONT_ON_DEMAND
+ void *vgl_alloc_phycont_block(uint32_t size) {
+ 	size = VGL_ALIGN(size, 1024 * 1024);
+@@ -495,6 +650,7 @@
+ 				sceGxmMapMemory(mempool_addr[i], mempool_size[i], SCE_GXM_MEMORY_ATTRIB_RW);
+ #ifndef HAVE_CUSTOM_HEAP
+ 				mempool_mspace[i] = sceClibMspaceCreate(mempool_addr[i], mempool_size[i]);
++				vgl_mf_init((vglMemType)i); // 1.3 MEMFREE (patch 0028)
+ #else
+ 				heap_extend(i, mempool_addr[i], mempool_size[i]);
+ #endif
+@@ -569,6 +725,7 @@
+ 		sceGxmMapMemory(mempool_addr[VGL_MEM_PHYCONT], mempool_size[VGL_MEM_PHYCONT], SCE_GXM_MEMORY_ATTRIB_RW);
+ #ifndef HAVE_CUSTOM_HEAP
+ 		mempool_mspace[VGL_MEM_PHYCONT] = sceClibMspaceCreate(mempool_addr[VGL_MEM_PHYCONT], mempool_size[VGL_MEM_PHYCONT]);
++		vgl_mf_init(VGL_MEM_PHYCONT); // 1.3 MEMFREE (patch 0028)
+ #else
+ 		heap_extend(VGL_MEM_PHYCONT, mempool_addr[VGL_MEM_PHYCONT], mempool_size[VGL_MEM_PHYCONT]);
+ #endif
+@@ -625,9 +782,10 @@
+ 	}
+ #else
+ 	} else if (mempool_size[type]) {
+-		SceClibMspaceStats stats;
+-		sceClibMspaceMallocStats(mempool_mspace[type], &stats);
+-		return stats.capacity - stats.current_in_use;
++		if (mf_mode && mf_ok[type]) // 1.3 MEMFREE (patch 0028): from the counters
++			return vgl_mf_free(type);
++		mf_n_walk++;
++		return vgl_mf_walk(type);
+ 	} else
+ 		return 0;
+ #endif
+@@ -689,8 +847,12 @@
+ 		tm_max_failed_alloc[type] = tm_free[type] + 1;
+ 	}
+ #else
+-	else if (mempool_mspace[type])
++	else if (mempool_mspace[type]) {
++		const GLboolean tr = vgl_mf_begin(type); // 1.3 MEMFREE (patch 0028)
++		const int32_t u = tr ? (int32_t)sceClibMspaceMallocUsableSize(ptr) : 0;
+ 		sceClibMspaceFree(mempool_mspace[type], ptr);
++		vgl_mf_end(type, tr, -u, -1);
++	}
+ #endif
+ }
+ 
+@@ -709,8 +871,10 @@
+ 	else if (size <= tm_max_failed_alloc[type])
+ 		return heap_alloc(type, size, MEM_ALIGNMENT);
+ #else
+-	else if (mempool_mspace[type])
+-		return sceClibMspaceMalloc(mempool_mspace[type], size);
++	else if (mempool_mspace[type]) {
++		const GLboolean tr = vgl_mf_begin(type); // 1.3 MEMFREE (patch 0028)
++		return vgl_mf_took(type, tr, sceClibMspaceMalloc(mempool_mspace[type], size));
++	}
+ #endif
+ 	return NULL;
+ }
+@@ -740,8 +904,10 @@
+ 		return ret;
+ 	}
+ #else
+-	else if (mempool_mspace[type])
+-		return sceClibMspaceCalloc(mempool_mspace[type], num, size);
++	else if (mempool_mspace[type]) {
++		const GLboolean tr = vgl_mf_begin(type); // 1.3 MEMFREE (patch 0028)
++		return vgl_mf_took(type, tr, sceClibMspaceCalloc(mempool_mspace[type], num, size));
++	}
+ #endif
+ 	return NULL;
+ }
+@@ -761,8 +927,10 @@
+ 	else if (size <= tm_max_failed_alloc[type])
+ 		return heap_alloc(type, size, alignment);
+ #else
+-	else if (mempool_mspace[type])
+-		return sceClibMspaceMemalign(mempool_mspace[type], alignment, size);
++	else if (mempool_mspace[type]) {
++		const GLboolean tr = vgl_mf_begin(type); // 1.3 MEMFREE (patch 0028)
++		return vgl_mf_took(type, tr, sceClibMspaceMemalign(mempool_mspace[type], alignment, size));
++	}
+ #endif
+ 	return NULL;
+ }
+@@ -798,7 +966,13 @@
+ 	}
+ #endif
+ #ifndef HAVE_CUSTOM_HEAP
+-	return sceClibMspaceRealloc(mempool_mspace[type], ptr, size);
++	{
++		const GLboolean tr = vgl_mf_begin(type); // 1.3 MEMFREE (patch 0028): the block's usable size before and after (it may move, grow or shrink in place)
++		const int32_t before = tr ? (int32_t)sceClibMspaceMallocUsableSize(ptr) : 0;
++		void *res = sceClibMspaceRealloc(mempool_mspace[type], ptr, size);
++		vgl_mf_end(type, tr, res ? (int32_t)sceClibMspaceMallocUsableSize(res) - before : 0, 0);
++		return res;
++	}
+ #else
+ 	return heap_realloc(type, ptr, size);
+ #endif
+diff -ruN a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1136,6 +1136,14 @@
+ void vglSetViewportExact(GLboolean exact); // 1.3 glViewport halves as floats (patch 0025; default GL_TRUE)
+ void vglSetMaskKeep(GLboolean on); // 1.3 MASK_KEEP (patch 0026; default GL_FALSE): a scissor mask rebuild the depth/stencil surface already holds is not drawn
+ void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept); // 1.3 MASK_KEEP: mask rebuilds drawn and not drawn so far (counted with the switch off too)
++// 1.3 MEMFREE (patch 0028): vglMemFree / vgl_mem_get_free_space without walking the heap. The allocator wrappers keep per pool the usable bytes and the count of live blocks;
++// a pool's free figure is then (free when empty) - (usable + overhead * count), O(1), where `overhead` is the allocator's per-block cost measured at start-up with probe blocks.
++// A pool whose probes do not show one constant overhead (or whose statistics call answers nothing: Vita3K) is never answered from the counters.
++// mode 0: walk the heap as before (the library default); 1: the counters; 2: the counters, and every answer is also checked against a walk (counted, logged).
++void vglSetMemFreeMode(int mode);
++// calls answered from the counters / by a walk; checks made, found different, skipped because another thread allocated or freed meanwhile; the largest difference seen (bytes);
++// pools whose counters are usable (bit per vglMemType). Any pointer may be NULL.
++void vglGetMemFreeStats(uint32_t *fast, uint32_t *walked, uint32_t *checks, uint32_t *mismatches, uint32_t *raced, int32_t *worst, uint32_t *pools);
+ GLboolean vglGetUniformShadow(GLuint prog, GLint location, void **vptr, void **fptr, uint32_t *bytes); // 1.3 vgx uniform shadows (patch 0024)
+ void vglUniformShadowWritten(GLuint prog, uint32_t stages);
+ 

@@ -1,0 +1,15 @@
+# console-1.2 run scn-mega: The whole Mega Strike at Vice with the split classes (fast-boot fb-mega-full)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group s30, route megafull, version payload 1.3, role ab
+# scenes30: [head] lines of class mega (the Mega scene: 23 Nov 99 % of its pictures at 2 refreshes, GPU 22 ms at 960x544) and mega-cut (the launch and result cut-scenes: 13 % and 26 % at 3 refreshes); `[head] presentation function "MegastrikeIntro" / "MegastrikeEnd"` lines prove the split; [heldgov] lines in the mega-cut scenes. Marks @begin / @end mega-sequence.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was fb-mega-full.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-mega-full.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500

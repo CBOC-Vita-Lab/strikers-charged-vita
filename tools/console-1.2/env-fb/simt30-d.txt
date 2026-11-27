@@ -1,0 +1,18 @@
+# console-1.2 run simt30-d: Overlapped step at the held 30 (no LOCK60), The Dump goal scenario
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route gsdump, version payload 1.3, role ab
+# overlap18: held 30 at The Dump: late %, goal-cut spikes, speed line 98 %, against gsdump16. Turn it on for the held 30 when this lowers late pictures. NEEDS THE simfix20 PACKAGE (lost wake-up fix, Fable verify10 P1). INVALID without the `[fs] np_sim` line (MSC_OVERLAP_LOG=1: `[simt] final` needs atexit, which the console exit does not run). MSC_SIMT never goes into the Smooth table from this sitting.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was fb-dump-goal.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump-goal.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=2
+MSC_SIMT=2
+MSC_RENDER_RNG=2
+MSC_OVERLAP_LOG=1
+MSC_HITCH_LINES=1500

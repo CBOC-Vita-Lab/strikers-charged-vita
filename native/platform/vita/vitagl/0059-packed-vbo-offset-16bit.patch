@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 22:00:00 -0500
+Subject: [PATCH] vgl24 (bug 2 of the GT3 Revisited list, written again from the description): a packed-VBO draw whose attribute offsets do not fit the 16-bit GXM attribute offset takes a stream per attribute instead (the offset was truncated: attributes read from the wrong place; compiled out of DRAW_SPEEDHACK draws, live in glMultiDrawElements and in builds without it)
+
+---
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 361f71662..822555a1a 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -25,6 +25,7 @@
+ #include <string.h>
+ #include "shared.h"
+ #include "utils/glsl_utils.h"
++#include "utils/geom_fix.h" // 0059
+ #include "utils/shacccg_paramquery.h"
+ #if defined(HAVE_SHADER_CACHE) || defined(HAVE_TEX_CACHE)
+ #define XXH_STATIC_LINKING_ONLY
+@@ -1560,6 +1561,9 @@ void _glMultiDrawArrays_CustomShadersIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
+ 		}
+ 	}
+ #else
++	// 0059: the packed-VBO attribute offset is 16 bits (SceGxmVertexAttribute.offset): an attribute further into the buffer than 64 KiB is read from the wrong place
++	if (is_packed && target_vbo && !vgl_pack_offsets_fit(cur_vao->vertex_attrib_offsets, cur_vao->vertex_attrib_state, p->attr_map, p->attr_num))
++		is_packed = GL_FALSE;
+ 	// Gathering real attribute data pointers
+ 	if (is_packed) {
+ 		if (target_vbo) {
+@@ -1827,6 +1831,9 @@ GLboolean _glDrawArrays_CustomShadersIMPL(GLint first, GLsizei count, GLboolean
+ 		}
+ 	}
+ #else
++	// 0059: the packed-VBO attribute offset is 16 bits (SceGxmVertexAttribute.offset): an attribute further into the buffer than 64 KiB is read from the wrong place
++	if (is_packed && target_vbo && !vgl_pack_offsets_fit(cur_vao->vertex_attrib_offsets, cur_vao->vertex_attrib_state, p->attr_map, p->attr_num))
++		is_packed = GL_FALSE;
+ 	// Gathering real attribute data pointers
+ 	if (is_packed) {
+ 		if (target_vbo) {
+@@ -2315,6 +2322,9 @@ GLboolean _glDrawElements_CustomShadersIMPL(uint16_t *idx_buf, GLsizei count, ui
+ 		}
+ 	}
+ #else
++	// 0059: the packed-VBO attribute offset is 16 bits (SceGxmVertexAttribute.offset): an attribute further into the buffer than 64 KiB is read from the wrong place
++	if (is_packed && target_vbo && !vgl_pack_offsets_fit(cur_vao->vertex_attrib_offsets, cur_vao->vertex_attrib_state, p->attr_map, p->attr_num))
++		is_packed = GL_FALSE;
+ 	// Gathering real attribute data pointers
+ 	if (is_packed) {
+ 		if (target_vbo) {

@@ -1,18 +1,23 @@
 #include "vgx_texdecode.h"
+#include "vgx_cmd.h"
 #include "vgx_common.h"
+#if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && !defined(VGX_NO_NEON)
+#include <arm_neon.h>
+#define VGX_TEXDEC_NEON 1
+#endif
 
 namespace vgx {
 
 namespace {
-struct TileInfo { uint32_t tw, th, bytes; }; // tile width/height in texels, bytes per tile
+struct TileInfo { uint32_t tw, th, bytes, sw, sh; }; // tile width/height in texels, bytes per tile, and the two log2 (cpu60-25: the level size shifts instead of dividing; the console's A9 has no integer divide)
 TileInfo Tile(uint32_t fmt) {
     switch (fmt) {
-    case 0x0: case 0x8: return {8, 8, 32};  // I4, C4
-    case 0x1: case 0x2: case 0x9: return {8, 4, 32}; // I8, IA4, C8
-    case 0x3: case 0x4: case 0x5: case 0xA: return {4, 4, 32}; // IA8, RGB565, RGB5A3, C14X2
-    case 0x6: return {4, 4, 64};  // RGBA8
-    case 0xE: return {8, 8, 32};  // CMPR
-    default: return {4, 4, 32};
+    case 0x0: case 0x8: return {8, 8, 32, 3, 3};  // I4, C4
+    case 0x1: case 0x2: case 0x9: return {8, 4, 32, 3, 2}; // I8, IA4, C8
+    case 0x3: case 0x4: case 0x5: case 0xA: return {4, 4, 32, 2, 2}; // IA8, RGB565, RGB5A3, C14X2
+    case 0x6: return {4, 4, 64, 2, 2};  // RGBA8
+    case 0xE: return {8, 8, 32, 3, 3};  // CMPR
+    default: return {4, 4, 32, 2, 2};
     }
 }
 inline void Put(uint8_t* d, uint32_t w, uint32_t h, uint32_t x, uint32_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -53,7 +58,8 @@ uint32_t TexLevelSize(uint32_t w, uint32_t h, uint32_t fmt) {
     const TileInfo t = Tile(fmt);
     return ((w + t.tw - 1) / t.tw) * ((h + t.th - 1) / t.th) * t.bytes;
 }
-uint32_t TexDataSize(uint32_t w, uint32_t h, uint32_t fmt, uint32_t levels) {
+// The size the plain way (the division in TexLevelSize), kept as the reference: MSC_VGX_TEXSIZE_MEMO=0 and the verify mode 2 use it.
+uint32_t TexDataSizeRef(uint32_t w, uint32_t h, uint32_t fmt, uint32_t levels) {
     uint32_t total = 0;
     for (uint32_t l = 0; l < levels; ++l) {
         total += TexLevelSize(w, h, fmt);
@@ -62,6 +68,56 @@ uint32_t TexDataSize(uint32_t w, uint32_t h, uint32_t fmt, uint32_t levels) {
         h = h > 1 ? h / 2 : 1;
     }
     return total;
+}
+
+namespace {
+// cpu60-25 (MSC_VGX_TEXSIZE_MEMO, default 1; 0 the plain loop, 2 verify): the player asks for the data size of a texture object at every R_TEX that is not a repeat
+// (TexSameGen: ~460 a picture at The Vice's tour, 418 host instructions each, 2 integer divisions a mip level, which the console's Cortex-A9 does in software), and the
+// answer is a pure function of (width, height, format, levels). A 64-entry table of the last answers (one 64-bit word each: the key above, the size below, written and
+// read whole, so a thread that finds another's entry finds a whole one) gives it back for a handful of instructions; a miss computes it with shifts instead of divisions
+// (the tile sizes are powers of two, so (w + t - 1) / t is (w + t - 1) >> log2 t, the same unsigned result for every input). Sizes outside the key's range (width or height
+// over 1024 or 0, a format or level count over 15) take the plain function.
+std::atomic<uint64_t> g_tdsMemo[64];
+std::atomic<uint64_t> g_tdsWrong{0}, g_tdsChecked{0};
+inline uint32_t TexDataSizeFast(uint32_t w, uint32_t h, uint32_t fmt, uint32_t levels) {
+    const TileInfo t = Tile(fmt);
+    uint32_t total = 0;
+    for (uint32_t l = 0; l < levels; ++l) {
+#ifdef VGX_TEXSIZE_MUTANT   // (unit test only: a size rounded down, the test must fail)
+        total += (((w + t.tw - 1) >> t.sw) * ((h + t.th - 2) >> t.sh)) * t.bytes;
+#else
+        total += (((w + t.tw - 1) >> t.sw) * ((h + t.th - 1) >> t.sh)) * t.bytes;
+#endif
+        if (w == 1 && h == 1) break;
+        w = w > 1 ? w >> 1 : 1;
+        h = h > 1 ? h >> 1 : 1;
+    }
+    return total;
+}
+} // namespace
+
+uint32_t TexDataSize(uint32_t w, uint32_t h, uint32_t fmt, uint32_t levels) {
+    const int mode = static_cast<int>(VGX_KNOB(EnvInt("MSC_VGX_TEXSIZE_MEMO", 1)));
+    if (mode == 0) return TexDataSizeRef(w, h, fmt, levels);
+    if (w - 1u >= 1024u || h - 1u >= 1024u || fmt >= 16u || levels >= 16u) return mode == 2 ? TexDataSizeRef(w, h, fmt, levels) : TexDataSizeFast(w, h, fmt, levels);
+    const uint32_t key = 0x80000000u | (w - 1u) | ((h - 1u) << 10) | (fmt << 20) | (levels << 24);
+    std::atomic<uint64_t>& slot = g_tdsMemo[(key * 0x9E3779B1u) >> 26];
+    const uint64_t e = slot.load(std::memory_order_relaxed);
+    uint32_t size;
+    if (static_cast<uint32_t>(e >> 32) == key) size = static_cast<uint32_t>(e);
+    else {
+        size = TexDataSizeFast(w, h, fmt, levels);
+        slot.store((static_cast<uint64_t>(key) << 32) | size, std::memory_order_relaxed);
+    }
+    if (mode == 2) {
+        const uint32_t ref = TexDataSizeRef(w, h, fmt, levels);
+        const uint64_t n = g_tdsChecked.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (ref != size && g_tdsWrong.fetch_add(1, std::memory_order_relaxed) < 16)
+            std::fprintf(stderr, "[texsize] MISMATCH %ux%u fmt %u levels %u: memo %u plain %u\n", w, h, fmt, levels, size, ref);
+        if ((n & 0xFFFFF) == 0) std::fprintf(stderr, "[texsize] verify: %llu checked, %llu wrong\n", static_cast<unsigned long long>(n), static_cast<unsigned long long>(g_tdsWrong.load(std::memory_order_relaxed)));
+        return ref;
+    }
+    return size;
 }
 
 // I8 -> RGBA8 (all four channels the intensity) for a size made of whole 8x4 tiles. Same bytes as the general loop below.
@@ -219,8 +275,67 @@ void DecodeTexture(const uint8_t* s, uint32_t w, uint32_t h, uint32_t fmt, const
     }
 }
 
+#ifdef VGX_TEXDEC_NEON
+namespace {
+// Eight grey texels as luminance-alpha (the same value twice).
+inline void StoreGray2(uint8_t* d, uint8x8_t v) {
+    uint8x8x2_t q;
+    q.val[0] = q.val[1] = v;
+    vst2_u8(d, q);
+}
+// GXD_TEXNEON (Galaxy's LA88 tile decoders): a size made of whole tiles, one vector store per row of a tile. The same bytes as the loops below.
+template <uint32_t fmt>
+bool DecodeLA88TilesNeon(const uint8_t* s, uint32_t w, uint32_t h, uint8_t* d) {
+    const TileInfo t = Tile(fmt);
+    if ((w & (t.tw - 1)) || (h & (t.th - 1))) return false;
+    const size_t stride = static_cast<size_t>(w) * 2;
+    for (uint32_t ty = 0; ty < h; ty += t.th)
+        for (uint32_t tx = 0; tx < w; tx += t.tw, s += t.bytes) {
+            uint8_t* row = d + static_cast<size_t>(ty) * stride + tx * 2;
+            if constexpr (fmt == 0) { // I4: two rows of eight texels from 8 bytes (high nibble first), L = A = n * 17
+                for (uint32_t y = 0; y < 8; y += 2) {
+                    const uint8x8_t packed = vld1_u8(s + y * 4);
+                    uint8x8_t hi = vshr_n_u8(packed, 4), lo = vand_u8(packed, vdup_n_u8(15));
+                    hi = vorr_u8(hi, vshl_n_u8(hi, 4));
+                    lo = vorr_u8(lo, vshl_n_u8(lo, 4));
+                    const uint8x8x2_t pixels = vzip_u8(hi, lo);
+                    StoreGray2(row + y * stride, pixels.val[0]);
+                    StoreGray2(row + (y + 1) * stride, pixels.val[1]);
+                }
+            } else if constexpr (fmt == 1) { // I8: L = A = the byte
+                for (uint32_t y = 0; y < 4; ++y) StoreGray2(row + y * stride, vld1_u8(s + y * 8));
+            } else if constexpr (fmt == 2) { // IA4: L = low nibble * 17, A = high nibble * 17
+                for (uint32_t y = 0; y < 4; ++y) {
+                    const uint8x8_t packed = vld1_u8(s + y * 8);
+                    uint8x8x2_t pixels;
+                    const uint8x8_t l = vand_u8(packed, vdup_n_u8(15)), a = vshr_n_u8(packed, 4);
+                    pixels.val[0] = vorr_u8(l, vshl_n_u8(l, 4));
+                    pixels.val[1] = vorr_u8(a, vshl_n_u8(a, 4));
+                    vst2_u8(row + y * stride, pixels);
+                }
+            } else { // IA8: the stored pair is (alpha, luminance), the output (luminance, alpha)
+                for (uint32_t y = 0; y < 4; ++y) vst1_u8(row + y * stride, vrev16_u8(vld1_u8(s + y * 8)));
+            }
+        }
+    return true;
+}
+} // namespace
+#endif
+
 bool DecodeTextureLA88(const uint8_t* s, uint32_t w, uint32_t h, uint32_t fmt, uint8_t* d) {
     if (fmt > 3 || !w || !h || !s || !d) return false;
+#ifdef VGX_TEXDEC_NEON
+    if (Gxd(GXD_TEXNEON)) {
+        bool done = false;
+        switch (fmt) {
+        case 0: done = DecodeLA88TilesNeon<0>(s, w, h, d); break;
+        case 1: done = DecodeLA88TilesNeon<1>(s, w, h, d); break;
+        case 2: done = DecodeLA88TilesNeon<2>(s, w, h, d); break;
+        default: done = DecodeLA88TilesNeon<3>(s, w, h, d); break;
+        }
+        if (done) return true;
+    }
+#endif
     const TileInfo t = Tile(fmt);
     for (uint32_t ty = 0; ty < h; ty += t.th)
         for (uint32_t tx = 0; tx < w; tx += t.tw, s += t.bytes)
@@ -240,6 +355,16 @@ bool DecodeTextureLA88(const uint8_t* s, uint32_t w, uint32_t h, uint32_t fmt, u
     return true;
 }
 
+bool DecodeTextureI8(const uint8_t* s, uint32_t w, uint32_t h, uint8_t* d) {
+    if (!s || !d || !w || !h || (w & 7u) || (h & 3u)) return false;
+    for (uint32_t ty = 0; ty < h; ty += 4)
+        for (uint32_t tx = 0; tx < w; tx += 8, s += 32) {
+            uint8_t* row = d + static_cast<size_t>(ty) * w + tx;
+            for (uint32_t y = 0; y < 4; ++y) std::memcpy(row + static_cast<size_t>(y) * w, s + y * 8, 8);
+        }
+    return true;
+}
+
 bool CmprToDxt1(const uint8_t* s, uint32_t w, uint32_t h, uint8_t* d, bool allowTransparent) {
     const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4; // DXT1 blocks
     const uint32_t tw = (w + 7) / 8;                   // CMPR tiles per row
@@ -256,6 +381,97 @@ bool CmprToDxt1(const uint8_t* s, uint32_t w, uint32_t h, uint8_t* d, bool allow
             }
         }
     return true;
+}
+
+void CmprToDxt5(const uint8_t* s, uint32_t w, uint32_t h, uint8_t* d) {
+    const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4; // blocks
+    const uint32_t tw = (w + 7) / 8;                   // CMPR tiles per row
+    for (uint32_t by = 0; by < bh; ++by)
+        for (uint32_t bx = 0; bx < bw; ++bx, d += 16) {
+            const uint8_t* b = s + ((static_cast<size_t>(by >> 1) * tw + (bx >> 1)) * 4 + (by & 1) * 2 + (bx & 1)) * 8;
+            const uint32_t c0 = be16(b), c1 = be16(b + 2);
+            const bool three = c0 <= c1;
+            // The colour block of DXT5 always has four colours, and the larger endpoint goes first so that no decoder can take it for a three-colour block.
+            const uint32_t e0 = three ? c1 : c0, e1 = three ? c0 : c1;
+            d[8] = static_cast<uint8_t>(e0); d[9] = static_cast<uint8_t>(e0 >> 8);
+            d[10] = static_cast<uint8_t>(e1); d[11] = static_cast<uint8_t>(e1 >> 8);
+            uint64_t alpha = 0; // 3-bit indices, first texel lowest: 0 = 255, 1 = 0
+            for (uint32_t y = 0; y < 4; ++y) {
+                const uint32_t r = b[4 + y];
+                uint32_t row = 0;
+                for (uint32_t x = 0; x < 4; ++x) {
+                    uint32_t i = (r >> (6 - x * 2)) & 3u; // GX: the leftmost texel in the top two bits
+                    if (three) {
+                        if (i == 3) alpha |= 1ull << ((y * 4 + x) * 3);
+                        if (c0 == c1) i = 0; // (one colour: no decoder can get this block wrong)
+                        else i = i < 2 ? (i ^ 1u) : (((bx * 4 + x + by * 4 + y) & 1u) ? 3u : 2u); // (the endpoints changed places; the middle colour: see the header)
+                    }
+                    row |= i << (x * 2);
+                }
+                d[12 + y] = static_cast<uint8_t>(row);
+            }
+            d[0] = 255; d[1] = 0;
+            for (int k = 0; k < 6; ++k) d[2 + k] = static_cast<uint8_t>(alpha >> (k * 8));
+        }
+}
+
+uint32_t CmprDxt5MaxError(const uint8_t* s, uint32_t w, uint32_t h) {
+    const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4, tw = (w + 7) / 8;
+    uint32_t worst = 0;
+    for (uint32_t by = 0; by < bh; ++by)
+        for (uint32_t bx = 0; bx < bw; ++bx) {
+            const uint8_t* b = s + ((static_cast<size_t>(by >> 1) * tw + (bx >> 1)) * 4 + (by & 1) * 2 + (bx & 1)) * 8;
+            const uint32_t c0 = be16(b), c1 = be16(b + 2);
+            if (c0 >= c1) continue; // four colours, or one: CmprToDxt5 keeps every colour of these
+            uint8_t p0[4], p1[4];
+            Dec565(static_cast<uint16_t>(c0), p0);
+            Dec565(static_cast<uint16_t>(c1), p1);
+            for (uint32_t y = 0; y < 4; ++y)
+                for (uint32_t x = 0; x < 4; ++x) {
+                    if (((b[4 + y] >> (6 - x * 2)) & 3u) < 2) continue; // an end colour, exact
+                    const bool odd = ((bx * 4 + x + by * 4 + y) & 1u) != 0;
+                    for (int k = 0; k < 3; ++k) {
+                        const int mid = (p0[k] + p1[k]) / 2;
+                        const int got = odd ? (p1[k] + 2 * p0[k]) / 3 : (2 * p1[k] + p0[k]) / 3;
+                        const uint32_t e = static_cast<uint32_t>(mid > got ? mid - got : got - mid);
+                        if (e > worst) worst = e;
+                    }
+                }
+        }
+    return worst;
+}
+
+uint8_t Rgba16Format(const std::vector<std::vector<uint8_t>>& levels, bool allow5551) {
+    enum : uint32_t { F565 = 1, F5551 = 2, F4444 = 4 };
+    const auto rep5 = [](uint32_t v) { return ((v >> 3) << 3 | v >> 5) == v; };
+    const auto rep6 = [](uint32_t v) { return ((v >> 2) << 2 | v >> 6) == v; };
+    const auto rep4 = [](uint32_t v) { return (v >> 4) == (v & 15u); };
+    uint32_t can = F565 | (allow5551 ? F5551 : 0u) | F4444;
+    for (const std::vector<uint8_t>& lv : levels) {
+        for (size_t i = 0; can && i + 4 <= lv.size(); i += 4) {
+            const uint32_t r = lv[i], g = lv[i + 1], b = lv[i + 2], a = lv[i + 3];
+            const bool c5 = rep5(r) && rep5(b);
+            if (!(c5 && rep6(g) && a == 255)) can &= ~static_cast<uint32_t>(F565);
+            if (!(c5 && rep5(g) && (a == 0 || a == 255))) can &= ~static_cast<uint32_t>(F5551);
+            if (!(rep4(r) && rep4(g) && rep4(b) && rep4(a))) can &= ~static_cast<uint32_t>(F4444);
+        }
+        if (!can) return 0;
+    }
+    return (can & F565) ? TF_RGB565 : (can & F5551) ? TF_RGBA5551 : (can & F4444) ? TF_RGBA4444 : 0;
+}
+
+void PackRgba16(std::vector<uint8_t>& lv, uint8_t format) {
+    const size_t n = lv.size() / 4;
+    for (size_t i = 0; i < n; ++i) {
+        const uint32_t r = lv[i * 4], g = lv[i * 4 + 1], b = lv[i * 4 + 2], a = lv[i * 4 + 3];
+        uint32_t v;
+        if (format == TF_RGB565) v = (r >> 3) << 11 | (g >> 2) << 5 | b >> 3;
+        else if (format == TF_RGBA5551) v = (r >> 3) << 11 | (g >> 3) << 6 | (b >> 3) << 1 | a >> 7;
+        else v = (r >> 4) << 12 | (g >> 4) << 8 | (b >> 4) << 4 | a >> 4;
+        lv[i * 2] = static_cast<uint8_t>(v);
+        lv[i * 2 + 1] = static_cast<uint8_t>(v >> 8);
+    }
+    lv.resize(n * 2);
 }
 
 void EncodeDxt1(const uint8_t* rgba, uint32_t w, uint32_t h, uint8_t* d) {

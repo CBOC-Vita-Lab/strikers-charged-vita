@@ -10,8 +10,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 NP=$(cd "$HERE/../../.." && pwd)
 PLAYER=""
 if [ "${1:-}" = -p ]; then PLAYER=$2; shift 2; fi
-PKG=${1:-/home/claude/msc/build/np/NPV3/c1/vita/pkg/np}
-KIT=${2:-/home/claude/msc/build/np/NPV3/kit}
+PKG=${1:-/work/msc/build/np/NPV3/c1/vita/pkg/np}
+KIT=${2:-/work/msc/build/np/NPV3/kit}
 rm -rf "$KIT"; mkdir -p "$KIT/env" "$KIT/nav" "$KIT/nav-native"
 cp "$PKG/mscharged-np.eboot.bin" "$KIT/eboot-np-lab.bin"
 cp "$PKG/mscharged-np.vpk" "$KIT/mscharged-np.vpk"
@@ -41,7 +41,7 @@ cp "$NP/platform/vita/lab/README.md" "$KIT/LAB-README.md"
 cp "$NP"/tools/nav/*.txt "$KIT/nav-native/" 2>/dev/null || true   # NPB2's scripts for the native layout (onoff values)
 cp "$HERE"/nav/*.txt "$KIT/nav/"
 cp "$NP/platform/vita/tools/v3k-env/v3k_fulltime.txt" "$KIT/nav/fullmatch.txt"   # the whole-match script that ran in Vita3K
-cp /home/claude/msc/tools/scripts/nav_kickoff.txt /home/claude/msc/tools/scripts/nav_match60.txt /home/claude/msc/tools/scripts/nav_menu_idle.txt /home/claude/msc/tools/scripts/mashA.txt "$KIT/nav/"
+cp /work/msc/tools/scripts/nav_kickoff.txt /work/msc/tools/scripts/nav_match60.txt /work/msc/tools/scripts/nav_menu_idle.txt /work/msc/tools/scripts/mashA.txt "$KIT/nav/"
 (cd "$KIT" && sha256sum eboot-np-lab.bin mscharged-np.vpk $(ls eboot-np-smoke.bin eboot-np-lab-o2.bin mscharged-np-player.vpk 2>/dev/null) $(find app-MSCN0000* -type f | sort) > SHA256SUMS)
 {
   echo "native port, Vita build (NPV3)"

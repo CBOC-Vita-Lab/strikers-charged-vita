@@ -3,6 +3,8 @@
 
 #include "NL/nlTask.h"
 
+#include "np/comfort.h"
+
 cRumbleFilter::cRumbleFilter()
 {
     nlVec2Set(v2Pos0, 0.0f, 0.0f);
@@ -35,7 +37,7 @@ void cRumbleFilter::Reset()
 void cRumbleFilter::Rumble(float x, float y, float ks, float kd)
 {
     nlVec2Set(v2Pos0, 0.0f, 0.0f);
-    nlVec2Set(v2Pos1, x, y);
+    nlVec2Set(v2Pos1, x * NpShakeScale(), y * NpShakeScale());   // MSC_REDUCED_MOTION (np/comfort.h)
     nlVec2Set(v2Vel0, 0.0f, 0.0f);
     nlVec2Set(v2Vel1, 0.0f, 0.0f);
     Ks = ks;

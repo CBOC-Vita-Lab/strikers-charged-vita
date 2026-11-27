@@ -1,0 +1,12 @@
+diff --git a/source/rt.c b/source/rt.c
+--- a/source/rt.c
++++ b/source/rt.c
+@@ -318,6 +318,8 @@ uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out) {
+ 		return 0;
+ 	__sync_synchronize();
+ 	*out = rt_gpu_frames[(h - 1) % RT_FRAMES];
++	if (out->timed != out->scenes)
++		out->timed = 0;
+ 	// A frame that lost a scene's record has a busy time that leaves that scene out: not offered as a measurement.
+ 	if (rt_ring_drops) {
+ 		const uint32_t fid = rt_gpu_frame_ids[(h - 1) % RT_FRAMES];

@@ -1,6 +1,8 @@
 // VLink POSIX UDP backend: host32 / armhf test builds (two game processes on 127.0.0.1, or real machines on a LAN).
 // Not built for the Vita (vlink_vita.cpp has the Vita's backends).
 #include "platform/sdk/net/vlink.h"
+#include "platform/sdk/net/np_net_census.h"
+#include "platform/sdk/net/np_bind_chain.h"
 
 #if !defined(NP_TARGET_VITA)
 
@@ -62,6 +64,7 @@ bool UdpOpen(UdpState& b) {
     if (b.fd >= 0) return true;
     b.fd = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (b.fd < 0) return false;
+    NpNetCensus::Opened(NpNetCensus::LanUdp);
     int one = 1;
     setsockopt(b.fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
     sockaddr_in local;
@@ -72,6 +75,7 @@ bool UdpOpen(UdpState& b) {
     if (::bind(b.fd, reinterpret_cast<sockaddr*>(&local), sizeof local) != 0) {
         VLINK_LOG("cannot bind UDP port %u (errno %d)\n", b.port, errno);
         ::close(b.fd);
+        NpNetCensus::Closed(NpNetCensus::LanUdp);
         b.fd = -1;
         return false;
     }
@@ -122,7 +126,7 @@ int UdpRecv(void* ctx, PeerAddr* from, void* buffer, size_t capacity) {
 
 void UdpClose(void* ctx) {
     UdpState& b = *static_cast<UdpState*>(ctx);
-    if (b.fd >= 0) ::close(b.fd);
+    if (b.fd >= 0) { ::close(b.fd); NpNetCensus::Closed(NpNetCensus::LanUdp); }
     b.fd = -1;
 }
 
@@ -130,7 +134,7 @@ void UdpClose(void* ctx) {
 
 Backend* CreateUdpBackend(uint16_t bindPort, const char* broadcastTargets, uint32_t vip) {
     UdpState* b = new UdpState;
-    b->port = bindPort ? bindPort : 41000;
+    b->port = bindPort ? bindPort : NpNet::kLanDefaultPort;
     if (vip == 0) {
         static uint32_t counter = 0;  // process id, time and a counter: unique enough between two consoles
         uint32_t x = uint32_t(getpid()) * 2654435761u ^ uint32_t(time(0)) * 40503u ^ (++counter * 2246822519u);
@@ -162,7 +166,7 @@ Backend* CreateUdpBackendFromEnvironment() {
         in_addr a;
         if (inet_pton(AF_INET, vipText, &a) == 1) vip = ntohl(a.s_addr);
     }
-    Backend* backend = CreateUdpBackend(port ? uint16_t(atoi(port)) : 41000, targets, vip);
+    Backend* backend = CreateUdpBackend(port ? uint16_t(atoi(port)) : NpNet::kLanDefaultPort, targets, vip);
     // MSC_LINK_MFS=<bytes>: pretend the medium carries at most this many bytes per datagram (the Vita's ad hoc PDP: 1444), so that a desktop run
     // exercises the link's fragmentation with the real game (tools/mp/turn.sh --env MSC_LINK_MFS=700). Test only.
     if (backend)
@@ -174,7 +178,7 @@ Backend* CreateUdpBackendFromEnvironment() {
 void DestroyUdpBackend(Backend* backend) {
     if (!backend) return;
     UdpState* b = static_cast<UdpState*>(backend->ctx);
-    if (b->fd >= 0) ::close(b->fd);
+    if (b->fd >= 0) { ::close(b->fd); NpNetCensus::Closed(NpNetCensus::LanUdp); }
     delete b;
 }
 

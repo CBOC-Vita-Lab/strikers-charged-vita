@@ -35,6 +35,8 @@
 
 #include "Game/SharedStaticStorage.h"
 #include "Game/TweakValue.inl"
+#include "np/scenecut.h"
+#include "np/stillback.h"
 
 template <>
 FEModelManager* nlSingleton<FEModelManager>::s_pInstance = 0;
@@ -74,6 +76,18 @@ static float sFEImpostorOrbitRadiusRate = 0.5f;
 static int sDiddyKongAlphaPacketSecond = 8;
 static int sDiddyKongAlphaPacketFirst;
 static char sDefaultAnimation[] = "fe_idle";
+
+// MSC_MENU_LOD (np/scenecut.h): the mesh a captain is captured from. Same hierarchy as the full mesh: a match poses both from one. Not for Diddy Kong: FEImpostorCharacter::Render
+// hides packets of his full mesh by number, and in another mesh those numbers are other parts.
+static const char* MenuModelFile(const tCharacterTemplateInfo* modelData)
+{
+    if (NpMenuLod() >= 1 && modelData->szLowPolyModelFilename != 0
+        && nlStrNCmp(GetCharacterInfo(modelData->cc).mName, "diddykong", 16) != 0)
+    {
+        return modelData->szLowPolyModelFilename;
+    }
+    return modelData->szModelFilename;
+}
 
 FEModel::FEModel(tCharacterTemplateInfo* modelData)
     : mModelID(-1)
@@ -151,7 +165,7 @@ void FEModel::OnTexturesLoaded(void* data, unsigned long size, void* userData)
     }
     else
     {
-        glBeginLoadModel(model->mModelData->szModelFilename, OnModelLoaded, model, model->mLoader);
+        glBeginLoadModel(MenuModelFile(model->mModelData), OnModelLoaded, model, model->mLoader);
         model->mLoadQueued = true;
     }
 
@@ -770,9 +784,29 @@ void FEModelManager::Render()
     {
         ImpostorManager::GetInstance()->SetSpritesInvalid();
         ImpostorManager::GetInstance()->ResetSpriteSlots();
-        ImpostorManager::GetInstance()->UpdateSprites();
+        if (NpMenuLod() >= 2 && !impostorManager->mHasClusters)   // MSC_MENU_LOD (np/scenecut.h): a sprite not refreshed keeps its picture
+        {
+            ImpostorManager::GetInstance()->UpdateSpritesWithFloor(2);
+        }
+        else
+        {
+            ImpostorManager::GetInstance()->UpdateSprites();
+        }
         ImpostorManager::GetInstance()->Render(GetLayerView(eCLV_ImpostorOut), false);
     }
+}
+
+unsigned FEModelManager::StillStamp(unsigned hash) const
+{
+    nlListIterator<FEModelHandle*> iterator = const_cast<FEModelManager*>(this)->mActiveModels.Begin();
+    while (iterator.IsValid())
+    {
+        FEModelHandle* handle = iterator.Current();
+        const struct { const void* model; int shown; } item = { handle->mModel, handle->mEnabled && handle->mModel->mLoaded };
+        hash = NpStillHash(hash, &item, sizeof(item));
+        iterator.Next();
+    }
+    return hash;
 }
 
 void FEModelManager::RegisterObject(StadiumFEModelMarker* object)

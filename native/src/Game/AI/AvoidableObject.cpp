@@ -19,6 +19,7 @@
 #include "Game/Render/ChainChomp.h"
 #include "Game/Team.h"
 #include "Game/SharedStaticStorage.h"
+#include "np/aiavoid.h"   // MSC_AI_AVOID
 #include "NL/nlList.h"
 #include "NL/nlMath.h"
 #include "Game/Render/YoshiEggObject.h"
@@ -97,6 +98,34 @@ bool AvoidableObject::IsWithinRange(
     nlVector2 v2Diff;
     v2Diff.x = v3Pos.x - v3OtherPos.x;
     v2Diff.y = v3Pos.y - v3OtherPos.y;
+    const int avoidMode = NpAiAvoidMode();
+    if (avoidMode & 2)
+    {
+        // MSC_AI_AVOID bit 2: a pair that is surely out of range is found without the emulated square root (see np/aiavoid.h for the margin)
+        float fOtherRadius = other->GetRadius();
+        float fRadius = GetRadius();
+        if (range <= 0.0f)
+        {
+            range = other->mTweaks[2];
+        }
+        float fReach = (fRadius + fOtherRadius) + range;
+        float fDistSq = v2Diff.x * v2Diff.x + v2Diff.y * v2Diff.y;
+        NpAiAvoidCount(2, 1);
+        if (fReach > 0.0f && fDistSq > fReach * fReach * (NpAiAvoidBreak() == 1 ? 0.25f : 1.000244f))
+        {
+            if (avoidMode & 4)
+            {
+                float fGap = nlVec2Length(v2Diff) - (fRadius + fOtherRadius);
+                if (fGap <= range)
+                    NpAiAvoidCount(4, 1);
+                return fGap <= range;
+            }
+            NpAiAvoidCount(3, 1);
+            return false;
+        }
+        float fGap = nlVec2Length(v2Diff) - (fRadius + fOtherRadius);
+        return fGap <= range;
+    }
     float fDist = nlVec2Length(v2Diff);
     float fOtherRadius = other->GetRadius();
     float fRadius = GetRadius();

@@ -1,12 +1,12 @@
 #!/bin/bash
 # NPP: build the armhf "full" executable (game + SDK + GX/vgx null back end + NPV platform/harness) of the current worktree
-# into /home/claude/msc/build/np/NPP2/<variant>/armhf/np-armhf-full.   Resumable (make is incremental): call it again after a timeout.
+# into /work/msc/build/np/NPP2/<variant>/armhf/np-armhf-full.   Resumable (make is incremental): call it again after a timeout.
 #   tools/heavy.sh -t 590 tools/perf/build.sh <variant> [make vars: OPT=-O2 LTO=thin ...]
 # The unfiltered compiler output goes to <build>/<variant>/make.log; MAKEWARN="-Wall ..." is passed as WARN= (the Makefile default is -w).
 V=${1:?variant}; shift
-SRC=${SRC:-/home/claude/msc/npw/NPP2}   # SRC=<dir>: build another source tree (a git archive snapshot) into the same variant layout
+SRC=${SRC:-/work/msc/npw/NPP2}   # SRC=<dir>: build another source tree (a git archive snapshot) into the same variant layout
 cd $SRC || exit 1
-B=/home/claude/msc/build/np/NPP2/$V
+B=/work/msc/build/np/NPP2/$V
 mkdir -p $B
 echo "== build $V $* $(date +%T)"
 # gap symbols that only the optimised objects reference (see extra_stubs.c)

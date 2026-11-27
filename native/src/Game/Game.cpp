@@ -4,6 +4,8 @@
 #include "Game/AI/TeamPlayMachine.h"
 #include "Game/Game.h"
 #include "np/aibudget.h"
+#include "np/gsplit.h"   // MSC_GSPLIT
+#include "np/ai27.h"     // MSC_AI27_*
 #include "np/camzoom.h"   // W5-CAM: MSC_TEST_VISIBILITY (test only)
 #include "np/itemtest.h"   // W5-ITEM: the test-only item hook
 #include "Game/MathHelpers.h"
@@ -40,6 +42,9 @@
 #include "Game/DB/StatsTracker.h"
 #include "Game/DB/GameProgress.inl"
 #include "Game/Goalie.h"
+#include "Game/Render/RLView.h"
+#include "Game/Render/RLViewLayers.h"
+#include "NL/gl/glView.h"
 #include "Game/Net.h"
 #include "Game/NetworkSession.h"
 #include "Game/Physics/PhysicsAIBall.h"
@@ -94,6 +99,7 @@
 #include "NL/nlString.h"
 #include "NL/nlTicker.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include "Game/Render/NumberDisplay.h"
 #include "Game/InputRouter.h"
 #include "Game/NetworkInput.h"
@@ -101,6 +107,12 @@
 #include "Game/DB/StadiumInfo.h"
 
 extern "C" void fn_80015B38(cBall* pBall, bool bParam);
+#ifdef NP_NATIVE
+#include "Game/Task/FixedUpdateTask.h"
+extern u32 gNetworkRandomSeed;
+// NP (1.3 ranked, platform/sdk/dwc/np_dwc_match.cpp): the end-of-match digest of a ranked match (read only; nothing in the match changes)
+extern "C" void NpRankedEndOfMatch(unsigned frame, unsigned checksum, unsigned seed) __attribute__((weak));
+#endif
 
 struct PlayerDistanceSnapshot
 {
@@ -1366,6 +1378,7 @@ int cGame::ProcessMessage(NetworkMessage* message)
 }
 void cGame::PreUpdate(float deltaTime)
 {
+    NP_GS(NPGS_AI_TEAMPRE);
     for (int i = 0; i < 2; i++)
     {
         g_pTeams[i]->PreUpdate(deltaTime);
@@ -1397,6 +1410,11 @@ void cGame::RandomizePlayerUpdateOrder()
 }
 cPlayer* gPlayerDistanceSortReference;
 
+#ifdef NP_NATIVE
+extern "C" int NpVisStepOn();   // src/Game/NpSimThread.cpp (MSC_VIS_STEP)
+extern "C" void NpVisStepCount(int differs);
+#endif
+
 void cGame::SendPlayerVisibility()
 {
     --lbl_806E2130;
@@ -1407,6 +1425,37 @@ void cGame::SendPlayerVisibility()
     {
         u8 message[3];
         message[0] = DETERM_PLAYER_VISIBILITY;
+#ifdef NP_NATIVE
+        if (NpVisStepOn())
+        {
+            // wave 10 (MSC_VIS_STEP): the flags come from the simulation's own player positions projected with the camera the picture's Begin Frame set up,
+            // not from m_v3ScreenPosition, which the drawing task (Indicators, projecting the BLENDED position of the last picture drawn) wrote
+            int differs = 0;
+            for (int c = 0; c < 10; c++)
+            {
+                cPlayer* const pc = (cPlayer*)g_pCharacters[c];
+                if (pc == 0)
+                {
+                    continue;
+                }
+                nlVector3 worldPos = pc->m_DetChar.m_v3Position;
+                if (pc->m_eClassType == FIELDER)
+                {
+                    worldPos.z += ((cFielder*)pc)->GetTweaks()->fHeight.GetValue() / 2.0f;
+                }
+                else
+                {
+                    worldPos.z += ((Goalie*)pc)->m_pTweaks->fPhysCapsuleHeight.GetValue() / 2.0f;
+                }
+                nlVector3 projected;
+                glViewProjectPoint(GetLayerView(eCLV_Unshadowed), worldPos, projected);
+                if (fabsf(pc->m_v3ScreenPosition.x) <= 0.95f != (fabsf(projected.x) <= 0.95f)
+                    || fabsf(pc->m_v3ScreenPosition.y) <= 0.95f != (fabsf(projected.y) <= 0.95f)) ++differs;
+                pc->m_v3ScreenPosition = projected;
+            }
+            NpVisStepCount(differs);
+        }
+#endif
 
         for (int i = 0; i < 2; i++)
         {
@@ -1449,6 +1498,7 @@ void cGame::Update(float fDeltaT)
         return;
     }
 
+    NpGsSeq gsq(NPGS_AI_MISC);
     AIPadManager::UpdateAccelerationHistory();
     SendPlayerVisibility();
     UpdateCachedGameData(fDeltaT);
@@ -1486,6 +1536,7 @@ void cGame::Update(float fDeltaT)
         }
     }
 
+    gsq.Next(NPGS_AI_TEAMREST);
     for (int i = 0; i < 2; i++)
     {
         FuzzyScriptSetCurrentTeam(g_pTeams[i]);
@@ -1493,8 +1544,10 @@ void cGame::Update(float fDeltaT)
         FuzzyScriptClearGlobals();
     }
 
+    gsq.Next(NPGS_AI_GAMECTX);
     mpAIContext->Update(true, fDeltaT);
 
+    gsq.Next(NPGS_AI_F_SELF);
     for (int i = 0; i < 10; i++)
     {
         g_pCurrentlyUpdatingCharacter = m_pRandomPlayersArray[i];
@@ -1509,12 +1562,22 @@ void cGame::Update(float fDeltaT)
         }
 
         g_pCurrentlyUpdatingTeam = m_pRandomPlayersArray[i]->m_pTeam;
-        m_pRandomPlayersArray[i]->Update(fDeltaT);
+        if (m_pRandomPlayersArray[i]->m_eClassType == FIELDER)
+        {
+            m_pRandomPlayersArray[i]->Update(fDeltaT);
+        }
+        else
+        {
+            NP_GS(NPGS_AI_GOALIE);
+            m_pRandomPlayersArray[i]->Update(fDeltaT);
+        }
         FuzzyScriptClearGlobals();
     }
 
     g_pCurrentlyUpdatingCharacter = 0;
+    gsq.Next(NPGS_AI_BALL);
     g_pBall->Update(fDeltaT);
+    gsq.Next(NPGS_AI_WORLD);
     mpWeatherManager->Update(fDeltaT);
     lbl_806E12C8->Update(fDeltaT);
 
@@ -1748,6 +1811,7 @@ int ComparePlayerDistances(
     }
     return 1;
 }
+static unsigned sAi27Tick;
 void cGame::UpdateCachedGameData(float fDeltaT)
 {
     g_FuzzyQuestionCache.Clear();
@@ -1794,14 +1858,58 @@ void cGame::UpdateCachedGameData(float fDeltaT)
         }
     }
 
+    const int ai27Sort = NpAi27(NPAI27_SORT);
     for (int i = 0; i < 10; i++)
     {
         gPlayerDistanceSortReference = static_cast<cPlayer*>(g_pCharacters[i]);
         for (int j = 0; j < 2; j++)
         {
+            if (ai27Sort)
+            {
+                // MSC_AI27_SORT: the list is sorted every step and mostly stays as it was. When the comparator finds no neighbour pair out of
+                // order (it says "after" only for a > b or an unordered pair), a stable insertion or merge sort would not move anything: skipped.
+                cPlayer** list = m_nClosestPlayers[i][j];
+                const int ref = GetPlayerIndex(gPlayerDistanceSortReference);
+                bool inOrder = true;
+                float prev = fn_8005B748(ref, GetPlayerIndex(list[0]));
+                for (int k = 1; k < 5; k++)
+                {
+                    const float cur = fn_8005B748(ref, GetPlayerIndex(list[k]));
+                    if (!(prev == cur) && !(prev < cur))
+                    {
+                        inOrder = false;
+                        break;
+                    }
+                    if (k == 1 && NpAi27Break() == 1)
+                        break;   // MSC_AI27_BREAK=1 (proof mutant): only the first pair is looked at
+                    prev = cur;
+                }
+                NPAI27_COUNT(NPAI27_SORT, 0, 1);
+                if (inOrder)
+                {
+                    NPAI27_COUNT(NPAI27_SORT, 1, 1);
+                    if (ai27Sort == 2)
+                    {
+                        cPlayer* copy[5];
+                        for (int k = 0; k < 5; k++)
+                            copy[k] = list[k];
+                        nlQSort(copy, 5, ComparePlayerDistances);
+                        NPAI27_COUNT(NPAI27_SORT, 2, 1);
+                        for (int k = 0; k < 5; k++)
+                            if (copy[k] != list[k])
+                            {
+                                NPAI27_COUNT(NPAI27_SORT, 3, 1);
+                                break;
+                            }
+                    }
+                    continue;
+                }
+            }
             nlQSort(m_nClosestPlayers[i][j], 5, ComparePlayerDistances);
         }
     }
+    if ((++sAi27Tick & 255) == 0)
+        NpAi27Tick();
     gPlayerDistanceSortReference = 0;
 }
 float cGame::fn_8005B748(int firstIndex, int secondIndex)
@@ -1968,6 +2076,14 @@ void cGame::ChangeGameState(eGameState state)
 
     if (state != m_eGameState)
     {
+#ifdef NP_NATIVE
+        // the step the match ended on is the same on both consoles of an online match in sync: its checksum and seed are what both result
+        // reports of a ranked match carry (the service rates the match only when they agree)
+        if (state == GS_END_GAME && NpRankedEndOfMatch != 0 && IsNetworkOrRecordedGame())
+        {
+            NpRankedEndOfMatch((unsigned)GetFixedUpdateTask()->GetFrame(), (unsigned)GetFixedUpdateTask()->CalculateChecksum(), (unsigned)gNetworkRandomSeed);
+        }
+#endif
         if (m_eGameState == GS_OVERTIME && state == GS_END_GAME)
         {
             StopSuddenDeathMusic();
@@ -2013,6 +2129,11 @@ void cGame::ChangeGameState(eGameState state)
         InitGameState(state);
     }
 }
+static bool NpAudioPrewarmOn()
+{
+    static const bool on = [] { const char* e = getenv("MSC_AUDIO_PREWARM"); return e != 0 && e[0] == '1'; }();
+    return on;
+}
 void cGame::InitGameState(eGameState state)
 {
     if (m_eGameState == GS_GAMEPLAY && state == GS_OVERTIME)
@@ -2029,6 +2150,19 @@ void cGame::InitGameState(eGameState state)
             m_pGameClock->Stop();
         }
         ResetForKickOff();
+        // nxr6b MSC_AUDIO_PREWARM=1 (default OFF, console A/B): the gameplay music's stream is created and prepared now (its dvd header and prime reads: 2 x 1 KiB + 2 x 27 KiB, the
+        // dvd 2/2K and 2/54K at the whistle in the 6027-6123 logs) instead of at the whistle (GS_GAMEPLAY below). Kick-off #2 and later find the handle already tracked (paused at the goal): untouched.
+        // Not exact, hence OFF: the cue / source choices (nlRandom on nlDefaultSeed, the render stream the crowd and cameras also use) are drawn ~13 frames earlier, and the music starts at the
+        // whistle itself instead of when the reads came back. Simulation and its checksum do not see any of it (audio handles are outside FixedUpdateTask::CalculateChecksum).
+        if (NpAudioPrewarmOn())
+        {
+            unsigned long soundID = GetStadiumSoundID(GameInfoManager::Instance()->GetStadium());
+            if (!IsSoundTracked(soundID, this))
+            {
+                const bool made = PrepareTrackedSound(18, soundID, 0, "Gameplay Music", this, true);
+                fprintf(stderr, "[audio-prewarm] kick-off: gameplay music stream %s (MSC_AUDIO_PREWARM=1)\n", made ? "prepared ahead of the whistle" : "not prepared (no handle)");
+            }
+        }
         break;
 
     case GS_PRE_GAME:
@@ -2089,7 +2223,17 @@ void cGame::InitGameState(eGameState state)
         unsigned long soundID = GetStadiumSoundID(GameInfoManager::Instance()->GetStadium());
         if (IsSoundTracked(soundID, this))
         {
-            ResumeSound(soundID, this);
+            // MSC_AUDIO_PREWARM: a handle made at the kick-off is still preparing or prepared: start it (what the cold path's Play does); a paused one (kick-off #2+) resumes as before
+            const int st = NpAudioPrewarmOn() ? GetSoundState(soundID, this) : 0;
+            if (st == SOUND_HANDLE_PREPARING || st == SOUND_HANDLE_PREPARED)
+            {
+                StartTrackedSound(soundID, this);
+                fprintf(stderr, "[audio-prewarm] whistle: gameplay music handle was %s: started\n", st == SOUND_HANDLE_PREPARED ? "prepared (no read left)" : "still preparing (reads in flight)");
+            }
+            else
+            {
+                ResumeSound(soundID, this);
+            }
         }
         else
         {

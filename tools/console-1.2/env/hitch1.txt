@@ -1,0 +1,14 @@
+# console-1.2 run hitch1: Long frames attributed, replay route
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group hitch, route replay, version payload 1.3, role ab
+# Diagnostics only: frame times stay valid. [hitch] names the cause of every frame gap of 45 ms or more (shader, target, texture, wait, display, backend, upstream), [load] the match load's timeline. Also read `[vita] thread sweep` for what the 600-frame sweeps cost.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HITCH_MS=45
+MSC_LOAD_TRACE=1

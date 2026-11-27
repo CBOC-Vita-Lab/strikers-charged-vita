@@ -1,0 +1,15 @@
+# console-1.2 run clockslip: Game clock: the wave 9 slip bucket instead of the debt clock, The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group pacing, route worstgpu, version payload 1.3, role ab
+# MSC_CLOCK=slip and MSC_SLIP_REFILL_PCT=2: the wave 9 bucket exactly (defaults since pacing12: debt, 0.5). r9 The Dump read 92.7 % and about 79.5 % of real time in two windows and 95.4 % over the match (47.69 steps a second) while the slip ledger claimed 98.1 %. The debt clock advances a late picture by what the game thread can run (2-5 steps), owes the rest (at most 100 ms), forgives a stall over 250 ms and signals what it cannot run ([clock] OVERLOAD). Read the [speed] lines (every clean 5 s window must read 99 % or more; a hitch may dip one window to 98 %) and the [clock] lines (debt, shed, forgiven, overload entries), with the picture mix ([present] hold mix, [lane] fps) and pad->shown unchanged. Against this run the match percentage in [speed] match #1 end is the number.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CLOCK=slip
+MSC_SLIP_REFILL_PCT=2

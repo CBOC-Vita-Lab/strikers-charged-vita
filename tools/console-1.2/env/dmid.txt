@@ -1,0 +1,13 @@
+# console-1.2 run dmid: 1.3 defaults (mid-session reference)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group reference, route tour, version payload 1.3, role ref
+# The session now lasts over three hours: a third reference between d1 and d2 shows drift (heat, battery) in the middle, and widens the noise if there is any.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+# (no switch)

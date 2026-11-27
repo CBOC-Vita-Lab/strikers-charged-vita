@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 10:00:00 -0500
+Subject: [PATCH] texture level-0 copy by the DMA engine (MSC_VITA_TEXCOPY, default 0): vgl_tex_copy in gpu_alloc_texture and glTexSubImage2D, vglSetTextureCopyDma(0|1|2), vglTextureCopyStats (after Galaxy GXV_DMA_LOAD)
+
+---
+
+diff --git a/source/textures.c b/source/textures.c
+index 19b11808..1a1b7d4b 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -1242,7 +1242,7 @@ static inline __attribute__((always_inline)) void _glTexSubImage2D(texture *tex,
+ 			uint32_t line_size = width * bpp;
+ 			uint32_t src_stride = (unpack_row_len ? unpack_row_len : width) * bpp;
+ 			if (xoffset == 0 && src_stride == mip_w * bpp && src_stride == mip_stride) {
+-				vgl_fast_memcpy(ptr, data, line_size * height);
++				vgl_tex_copy(ptr, data, line_size * height); // 0051
+ 			} else {
+ 				for (int i = 0; i < height; i++) {
+ 					vgl_fast_memcpy(ptr, data, line_size);
+diff --git a/source/utils/gpu_utils.c b/source/utils/gpu_utils.c
+index 1f4d5c80..7c3ef83c 100644
+--- a/source/utils/gpu_utils.c
++++ b/source/utils/gpu_utils.c
+@@ -514,7 +514,7 @@ void gpu_alloc_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, const
+ 			uint8_t *dst;
+ 			if (fast_store) { // Internal Format and Data Format are the same, we can just use vgl_fast_memcpy for better performance
+ 				if (aligned_w == w) // Texture size is already aligned, we can use a single vgl_fast_memcpy for better performance
+-					vgl_fast_memcpy(texture_data, src, tex_size);
++					vgl_tex_copy(texture_data, src, tex_size); // 0051
+ 				else {
+ 					uint32_t line_size = w * bpp;
+ 					for (int i = 0; i < h; i++) {
+diff --git a/source/utils/mem_utils.h b/source/utils/mem_utils.h
+index d090bb75..aabcf470 100644
+--- a/source/utils/mem_utils.h
++++ b/source/utils/mem_utils.h
+@@ -37,6 +37,7 @@
+ 
+ // 0045 (MSC_VITA_WRCOPY): a copy into the uncached pools (stream buffers, uniform ring), see utils/wrcopy.c
+ void vgl_wr_copy(void *dst, const void *src, uint32_t n);
++void vgl_tex_copy(void *dst, const void *src, uint32_t n); // 0051 (MSC_VITA_TEXCOPY): a texture level-0 copy, by the DMA engine when vglSetTextureCopyDma asks
+ 
+ extern vglMemType VGL_MEM_MAIN; // Flag for VRAM usage for allocations
+ 
+diff --git a/source/utils/wrcopy.c b/source/utils/wrcopy.c
+index 97580e57..0727be70 100644
+--- a/source/utils/wrcopy.c
++++ b/source/utils/wrcopy.c
+@@ -14,7 +14,11 @@
+ #include <string.h>
+ #include <psp2/kernel/clib.h>
+ #include <psp2/kernel/dmac.h>
++#include <psp2/kernel/processmgr.h>
+ #include "wrcopy.h"
++#ifndef vgl_fast_memcpy
++#define vgl_fast_memcpy sceClibMemcpy // (as utils/mem_utils.h without DISABLE_CLIB)
++#endif
+ 
+ #define VGL_WRCOPY_MIN 192u
+ 
+@@ -102,6 +106,41 @@ void vglWriteCopyStats(uint32_t *out4) {
+ 		out4[i] = vgl_wr_stat[i];
+ }
+ 
++// 0051 (MSC_VITA_TEXCOPY): the contiguous level-0 copy of a texture upload (gpu_alloc_texture, glTexSubImage2D). Mode 0 is exactly what these two sites did before (vgl_fast_memcpy).
++// The destination is GPU-mapped video memory, where the CPU's stores run at about a third of the DMA engine's speed (339-363 against 866-935 MB/s, 17 Nov console, 8 KiB+).
++static volatile int vgl_tex_mode = 0;
++static uint32_t vgl_tex_stat[6]; // dma copies, dma bytes, dma us, cpu copies, differences (mode 2), refusals
++void vglSetTextureCopyDma(int mode) {
++	vgl_tex_mode = (mode == 1 || mode == 2) ? mode : 0;
++}
++void vglTextureCopyStats(uint32_t *out6) {
++	for (int i = 0; i < 6; i++)
++		out6[i] = vgl_tex_stat[i];
++}
++void vgl_tex_copy(void *dst, const void *src, uint32_t n) {
++	const int m = vgl_tex_mode;
++	if (m == 0) {
++		vgl_fast_memcpy(dst, src, n);
++		return;
++	}
++	if (n >= 0x2000u && (uint32_t)src < 0x81000000u && (uint32_t)dst < 0x81000000u) {
++		const uint64_t t0 = sceKernelGetProcessTimeWide();
++		if (sceDmacMemcpy(dst, src, n) >= 0) {
++			vgl_tex_stat[0]++;
++			vgl_tex_stat[1] += n;
++			vgl_tex_stat[2] += (uint32_t)(sceKernelGetProcessTimeWide() - t0);
++			if (m == 2 && memcmp(dst, src, n) != 0) {
++				vgl_tex_stat[4]++;
++				sceClibMemcpy(dst, src, n);
++			}
++			return;
++		}
++		vgl_tex_stat[5]++;
++	}
++	vgl_tex_stat[3]++;
++	vgl_fast_memcpy(dst, src, n);
++}
++
+ void vgl_wr_copy(void *dst, const void *src, uint32_t n) {
+ 	const int m = vgl_wr_mode;
+ 	if (m == 0 || n < VGL_WRCOPY_MIN) {
+diff --git a/source/utils/wrcopy.h b/source/utils/wrcopy.h
+index 8411aad2..e82ecf83 100644
+--- a/source/utils/wrcopy.h
++++ b/source/utils/wrcopy.h
+@@ -7,4 +7,8 @@ void vglSetWriteCopy(int mode);
+ int vglGetWriteCopy(void);
+ void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n);
+ void vglWriteCopyStats(uint32_t *out4);
++// 0051 (MSC_VITA_TEXCOPY): the level-0 copy of a texture upload, see wrcopy.c
++void vgl_tex_copy(void *dst, const void *src, uint32_t n);
++void vglSetTextureCopyDma(int mode);
++void vglTextureCopyStats(uint32_t *out6);
+ #endif
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 9333ddd0..7f7a9567 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1475,6 +1475,11 @@ void vglSetWriteCopy(int mode);
+ int vglGetWriteCopy(void);
+ void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n);
+ void vglWriteCopyStats(uint32_t *out4);
++// 0051 (MSC_VITA_TEXCOPY): the copy of a texture's decoded level 0 into its video memory (glTexImage2D / glTexSubImage2D, one contiguous copy): 0 the library's own copy (default), 1 sceDmacMemcpy for 8 KiB and more
++// (upstream's vgl_memcpy does this for other copies; these two were left to the CPU), 2 as 1 and every DMA copy is compared with its source and made again by the CPU on a difference (counted).
++// vglTextureCopyStats: DMA copies, DMA bytes, DMA microseconds, copies left to the CPU, differences, refusals. The same bytes either way.
++void vglSetTextureCopyDma(int mode);
++void vglTextureCopyStats(uint32_t *out6);
+ 
+ // Skip sceGxm calls that would set what the context already has (vertex program, fragment program, vertex streams, fragment textures); the cache is
+ // forgotten at every sceGxmBeginScene / sceGxmEndScene and after calls that change state behind its back. Default: off.

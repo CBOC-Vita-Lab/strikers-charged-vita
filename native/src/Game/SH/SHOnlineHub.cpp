@@ -39,6 +39,7 @@
 #include "Game/MiiManager.h"
 #include "Game/FE/tlDefault.h"
 #include "Game/SH/SHOnlineHub.h"
+#include "platform/sdk/dwc/np_online_flow.h"
 
 static inline void ShowOnlineHubDialog(SHOnlineHub* hub, ePopupMenu type);
 
@@ -54,6 +55,8 @@ static inline void UpdateOnlineHubMiiIcon(SHOnlineHub* hub)
         image->m_pTextureResource->SetTextureHandle(texture);
         image->SetAssetVisible(valid);
     }
+    if (NpOnlineHideMiiIcon())
+        image->SetAssetVisible(false);   // no Miis on this platform: the icon would be an empty orange square
 }
 
 SHOnlineHub::SHOnlineHub()

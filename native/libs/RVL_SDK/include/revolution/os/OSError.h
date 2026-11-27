@@ -49,8 +49,8 @@ typedef void (*OSErrorHandler)(u8 error, OSContext* context, u32 dsisr, u32 dar,
 extern OSErrorHandler __OSErrorTable[OS_ERR_MAX];
 extern u32 __OSFpscrEnableBits;
 
-void OSVReport(const char* message, va_list list);
-void OSPanic(const char* file, int line, const char* message, ...);
+void OSVReport(const char* message, va_list list) __attribute__((format(printf, 1, 0)));
+void OSPanic(const char* file, int line, const char* message, ...) __attribute__((format(printf, 3, 4)));
 OSErrorHandler OSSetErrorHandler(u16 error, OSErrorHandler handler);
 void __OSUnhandledException(u8 error, OSContext* context, u32 dsisr, u32 dar);
 

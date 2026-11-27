@@ -3,9 +3,9 @@
 #   tools/gxd/synvita.sh <vgx dir> [file ...]
 D=${1:?vgx dir}; shift
 FILES=("$@"); [ ${#FILES[@]} = 0 ] && FILES=(vgx_rec vgx_play vgx_state vgx_draw vgx_dlcache vgx_texcache vgx_guestmem vgx_stats vgx_interp vgx_api)
-SRC=${SRC:-/home/claude/msc/npw/W5GXD}
+SRC=${SRC:-/work/msc/npw/W5GXD}
 cd $SRC || exit 1
-make -n TARGET=vita BUILD_ROOT=/home/claude/msc/build/np/W5GXD/vitadry GX_VGX=$D WITH_SDK=1 WITH_GX=1 OPT=-O2 2>/dev/null > /tmp/synvita.$$.mk
+make -n TARGET=vita BUILD_ROOT=/work/msc/build/np/W5GXD/vitadry GX_VGX=$D WITH_SDK=1 WITH_GX=1 OPT=-O2 2>/dev/null > /tmp/synvita.$$.mk
 rc=0
 for f in "${FILES[@]}"; do
   f=${f%.cpp}

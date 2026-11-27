@@ -3,7 +3,7 @@
 #   heavy.sh -t 590 tools/det/disc.sh
 # A: plain qemu (no plugin), tuned2 binary, a data dir WITH a save file (copy of NPP's rundata), nav_match60, pads 0 and 16
 # B: qemu PLUGIN + marks (tools/perf/run.sh), tuned2, a FRESH data dir (popup path), pads 0 and 16
-B=/home/claude/msc/build/np; NP=/home/claude/msc/np; T2=$B/NPP/tuned2/armhf/np-armhf-full; NAV=/home/claude/msc/tools/scripts/nav_match60.txt
+B=/work/msc/build/np; NP=/work/msc/np; T2=$B/NPP/tuned2/armhf/np-armhf-full; NAV=/work/msc/tools/scripts/nav_match60.txt
 cd $NP
 for P in 0 16; do tools/det/qrun.sh -x $T2 -s $NAV -f 3800 -H 30 -n discA-pad$P -p $P -k $B/B3/rundata-save | tail -1; done
 echo "== A (plain qemu, save file, tuned2): pad 0 vs 16"; diff <(grep -a '^\[hash\]' $B/B3/discA-pad0.log) <(grep -a '^\[hash\]' $B/B3/discA-pad16.log) | head -4

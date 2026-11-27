@@ -1,0 +1,755 @@
+# The port's own player-facing texts (1.3): English, Spanish and French, separated by tabs, one text per line, UTF-8.
+# Spanish is Latin American, in the wording of the disc's North American Spanish tables (supertrallazo, superparada, partido); French follows the
+# disc's North American French tables (méga frappe, méga arrêt). The game's own texts come from the disc and are not here.
+# "#@limit N": the most characters (not bytes) a translation below may have, 0 for none; "#@cells N": upper-case texts of at most N characters in
+# English (row names, choices, table cells) keep within N. tests/test_text_table.py checks both, the controls page's rule lines whole, the %s/%d of each line, and that every character is one the
+# Settings font draws (ASCII and Latin-1).
+# After an edit: python3 native/platform/vita/tools/gen_text.py (writes np_text_table.h).
+# Settings screen: pages, rows, help lines (76 characters at most), choices
+#@limit 76
+#@cells 29
+PICTURE	IMAGEN	IMAGE
+GAME	JUEGO	JEU
+CONTROLS	CONTROLES	COMMANDES
+MULTIPLAYER	MULTIJUGADOR	MULTIJOUEUR
+SYSTEM	SISTEMA	SYSTÈME
+RESOLUTION	RESOLUCIÓN	RÉSOLUTION
+The size the 3D picture is drawn at; the screen itself is 960x544.	El tamaño al que se dibuja la imagen 3D; la pantalla es de 960x544.	La taille de l'image 3D dessinée; l'écran lui-même fait 960x544.
+STANDARD follows the load. A fixed size stays: it never adapts.	ESTÁNDAR sigue la carga. Un tamaño fijo se queda: nunca se adapta.	STANDARD suit la charge. Une taille fixe reste: elle ne s'adapte jamais.
+STANDARD	ESTÁNDAR	STANDARD
+SMALLER 864X488	MENOR 864X488	PLUS PETIT 864X488
+STADIUM CROWD	PÚBLICO DEL ESTADIO	PUBLIC DU STADE
+SHOW draws the crowd in the stands and the people around the pitch.	MOSTRAR dibuja al público en las gradas y a la gente junto a la cancha.	AFFICHER dessine le public des tribunes et les gens autour du terrain.
+HIDE leaves them out: same match, emptier and faster. Applies at once.	OCULTAR los quita: mismo partido, más vacío y rápido. Se aplica ya.	MASQUER les retire: même match, plus vide et rapide. Appliqué tout de suite.
+SHOW	MOSTRAR	AFFICHER
+HIDE	OCULTAR	MASQUER
+ON	SÍ	OUI
+OFF	NO	NON
+FRAME RATE	FOTOGRAMAS POR SEGUNDO	IMAGES PAR SECONDE
+AUTO: up to 60 by scene, rates between 30 and 60 too. Same game speed.	AUTO: hasta 60 según la escena, y valores entre 30 y 60. Igual velocidad.	AUTO: jusqu'à 60 selon la scène, et valeurs entre 30 et 60. Même vitesse.
+30 FPS: every picture is shown for exactly two refreshes. Steady, never 60.	30 FPS: cada imagen dura exactamente dos refrescos. Estable, nunca 60.	30 I/S: chaque image dure deux rafraîchissements. Stable, jamais 60.
+AUTO (UP TO 60)	AUTO (HASTA 60)	AUTO (JUSQU'À 60)
+30 FPS	30 FPS	30 I/S
+ON (DEFAULT)	SÍ (PREDETERMINADO)	OUI (PAR DÉFAUT)
+ANTI-ALIASING	ANTIALIASING	ANTICRÉNELAGE
+ON: 2x smoothing in live play; the picture size drops before it does.	SÍ: suavizado 2x en juego; antes baja el tamaño de la imagen.	OUI: lissage 2x en jeu; la taille de l'image baisse avant lui.
+One sample (soft edge filter stays) in Mega Strikes, replays and cut-scenes.	Una muestra (filtro de bordes sigue): Mega, repeticiones y cinemáticas.	Un échantillon (filtre de bords gardé) en Méga, replays et cinématiques.
+HD CHARACTERS	PERSONAJES HD	PERSONNAGES HD
+Sharper player and ball textures from hdtex.pack, if that file is there.	Texturas más nítidas de jugadores y balón desde hdtex.pack, si existe.	Textures de joueurs et de ballon plus nettes via hdtex.pack, s'il existe.
+OFF: the original textures. The pack uses 8 MiB of graphics memory at most.	NO: texturas originales. El paquete usa hasta 8 MiB de memoria gráfica.	NON: textures d'origine. Le pack utilise au plus 8 Mio de mémoire graphique.
+DEPTH OF FIELD	PROFUNDIDAD DE CAMPO	PROFONDEUR DE CHAMP
+ON: the soft background blur in cut-scenes, drawn the cheap way.	SÍ: desenfoque suave del fondo en cinemáticas, con el método barato.	OUI: flou doux d'arrière-plan des cinématiques, dessiné à moindre coût.
+OFF: a sharp background, no blur drawn; saves a little graphics time.	NO: fondo nítido, sin desenfoque; ahorra un poco de tiempo gráfico.	NON: fond net, aucun flou; économise un peu de temps graphique.
+CORE PLAN	PLAN DE NÚCLEOS	PLAN DES COEURS
+Which CPU core does which job. AUTO steps down after a failed start.	Qué núcleo de la CPU hace cada tarea. AUTO cambia de plan si falla.	Quel coeur du processeur fait quoi. AUTO se replie après un démarrage raté.
+Change it only if the game will not start: S is the safest. Next start.	Cámbialo solo si el juego no inicia: S es el más seguro. Próximo inicio.	Seulement si le jeu ne démarre pas: S est le plus sûr. Au redémarrage.
+SMOOTH 60 aims for 60 and gives way in heavy scenes. 30 LOCKED: always 30.	FLUIDO 60 busca 60 y cede en escenas pesadas. 30 FIJO: siempre 30.	FLUIDE 60 vise 60 et cède dans les scènes lourdes. 30 FIXE: toujours 30.
+SMOOTH 60 (DEFAULT)	FLUIDO 60 (PREDETERMINADO)	FLUIDE 60 (PAR DÉFAUT)
+SMOOTH 60	FLUIDO 60	FLUIDE 60
+30 LOCKED	30 FIJO	30 FIXE
+NEARBY PAIRING	EMPAREJAR CERCANO	APPAIRAGE PROCHE
+Two Vitas on NEARBY not finding each other? HOST on one, JOIN on the other.	¿Dos Vitas en CERCANO no se encuentran? CREAR en una, UNIRSE en la otra.	Deux Vita en PROCHE sans se trouver ? HÔTE sur l'une, REJOINDRE sur l'autre.
+How you aim Mega Saves: front touch, rear touch + Cross, or the stick only.	Cómo apuntas la superparada: táctil delantero, trasero + X o solo el stick.	Visée du méga arrêt: tactile avant, arrière + croix, ou le stick seul.
+STICK ONLY	SOLO STICK	STICK SEUL
+How fast the stick moves the glove in Mega Saves; 3x reaches the far side.	Velocidad del guante con el stick en la superparada; 3x llega al otro lado.	Vitesse du gant au stick pendant le méga arrêt; 3x atteint l'autre côté.
+SAFE START	INICIO SEGURO	DÉMARRAGE SÛR
+AUTO	AUTO	AUTO
+C NO OVERLAP	C SIN SOLAPAR	C SANS CHEVAUCHEMENT
+PLAN A	PLAN A	PLAN A
+PLAN S (SAFEST)	PLAN S (MÁS SEGURO)	PLAN S (LE PLUS SÛR)
+SHARPNESS	NITIDEZ	NETTETÉ
+Sharpens the picture when it is scaled up to the screen.	Da nitidez a la imagen al escalarla a la pantalla.	Accentue l'image quand elle est agrandie à la taille de l'écran.
+SMOOTH: soft, cheap. CRISP: blocky, hard edges. OFF: no filtering at all.	SUAVE: suave, ligero. NÍTIDO: anguloso, bordes duros. NO: sin filtrado.	DOUX: léger. NET: anguleux, bords durs. NON: aucun filtrage.
+SMOOTH	SUAVE	DOUX
+CRISP	NÍTIDO	NET
+FAST	RÁPIDO	RAPIDE
+PICTURE FORMAT	FORMATO DE IMAGEN	FORMAT D'IMAGE
+WIDESCREEN fills the screen. 4:3 is the original picture with bars.	PANORÁMICO llena la pantalla. 4:3 es la imagen original con barras.	ÉCRAN LARGE remplit l'écran. 4:3 est l'image d'origine avec des bandes.
+Changes what is shown at the sides of the pitch, not the match.	Cambia lo que se ve a los lados de la cancha, no el partido.	Change ce qui est visible sur les côtés du terrain, pas le match.
+WIDESCREEN	PANORÁMICO	ÉCRAN LARGE
+4:3 BOX	4:3 CON BARRAS	4:3 AVEC BANDES
+MULTIPLAYER LINK	CONEXIÓN MULTIJUGADOR	LIAISON MULTIJOUEUR
+NEARBY: no router. SAME WI-FI: your access point. ONLINE: an invite code.	CERCANO: sin router. MISMA WI-FI: tu punto de acceso. EN LÍNEA: un código.	PROCHE: sans routeur. MÊME WI-FI: votre point d'accès. EN LIGNE: un code.
+Not finding each other? NEARBY HOST on one Vita, NEARBY JOIN on the other.	¿No se encuentran? CERCANO: CREAR en una Vita y CERCANO: UNIRSE en la otra.	Introuvables? PROCHE: HÔTE sur une Vita, PROCHE: REJOINDRE sur l'autre.
+NEARBY (AD HOC)	CERCANO (AD HOC)	PROCHE (AD HOC)
+SAME WI-FI	MISMA WI-FI	MÊME WI-FI
+NEARBY HOST	CERCANO: CREAR	PROCHE: HÔTE
+NEARBY JOIN	CERCANO: UNIRSE	PROCHE: REJOINDRE
+ONLINE (INVITE CODE)	EN LÍNEA (CÓDIGO)	EN LIGNE (CODE)
+INPUT DELAY	RETARDO DE ENTRADA	DÉLAI DES COMMANDES
+The host's minimum input delay online and on Wi-Fi. STANDARD: the game decides.	Retardo mínimo del anfitrión en línea y en Wi-Fi. ESTÁNDAR: decide el juego.	Délai minimal de l'hôte en ligne et en Wi-Fi. STANDARD : le jeu décide.
+AUTO uses the lobby ping. Fewer ticks: snappier. More ticks: smoother.	AUTO usa el ping de la sala. Menos ticks: más ágil. Más ticks: más estable.	AUTO utilise le ping du salon. Moins de ticks: plus vif. Plus: plus fluide.
+2 TICKS	2 TICKS	2 TICKS
+3 TICKS	3 TICKS	3 TICKS
+4 TICKS	4 TICKS	4 TICKS
+6 TICKS	6 TICKS	6 TICKS
+CONNECTION	CONEXIÓN	CONNEXION
+AUTO: a direct path, else the relay. RELAY ONLY: always the relay.	AUTO: conexión directa, si no, el relé. SOLO RELÉ: siempre el relé.	AUTO: un chemin direct, sinon le relais. RELAIS SEUL: toujours le relais.
+RELAY ONLY hides your address from the other player but adds delay.	SOLO RELÉ oculta tu dirección al otro jugador, pero añade retardo.	RELAIS SEUL cache votre adresse à l'autre joueur mais ajoute du délai.
+RELAY ONLY	SOLO RELÉ	RELAIS SEUL
+MEGA STRIKES	SUPERTRALLAZOS	MÉGA FRAPPES
+OFF removes Mega Strikes: a charged captain shot is a normal shot.	NO quita los supertrallazos: un tiro cargado del capitán es un tiro normal.	NON retire les méga frappes: un tir chargé du capitaine devient normal.
+Both Vitas of a match must use the same setting. Ranked online ignores it.	Las dos Vitas deben usar el mismo ajuste. Las clasificatorias lo ignoran.	Les deux Vita doivent avoir le même réglage. Le mode classé l'ignore.
+ON (STANDARD)	SÍ (ESTÁNDAR)	OUI (STANDARD)
+OFF (BOTH MUST MATCH)	NO (IGUAL EN AMBAS)	NON (LES DEUX IDEM)
+LANGUAGE	IDIOMA	LANGUE
+The menu and game texts. AUTOMATIC follows the Vita's language.	Textos de menús y del juego. AUTOMÁTICO sigue el idioma de la Vita.	Textes des menus et du jeu. AUTOMATIQUE suit la langue de la Vita.
+Next start. Controller help stays in the Wii's words.	Al reiniciar. La ayuda de controles usa términos de Wii.	Au redémarrage. L'aide des commandes garde les termes Wii.
+AUTOMATIC	AUTOMÁTICO	AUTOMATIQUE
+ENGLISH	INGLÉS (ENGLISH)	ANGLAIS (ENGLISH)
+SPANISH	ESPAÑOL	ESPAGNOL (ESPAÑOL)
+FRENCH	FRANCÉS (FRANÇAIS)	FRANÇAIS
+REDUCED CAMERA SHAKE	MENOS TEMBLOR DE CÁMARA	SECOUSSES DE CAMÉRA RÉDUITES
+Camera shake on hits and Mega Strikes is a quarter as strong.	El temblor de cámara en golpes y supertrallazos es cuatro veces menor.	Les secousses de caméra (chocs, méga frappes) sont quatre fois moins fortes.
+Applies at once when you save, also in a match.	Se aplica al guardar, también en un partido.	Appliqué dès l'enregistrement, même en match.
+ON (QUARTER SHAKE)	SÍ (UN CUARTO)	OUI (UN QUART)
+ORIGINAL GAME FIXES	ARREGLOS DEL JUEGO	CORRECTIFS DU JEU
+Fixes retail bugs: resting goal nets, electrocution picture, Boo glitch.	Corrige fallos del original: redes, imagen de electrocución, fallo de Boo.	Corrige des bogues d'origine: filets, image d'électrocution, bogue de Boo.
+ALL changes the match itself: both Vitas must use the same setting.	TODOS cambia el partido en sí: las dos Vitas deben usar el mismo ajuste.	TOUS change le match lui-même: les deux Vita doivent avoir le même réglage.
+OFF (AS RETAIL)	NO (COMO EL ORIGINAL)	NON (COMME L'ORIGINAL)
+DRAWING ONLY	SOLO GRÁFICOS	AFFICHAGE SEUL
+ALL (WITH BOO FIX)	TODOS (CON BOO)	TOUS (AVEC BOO)
+UNLOCK ALL CHARACTERS	DESBLOQUEAR PERSONAJES	DÉBLOQUER PERSONNAGES
+ON: Bowser Jr., Diddy Kong and Petey Piranha without winning the cups.	SÍ: Bowser Jr., Diddy Kong y Petey Piranha sin ganar las copas.	OUI: Bowser Jr., Diddy Kong et Petey Piranha sans gagner les coupes.
+Cups, stadiums and trophies stay as earned. OFF: as the original game.	Copas, estadios y trofeos quedan como los ganaste. NO: como el original.	Coupes, stades et trophées restent comme gagnés. NON: comme l'original.
+UNLOCK ALL STADIUMS	DESBLOQUEAR ESTADIOS	DÉBLOQUER LES STADES
+ON: all 6 locked stadiums without winning the cups and awards.	SÍ: los 6 estadios bloqueados sin ganar las copas ni los premios.	OUI: les 6 stades bloqués sans gagner les coupes ni les prix.
+Cups, captains and trophies stay as earned. OFF: as the original game.	Copas, capitanes y trofeos quedan como los ganaste. NO: como el original.	Coupes, capitaines et trophées restent comme gagnés. NON: comme l'original.
+MODERN: Cross pass, Circle shoot, Square lob/big hit, Triangle item, R turbo	MODERNO: X pase, Círculo tiro, Cuadrado globo/carga, Triáng. objeto, R turbo	MODERNE: Croix passe, Rond tir, Carré lob/charge, Triangle objet, R turbo
+CLASSIC: the GameCube Strikers buttons. TRIANGLE: see every button.	CLÁSICO: los botones de Strikers de GameCube. TRIÁNGULO: ver todos.	CLASSIQUE: les boutons de Strikers sur GameCube. TRIANGLE: tout voir.
+MODERN	MODERNO	MODERNE
+CLASSIC	CLÁSICO	CLASSIQUE
+REAR TOUCH	PANEL TRASERO	PAVÉ ARRIÈRE
+Tap the back: right half switches player, left half cycles items.	Toca atrás: la mitad derecha cambia de jugador, la izquierda de objeto.	Touchez l'arrière: moitié droite change de joueur, gauche d'objet.
+Applies at once. The control guide and hints change at the next start.	Se aplica ya. La guía de controles y los avisos cambian al reiniciar.	Appliqué de suite. Le guide des commandes change au prochain lancement.
+WITH MODERN	CON MODERNO	AVEC MODERNE
+TOUCH POINTER	PUNTERO TÁCTIL	POINTEUR TACTILE
+A finger on the screen moves the pointer in menus that use one.	Un dedo en la pantalla mueve el puntero en los menús que lo usan.	Un doigt sur l'écran déplace le pointeur dans les menus qui en ont un.
+TOUCH MEGA SAVE	SUPERPARADA TÁCTIL	MÉGA ARRÊT TACTILE
+ON: aim Mega Saves by touch, the way MEGA SAVE AIM says.	SÍ: apunta las superparadas tocando, como indique APUNTAR SUPERPARADA.	OUI: visez les méga arrêts au toucher, selon VISÉE MÉGA ARRÊT.
+OFF: aim with either stick, block with Cross or R.	NO: apunta con cualquier stick y bloquea con X o R.	NON: visez avec un stick, bloquez avec Croix ou R.
+MEGA SAVE AIM	APUNTAR SUPERPARADA	VISÉE MÉGA ARRÊT
+FRONT: touch to aim and block. REAR: one finger aims, Cross or R blocks.	DELANTE: toca para apuntar y bloquear. ATRÁS: un dedo apunta, X o R bloquea.	AVANT: touchez pour viser et bloquer. ARRIÈRE: un doigt vise, Croix ou R.
+Rear aim needs a fresh contact; lift all fingers after a grip or pause.	Atrás pide un toque nuevo: levanta los dedos tras sujetar o pausar.	Arrière: un nouveau contact est requis; levez les doigts après une pause.
+FRONT TOUCH	TÁCTIL DELANTERO	TACTILE AVANT
+REAR + CROSS	TRASERO + X	ARRIÈRE + CROIX
+MEGA SAVE SPEED	VELOCIDAD DE SUPERPARADA	VITESSE MÉGA ARRÊT
+How fast the stick moves the glove in Mega Saves. 3x (default) reaches	Velocidad del guante con el stick en superparadas. 3x (predeterminado)	Vitesse du gant au stick pendant les méga arrêts. 3x (par défaut) atteint
+the far side in time. ORIGINAL keeps POINTER SPEED. Touch is unchanged.	llega a tiempo. ORIGINAL usa VELOCIDAD DEL PUNTERO. El táctil no cambia.	l'autre côté à temps. ORIGINE suit VITESSE DU POINTEUR. Tactile inchangé.
+3x	3x	3x
+4x	4x	4x
+2x	2x	2x
+ORIGINAL	ORIGINAL	ORIGINE
+TOUCH MEGA STRIKE	SUPERTRALLAZO TÁCTIL	MÉGA FRAPPE TACTILE
+Your Mega Strike: hold a finger on the screen to stop the meter.	Tu supertrallazo: mantén un dedo en la pantalla para parar el medidor.	Votre méga frappe: gardez un doigt sur l'écran pour arrêter la jauge.
+OFF: the shoot button does it.	NO: lo hace el botón de tiro.	NON: le bouton de tir s'en charge.
+TOUCH SHAKEDOWN	SACUDIDA TÁCTIL	SECOUSSE TACTILE
+Their Mega Strike: swipe the screen to shake their meter.	Su supertrallazo: desliza el dedo por la pantalla para agitar su medidor.	Sa méga frappe: balayez l'écran pour secouer sa jauge.
+OFF: tap the back left, or mash Select, Square or Triangle.	NO: toca atrás a la izquierda o pulsa rápido Select, Cuadrado o Triángulo.	NON: touchez l'arrière gauche ou martelez Select, Carré ou Triangle.
+POINTER SPEED	VELOCIDAD DEL PUNTERO	VITESSE DU POINTEUR
+How fast the pointer moves in menus when steered with the right stick.	Velocidad del puntero en los menús al moverlo con el stick derecho.	Vitesse du pointeur dans les menus quand il est guidé au stick droit.
+SLOW 0.5	LENTA 0.5	LENTE 0,5
+SLOWER 0.75	MÁS LENTA 0.75	PLUS LENTE 0,75
+1 is slowest, 10 fastest; 5 is the game's own speed.	1 es la más lenta, 10 la más rápida; 5 es la velocidad original.	1 est la plus lente, 10 la plus rapide; 5 est la vitesse d'origine.
+1 (SLOWEST)	1 (LA MÁS LENTA)	1 (LA PLUS LENTE)
+5 (NORMAL)	5 (NORMAL)	5 (NORMALE)
+10 (FASTEST)	10 (LA MÁS RÁPIDA)	10 (LA PLUS RAPIDE)
+2	2	2
+3	3	3
+4	4	4
+6	6	6
+7	7	7
+8	8	8
+9	9	9
+NORMAL	NORMAL	NORMALE
+FULL	COMPLETO	COMPLÈTE
+ONLINE NAME	NOMBRE EN LÍNEA	NOM EN LIGNE
+SAVE A REPORT	GUARDAR UN INFORME	ENREGISTRER UN RAPPORT
+PRESS CROSS	PULSA X	APPUYEZ SUR CROIX
+VERSION	VERSIÓN	VERSION
+BUILD	COMPILACIÓN	COMPILATION
+SETTINGS FILE	ARCHIVO DE AJUSTES	FICHIER DE RÉGLAGES
+GAME FILES	ARCHIVOS DEL JUEGO	FICHIERS DU JEU
+NOT SET YET	SIN DEFINIR	PAS ENCORE DÉFINI
+UNNAMED	SIN NOMBRE	SANS NOM
+FOUND	ENCONTRADOS	TROUVÉS
+MISSING	FALTAN	MANQUANTS
+NO STAMP	SIN MARCA	SANS MARQUE
+NONE YET	NINGUNO AÚN	AUCUN POUR L'INSTANT
+Name on the online rankings. The Vita keyboard asks for it the first time	Nombre en las clasificaciones. El teclado lo pide la primera vez que	Nom des classements. Le clavier de la Vita le demande la 1re fois que
+you pick Online. To change it, delete np-data/online_name.txt.	eliges En línea. Para cambiarlo, borra np-data/online_name.txt.	vous choisissez En ligne. Pour changer: supprimez np-data/online_name.txt.
+The version of this game, as in the log and in the LiveArea.	La versión de este juego, como en el registro y en el LiveArea.	La version de ce jeu, comme dans le journal et dans la LiveArea.
+The build's identity: the same on two Vitas that play each other.	La identidad de la compilación: igual en dos Vitas que juegan entre sí.	L'identité de la compilation: la même sur deux Vita qui jouent ensemble.
+Quote it when you report a problem; log.txt starts with it.	Cítala al informar de un problema; log.txt empieza con ella.	Citez-la en signalant un problème; log.txt commence par elle.
+# (1.3 front19) The name of the player settings screen: the title band of the screen, the pause item and the OPTIONS screen's corner button. A product name, the same in all three languages.
+VITA SETTINGS	VITA SETTINGS	VITA SETTINGS
+In the game: pause or OPTIONS, then VITA SETTINGS (not in multiplayer).	En el juego: pausa u OPCIONES, luego VITA SETTINGS (no en multijugador).	Dans le jeu: pause ou OPTIONS, puis VITA SETTINGS (pas en multijoueur).
+ux0:data/mscharged/np-player.txt. An older file is kept as	ux0:data/mscharged/np-player.txt. Un archivo anterior se guarda como	ux0:data/mscharged/np-player.txt. Un fichier antérieur est gardé comme
+np-player.before-1.3.txt when 1.3 first updates it.	np-player.before-1.3.txt cuando 1.3 lo actualiza por primera vez.	np-player.before-1.3.txt quand la 1.3 le met à jour pour la première fois.
+The extracted disc (USA, R4QE01) goes in ux0:data/mscharged/game/sys and	El disco extraído (USA, R4QE01) va en ux0:data/mscharged/game/sys y	Le disque extrait (USA, R4QE01) va dans ux0:data/mscharged/game/sys et
+game/files. Compiler: libshacccg.suprx in ur0:data or data/external.	game/files. Compilador: libshacccg.suprx en ur0:data o data/external.	game/files. Compilateur: libshacccg.suprx dans ur0:data ou data/external.
+# Settings screen: headings, rows, help, buttons, confirmations, messages
+#@limit 76
+#@cells 29
+SETTINGS	AJUSTES	PARAMÈTRES
+CUSTOM	PERSONALIZADO	PERSONNALISÉ
+RESET TO DEFAULTS	RESTABLECER TODO	RÉTABLIR PAR DÉFAUT
+SAVE FOR NEXT START	GUARDAR PARA LUEGO	ENREGISTRER POUR PLUS TARD
+SAVE AND START	GUARDAR E INICIAR	ENREGISTRER ET LANCER
+SAVE AND RESTART	GUARDAR Y REINICIAR	ENREGISTRER ET RELANCER
+SAVE AND EXIT	GUARDAR Y SALIR	ENREGISTRER ET QUITTER
+NO EFFECT NOW: RESOLUTION is fixed. Set it to STANDARD first.	SIN EFECTO: RESOLUCIÓN es fija. Ponla primero en ESTÁNDAR.	SANS EFFET: RÉSOLUTION est fixe. Mettez-la d'abord sur STANDARD.
+NO EFFECT NOW: it needs TOUCH MEGA SAVE ON.	SIN EFECTO: requiere SUPERPARADA TÁCTIL en SÍ.	SANS EFFET: demande MÉGA ARRÊT TACTILE sur OUI.
+NO EFFECT NOW: it is for MULTIPLAYER LINK ONLINE (INVITE CODE).	SIN EFECTO: es para CONEXIÓN MULTIJUGADOR EN LÍNEA (CÓDIGO).	SANS EFFET: sert à LIAISON MULTIJOUEUR EN LIGNE (CODE).
+Puts every row of every page back to its default.	Devuelve todas las filas de todas las páginas a su valor predeterminado.	Remet chaque ligne de chaque page à sa valeur par défaut.
+Nothing is written until you save.	No se escribe nada hasta que guardes.	Rien n'est écrit avant l'enregistrement.
+Saves for the next start. Your current game goes on as it was.	Guarda para el próximo inicio. Tu partida actual sigue como estaba.	Enregistre pour le prochain démarrage. Votre partie continue telle quelle.
+Writes ux0:data/mscharged/np-player.txt and starts the game.	Escribe ux0:data/mscharged/np-player.txt e inicia el juego.	Écrit ux0:data/mscharged/np-player.txt et lance le jeu.
+Saves and restarts the game so the settings apply now. A match is lost.	Guarda y reinicia para aplicar los ajustes ya. Se pierde el partido.	Enregistre et relance le jeu pour tout appliquer. Le match est perdu.
+Writes np-player.txt and returns to the LiveArea.	Escribe np-player.txt y vuelve al LiveArea.	Écrit np-player.txt et revient au LiveArea.
+L/R: page  Up/Down: row  Left/Right: change  Triangle: buttons  Circle: back	L/R: página  Arr/Ab: fila  Izq/Der: cambiar  Triáng.: botones  Círc.: volver	L/R: page  Haut/Bas: ligne  G/D: changer  Triangle: boutons  Rond: retour
+L/R: page  Up/Down: row  Left/Right: change  Triangle: buttons  Circle: leave	L/R: página  Arr/Ab: fila  Izq/Der: cambiar  Triáng.: botones  Círc.: salir	L/R: page  Haut/Bas: ligne  G/D: changer  Triangle: boutons  Rond: quitter
+L/R: page  Up/Down: row  Left/Right: change  Triangle: buttons  Square: back	L/R: página  Arr/Ab: fila  Izq/Der: cambiar  Triáng.: botones  Cuad.: volver	L/R: page  Haut/Bas: ligne  G/D: changer  Triangle: boutons  Carré: retour
+L/R: page  Up/Down: row  Left/Right: change  Triangle: buttons  Square: leave	L/R: página  Arr/Ab: fila  Izq/Der: cambiar  Triáng.: botones  Cuad.: salir	L/R: page  Haut/Bas: ligne  G/D: changer  Triangle: boutons  Carré: quitter
+RESTART THE GAME?	¿REINICIAR EL JUEGO?	RELANCER LE JEU?
+A match in progress will be lost.	Se perderá el partido en curso.	Le match en cours sera perdu.
+CANCEL	CANCELAR	ANNULER
+Left/Right: choose  Cross: confirm  Circle: cancel	Izq./Der.: elegir  X: confirmar  Círculo: cancelar	Gauche/Droite: choisir  Croix: valider  Rond: annuler
+Left/Right: choose  Cross: confirm  Square: cancel	Izq./Der.: elegir  X: confirmar  Cuadrado: cancelar	Gauche/Droite: choisir  Croix: valider  Carré: annuler
+SAVE YOUR CHANGES?	¿GUARDAR LOS CAMBIOS?	ENREGISTRER LES CHANGEMENTS?
+You changed settings and have not saved them.	Cambiaste ajustes y no los guardaste.	Vous avez changé des réglages sans les enregistrer.
+KEEP EDITING	SEGUIR EDITANDO	CONTINUER
+DISCARD	DESCARTAR	ABANDONNER
+SAVE	GUARDAR	ENREGISTRER
+DON'T SAVE	NO GUARDAR	NE PAS ENREGISTRER
+SAVE AND START AGAIN	GUARDAR Y VOLVER A ABRIR	ENREGISTRER ET RELANCER
+Some changes apply the next time the game starts.	Algunos cambios se aplican al volver a abrir el juego.	Certains changements s'appliquent au prochain lancement.
+Saved. It applies now.	Guardado. Se aplica ya.	Enregistré. Appliqué tout de suite.
+Saves. Crowd, camera shake and rear touch apply now; the rest next start.	Guarda. Público, temblor y táctil se aplican ya; lo demás al reiniciar.	Enregistre. Public, secousses, tactile: tout de suite; le reste après.
+Leaves without saving. Nothing is written.	Sale sin guardar. No se escribe nada.	Quitte sans enregistrer. Rien n'est écrit.
+Left/Right: choose  Cross: confirm  Circle: keep editing	Izq./Der.: elegir  X: confirmar  Círculo: seguir editando	Gauche/Droite: choisir  Croix: valider  Rond: continuer
+Left/Right: choose  Cross: confirm  Square: keep editing	Izq./Der.: elegir  X: confirmar  Cuadrado: seguir editando	Gauche/Droite: choisir  Croix: valider  Carré: continuer
+Up/Down: choose  Cross: confirm  Circle: keep editing	Arr./Ab.: elegir  X: confirmar  Círculo: seguir editando	Haut/Bas: choisir  Croix: valider  Rond: continuer
+Up/Down: choose  Cross: confirm  Square: keep editing	Arr./Ab.: elegir  X: confirmar  Cuadrado: seguir editando	Haut/Bas: choisir  Croix: valider  Carré: continuer
+SAVE AND RESTART closes the game now: this match is lost.	GUARDAR Y REINICIAR cierra el juego ya: pierdes el partido.	ENREGISTRER ET RELANCER ferme le jeu: ce match est perdu.
+SAVE FOR NEXT START keeps playing; it applies next time.	GUARDAR PARA LUEGO sigue el juego; se aplica la próxima vez.	ENREGISTRER POUR PLUS TARD: le jeu continue; appliqué après.
+The system refused the restart. Saved: it applies at the next start.	El sistema rechazó el reinicio. Guardado: se aplica en el próximo inicio.	Le système a refusé le relancement. Enregistré: effet au prochain démarrage.
+np-player.txt would be too large	np-player.txt sería demasiado grande	np-player.txt serait trop grand
+Could not write np-player.txt	No se pudo escribir np-player.txt	Impossible d'écrire np-player.txt
+Saved. It applies the next time the game starts.	Guardado. Se aplica la próxima vez que inicie el juego.	Enregistré. S'applique au prochain démarrage du jeu.
+Saved to ux0:data/mscharged/np-player.txt	Guardado en ux0:data/mscharged/np-player.txt	Enregistré dans ux0:data/mscharged/np-player.txt
+Every row is back to its default. Save to keep that.	Todas las filas vuelven a su valor predeterminado. Guarda para conservarlo.	Tout est remis par défaut. Enregistrez pour le garder.
+Writes ux0:data/mscharged/mp-report.txt about this game's multiplayer.	Escribe ux0:data/mscharged/mp-report.txt sobre el multijugador del juego.	Écrit ux0:data/mscharged/mp-report.txt sur le multijoueur de ce jeu.
+No names, addresses or codes in it. Attach it to a bug report.	Sin nombres, direcciones ni códigos. Adjúntalo a un informe de error.	Sans noms, adresses ni codes. Joignez-le à un rapport de bogue.
+Report saved: ux0:data/mscharged/mp-report.txt	Informe guardado: ux0:data/mscharged/mp-report.txt	Rapport enregistré: ux0:data/mscharged/mp-report.txt
+Could not write the report. Is the memory card full?	No se pudo escribir el informe. ¿La tarjeta está llena?	Impossible d'écrire le rapport. La carte est-elle pleine?
+SEND A REPORT	ENVIAR UN INFORME	ENVOYER UN RAPPORT
+DELETE MY ONLINE ACCOUNT	BORRAR MI CUENTA EN LÍNEA	SUPPRIMER MON COMPTE EN LIGNE
+Sends a problem report to the online service. You see what first.	Envía un informe de problemas al servicio en línea. Ves el contenido antes.	Envoie un rapport au service en ligne. Vous voyez le contenu avant.
+3 a day at most. Needs an online account.	Máximo 3 al día. Necesita una cuenta en línea.	3 par jour au maximum. Il faut un compte en ligne.
+Removes your name, friends and reports from the online service.	Borra tu nombre, amigos e informes del servicio en línea.	Retire votre nom, amis et rapports du service en ligne.
+This Vita forgets its online name. It cannot be undone.	Esta Vita olvida su nombre en línea. No se puede deshacer.	Cette Vita oublie son nom en ligne. C'est irréversible.
+PLEASE WAIT	ESPERA	PATIENTEZ
+SEND A REPORT?	¿ENVIAR UN INFORME?	ENVOYER UN RAPPORT ?
+DELETE THE ACCOUNT?	¿BORRAR LA CUENTA?	SUPPRIMER LE COMPTE ?
+SEND	ENVIAR	ENVOYER
+NO	NO	NON
+YES	SÍ	OUI
+This is sent to the online service:	Esto se envía al servicio en línea:	Ceci est envoyé au service en ligne:
+- your online name	- tu nombre en línea	- votre nom en ligne
+- the last lines of the multiplayer log	- las últimas líneas del registro multijugador	- les dernières lignes du journal multijoueur
+- your last connection check	- tu última prueba de conexión	- votre dernier test de connexion
+- numbers from your last game: length, delay, loss	- cifras de tu última partida: duración, retraso, pérdidas	- chiffres de votre dernière partie: durée, délai, pertes
+IP addresses, ids and codes are removed first.	Las direcciones IP, ids y códigos se quitan antes.	Les adresses IP, ids et codes sont retirés avant.
+Your friend list is not sent.	Tu lista de amigos no se envía.	Votre liste d'amis n'est pas envoyée.
+It is kept for 30 days or until you delete the account.	Se guarda 30 días o hasta que borres la cuenta.	Conservé 30 jours ou jusqu'à la suppression du compte.
+This removes your name, friends, invitations and reports	Esto borra tu nombre, amigos, invitaciones e informes	Ceci retire votre nom, amis, invitations et rapports
+from the online service, and this Vita forgets its name.	del servicio en línea, y esta Vita olvida su nombre.	du service en ligne, et cette Vita oublie son nom.
+Your game progress is not touched. This cannot be undone.	Tu progreso de juego no se toca. No se puede deshacer.	Votre progression n'est pas touchée. C'est irréversible.
+Sending the report...	Enviando el informe...	Envoi du rapport...
+Deleting your online account...	Borrando tu cuenta en línea...	Suppression de votre compte en ligne...
+Circle: cancel	Círculo: cancelar	Rond: annuler
+Square: cancel	Cuadrado: cancelar	Carré: annuler
+Report sent. Thank you.	Informe enviado. Gracias.	Rapport envoyé. Merci.
+You already sent 3 reports today. Try again tomorrow.	Ya enviaste 3 informes hoy. Inténtalo mañana.	Vous avez déjà envoyé 3 rapports aujourd'hui. Réessayez demain.
+No connection to the online service. Check your Wi-Fi.	Sin conexión con el servicio en línea. Revisa el Wi-Fi.	Pas de connexion au service en ligne. Vérifiez le Wi-Fi.
+The online service is not taking reports now. Try tomorrow.	El servicio en línea no acepta informes ahora. Prueba mañana.	Le service en ligne n'accepte pas de rapports. Réessayez demain.
+No online account on this Vita yet. Play online once first.	Esta Vita aún no tiene cuenta en línea. Juega en línea antes.	Pas encore de compte en ligne. Jouez d'abord en ligne.
+The report was too big to send.	El informe era demasiado grande para enviarlo.	Le rapport était trop gros pour être envoyé.
+The online service does not take reports yet.	El servicio en línea aún no acepta informes.	Le service en ligne n'accepte pas encore de rapports.
+The online service refused the report.	El servicio en línea rechazó el informe.	Le service en ligne a refusé le rapport.
+Your online account was deleted. This Vita forgot its name.	Tu cuenta en línea se borró. Esta Vita olvidó su nombre.	Compte en ligne supprimé. Cette Vita a oublié son nom.
+There is no online account on this Vita. Nothing to delete.	Esta Vita no tiene cuenta en línea. Nada que borrar.	Aucun compte en ligne sur cette Vita. Rien à supprimer.
+No connection. Nothing was changed. Check your Wi-Fi.	Sin conexión. No se cambió nada. Revisa el Wi-Fi.	Pas de connexion. Rien n'a changé. Vérifiez le Wi-Fi.
+The online service cannot delete accounts yet. Try later.	El servicio en línea aún no borra cuentas. Prueba luego.	Le service ne supprime pas encore les comptes. Plus tard.
+Too many tries. Wait a while and try again.	Demasiados intentos. Espera un poco y reinténtalo.	Trop d'essais. Patientez un peu et réessayez.
+The online service is busy. Nothing was changed. Try later.	El servicio en línea está ocupado. No se cambió nada.	Le service en ligne est occupé. Rien n'a changé.
+The online service refused the request. Nothing was changed.	El servicio en línea rechazó la petición. No se cambió nada.	Le service en ligne a refusé. Rien n'a changé.
+# Settings screen: controls page (Triangle); a cell of its table is 28 characters wide, a rule line is checked whole by the test
+#@limit 76
+#@cells 29
+BUTTON	BOTÓN	BOUTON
+WITH THE BALL	CON EL BALÓN	AVEC LE BALLON
+WITHOUT THE BALL	SIN EL BALÓN	SANS LE BALLON
+(REAR TOUCH OFF)	(PANEL TRASERO NO)	(PAVÉ ARRIÈRE NON)
+Left/Right: MODERN or CLASSIC   Circle, Cross or Triangle: back to the list	Izq./Der.: MODERNO o CLÁSICO   Círculo, X o Triángulo: volver a la lista	Gauche/Droite: MODERNE ou CLASSIQUE   Rond, Croix ou Triangle: retour
+CROSS	X	CROIX
+PASS	PASE	PASSE
+SWITCH PLAYER (HOLD: CAPTAIN)	CAMBIAR (MANTENER: CAPITÁN)	CHANGER (TENIR: CAPITAINE)
+CIRCLE	CÍRCULO	ROND
+SHOOT (HOLD: CHARGE)	TIRO (MANTENER: CARGAR)	TIR (MAINTENIR: CHARGER)
+SLIDE TACKLE	ENTRADA	TACLE GLISSÉ
+SQUARE	CUADRADO	CARRÉ
+LOB PASS	PASE EN GLOBO	PASSE LOBÉE
+BIG HIT	CARGA	CHARGE
+TRIANGLE	TRIÁNGULO	TRIANGLE
+USE NEXT ITEM / SUPER ABILITY	OBJETO / SUPERHABILIDAD	OBJET / SUPER-CAPACITÉ
+CHIP AHEAD AND RUN (TURBO)	ADELANTAR Y CORRER (TURBO)	POUSSER ET COURIR (TURBO)
+R + CROSS/CIRCLE	R + X/CÍRCULO	R + CROIX/ROND
+LOB PASS / CHIP SHOT	PASE EN GLOBO / VASELINA	PASSE LOBÉE / PIQUÉ
+AS R (L + CIRCLE: CHIP SHOT)	COMO R (L + CÍRC.: VASELINA)	COMME R (L + ROND: PIQUÉ)
+DEKE	REGATE	FEINTE
+L + CROSS/SQUARE	L + X/CUADRADO	L + CROIX/CARRÉ
+DEKE TOWARD THE STICK	REGATE HACIA EL STICK	FEINTE VERS LE STICK
+SLIDE TOWARD THE STICK	ENTRADA HACIA EL STICK	TACLE VERS LE STICK
+RIGHT STICK	STICK DERECHO	STICK DROIT
+DEKE (FLICK)	REGATE (MOVER RÁPIDO)	FEINTE (GESTE VIF)
+D-PAD	CRUCETA	CROIX DIRECTIONNELLE
+NEXT ITEM	SIGUIENTE OBJETO	OBJET SUIVANT
+BACK RIGHT TAP	TOQUE ATRÁS DER.	TAP ARRIÈRE DROIT
+- (NEVER PASSES)	- (NUNCA PASA)	- (JAMAIS DE PASSE)
+SWITCH PLAYER	CAMBIAR JUGADOR	CHANGER DE JOUEUR
+BACK LEFT TAP	TOQUE ATRÁS IZQ.	TAP ARRIÈRE GAUCHE
+PAUSE	PAUSA	PAUSE
+MEGA STRIKE	SUPERTRALLAZO	MÉGA FRAPPE
+CAPTAIN HOLDS CIRCLE, THEN CIRCLE ON EACH MARK	MANTÉN CÍRCULO, LUEGO CÍRCULO EN CADA MARCA	MAINTENEZ ROND, PUIS ROND À CHAQUE REPÈRE
+ (OR A FINGER)	 (O UN DEDO)	 (OU UN DOIGT)
+CAPTAIN HOLDS SQUARE, THEN SQUARE ON EACH MARK	MANTÉN CUADRADO, LUEGO CUADRADO EN CADA MARCA	MAINTENEZ CARRÉ, PUIS CARRÉ À CHAQUE REPÈRE
+MEGA SAVE	SUPERPARADA	MÉGA ARRÊT
+AIM WITH A STICK, BLOCK WITH CROSS OR R	APUNTA CON UN STICK, BLOQUEA CON X O R	VISEZ AU STICK, BLOQUEZ: CROIX OU R
+ (OR TOUCH)	 (O TÁCTIL)	 (OU TACTILE)
+ (OR REAR AIM)	 (O ATRÁS)	 (OU ARRIÈRE)
+THEIR MEGA STRIKE	SUPERTRALLAZO RIVAL	MÉGA FRAPPE ADVERSE
+MASH SQUARE, TRIANGLE OR SELECT	PULSA CUADRADO, TRIÁNGULO O SELECT	MARTELEZ CARRÉ/TRIANGLE/SELECT
+, TAP BACK LEFT	, ATRÁS IZQ.	, ARRIÈRE GAUCHE
+, SWIPE	, DESLIZA	, BALAYEZ
+MASH SELECT	PULSA RÁPIDO SELECT	MARTELEZ SELECT
+MENUS	MENÚS	MENUS
+CROSS OK, CIRCLE BACK, D-PAD/STICKS MOVE, L/R PAGE	X ACEPTA, CÍRCULO ATRÁS, CRUCETA/STICKS MUEVEN, L/R PÁGINA	CROIX OK, ROND RETOUR, FLÈCHES/STICKS, L/R PAGE
+, A FINGER POINTS	, TÁCTIL	, UN DOIGT POINTE
+CROSS OK, SQUARE BACK, D-PAD/STICKS MOVE, L/R PAGE	X ACEPTA, CUADRADO ATRÁS, CRUCETA/STICKS MUEVEN, L/R PÁGINA	CROIX OK, CARRÉ RETOUR, FLÈCHES/STICKS, L/R PAGE
+# Online and local multiplayer menus (the game's popups, which wrap their text: no limit)
+#@limit 0
+Send a problem report?	¿Enviar un informe de problemas?	Envoyer un rapport de problème ?
+It contains: your online name, the last lines of the game's multiplayer log, your last connection check and numbers from your last online game (length, delay, reconnects, packet loss).	Contiene: tu nombre en línea, las últimas líneas del registro multijugador del juego, tu última prueba de conexión y cifras de tu última partida en línea (duración, retraso, reconexiones, pérdida de paquetes).	Il contient: votre nom en ligne, les dernières lignes du journal multijoueur du jeu, votre dernier test de connexion et des chiffres de votre dernière partie en ligne (durée, délai, reconnexions, perte de paquets).
+Your last online game ended with a problem.	Tu última partida en línea terminó con un problema.	Votre dernière partie en ligne s'est terminée par un problème.
+Send a report to help fix it?	¿Enviar un informe para ayudar a arreglarlo?	Envoyer un rapport pour aider à corriger ?
+You will see what is sent first.	Verás antes lo que se envía.	Vous verrez d'abord ce qui est envoyé.
+NOT NOW	AHORA NO	PAS MAINTENANT
+Different version: please update the game.	Versión diferente: actualiza el juego.	Version différente: mettez le jeu à jour.
+Different version: please update the game to %s.	Versión diferente: actualiza el juego a la versión %s.	Version différente: mettez le jeu à jour en version %s.
+That name is already taken. Choose another one.	Ese nombre ya está en uso. Elige otro.	Ce nom est déjà pris. Choisissez-en un autre.
+That name is reserved. Choose another one.	Ese nombre está reservado. Elige otro.	Ce nom est réservé. Choisissez-en un autre.
+That name is not allowed. Choose another one.	Ese nombre no está permitido. Elige otro.	Ce nom n'est pas autorisé. Choisissez-en un autre.
+Use 2 to 10 letters or digits for the name.	Usa de 2 a 10 letras o números para el nombre.	Utilisez de 2 à 10 lettres ou chiffres pour le nom.
+Daily limit reached. Try again tomorrow.	Límite diario alcanzado. Inténtalo mañana.	Limite quotidienne atteinte. Réessayez demain.
+Too many tries. Wait a minute and try again.	Demasiados intentos. Espera un minuto y vuelve a intentarlo.	Trop d'essais. Attendez une minute et réessayez.
+Online play is switched off for now.	El juego en línea está desactivado por ahora.	Le jeu en ligne est désactivé pour le moment.
+The service is busy. Try again in a moment.	El servicio está ocupado. Inténtalo en un momento.	Le service est occupé. Réessayez dans un instant.
+The service is busy or down. Try again in a moment.	El servicio está ocupado o caído. Inténtalo en un momento.	Le service est occupé ou indisponible. Réessayez dans un instant.
+The online account was not accepted. Try again.	No se aceptó la cuenta en línea. Vuelve a intentarlo.	Le compte en ligne n'a pas été accepté. Réessayez.
+The service refused the request (%s).	El servicio rechazó la solicitud (%s).	Le service a refusé la demande (%s).
+Connecting to the service...	Conectando con el servicio...	Connexion au service...
+Please wait.	Espera, por favor.	Veuillez patienter.
+Press Circle to cancel.	Pulsa Círculo para cancelar.	Appuyez sur Rond pour annuler.
+Finding a route...	Buscando una ruta...	Recherche d'un chemin...
+A direct link is being made.	Se está creando un enlace directo.	Un lien direct est en cours de création.
+Waiting for your partner (code %s)... Press Circle to cancel.	Esperando al otro jugador (código %s)... Pulsa Círculo para cancelar.	En attente de l'autre joueur (code %s)... Appuyez sur Rond pour annuler.
+Creating your online account...	Creando tu cuenta en línea...	Création de votre compte en ligne...
+Connecting...	Conectando...	Connexion...
+No direct route to your partner was found. Try another Wi-Fi network.	No se encontró una ruta directa hasta el otro jugador. Prueba otra red Wi-Fi.	Aucun chemin direct vers l'autre joueur. Essayez un autre réseau Wi-Fi.
+The online link was lost.	Se perdió la conexión en línea.	La liaison en ligne a été perdue.
+The online connection failed. Check your Wi-Fi and try again.	Falló la conexión en línea. Revisa tu Wi-Fi y vuelve a intentarlo.	La connexion en ligne a échoué. Vérifiez votre Wi-Fi et réessayez.
+Check your Wi-Fi: this Vita is not connected to a network.	Revisa tu Wi-Fi: esta Vita no está conectada a ninguna red.	Vérifiez votre Wi-Fi: cette Vita n'est connectée à aucun réseau.
+Set your Vita's date and time (Settings > Date & Time), then try again.	Ajusta la fecha y hora de tu Vita (Ajustes > Fecha y hora) y vuelve a intentarlo.	Réglez la date et l'heure de la Vita (Paramètres > Date et heure), puis réessayez.
+The online connection could not be started. Try again.	No se pudo iniciar la conexión en línea. Vuelve a intentarlo.	Impossible de démarrer la connexion en ligne. Réessayez.
+Online play is not available in this version of the game.	El juego en línea no está disponible en esta versión del juego.	Le jeu en ligne n'est pas disponible dans cette version du jeu.
+TEST CONNECTION	PROBAR CONEXIÓN	TESTER LA CONNEXION
+Checking your connection...	Comprobando tu conexión...	Vérification de votre connexion...
+Your connection is good: other players should be able to reach you.	Tu conexión es buena: otros jugadores deberían poder conectarse contigo.	Votre connexion est bonne: les autres joueurs devraient pouvoir vous joindre.
+Online play works, but your Wi-Fi hides this Vita from other players, so a match may have to go through a relay and lag. Another Wi-Fi network may work better.	El juego en línea funciona, pero tu Wi-Fi oculta esta Vita a los demás jugadores, así que un partido podría pasar por un relé y tener retraso. Otra red Wi-Fi puede funcionar mejor.	Le jeu en ligne fonctionne, mais votre Wi-Fi cache cette Vita aux autres joueurs: un match peut passer par un relais et ramer. Un autre réseau Wi-Fi peut mieux marcher.
+The online service answered, but your Wi-Fi could not be checked fully. Try a match; if it does not connect, try another Wi-Fi network.	El servicio en línea respondió, pero no se pudo comprobar tu Wi-Fi por completo. Prueba un partido; si no conecta, prueba otra red Wi-Fi.	Le service en ligne a répondu, mais votre Wi-Fi n'a pas pu être vérifié complètement. Essayez un match; s'il ne se connecte pas, essayez un autre réseau Wi-Fi.
+The connection is choppy.	La conexión va entrecortada.	La connexion est saccadée.
+This Vita is not connected to Wi-Fi.	Esta Vita no está conectada a Wi-Fi.	Cette Vita n'est pas connectée au Wi-Fi.
+The Wi-Fi signal is weak.	La señal de Wi-Fi es débil.	Le signal Wi-Fi est faible.
+The date and time on this Vita look wrong.	La fecha y hora de esta Vita parecen incorrectas.	La date et l'heure de cette Vita semblent incorrectes.
+The game needs an update to play online.	El juego necesita una actualización para jugar en línea.	Le jeu doit être mis à jour pour jouer en ligne.
+Online play is paused right now.	El juego en línea está en pausa por ahora.	Le jeu en ligne est suspendu pour le moment.
+Connect to Wi-Fi in the Vita's Settings.	Conéctate a Wi-Fi en los Ajustes de la Vita.	Connectez-vous au Wi-Fi dans les Paramètres de la Vita.
+Nearby play needs no Wi-Fi and still works.	El juego cercano no necesita Wi-Fi y sigue funcionando.	Le jeu à proximité n'a pas besoin de Wi-Fi et marche toujours.
+Same Wi-Fi and Nearby play still work.	El juego en la misma Wi-Fi y el cercano siguen funcionando.	Le jeu sur le même Wi-Fi et à proximité marchent toujours.
+A clock that is off, even by a year, breaks secure connections.	Un reloj mal puesto, aunque sea por un año, rompe las conexiones seguras.	Une horloge fausse, même d'un an, empêche les connexions sécurisées.
+Set it in Settings > Date & Time, then test again.	Ajústala en Ajustes > Fecha y hora y vuelve a probar.	Réglez-la dans Paramètres > Date et heure, puis testez à nouveau.
+Check that your Wi-Fi has internet.	Comprueba que tu Wi-Fi tenga internet.	Vérifiez que votre Wi-Fi a accès à internet.
+Update the game, then try again.	Actualiza el juego y vuelve a intentarlo.	Mettez le jeu à jour, puis réessayez.
+Please try again later.	Vuelve a intentarlo más tarde.	Veuillez réessayer plus tard.
+Move closer to your router.	Acércate más a tu router.	Rapprochez-vous de votre routeur.
+The delay looks fast.	El retraso parece bajo.	Le délai semble court.
+The delay looks fine.	El retraso parece normal.	Le délai semble correct.
+Online games may lag.	Las partidas en línea pueden ir con retraso.	Les parties en ligne peuvent ramer.
+Same Wi-Fi or Nearby may be smoother.	La misma Wi-Fi o el modo cercano pueden ir mejor.	Le même Wi-Fi ou la proximité peuvent mieux marcher.
+Another Vita on this Wi-Fi was found.	Se encontró otra Vita en esta Wi-Fi.	Une autre Vita a été trouvée sur ce Wi-Fi.
+This Wi-Fi may block other Vitas.	Esta Wi-Fi podría bloquear otras Vitas.	Ce Wi-Fi peut bloquer les autres Vitas.
+# ux13 (O8): Who can I play with? (MSC_WHO_CAN_I_PLAY_WITH=1; np_conntest.cpp WhoPhraseText; the first row is the failure popup's second button)
+WHO CAN I PLAY WITH?	¿CON QUIÉN JUEGO?	AVEC QUI JOUER ?
+Who can I play with?	¿Con quién puedo jugar?	Avec qui puis-je jouer ?
+People in this room:	Personas en esta sala:	Les personnes de cette pièce :
+A friend far away:	Un amigo lejos:	Un ami loin d'ici :
+Anyone online:	Cualquiera en línea:	N'importe qui en ligne :
+yes, on the same Wi-Fi or with Nearby play.	sí, en la misma Wi-Fi o con el juego cercano.	oui, sur le même Wi-Fi ou en jeu à proximité.
+yes, with Nearby play (no Wi-Fi needed).	sí, con el juego cercano (no hace falta Wi-Fi).	oui, en jeu à proximité (sans Wi-Fi).
+Nearby play works; this Wi-Fi may block other Vitas.	el juego cercano funciona; esta Wi-Fi podría bloquear otras Vitas.	le jeu à proximité marche; ce Wi-Fi peut bloquer les autres Vitas.
+yes, with a code you give them.	sí, con un código que tú le das.	oui, avec un code que vous lui donnez.
+yes, with a code, but it may lag on this Wi-Fi.	sí, con un código, pero puede ir con retraso en esta Wi-Fi.	oui, avec un code, mais cela peut ramer sur ce Wi-Fi.
+yes.	sí.	oui.
+yes, but games may lag.	sí, pero las partidas pueden ir con retraso.	oui, mais les parties peuvent ramer.
+not yet: connect to Wi-Fi first.	todavía no: conéctate primero a Wi-Fi.	pas encore : connectez-vous d'abord au Wi-Fi.
+not yet: set the date and time first.	todavía no: ajusta primero la fecha y la hora.	pas encore : réglez d'abord la date et l'heure.
+not yet: update the game first.	todavía no: actualiza primero el juego.	pas encore : mettez d'abord le jeu à jour.
+not right now: online play is paused.	ahora no: el juego en línea está en pausa.	pas maintenant : le jeu en ligne est suspendu.
+not right now: the online service could not be reached.	ahora no: no se pudo conectar con el servicio en línea.	pas maintenant : le service en ligne est injoignable.
+not in this version of the game.	no en esta versión del juego.	pas dans cette version du jeu.
+Local multiplayer	Multijugador local	Multijoueur local
+Multiplayer	Multijugador	Multijoueur
+Nearby: both Vitas close together, no network needed.	Cerca: las dos Vitas juntas, sin necesidad de red.	Proche: les deux Vita côte à côte, sans réseau.
+Same Wi-Fi: both Vitas on one Wi-Fi network.	Misma Wi-Fi: las dos Vitas en la misma red Wi-Fi.	Même Wi-Fi: les deux Vita sur le même réseau Wi-Fi.
+Online: play over the internet.	En línea: juega por internet.	En ligne: jouez par Internet.
+Local: play with a Vita next to you.	Local: juega con una Vita a tu lado.	Local: jouez avec une Vita à côté de vous.
+NEARBY	CERCANO	PROCHE
+LOCAL	LOCAL	LOCAL
+ONLINE	EN LÍNEA	EN LIGNE
+BACK	VOLVER	RETOUR
+Play a friend: one of you hosts a room and shares its code, the other joins with it (not ranked).	Juega con un amigo: uno crea una sala y comparte su código, el otro se une con él (no clasificatoria).	Jouez avec un ami: l'un crée un salon et partage son code, l'autre le rejoint avec (non classé).
+RANKED MATCH plays anyone online and counts on the season and daily leaderboards.	PARTIDO CLASIFICATORIO juega contra cualquiera en línea y cuenta en las clasificaciones de la temporada y del día.	MATCH CLASSÉ affronte n'importe qui en ligne et compte dans les classements de la saison et du jour.
+Circle goes back.	Círculo vuelve atrás.	Rond pour revenir.
+Play online with a friend.	Juega en línea con un amigo.	Jouez en ligne avec un ami.
+One of you hosts a room and shares its code, the other joins with it.	Uno crea una sala y comparte su código, el otro se une con él.	L'un crée un salon et partage son code, l'autre le rejoint avec.
+HOST A ROOM	CREAR SALA	CRÉER UN SALON
+JOIN WITH A CODE	UNIRSE CON CÓDIGO	REJOINDRE AVEC UN CODE
+RANKED MATCH	PARTIDO CLASIFICATORIO	MATCH CLASSÉ
+Friends: play with someone you know.	Amigos: juega con alguien que conoces.	Amis: jouez avec quelqu'un que vous connaissez.
+Play with anyone: a quick match that does not count on the leaderboards.	Jugar con cualquiera: una partida rápida que no cuenta en las clasificaciones.	Jouer avec n'importe qui: un match rapide qui ne compte pas dans les classements.
+Ranked match: counts on the leaderboards.	Partido clasificatorio: cuenta en las clasificaciones.	Match classé: compte dans les classements.
+Friend list: your friends, their invitations and who you played.	Lista de amigos: tus amigos, sus invitaciones y con quién jugaste.	Liste d'amis: vos amis, leurs invitations et vos adversaires récents.
+Host a room: you get a code to give to a friend.	Crear sala: obtienes un código para dárselo a un amigo.	Créer un salon: vous obtenez un code à donner à un ami.
+Join with a code: type the code a friend gave you.	Unirse con código: escribe el código que te dio un amigo.	Rejoindre avec un code: saisissez le code donné par un ami.
+FRIENDS	AMIGOS	AMIS
+PLAY WITH ANYONE	JUGAR CON CUALQUIERA	JOUER AVEC N'IMPORTE QUI
+FRIEND LIST	LISTA DE AMIGOS	LISTE D'AMIS
+The online account could not be created.	No se pudo crear la cuenta en línea.	Impossible de créer le compte en ligne.
+Choose a name for online play (2-10 characters)	Elige un nombre para jugar en línea (2-10 caracteres)	Choisissez un nom pour le jeu en ligne (2 à 10 caractères)
+This build has no keyboard to type a name.	Esta versión no tiene teclado para escribir un nombre.	Cette version n'a pas de clavier pour saisir un nom.
+The online service did not answer. Check your Wi-Fi and try again.	El servicio en línea no respondió. Revisa tu Wi-Fi y vuelve a intentarlo.	Le service en ligne n'a pas répondu. Vérifiez votre Wi-Fi et réessayez.
+The online service could not be reached. Check your Wi-Fi.	No se pudo contactar con el servicio en línea. Revisa tu Wi-Fi.	Le service en ligne est injoignable. Vérifiez votre Wi-Fi.
+The online service's answer was not understood.	No se entendió la respuesta del servicio en línea.	La réponse du service en ligne n'a pas été comprise.
+Enter the invite code of the room	Escribe el código de invitación de la sala	Saisissez le code d'invitation du salon
+This build has no keyboard to type the code.	Esta versión no tiene teclado para escribir el código.	Cette version n'a pas de clavier pour saisir le code.
+That is not an invite code.	Eso no es un código de invitación.	Ce n'est pas un code d'invitation.
+A code has 6 letters and digits.	Un código tiene 6 letras y números.	Un code a 6 lettres et chiffres.
+It never has the letters O, I or L, or the digits 0 or 1.	Nunca lleva las letras O, I ni L, ni los números 0 ni 1.	Il n'a jamais les lettres O, I ou L, ni les chiffres 0 ou 1.
+The online connection ended.	La conexión en línea terminó.	La connexion en ligne est terminée.
+Nobody joined the room in time.	Nadie se unió a la sala a tiempo.	Personne n'a rejoint le salon à temps.
+Nobody joined the room in 10 minutes.	Nadie se unió a la sala en 10 minutos.	Personne n'a rejoint le salon en 10 minutes.
+Try again, and share the code again.	Vuelve a intentarlo y comparte el código otra vez.	Réessayez et partagez à nouveau le code.
+No route to your partner was found in time. Try again.	No se encontró a tiempo una ruta hasta el otro jugador. Vuelve a intentarlo.	Aucun chemin vers l'autre joueur trouvé à temps. Réessayez.
+A match cannot be picked up again after a break, so it ends here.	Un partido no se puede retomar tras un corte, así que termina aquí.	Un match ne peut pas reprendre après une coupure: il s'arrête ici.
+The online link ended.	La conexión en línea terminó.	La liaison en ligne est terminée.
+RECONNECT	RECONECTAR	RECONNECTER
+LEAVE	SALIR	QUITTER
+OK	ACEPTAR	OK
+Too much time has passed: the room cannot be rejoined.	Pasó demasiado tiempo: ya no se puede volver a la sala.	Trop de temps a passé: impossible de rejoindre le salon.
+The connection could not be restored.	No se pudo restablecer la conexión.	Impossible de rétablir la connexion.
+Reconnecting to the same room...	Reconectando a la misma sala...	Reconnexion au même salon...
+Reconnect to the same room?	¿Reconectar a la misma sala?	Revenir dans le même salon?
+Same Wi-Fi needs a Wi-Fi connection.	Misma Wi-Fi necesita una conexión Wi-Fi.	Même Wi-Fi demande une connexion Wi-Fi.
+Connect this Vita to a network and try again; just after Nearby play that can take a few seconds.	Conecta esta Vita a una red y vuelve a intentarlo; justo después de jugar en Cercano puede tardar unos segundos.	Connectez cette Vita à un réseau et réessayez; juste après une partie Proche, cela peut prendre quelques secondes.
+Different rules (theirs: %s, ours: %s). Both players need the same settings.	Reglas diferentes (las suyas: %s, las tuyas: %s). Ambos necesitan los mismos ajustes.	Règles différentes (les siennes: %s, les vôtres: %s). Il faut les mêmes réglages.
+Different version: the other player has another build of the game. Both need the same one.	Versión diferente: el otro jugador tiene otra versión del juego. Ambos necesitan la misma.	Version différente: l'autre joueur a une autre version du jeu. Il faut la même.
+# Online transport: errors and the in-match banner (popups: no limit)
+#@limit 0
+Online play is not set up: no online service address or sign-in.	El juego en línea no está configurado: falta la dirección del servicio o la sesión.	Le jeu en ligne n'est pas configuré: pas d'adresse de service ni de connexion.
+Cannot open the network socket. Is Wi-Fi connected?	No se puede abrir la conexión de red. ¿Está conectada la Wi-Fi?	Impossible d'ouvrir la connexion réseau. Le Wi-Fi est-il connecté?
+The internet address could not be found: only players on the same network can connect.	No se encontró la dirección de internet: solo pueden conectarse jugadores de la misma red.	Adresse internet introuvable: seuls les joueurs du même réseau peuvent se connecter.
+The online service did not send the key for this match, so a secure link cannot be made. Try again.	El servicio en línea no envió la clave de este partido y no se puede crear un enlace seguro. Vuelve a intentarlo.	Le service en ligne n'a pas envoyé la clé de ce match: pas de lien sécurisé possible. Réessayez.
+The room was closed.	La sala se cerró.	Le salon a été fermé.
+The online service did not answer. Check the Wi-Fi connection and try again.	El servicio en línea no respondió. Revisa la conexión Wi-Fi y vuelve a intentarlo.	Le service en ligne n'a pas répondu. Vérifiez la connexion Wi-Fi et réessayez.
+The room is empty: the host left.	La sala está vacía: el anfitrión se fue.	Le salon est vide: l'hôte est parti.
+The online connection could not be restored.	No se pudo restablecer la conexión en línea.	Impossible de rétablir la connexion en ligne.
+The match goes on.	El partido continúa.	Le match continue.
+The online service cannot be reached.	No se puede contactar con el servicio en línea.	Le service en ligne est injoignable.
+The online service cannot be used any more.	Ya no se puede usar el servicio en línea.	Le service en ligne n'est plus utilisable.
+The other player could not be reached through the relay. Try again.	No se pudo llegar al otro jugador a través del relé. Vuelve a intentarlo.	L'autre joueur est injoignable via le relais. Réessayez.
+The online link ended because the Vita went to sleep.	La conexión en línea terminó porque la Vita entró en reposo.	La liaison en ligne s'est terminée car la Vita s'est mise en veille.
+The online link ended because the Wi-Fi network changed.	La conexión en línea terminó porque cambió la red Wi-Fi.	La liaison en ligne s'est terminée car le réseau Wi-Fi a changé.
+The online link ended because the Wi-Fi connection was lost.	La conexión en línea terminó porque se perdió la Wi-Fi.	La liaison en ligne s'est terminée car le Wi-Fi a été perdu.
+The other player left the match.	El otro jugador abandonó el partido.	L'autre joueur a quitté le match.
+The other player stopped responding.	El otro jugador dejó de responder.	L'autre joueur ne répond plus.
+The online connection ended, and the online service cannot be reached to start it again.	La conexión en línea terminó y no se puede contactar con el servicio para reanudarla.	La connexion en ligne est terminée et le service est injoignable pour la relancer.
+The network socket could not be reopened. Is Wi-Fi connected?	No se pudo reabrir la conexión de red. ¿Está conectada la Wi-Fi?	Impossible de rouvrir la connexion réseau. Le Wi-Fi est-il connecté?
+The online service sent relay addresses the game cannot use.	El servicio en línea envió direcciones de relé que el juego no puede usar.	Le service en ligne a envoyé des adresses de relais inutilisables.
+The relay server could not be found. Check the Wi-Fi connection and try again.	No se encontró el servidor de relé. Revisa la conexión Wi-Fi y vuelve a intentarlo.	Serveur relais introuvable. Vérifiez la connexion Wi-Fi et réessayez.
+The online service did not hand out relay credentials in time. Try again.	El servicio en línea no entregó a tiempo los datos del relé. Vuelve a intentarlo.	Le service en ligne n'a pas fourni l'accès au relais à temps. Réessayez.
+# Loading screen, waiting notice and error screen (80 columns)
+#@limit 76
+STARTING	INICIANDO	DÉMARRAGE
+CHECKING THE GAME FILES	REVISANDO LOS ARCHIVOS DEL JUEGO	VÉRIFICATION DES FICHIERS DU JEU
+CHECKING THE SAVE	REVISANDO LOS DATOS GUARDADOS	VÉRIFICATION DE LA SAUVEGARDE
+STARTING THE GRAPHICS	INICIANDO LOS GRÁFICOS	DÉMARRAGE DES GRAPHISMES
+LOADING THE GAME	CARGANDO EL JUEGO	CHARGEMENT DU JEU
+PREPARING THE SHADERS	PREPARANDO LOS SHADERS	PRÉPARATION DES SHADERS
+RETRYING THE GAME FILES	REINTENTANDO LOS ARCHIVOS DEL JUEGO	NOUVELLE TENTATIVE SUR LES FICHIERS
+STILL LOADING. A FIRST START TAKES LONGER.	SIGUE CARGANDO. EL PRIMER INICIO TARDA MÁS.	CHARGEMENT EN COURS. LE PREMIER LANCEMENT EST PLUS LONG.
+Still working: no new picture for %d seconds.	Sigue trabajando: ninguna imagen nueva en %d segundos.	Toujours en cours: aucune nouvelle image depuis %d secondes.
+The game may be loading or waiting for the memory card. Please wait.	El juego puede estar cargando o esperando la tarjeta de memoria. Espera.	Le jeu charge peut-être ou attend la carte mémoire. Patientez.
+If nothing changes, close the game from the PS menu and start it again.	Si nada cambia, cierra el juego desde el menú PS y vuelve a iniciarlo.	Si rien ne change, fermez le jeu depuis le menu PS et relancez-le.
+Mario Strikers Charged stopped: fatal error	Mario Strikers Charged se detuvo: error grave	Mario Strikers Charged s'est arrêté: erreur fatale
+Hold L + R at the next start to reset the settings.	Mantén L + R al iniciar para restablecer los ajustes.	Maintenez L + R au démarrage pour rétablir les réglages.
+The full log is ux0:data/mscharged/log.txt.  Press START to exit.	Registro completo: ux0:data/mscharged/log.txt. Pulsa START para salir.	Journal complet: ux0:data/mscharged/log.txt. Appuyez sur START pour quitter.
+Game files are missing or incomplete	Faltan archivos del juego o están incompletos	Fichiers du jeu manquants ou incomplets
+the program crashed	el programa falló	le programme a planté
+ON: 60 fps first in every scene; picture size and effects give way.	SÍ: 60 fps primero en cada escena; ceden el tamaño y los efectos.	OUI: 60 i/s d'abord dans chaque scène; taille et effets cèdent.
+30 only as a relief. Needs FRAME RATE AUTO. Not yet measured. Next start.	30 solo como alivio. Pide FOTOGRAMAS AUTO. Sin medir. Próximo inicio.	30 en dernier recours. Demande IMAGES AUTO. Non mesuré. Prochain démarrage.
+SMOOTH 60 MODE	MODO FLUIDO 60	MODE FLUIDE 60
+OFF (DEFAULT)	NO (PREDETERMINADO)	NON (PAR DÉFAUT)
+NO EFFECT NOW: FRAME RATE is 30 FPS. Set it to AUTO first.	SIN EFECTO: FOTOGRAMAS POR SEGUNDO está en 30 FPS. Ponlo antes en AUTO.	SANS EFFET: IMAGES PAR SECONDE est sur 30 I/S. Mettez d'abord AUTO.
+SET BY SMOOTH 60 MODE: 60 first, 30 only as a relief.	FIJADO POR MODO FLUIDO 60: 60 primero, 30 solo como alivio.	RÉGLÉ PAR MODE FLUIDE 60: 60 d'abord, 30 en dernier recours.
+LIVE SHADOWS	SOMBRAS EN JUEGO	OMBRES EN JEU
+FAST: soft shadows in live play, one pass less. Works in every picture.	RÁPIDAS: sombras suaves en juego, un paso menos. Vale para toda imagen.	RAPIDES: ombres douces en jeu, une passe en moins. Vaut pour toute image.
+FULL: the game's own shadows. Replays and cut-scenes always keep them.	COMPLETAS: las del juego. Repeticiones y escenas siempre las conservan.	COMPLÈTES: celles du jeu. Ralentis et scènes les gardent toujours.
+# Error texts of the online service, the relay, the secure connection and the radio, one sentence per line (popups join them sentence by sentence: no limit)
+#@limit 0
+That invite code was not found.	No se encontró ese código de invitación.	Ce code d'invitation est introuvable.
+Check it and try again.	Revísalo y vuelve a intentarlo.	Vérifiez-le et réessayez.
+That room is already full.	Esa sala ya está llena.	Ce salon est déjà complet.
+That room is closed.	Esa sala está cerrada.	Ce salon est fermé.
+Ask for a new invite code.	Pide un código de invitación nuevo.	Demandez un nouveau code d'invitation.
+That is your own room.	Esa es tu propia sala.	C'est votre propre salon.
+Give the code to a friend.	Dale el código a un amigo.	Donnez le code à un ami.
+That player is in a ranked match.	Ese jugador está en un partido clasificatorio.	Ce joueur est dans un match classé.
+Different game version: please update the game.	Versión diferente: actualiza el juego.	Version différente: mettez le jeu à jour.
+Your online account was not accepted.	No se aceptó tu cuenta en línea.	Votre compte en ligne n'a pas été accepté.
+Sign in again.	Inicia sesión de nuevo.	Reconnectez-vous.
+This online account cannot be used.	Esta cuenta en línea no se puede usar.	Ce compte en ligne ne peut pas être utilisé.
+Daily limit reached.	Límite diario alcanzado.	Limite quotidienne atteinte.
+Try again tomorrow.	Inténtalo mañana.	Réessayez demain.
+Too many tries.	Demasiados intentos.	Trop d'essais.
+Wait a moment and try again.	Espera un momento y vuelve a intentarlo.	Attendez un instant et réessayez.
+The online service is busy.	El servicio en línea está ocupado.	Le service en ligne est occupé.
+Try again in a moment.	Inténtalo en un momento.	Réessayez dans un instant.
+Try again later.	Inténtalo más tarde.	Réessayez plus tard.
+Try again.	Vuelve a intentarlo.	Réessayez.
+Try again in a few minutes.	Inténtalo en unos minutos.	Réessayez dans quelques minutes.
+You are not in that room any more.	Ya no estás en esa sala.	Vous n'êtes plus dans ce salon.
+The online service had a problem.	El servicio en línea tuvo un problema.	Le service en ligne a rencontré un problème.
+The room timed out.	La sala caducó.	Le salon a expiré.
+The host left the room.	El anfitrión salió de la sala.	L'hôte a quitté le salon.
+Your friend left the room.	Tu amigo salió de la sala.	Votre ami a quitté le salon.
+The host opened another room.	El anfitrión abrió otra sala.	L'hôte a ouvert un autre salon.
+The match is over.	El partido terminó.	Le match est terminé.
+The online service request was lost.	Se perdió la solicitud al servicio en línea.	La demande au service en ligne a été perdue.
+The online service did not answer in time.	El servicio en línea no respondió a tiempo.	Le service en ligne n'a pas répondu à temps.
+The online service address is not set.	Falta la dirección del servicio en línea.	L'adresse du service en ligne n'est pas définie.
+You are not signed in to the online service.	No iniciaste sesión en el servicio en línea.	Vous n'êtes pas connecté au service en ligne.
+The online service could not be reached.	No se pudo contactar con el servicio en línea.	Le service en ligne est injoignable.
+The online service sent an answer the game does not understand.	El servicio en línea envió una respuesta que el juego no entiende.	Le service en ligne a envoyé une réponse que le jeu ne comprend pas.
+The relay service sent an answer the game does not understand.	El servicio de relé envió una respuesta que el juego no entiende.	Le service de relais a envoyé une réponse que le jeu ne comprend pas.
+The relay service could not be reached.	No se pudo contactar con el servicio de relé.	Le service de relais est injoignable.
+The online service sent an unusable key for this match.	El servicio en línea envió una clave no válida para este partido.	Le service en ligne a envoyé une clé inutilisable pour ce match.
+Relay play is unavailable right now: the relay allowance of the online service is used up.	El juego por relé no está disponible ahora: se agotó la cuota de relé del servicio.	Le jeu par relais est indisponible: le quota de relais du service est épuisé.
+Try again later, or play from a network that allows direct connections.	Inténtalo más tarde o juega desde una red que permita conexiones directas.	Réessayez plus tard, ou jouez depuis un réseau qui autorise les connexions directes.
+You have used all of today's relay connections.	Usaste todas tus conexiones por relé de hoy.	Vous avez utilisé toutes vos connexions par relais du jour.
+Try again tomorrow, or play from a network that allows direct connections.	Inténtalo mañana o juega desde una red que permita conexiones directas.	Réessayez demain, ou jouez depuis un réseau qui autorise les connexions directes.
+Relay play is available again tomorrow, or play from a network that allows direct connections.	El juego por relé vuelve a estar disponible mañana, o juega desde una red que permita conexiones directas.	Le jeu par relais sera de nouveau disponible demain, ou jouez depuis un réseau qui autorise les connexions directes.
+Relay play is not available on this online service.	El juego por relé no está disponible en este servicio.	Le jeu par relais n'est pas disponible sur ce service.
+The relay service did not answer.	El servicio de relé no respondió.	Le service de relais n'a pas répondu.
+The relay can only be used inside a room with both players.	El relé solo se usa en una sala con los dos jugadores.	Le relais ne s'utilise que dans un salon avec les deux joueurs.
+The relay server address is unknown.	Se desconoce la dirección del servidor de relé.	L'adresse du serveur relais est inconnue.
+The relay server did not answer.	El servidor de relé no respondió.	Le serveur relais n'a pas répondu.
+The relay server's answer was not understood.	No se entendió la respuesta del servidor de relé.	La réponse du serveur relais n'a pas été comprise.
+The relay still holds your earlier connection.	El relé aún mantiene tu conexión anterior.	Le relais garde encore votre connexion précédente.
+The relay refused the sign-in.	El relé rechazó el inicio de sesión.	Le relais a refusé l'identification.
+The relay has no room for another player right now.	El relé no tiene lugar para otro jugador ahora.	Le relais n'a plus de place pour un autre joueur.
+The relay server refused a request.	El servidor de relé rechazó una solicitud.	Le serveur relais a refusé une demande.
+The relay server refused the request (not allowed).	El servidor de relé rechazó la solicitud (no permitida).	Le serveur relais a refusé la demande (non autorisée).
+Secure connections are not available in this build.	Las conexiones seguras no están disponibles en esta versión.	Les connexions sécurisées ne sont pas disponibles dans cette version.
+The request was not valid.	La solicitud no era válida.	La demande n'était pas valide.
+Too many requests at once.	Demasiadas solicitudes a la vez.	Trop de demandes à la fois.
+The Vita is not connected to a network.	La Vita no está conectada a una red.	La Vita n'est pas connectée à un réseau.
+Turn on Wi-Fi and try again.	Activa la Wi-Fi y vuelve a intentarlo.	Activez le Wi-Fi et réessayez.
+The Vita's date and time look wrong.	La fecha y hora de la Vita parecen incorrectas.	La date et l'heure de la Vita semblent incorrectes.
+Set them in Settings > Date & Time, then try again.	Ajústalas en Ajustes > Fecha y hora y vuelve a intentarlo.	Réglez-les dans Paramètres > Date et heure, puis réessayez.
+The server's address could not be found.	No se encontró la dirección del servidor.	L'adresse du serveur est introuvable.
+Check the Wi-Fi connection.	Revisa la conexión Wi-Fi.	Vérifiez la connexion Wi-Fi.
+Could not connect to the server.	No se pudo conectar con el servidor.	Connexion au serveur impossible.
+The secure connection could not be set up.	No se pudo crear la conexión segura.	Impossible d'établir la connexion sécurisée.
+The server's certificate was not accepted, so nothing was sent.	No se aceptó el certificado del servidor, así que no se envió nada.	Le certificat du serveur a été refusé: rien n'a été envoyé.
+The connection to the server broke.	Se cortó la conexión con el servidor.	La connexion au serveur a été coupée.
+The server's answer was not understood.	No se entendió la respuesta del servidor.	La réponse du serveur n'a pas été comprise.
+The server asked to go somewhere else, which is not followed.	El servidor pidió ir a otra dirección, y eso no se sigue.	Le serveur a demandé une redirection, qui n'est pas suivie.
+The server answered with an error.	El servidor respondió con un error.	Le serveur a répondu par une erreur.
+The server took too long to answer.	El servidor tardó demasiado en responder.	Le serveur a mis trop de temps à répondre.
+The server's answer is too large.	La respuesta del servidor es demasiado grande.	La réponse du serveur est trop volumineuse.
+Out of memory.	Memoria insuficiente.	Mémoire insuffisante.
+Only secure (https) addresses are allowed.	Solo se permiten direcciones seguras (https).	Seules les adresses sécurisées (https) sont autorisées.
+The server name could not be found.	No se encontró el nombre del servidor.	Le nom du serveur est introuvable.
+No socket.	No hay conexión de red disponible.	Aucune connexion réseau disponible.
+The server refused the connection.	El servidor rechazó la conexión.	Le serveur a refusé la connexion.
+The server did not accept the request in time.	El servidor no aceptó la solicitud a tiempo.	Le serveur n'a pas accepté la demande à temps.
+The answer is too large.	La respuesta es demasiado grande.	La réponse est trop volumineuse.
+The server did not answer in time.	El servidor no respondió a tiempo.	Le serveur n'a pas répondu à temps.
+Could not start the request.	No se pudo iniciar la solicitud.	Impossible de lancer la demande.
+This console's random number generator is not working, so a secure online link cannot be made.	El generador de números aleatorios de la consola no funciona, así que no se puede crear un enlace en línea seguro.	Le générateur de nombres aléatoires de la console ne fonctionne pas: impossible de créer une liaison en ligne sécurisée.
+The ad hoc radio is in use.	La radio ad hoc está en uso.	La radio ad hoc est utilisée.
+Leave the ad hoc game first, then try again.	Sal primero de la partida ad hoc y vuelve a intentarlo.	Quittez d'abord la partie ad hoc, puis réessayez.
+Wi-Fi is not connected.	La Wi-Fi no está conectada.	Le Wi-Fi n'est pas connecté.
+Connect to a network and try again.	Conéctate a una red y vuelve a intentarlo.	Connectez-vous à un réseau et réessayez.
+The network port is busy.	El puerto de red está ocupado.	Le port réseau est occupé.
+Restart the game and try again.	Reinicia el juego y vuelve a intentarlo.	Relancez le jeu et réessayez.
+OLD SETTINGS UPDATED FOR 1.3. BACKUP KEPT.	AJUSTES ACTUALIZADOS A 1.3. COPIA GUARDADA.	RÉGLAGES MIS À JOUR POUR 1.3. COPIE GARDÉE.
+
+NO SPANISH ON THIS DISC: ENGLISH IS USED.	SIN ESPAÑOL EN ESTE DISCO: SE USA INGLÉS.	PAS D'ESPAGNOL SUR CE DISQUE: ANGLAIS.
+NO FRENCH ON THIS DISC: ENGLISH IS USED.	SIN FRANCÉS EN ESTE DISCO: SE USA INGLÉS.	PAS DE FRANÇAIS SUR CE DISQUE: ANGLAIS.
+
+# Start-up failures (the error screen wraps these lines: no limit)
+#@limit 0
+#@cells 0
+the game data is missing	faltan los datos del juego	les données du jeu sont absentes
+this is not the right game disc	este no es el disco correcto	ce n'est pas le bon disque
+the shader compiler is missing	falta el compilador de shaders	le compilateur de shaders est absent
+the graphics could not start	los gráficos no pudieron iniciarse	les graphismes n'ont pas pu démarrer
+the data directory is missing	falta la carpeta de datos	le dossier de données est absent
+Copy your own extracted Mario Strikers Charged disc (Wii, USA, R4QE01) into these two folders:	Copia tu propio disco extraído de Mario Strikers Charged (Wii, USA, R4QE01) en estas dos carpetas:	Copiez votre propre disque extrait de Mario Strikers Charged (Wii, USA, R4QE01) dans ces deux dossiers :
+The CBOC Vita Installer does this for you.	El instalador CBOC Vita lo hace por ti.	CBOC Vita Installer le fait pour vous.
+Another place can be set with MSC_GAME_ROOT in ux0:data/mscharged/np-player.txt.	Se puede usar otro lugar con MSC_GAME_ROOT en ux0:data/mscharged/np-player.txt.	Un autre emplacement se règle avec MSC_GAME_ROOT dans ux0:data/mscharged/np-player.txt.
+The game files found are for a different game or region. Mario Strikers Charged, Wii, USA (R4QE01) is needed.	Los archivos encontrados son de otro juego o región. Se necesita Mario Strikers Charged, Wii, USA (R4QE01).	Les fichiers trouvés sont d'un autre jeu ou d'une autre région. Il faut Mario Strikers Charged, Wii, USA (R4QE01).
+Disc id found: 	Id del disco: 	Id du disque : 
+Folder: 	Carpeta: 	Dossier : 
+The game needs the Vita's shader compiler module, which was not found. Copy libshacccg.suprx to:	El juego necesita el módulo compilador de shaders de la Vita, que no se encontró. Copia libshacccg.suprx en:	Le jeu a besoin du module compilateur de shaders de la Vita, introuvable. Copiez libshacccg.suprx dans :
+VitaShell can copy it there: put it in ux0:VPK, press Triangle, Copy, then open ur0:data and Paste.	VitaShell puede copiarlo: ponlo en ux0:VPK, pulsa Triángulo, Copiar, abre ur0:data y Pegar.	VitaShell peut le copier : mettez-le dans ux0:VPK, Triangle, Copier, ouvrez ur0:data puis Coller.
+The Vita's graphics could not be set up. Restart the Vita and try again.	No se pudieron preparar los gráficos de la Vita. Reinicia la Vita e inténtalo de nuevo.	Les graphismes de la Vita n'ont pas pu être préparés. Redémarrez la Vita et réessayez.
+If it happens again, ux0:data/mscharged/log.txt says why.	Si vuelve a ocurrir, ux0:data/mscharged/log.txt dice por qué.	Si cela se reproduit, ux0:data/mscharged/log.txt en donne la raison.
+The game requested an unknown disc address (%s, %u bytes).	El juego pidió una dirección de disco desconocida (%s, %u bytes).	Le jeu a demandé une adresse de disque inconnue (%s, %u octets).
+Cannot open game file:	No se puede abrir el archivo del juego:	Impossible d'ouvrir le fichier du jeu :
+Game file short read:	Lectura incompleta del archivo del juego:	Lecture incomplète du fichier du jeu :
+Read %lu of %u bytes at %u; disc expects %u bytes.	Se leyeron %lu de %u bytes en la posición %u; el disco espera %u bytes.	Lu %lu sur %u octets à la position %u; le disque attend %u octets.
+No extracted game files at:	No hay archivos del juego extraídos en:	Aucun fichier du jeu extrait dans :
+Expected sys/fst.bin and files/.	Se esperaban sys/fst.bin y files/.	Attendus : sys/fst.bin et files/.
+Re-copy the complete extracted game to ux0:data/mscharged/game using the installer, or prepare it again from your own Wii USA Rev 1 game file. Keep the sys and files folders together.	Vuelve a copiar el juego extraído completo en ux0:data/mscharged/game con el instalador, o prepáralo de nuevo desde tu propio archivo del juego Wii USA Rev 1. Mantén juntas las carpetas sys y files.	Recopiez le jeu extrait complet dans ux0:data/mscharged/game avec l'installateur, ou préparez-le de nouveau à partir de votre propre fichier du jeu Wii USA Rev 1. Gardez ensemble les dossiers sys et files.
+Cause: the graphics memory pool could not be created.	Causa: no se pudo crear el bloque de memoria gráfica.	Cause : le bloc de mémoire graphique n'a pas pu être créé.
+Cause: not enough video memory was free at start-up.	Causa: no había suficiente memoria de video libre al iniciar.	Cause : pas assez de mémoire vidéo libre au démarrage.
+Cause: the shader compiler test failed.	Causa: falló la prueba del compilador de shaders.	Cause : le test du compilateur de shaders a échoué.
+Cause: the graphics back end could not start.	Causa: no se pudo iniciar el motor gráfico.	Cause : le moteur graphique n'a pas pu démarrer.
+Cause: the render thread could not be created.	Causa: no se pudo crear el hilo de dibujo.	Cause : le fil de rendu n'a pas pu être créé.
+ux0:data/mscharged could not be created or entered.	No se pudo crear ni abrir ux0:data/mscharged.	Impossible de créer ou d'ouvrir ux0:data/mscharged.
+The memory card may be full or not writable. Free some space and start again.	La tarjeta de memoria puede estar llena o protegida. Libera espacio e inicia de nuevo.	La carte mémoire est peut-être pleine ou protégée. Libérez de la place et relancez.
+#@limit 46
+#@cells 0
+FIRST-RUN FILES NOT SAVED. IS THE CARD FULL?	NO SE GUARDARON LOS ARCHIVOS. ¿TARJETA LLENA?	FICHIERS NON ENREGISTRÉS. CARTE PLEINE ?
+2 FAILED STARTS: STANDARD PICTURE AND LANGUAGE	2 INICIOS FALLIDOS: IMAGEN E IDIOMA ESTÁNDAR	2 DÉMARRAGES RATÉS: IMAGE ET LANGUE STANDARD
+# The disc's online screens (np_lan.cpp patches them by message id in every language: np_lan_text.h): upper case, {0} the error code and {p} a line break as the disc writes them; each must be no longer than the disc's own text in that language (tests/test_text_table.py)
+#@limit 0
+PLAY A FRIEND ONLINE, NEARBY OR ON THE SAME Wi-Fi!	JUEGA CON UN AMIGO EN LÍNEA, CERCA O EN LA MISMA Wi-Fi.	JOUEZ AVEC UN AMI EN LIGNE, À PROXIMITÉ OU SUR LE MÊME Wi-Fi.
+ONLINE PLAY DATA WILL NOW BE CREATED ON THIS PS VITA.	SE CREARÁN LOS DATOS DEL JUEGO EN LÍNEA EN ESTA PS VITA.	LES DONNÉES DU JEU EN LIGNE VONT ÊTRE CRÉÉES SUR CETTE PS VITA.
+ERROR {0}{p}UNABLE TO CONNECT TO THE INTERNET. CHECK THE Wi-Fi CONNECTION OF THIS PS VITA.	ERROR {0}{p}NO SE PUDO CONECTAR A INTERNET. REVISA LA CONEXIÓN Wi-Fi DE ESTA PS VITA.	CODE ERREUR: {0}{p}IMPOSSIBLE DE SE CONNECTER À INTERNET. VÉRIFIEZ LA CONNEXION Wi-Fi DE CETTE PS VITA.
+ERROR {0}{p}THE ONLINE SERVICE IS BUSY OR DOWN.{p}PLEASE TRY AGAIN LATER.	ERROR {0}{p}EL SERVICIO EN LÍNEA ESTÁ SATURADO O NO DISPONIBLE.{p}INTENTA DE NUEVO MÁS TARDE.	CODE ERREUR: {0}{p}LE SERVICE EN LIGNE EST SURCHARGÉ OU INDISPONIBLE.{p}VEUILLEZ RÉESSAYER PLUS TARD.
+ERROR {0}{p}UNABLE TO CONNECT TO THE ONLINE SERVICE.{p}PLEASE TRY AGAIN LATER.	ERROR {0}{p}NO SE PUDO CONECTAR AL SERVICIO EN LÍNEA.{p}INTENTA DE NUEVO MÁS TARDE.	CODE ERREUR: {0}{p}IMPOSSIBLE DE SE CONNECTER AU SERVICE EN LIGNE.{p}VEUILLEZ RÉESSAYER PLUS TARD.
+ERROR {0}{p}THIS VERSION CAN NO LONGER USE THE ONLINE SERVICE.{p}PLEASE UPDATE THE GAME.	ERROR {0}{p}ESTA VERSIÓN YA NO PUEDE USAR EL SERVICIO EN LÍNEA.{p}ACTUALIZA EL JUEGO.	CODE ERREUR: {0}{p}CETTE VERSION NE PEUT PLUS UTILISER LE SERVICE EN LIGNE.{p}METTEZ LE JEU À JOUR.
+ERROR CONNECTING TO THE ONLINE SERVICE.	ERROR DE CONEXIÓN AL SERVICIO EN LÍNEA.	ERREUR DE CONNEXION AU SERVICE EN LIGNE.
+ERROR {0}{p}COMMUNICATION ERROR. PLEASE TRY AGAIN.	ERROR {0}{p}ERROR DE COMUNICACIÓN. INTENTA DE NUEVO.	CODE ERREUR: {0}{p}ERREUR DE COMMUNICATION. VEUILLEZ RÉESSAYER.
+ONLINE CENTRAL	CENTRAL EN LÍNEA	CENTRE EN LIGNE
+CONNECTING TO ONLINE PLAY	CONECTANDO AL JUEGO EN LÍNEA	CONNEXION AU JEU EN LIGNE
+CONNECTED TO ONLINE PLAY	CONECTADO AL JUEGO EN LÍNEA	CONNEXION ÉTABLIE
+ONLINE DOMINATION	DOMINACIÓN EN LÍNEA	DOMINATION
+ONLINE INVITATION	INVITACIÓN EN LÍNEA	INVITATION EN LIGNE
+# More of the disc's messages by id (np_lan_text.h): the Wii's system memory, SD card, Mii, remote and Nintendo service wording, in the same upper case; where the English column is only the meaning (a message np_prompts.cpp already rewrites in English for the player's layout) the English message is left alone and only Spanish and French are replaced. Button names are not used: the layout is the player's choice.
+#@limit 0
+AN ERROR OCCURRED WHILE ACCESSING THE SAVE DATA. NO FURTHER SAVING OR LOADING IS POSSIBLE.	SE PRODUJO UN ERROR AL ACCEDER A LOS DATOS GUARDADOS. YA NO SE PUEDE GUARDAR NI CARGAR.	ERREUR D'ACCÈS AUX DONNÉES DE SAUVEGARDE. IMPOSSIBLE DE SAUVEGARDER OU DE CHARGER.
+ERROR {0}{p}THERE IS NOT ENOUGH FREE SPACE ON THIS PS VITA.	ERROR {0}{p}NO HAY SUFICIENTE ESPACIO LIBRE EN ESTA PS VITA.	CODE ERREUR: {0}{p}PAS ASSEZ D'ESPACE LIBRE SUR CETTE PS VITA.
+MARIO STRIKERS CHARGED WILL AUTOMATICALLY SAVE YOUR DATA ON THIS PS VITA.	MARIO STRIKERS CHARGED GUARDARÁ TUS DATOS AUTOMÁTICAMENTE EN ESTA PS VITA.	MARIO STRIKERS CHARGED SAUVEGARDERA AUTOMATIQUEMENT VOS DONNÉES SUR CETTE PS VITA.
+ERROR {0}{p}THE SAVE DATA IS DAMAGED AND CANNOT BE USED.	ERROR {0}{p}LOS DATOS GUARDADOS ESTÁN DAÑADOS Y NO SE PUEDEN USAR.	CODE ERREUR: {0}{p}LES DONNÉES DE SAUVEGARDE SONT ENDOMMAGÉES ET INUTILISABLES.
+THE SAVE DATA IS DAMAGED AND CANNOT BE USED.	LOS DATOS GUARDADOS ESTÁN DAÑADOS Y NO SE PUEDEN USAR.	LES DONNÉES DE SAUVEGARDE SONT ENDOMMAGÉES ET INUTILISABLES.
+THERE IS NOT ENOUGH FREE SPACE ON THIS PS VITA. FREE UP SPACE AND TRY AGAIN.	NO HAY SUFICIENTE ESPACIO LIBRE EN ESTA PS VITA. LIBERA ESPACIO E INTENTA DE NUEVO.	PAS ASSEZ D'ESPACE LIBRE SUR CETTE PS VITA. LIBÉREZ DE L'ESPACE ET RÉESSAYEZ.
+TO PLAY ONLINE, A SAVE FILE MUST FIRST BE CREATED ON THIS PS VITA.	PARA JUGAR EN LÍNEA, PRIMERO HAY QUE CREAR UN ARCHIVO DE GUARDADO EN ESTA PS VITA.	POUR JOUER EN LIGNE, IL FAUT D'ABORD CRÉER UN FICHIER DE SAUVEGARDE SUR CETTE PS VITA.
+FAILURE TO ACCESS THE GAME FILES. THE ONLINE CONNECTION WAS CLOSED.	ERROR AL ACCEDER A LOS ARCHIVOS DEL JUEGO. SE CERRÓ LA CONEXIÓN EN LÍNEA.	ÉCHEC D'ACCÈS AUX FICHIERS DU JEU. CONNEXION EN LIGNE FERMÉE.
+ERROR {0} CONNECTING TO THE ONLINE SERVICE.	ERROR {0} AL CONECTAR AL SERVICIO EN LÍNEA.	ERREUR {0} DE CONNEXION AU SERVICE EN LIGNE.
+ERROR {0}{p}THERE IS NO RESPONSE. EITHER THE PLAYER IS NOT ONLINE, OR YOU HAVE BEEN REMOVED FROM THEIR FRIEND LIST.	ERROR {0}{p}NO HAY RESPUESTA. EL JUGADOR NO ESTÁ EN LÍNEA O TE QUITÓ DE SU LISTA DE AMIGOS.	CODE ERREUR: {0}{p}PAS DE RÉPONSE. LE JOUEUR N'EST PAS EN LIGNE OU VOUS A RETIRÉ DE SA LISTE D'AMIS.
+{0} HAS INVITED YOU TO AN ONLINE MATCH. WOULD YOU LIKE TO:	{0} TE INVITÓ A UN PARTIDO EN LÍNEA. ¿QUIERES:	{0} VOUS INVITE À UN MATCH EN LIGNE. VOULEZ-VOUS:
+THAT WAS A GREAT WIN! YOU ARE NOW READY TO TAKE ON THE WORLD OF MARIO STRIKERS CHARGED! PUT YOUR SKILLS TO THE TEST IN EVERY MODE, ONLINE TOO!	¡QUÉ GRAN VICTORIA! YA ESTÁS LISTO PARA EL MUNDO DE MARIO STRIKERS CHARGED. ¡PON A PRUEBA TU HABILIDAD EN TODOS LOS MODOS, TAMBIÉN EN LÍNEA!	QUELLE BELLE VICTOIRE! VOUS ÊTES PRÊT POUR L'UNIVERS DE MARIO STRIKERS CHARGED. METTEZ VOTRE TALENT À L'ÉPREUVE DANS TOUS LES MODES, EN LIGNE AUSSI!
+ONLINE CUP	COPA EN LÍNEA	COUPE EN LIGNE
+YOU CANNOT GO ONLINE WITH THIS NAME. TRY AGAIN WITH A DIFFERENT NAME.	NO PUEDES JUGAR EN LÍNEA CON ESTE NOMBRE. INTÉNTALO CON OTRO NOMBRE.	VOUS NE POUVEZ PAS JOUER EN LIGNE AVEC CE NOM. ESSAYEZ UN AUTRE NOM.
+QUIT THE GAME	SALIR DEL JUEGO	QUITTER LE JEU
+ACTIVATE CONTROLLERS	ACTIVAR MANDOS	ACTIVER MANETTES
+ACTIVE CONTROLLERS	MANDOS ACTIVOS	MANETTES ACTIVES
+PRESS THE HIT BUTTON!	¡PULSA EL BOTÓN DE CARGA!	BOUTON DE CHARGE!
+PLEASE CHECK THE CONTROLLER.	REVISA QUE HAYA UN MANDO CONECTADO.	VÉRIFIEZ QUE LA MANETTE EST CONNECTÉE.
+PLEASE CHECK THAT EVERY PLAYER HAS A CONTROLLER.	REVISA QUE TODOS LOS JUGADORES TENGAN UN MANDO.	VÉRIFIEZ QUE CHAQUE JOUEUR A UNE MANETTE.
+SWITCH POWER-UPS WITH ITS BUTTON.	CAMBIA DE OBJETO CON SU BOTÓN.	CHANGEZ D'OBJET AVEC SON BOUTON.
+POWER-UPS ARE EARNED BY WINDING UP AND RELEASING A SHOT WHEN A BLUE ENERGY RING SURROUNDS YOUR PLAYER, OR WHEN A PLAYER WITHOUT THE BALL IS TACKLED. THE POWER-UP APPEARS IN THE HUD. LAUNCH IT WITH THE POWER-UP BUTTON. EARN SOME AND WIN THE GAME!	SE GANAN OBJETOS CARGANDO Y SOLTANDO UN TIRO CUANDO UN ANILLO DE ENERGÍA AZUL ENVUELVE A TU JUGADOR, O CUANDO UN JUGADOR SIN BALÓN RECIBE UNA CARGA. EL OBJETO APARECE EN PANTALLA. LÁNZALO CON EL BOTÓN DE OBJETO. ¡CONSIGUE ALGUNOS Y GANA EL PARTIDO!	ON GAGNE DES OBJETS SPÉCIAUX EN CHARGEANT PUIS RELÂCHANT UN TIR QUAND UN ANNEAU D'ÉNERGIE BLEU ENTOURE VOTRE JOUEUR, OU QUAND UN JOUEUR SANS BALLON SE FAIT PERCUTER. L'OBJET APPARAÎT À L'ÉCRAN. LANCEZ-LE AVEC LE BOUTON D'OBJET. OBTENEZ-EN ET REMPORTEZ LE MATCH!
+WHEN A MEGA STRIKE IS LAUNCHED ON YOUR TEAM, YOU CAN STOP THE BALLS AND WIN THE GAME! TAKE CONTROL OF THE GOALIE'S HANDS. WHEN THE HANDS ARE OVER A BALL, PRESS THE ACTION BUTTON TO DESTROY IT! BALLS CAN COME FROM ANYWHERE, SO BE READY!	CUANDO LANCEN UN SUPERTRALLAZO CONTRA TU EQUIPO, ¡PUEDES DETENER LOS BALONES Y GANAR EL PARTIDO! TOMA EL CONTROL DE LAS MANOS DEL PORTERO. CUANDO ESTÉN SOBRE UN BALÓN, ¡PULSA EL BOTÓN DE ACCIÓN PARA DESTRUIRLO! LOS BALONES PUEDEN VENIR DE CUALQUIER LADO, ¡ATENCIÓN!	QUAND UNE MÉGA FRAPPE VISE VOTRE ÉQUIPE, VOUS POUVEZ ARRÊTER LES BALLONS ET GAGNER LE MATCH! PRENEZ LE CONTRÔLE DES MAINS DU GARDIEN. QUAND LES MAINS SONT SUR UN BALLON, APPUYEZ SUR LE BOUTON D'ACTION POUR LE DÉTRUIRE! LES BALLONS PEUVENT VENIR DE PARTOUT, SOYEZ PRÊT!
+TRY A DIFFERENT KIND OF SKILLSHOT WITH BOO! FIND THE RIGHT DISTANCE TO SCORE! IF YOU LOSE THE BALL, WIN IT BACK ON DEFENSE: SLIDE TACKLE, OR THROW A BIG HIT WITH THE HIT BUTTON.	¡PRUEBA OTRO TIPO DE SUPERTIRO CON BOO! ENCUENTRA LA DISTANCIA ADECUADA PARA ANOTAR. SI PIERDES EL BALÓN, RECUPÉRALO DEFENDIENDO: HAZ UNA ENTRADA O UNA CARGA CON EL BOTÓN DE CARGA.	ESSAYEZ UN AUTRE TIR SPÉCIAL AVEC BOO! TROUVEZ LA BONNE DISTANCE POUR MARQUER! SI VOUS PERDEZ LE BALLON, RÉCUPÉREZ-LE EN DÉFENDANT: TACLE GLISSÉ, OU CHARGE AVEC LE BOUTON DE CHARGE.
+TO PUT YOUR CONTROLLER ON A TEAM, PRESS THE ACTION BUTTON ON THE TEAM BOX YOU WANT. TO CHANGE TEAMS, PICK IT UP AGAIN WITH THE SAME BUTTON.	PARA ENTRAR A UN EQUIPO, PULSA EL BOTÓN DE ACCIÓN EN LA CASILLA DEL EQUIPO. PARA CAMBIAR, RECOGE TU MANDO CON EL MISMO BOTÓN EN SU CASILLA.	POUR REJOINDRE UNE ÉQUIPE, APPUYEZ SUR LE BOUTON D'ACTION SUR LA CASE DE L'ÉQUIPE. POUR CHANGER, REPRENEZ VOTRE MANETTE AVEC LE MÊME BOUTON SUR SA CASE.
+# Messages with a number or a code in them (np_text.h: the formatted English text is matched against the template, the pieces are put into the Spanish or French one; only %s %d %u %lu)
+Different game version: please update the game to %s.	Versión diferente: actualiza el juego a la versión %s.	Version différente: mettez le jeu à jour en version %s.
+The online service refused the request (%s).	El servicio en línea rechazó la solicitud (%s).	Le service en ligne a refusé la demande (%s).
+The relay could not be set up (%s).	No se pudo configurar el relé (%s).	Le relais n'a pas pu être configuré (%s).
+The relay server refused to set up the connection (error %d).	El servidor de relé rechazó crear la conexión (error %d).	Le serveur relais a refusé d'établir la connexion (erreur %d).
+Using the relay (%s).	Usando el relé (%s).	Utilisation du relais (%s).
+A newer version of the game is needed to play online.	Se necesita una versión más reciente del juego para jugar en línea.	Une version plus récente du jeu est nécessaire pour jouer en ligne.
+A newer version of the game is needed to play online (%s).	Se necesita una versión más reciente del juego para jugar en línea (%s).	Une version plus récente du jeu est nécessaire pour jouer en ligne (%s).
+This online profile is not allowed to play.	Este perfil en línea no tiene permiso para jugar.	Ce profil en ligne n'est pas autorisé à jouer.
+Scores are not sent while the NK-bug fix of MSC_GAME_FIXES is on.	No se envían puntuaciones mientras la corrección del error NK de MSC_GAME_FIXES esté activa.	Les scores ne sont pas envoyés tant que la correction du bogue NK de MSC_GAME_FIXES est active.
+no answer	sin respuesta	pas de réponse
+status %d	estado %d	statut %d
+Waiting for the other player... (%d s)	Esperando al otro jugador... (%d s)	En attente de l'autre joueur... (%d s)
+relay-only mode	modo solo relé	mode relais seul
+advised by the online service	recomendado por el servicio en línea	conseillé par le service en ligne
+the other player uses the relay	el otro jugador usa el relé	l'autre joueur utilise le relais
+both NATs are symmetric	ambos NAT son simétricos	les deux NAT sont symétriques
+no direct path	sin ruta directa	pas de chemin direct
+# Keyboard titles of the online name (the system keyboard: 63 characters at most)
+#@limit 63
+Name for the online rankings (10 characters)	Nombre para las clasificaciones en línea (10 caracteres)	Nom pour les classements en ligne (10 caractères)
+Use letters, digits or symbols (10 characters)	Usa letras, números o símbolos (10 caracteres)	Utilisez lettres, chiffres ou symboles (10 caractères)
+Waiting for your partner. Give them this code:	Esperando al otro jugador. Dale este código:	En attente de l'autre joueur. Donnez-lui ce code :
+# (mpbeta27) Multiplayer is a public beta: the tagged buttons of the Multiplayer menu (np_mpbeta.h; the popups' longest label so far is 24 characters)
+#@limit 24
+ONLINE BETA	EN LÍNEA BETA	EN LIGNE BÊTA
+LOCAL BETA	LOCAL BETA	LOCAL BÊTA
+NEARBY BETA	CERCANO BETA	PROCHE BÊTA
+SAME WI-FI BETA	MISMA WI-FI BETA	MÊME WI-FI BÊTA
+FRIENDS BETA	AMIGOS BETA	AMIS BÊTA
+PLAY WITH ANYONE BETA	CON CUALQUIERA BETA	AVEC N'IMPORTE QUI BÊTA
+RANKED MATCH BETA	CLASIFICATORIO BETA	MATCH CLASSÉ BÊTA
+REPORT A PROBLEM	INFORMAR UN PROBLEMA	SIGNALER UN PROBLÈME
+# the game's own main menu entry and the online hub's title, written in place (np_lan_text.h kBetaKeys: within the disc's lengths)
+MULTIPLAYER BETA	MULTIJUGADOR BETA	MULTIJOUEUR BÊTA
+ONLINE CENTRAL BETA	CENTRAL EN LÍNEA BETA	CENTRE EN LIGNE BÊTA
+# (mpbeta27) the beta notice, the result screen's line, the sync-error popup, another build, the report offer (popups and the banner wrap: no limit)
+#@limit 0
+Multiplayer is in beta.	El multijugador está en fase beta.	Le multijoueur est en version bêta.
+If something goes wrong, the game will offer to send a problem report.	Si algo sale mal, el juego te ofrecerá enviar un informe de problemas.	Si quelque chose ne va pas, le jeu proposera d'envoyer un rapport de problème.
+Thank you!	¡Gracias!	Merci !
+Something wrong?	¿Algo salió mal?	Un problème ?
+Choose REPORT A PROBLEM in the Multiplayer menu.	Elige INFORMAR UN PROBLEMA en el menú Multijugador.	Choisissez SIGNALER UN PROBLÈME dans le menu Multijoueur.
+The two Vitas got out of step, so this match ends here.	Las dos Vitas perdieron la sincronización, así que este partido termina aquí.	Les deux Vita ne sont plus synchronisées, ce match s'arrête donc ici.
+Sorry!	¡Lo sentimos!	Désolé !
+The next time you open Multiplayer, the game will offer to send a problem report.	La próxima vez que abras Multijugador, el juego te ofrecerá enviar un informe de problemas.	La prochaine fois que vous ouvrirez Multijoueur, le jeu proposera d'envoyer un rapport de problème.
+The other Vita has another version of the game, so the match could not start.	La otra Vita tiene otra versión del juego, así que el partido no pudo empezar.	L'autre Vita a une autre version du jeu, le match n'a donc pas pu commencer.
+Update both Vitas to the latest version.	Actualiza las dos Vitas a la última versión.	Mettez les deux Vita à jour avec la dernière version.
+Different version: the other player has another build of the game. Both need the same one. Update both Vitas to the latest version.	Versión diferente: el otro jugador tiene otra versión del juego. Ambos necesitan la misma. Actualiza las dos Vitas a la última versión.	Version différente: l'autre joueur a une autre version du jeu. Il faut la même. Mettez les deux Vita à jour avec la dernière version.
+The game closed during your last multiplayer game.	El juego se cerró durante tu última partida multijugador.	Le jeu s'est fermé pendant votre dernière partie multijoueur.
+Your last multiplayer game ended with a problem.	Tu última partida multijugador terminó con un problema.	Votre dernière partie multijoueur s'est terminée par un problème.
+No online account on this Vita yet, so the report cannot be sent.	Esta Vita aún no tiene cuenta en línea, así que no se puede enviar el informe.	Cette Vita n'a pas encore de compte en ligne, le rapport ne peut donc pas être envoyé.
+It was saved as ux0:data/mscharged/mp-report.txt.	Se guardó como ux0:data/mscharged/mp-report.txt.	Il a été enregistré sous ux0:data/mscharged/mp-report.txt.
+To send reports, play online once.	Para enviar informes, juega en línea una vez.	Pour envoyer des rapports, jouez une fois en ligne.
+The report could not be saved.	No se pudo guardar el informe.	Le rapport n'a pas pu être enregistré.

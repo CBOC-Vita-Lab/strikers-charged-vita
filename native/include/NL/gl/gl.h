@@ -57,6 +57,7 @@ bool glHasQuads();
 void glBeginFrame();
 void glEndFrame();
 void glDiscardFrame(int count);
+void glDiscardFrameWhy(int count, const char* why);   /* stall10: the same, naming the caller for the [discard] counter line */
 void glSendFrame();
 bool glIsFrameActive();
 void glFinish();

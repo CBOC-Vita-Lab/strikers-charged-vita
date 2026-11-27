@@ -1,0 +1,14 @@
+# console-1.2 run n-clusterlazy: No crowd cluster where nothing reads it
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group replay, route crep, version payload 1.3, role nab
+# The same picture by reading. rep:replay against rep1, rep2: a win on this route's stadium means the capture was paid for nothing.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_CROWD_CLUSTER_LAZY=1

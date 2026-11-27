@@ -6,7 +6,7 @@
 # Run it inside a heavy.sh turn (NOHEAVY=1 is set):  tools/heavy.sh -t 900 tools/seed/v3k_proof.sh ...
 # Result: build/np/W5SEED/v3k-runs/<tag>/ (log.txt, report.txt = v3k_report.py, cache.txt = how many GXP files this run had to compile with libshacccg).
 cd "$(dirname "$0")/../.."
-R=/home/claude/msc/build/np/W5SEED
+R=${SEED_ROOT:-/work/msc/build/np/W5SEED}   # (SEED_ROOT=<folder> keeps the work somewhere else, e.g. under the build root of this checkout)
 KEEP=0; SECS=600; VPK=; SCRIPT=; XENV=; PROF=$R/v3k-proof
 while getopts "ks:v:S:x:P:" o; do case $o in k) KEEP=1;; s) SECS=$OPTARG;; v) VPK=$OPTARG;; S) SCRIPT=$OPTARG;; x) XENV=$OPTARG;; P) PROF=$OPTARG;; *) exit 2;; esac; done
 shift $((OPTIND-1))
@@ -17,10 +17,10 @@ FILES=
 {
   echo "# W5-SEED proof run $TAG of $VPK"
   echo "MSC_WATCH=1"; echo "MSC_WATCH_EVERY=300"
-  echo "MSC_VITA_RENDER=320x224"
+  case " $XENV " in *" MSC_VITA_RENDER="*) ;; *) echo "MSC_VITA_RENDER=320x224";; esac   # (-x "MSC_VITA_RENDER=..." replaces the small picture: dynamic resolution and the multisampled rungs need none)
   echo "NP_DATA_DIR=ux0:data/mscharged/np-data"
   if [ -n "$SCRIPT" ]; then cp "$SCRIPT" $R/v3k-in/; FILES="$R/v3k-in/$(basename $SCRIPT)"; echo "MSC_INPUT_SCRIPT=$(basename $SCRIPT)"; echo "MSC_MAX_FRAMES=200000"; else echo "MSC_MAX_FRAMES=120"; fi
-  for kv in $XENV; do echo "$kv"; done
+  for kv in $XENV; do [ "$kv" = "MSC_VITA_RENDER=" ] || echo "$kv"; done   # (-x MSC_VITA_RENDER= alone: no fixed picture size at all)
 } > $ENVF
 UNTIL="reached MSC_MAX_FRAMES|script exit|CRASH|STALL"
 NOHEAVY=1 KEEPDATA=$KEEP FILES="$FILES" RUNS_DIR=$R/v3k-runs PROFILE_DIR=$PROF GAME=1 platform/vita/tools/job_v3k.sh "$TAG" "$SECS" "$ENVF" "$UNTIL" "$VPK" MSCN00001

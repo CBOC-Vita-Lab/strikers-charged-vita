@@ -13,10 +13,12 @@
 #include <random>
 #include <string>
 
+#include "backend_test_hooks.h"
 #include "../src/vgx_backend_gl.cpp"
 #include "../src/vgx_zfreeze.h"
 
-namespace vgx { bool LogEnabled() { return false; } }
+namespace vgx { bool LogEnabled() { return false; } const char* ShaderListPath() { return ""; } }   // (vgx_draw.cpp, not linked here)
+extern "C" int VgxStillArmed(void) { return 0; }
 
 using namespace vgx;
 

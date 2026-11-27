@@ -1,0 +1,14 @@
+# console-1.2 run price17b: FPS probe off (MSC_FPS=30), split lines on
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route tour, version payload 1.3, role ab
+# price17: begin-frame pace with the probe off (it reads only at frame 1 in 30 mode); against price17ref. Not a candidate, a measurement of what the probe costs.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=2
+MSC_FPS=30

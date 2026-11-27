@@ -25,6 +25,7 @@
 #include "../../../include/np/touch_diag.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -33,6 +34,7 @@
 #include <psp2/touch.h>
 #endif
 
+#include "../../compat/np_lat16.h"   // wave 11 (press16): MSC_LAT_SAMPLE / MSC_LAT_PADAGE, the controller sample clock
 #include "../../sdk/input/np_controls.h"   // W5 CTL: the tap latch and the rear-touch switch (inline, no game code)
 
 // GameCube pad bits (the nav scripts' and the SDK's PAD_* values).
@@ -61,17 +63,36 @@ uint64_t g_lastTapStamp = 0;
 uint64_t g_debugTapStamp = 0;
 #endif
 
-void MapStick(uint8_t rawX, uint8_t rawY, int8_t& outX, int8_t& outY) {
+// Wave 24 (feel24, X10; default OFF): MSC_STICK_DEAD=<raw units, 4..32> (default 16, the line above) and MSC_STICK_CURVE=<power 1..2, default 1 = linear> for the LEFT
+// stick (movement, pass and shot aim). The same radial zone and the same full travel; the power curve makes small deflections finer. With neither set, MapStick is the code
+// above, bit for bit (the curve is skipped at 1, the zone is the constant). The mapped value is what the game captures, records and sends, so a replay and a peer see
+// the result of the player's own mapping: multiplayer-safe (nothing here is a second input stream).
+struct StickTune { float dead; float power; };
+const StickTune& StickTuneLeft() {
+    static const StickTune t = [] {
+        StickTune v{kDeadZone, 1.0f};
+        const char* d = std::getenv("MSC_STICK_DEAD");
+        const char* c = std::getenv("MSC_STICK_CURVE");
+        if (d && *d) { const float x = static_cast<float>(std::atof(d)); if (x >= 4.0f && x <= 32.0f) v.dead = x; }
+        if (c && *c) { const float x = static_cast<float>(std::atof(c)); if (x >= 1.0f && x <= 2.0f) v.power = x; }
+        return v;
+    }();
+    return t;
+}
+
+void MapStick(uint8_t rawX, uint8_t rawY, int8_t& outX, int8_t& outY, const StickTune* tune = nullptr) {
+    const float dead = tune ? tune->dead : kDeadZone;
     const float x = static_cast<float>(rawX) - 128.0f;
     const float y = 128.0f - static_cast<float>(rawY);
     const float magnitude = std::sqrt(x * x + y * y);
-    if (magnitude <= kDeadZone) {
+    if (magnitude <= dead) {
         outX = 0;
         outY = 0;
         return;
     }
-    float scaled = (magnitude - kDeadZone) / (kFullTravel - kDeadZone);
+    float scaled = (magnitude - dead) / (kFullTravel - dead);
     if (scaled > 1.0f) scaled = 1.0f;
+    if (tune && tune->power > 1.0f) scaled = std::pow(scaled, tune->power);
     const float k = scaled * kFullScale / magnitude;
     outX = static_cast<int8_t>(std::lround(x * k));
     outY = static_cast<int8_t>(std::lround(y * k));
@@ -79,7 +100,7 @@ void MapStick(uint8_t rawX, uint8_t rawY, int8_t& outX, int8_t& outY) {
 
 } // namespace
 
-void InvalidateTapHistory() { g_lastTapStamp = 0; }
+void InvalidateTapHistory() { g_lastTapStamp = 0; TapCarryClear(); }
 
 void Map(const Raw& raw, NpPadState& status) {
     uint16_t buttons = 0;
@@ -97,7 +118,7 @@ void Map(const Raw& raw, NpPadState& status) {
     map(kLeft, PAD_BUTTON_LEFT);
     map(kRight, PAD_BUTTON_RIGHT);
     status.buttons = buttons;
-    MapStick(raw.lx, raw.ly, status.stickX, status.stickY);
+    MapStick(raw.lx, raw.ly, status.stickX, status.stickY, &StickTuneLeft());
     MapStick(raw.rx, raw.ry, status.substickX, status.substickY);
     status.triggerL = (raw.buttons & kLTrigger) ? 255 : 0;
     status.triggerR = (raw.buttons & kRTrigger) ? 255 : 0;
@@ -143,6 +164,7 @@ static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
     for (int i = 1; i < got && i < kBuffers; ++i)
         if (pads[i].timeStamp > pads[newest].timeStamp) newest = i;
     const SceCtrlData& pad = pads[newest];
+    if (&lastStamp == &g_lastTapStamp && (npl16::Wanted() || npl16::AgeLog())) npl16::GameRead(pad.timeStamp, npl16::RealUs());   // wave 11 (press16)
     if(diag)NpDiagEvent(NPD_CTRL,0,NpDiagPollId(),begin,end,pad.timeStamp,NpDiagInts(got,want),
         NpDiagInts(pad.buttons,uint32_t(pad.lx)|(uint32_t(pad.ly)<<8)|(uint32_t(pad.rx)<<16)|(uint32_t(pad.ry)<<24)));
     // every successful read advances the history, a single sample too (otherwise a later tap could be lost or replayed)
@@ -150,7 +172,8 @@ static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
     uint64_t t[kBuffers];
     const int n = got < kBuffers ? got : kBuffers;
     for (int i = 0; i < n; ++i) { b[i] = pads[i].buttons; t[i] = pads[i].timeStamp; }
-    raw.buttons = NpControls::LatchTaps(b, t, n, &lastStamp);
+    raw.buttons = NpControls::LatchTaps(b, t, n, &lastStamp, NpControls::TapGapUs());   // wave 6: MSC_TAP_GAP_MS
+    raw.newestButtons = pad.buttons;
     raw.lx = pad.lx;
     raw.ly = pad.ly;
     raw.rx = pad.rx;
@@ -158,8 +181,19 @@ static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
     return true;
 }
 
+static NpControls::TapCarry g_tapCarry;
+static bool TapCarryOn() {
+    static const bool on = [] { const char* e = getenv("MSC_TAP_CARRY"); return e && *e && atoi(e) != 0; }();
+    return on;
+}
+void TapCarryHold(bool on) { g_tapCarry.SetHold(on && TapCarryOn()); }
+void TapCarryClear() { g_tapCarry.Clear(); }
+
 bool Read(Raw& raw) {
     if (!ReadWithHistory(raw, g_lastTapStamp)) return false;
+#if defined(__vita__)
+    if (TapCarryOn()) raw.buttons = g_tapCarry.Apply(raw.buttons, raw.newestButtons);   // wave 9 MSC_TAP_CARRY: a frame without a step takes no tap from the next step
+#endif
     g_debugTapStamp = g_lastTapStamp;   // game reads drain the observer's history (old settings presses never replay as chords)
     return true;
 }
@@ -172,6 +206,16 @@ bool ReadDebug(Raw&) { return false; }
 
 } // namespace VitaInput
 
+#if defined(__vita__)
+// wave 11 (press16, np_lat16.h): the stamp of the newest controller sample, read without touching the tap history (a Peek); 0 when there is none
+extern "C" uint64_t NpVitaCtrlStampUs(void)
+{
+    SceCtrlData d;
+    std::memset(&d, 0, sizeof d);
+    return sceCtrlPeekBufferPositive(0, &d, 1) > 0 ? (uint64_t)d.timeStamp : 0u;
+}
+#endif
+
 // ---------------------------------------------------------------------------------------------
 // np_vita.h
 // ---------------------------------------------------------------------------------------------
@@ -180,6 +224,12 @@ extern "C" {
 // True while the system's ad hoc connection dialog (SceNetCheckDialog, multiplayer) is on screen: the dialog reads the pad itself,
 // so the game must not also see it (a Cross press that confirms the dialog would otherwise press A in the menu behind it).
 extern "C" bool np_vita_radio_dialog_active(void) __attribute__((weak));
+
+extern "C" void NpVitaPadHoldTaps(int on) { VitaInput::TapCarryHold(on != 0); }   // wave 9 (MSC_TAP_CARRY): FixedUpdateTask, before the end-of-frame read of a frame without a step
+extern "C" void NpVitaPadClearTaps(void) { VitaInput::TapCarryClear(); }
+
+static uint32_t g_inputActivity = 0;   // see the end of NpVitaReadInput
+extern "C" uint32_t NpVitaInputActivity(void) { return g_inputActivity; }
 
 int NpVitaReadInput(NpVitaInput* out) {
     if (!out) return 0;
@@ -216,7 +266,17 @@ int NpVitaReadInput(NpVitaInput* out) {
         SceTouchPanelInfo panel{};
         SceTouchData data{};
         const uint64_t begin=diag?NpDiagNow():0;
-        const int panelRc=started?sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT,&panel):-1;
+        // wave 24 (feel24, X4): the panel's size does not change; asked once when it answers sensibly (as the rear panel is), not at every poll
+        static SceTouchPanelInfo frontPanel{};
+        static bool frontPanelOk = false;
+        int panelRc = -1;
+        if (started) {
+            if (frontPanelOk) { panel = frontPanel; panelRc = 0; }
+            else {
+                panelRc = sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT, &panel);
+                if (panelRc >= 0 && panel.maxDispX > panel.minDispX && panel.maxDispY > panel.minDispY) { frontPanel = panel; frontPanelOk = true; }
+            }
+        }
         const uint64_t panelEnd=diag?NpDiagNow():0;
         const bool validPanel=started&&panelRc>=0&&panel.maxDispX>panel.minDispX&&panel.maxDispY>panel.minDispY;
         // Short taps (23 Oct, Codex handoff "front touches wholly between polls can be missed"): the panel keeps a few samples. When
@@ -265,7 +325,8 @@ int NpVitaReadInput(NpVitaInput* out) {
     }
     // W5 CTL: the rear panel, for the layout's rear taps (np_controls.h RearPad). Read only when it is switched on
     // (MSC_REAR_TOUCH, default on with the MODERN layout) and a person holds the console (not in a scripted run).
-    static const bool rearEnabled = NpControls::RearEnabled(NpControls::ConfiguredLayout()) || NpControls::RearSaveEnabled();
+    // 1.3: read at every poll (a cell, np/live_settings.h): the settings screen's REAR TOUCH applies to the running game. The panel starts lazily below.
+    const bool rearEnabled = NpControls::RearEnabled(NpControls::ConfiguredLayout()) || NpControls::RearSaveEnabled();
     if (rearEnabled && NpVitaTouchAllowed()) {
         static bool rearStarted = false;
         static SceTouchPanelInfo rearPanel{};
@@ -284,7 +345,48 @@ int NpVitaReadInput(NpVitaInput* out) {
         }();
         SceTouchData data{};
         const uint64_t begin=diag?NpDiagNow():0;
-        const int rearRc=rearPanelOk?sceTouchPeek(SCE_TOUCH_PORT_BACK,&data,1):0;
+        // wave 24 (feel24, X4; MSC_REAR_LATCH=0: off): the panel's last few samples, so a finger that came and went wholly between two reads is reported once
+        // (np_controls.h PickLostContact), as the front panel's tap latch does. Only a NEW finger in a sample newer than the previous read's newest, with the
+        // newest sample empty: what the old single-sample read could not see at all.
+        static uint64_t rearLastStamp = 0;
+        static int rearPrevIds[8];
+        static int rearPrevCount = 0;
+        static unsigned long rearRecovered = 0;
+        int rearRc = 0;
+        if (rearPanelOk && NpControls::RearLatchEnabled()) {
+            constexpr int kRearBufs = 4;
+            SceTouchData bufs[kRearBufs];
+            std::memset(bufs, 0, sizeof(bufs));
+            const int got = sceTouchPeek(SCE_TOUCH_PORT_BACK, bufs, kRearBufs);
+            rearRc = got;
+            if (got > 0) {
+                const int n = got < kRearBufs ? got : kRearBufs;
+                NpControls::TouchSample ts[kRearBufs];
+                int newest = 0;
+                for (int i = 0; i < n; ++i) {
+                    ts[i].stamp = bufs[i].timeStamp;
+                    ts[i].count = bufs[i].reportNum <= 8 ? static_cast<int>(bufs[i].reportNum) : 9;
+                    for (int k = 0; k < 8; ++k) ts[i].ids[k] = (k < ts[i].count) ? static_cast<int>(bufs[i].report[k].id) : -1;
+                    if (bufs[i].timeStamp > bufs[newest].timeStamp) newest = i;
+                }
+                data = bufs[newest];
+                const int pick = NpControls::PickLostContact(ts, n, rearLastStamp, rearPrevIds, rearPrevCount, NpControls::TapGapUs());
+                if (pick >= 0) {
+                    data = bufs[pick];
+                    if (++rearRecovered == 1 || rearRecovered % 50 == 0)
+                        std::fprintf(stderr, "[touch] rear: %lu short touches recovered (a finger that came and went between two reads)\n", rearRecovered);
+                }
+                rearLastStamp = bufs[newest].timeStamp;
+                rearRc = 1;
+                rearPrevCount = data.reportNum <= 8 ? static_cast<int>(data.reportNum) : 0;
+                for (int k = 0; k < rearPrevCount; ++k) rearPrevIds[k] = static_cast<int>(data.report[k].id);
+            } else {
+                rearLastStamp = 0;
+                rearPrevCount = 0;
+            }
+        } else {
+            rearRc = rearPanelOk ? sceTouchPeek(SCE_TOUCH_PORT_BACK, &data, 1) : 0;
+        }
         const uint64_t end=diag?NpDiagNow():0;
         if(diag)NpDiagEvent(NPD_POLL,1,NpDiagPollId(),begin,begin,end,data.timeStamp,NpDiagInts(rearRc,data.reportNum));
         if (rearPanelOk && rearRc > 0 && data.reportNum <= 8) {
@@ -298,6 +400,10 @@ int NpVitaReadInput(NpVitaInput* out) {
         }
     }
 #endif
+    // r16 (fable-da21 F3): the keep-awake idle limit (np_keep_awake.h) watches this counter: it moves on a poll with a button, a stick well off
+    // centre or a finger on the panel (about ten instructions; a pad at rest costs nothing more).
+    if (out->buttons || out->touchCount > 0 || out->lx < 88 || out->lx > 168 || out->ly < 88 || out->ly > 168 || out->rx < 88 || out->rx > 168 || out->ry < 88 || out->ry > 168)
+        ++g_inputActivity;
     return 1;
 }
 

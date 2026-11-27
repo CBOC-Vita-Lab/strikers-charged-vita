@@ -3,6 +3,7 @@
 #include "Game/GL/GLInventory.h"
 #include "NL/gl/glMemory.h"
 #include "NL/gl/glTexture.h"
+#include "NL/gl/glTextureManager.h"
 #include "NL/glx/glxTexture.h"
 #include "np/framepace.h"
 
@@ -60,6 +61,7 @@ void glReleaseTextureAnim(GLTextureAnim* anim)
 
     manager->mTextures[textureHandle] = 0;
     anim->m_textureIndex = 0xFFFF;
+    glTextureLookupChanged();
 }
 
 GLAnimTex& GLTextureAnim::GetTexture(int index)

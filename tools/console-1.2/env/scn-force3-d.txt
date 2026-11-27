@@ -1,0 +1,15 @@
+# console-1.2 run scn-force3-d: Held moments with every governor level in force from the cut (MSC_HELD_GOV_FORCE=3), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group s30, route worstgpu, version payload 1.3, role ab
+# scenes30: the ceiling of levels 1-3 (crowd floor 3, shadows every 3rd, glow every 3rd) in every held picture, no climb. Against scn-gov0-d: GPU p95 per held class is what the three levels buy (host ESTIMATE -3 to -6 ms; passes a picture 24.6 -> 16.4 walk-out, 17.6 -> 11.8 celebration, 16.2 -> 10.8 replay). Not a default.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500
+MSC_HELD_GOV_FORCE=3

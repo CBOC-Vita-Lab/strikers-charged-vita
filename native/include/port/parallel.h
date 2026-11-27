@@ -32,7 +32,10 @@ typedef int (*PortParallelFn)(void* ctx, size_t begin, size_t end, uint32_t lane
 unsigned PortParallelWorkers(void);
 unsigned PortParallelLanes(void);
 int PortParallelFor(size_t count, size_t grain, PortParallelFn fn, void* ctx);
+// (wave 9) the run-time switch of one job site: 0 RenderSnapshot Grab/Blend (MSC_SNAP_PAR), 1 crowd sprite views (MSC_CROWD_POS_PAR); 0 = serial
+int PortParallelSite(int site);
 #else
+static inline int PortParallelSite(int site) { (void)site; return 0; }
 static inline unsigned PortParallelWorkers(void) { return 0; }
 static inline unsigned PortParallelLanes(void) { return 1; }
 static inline int PortParallelFor(size_t count, size_t grain, PortParallelFn fn, void* ctx)

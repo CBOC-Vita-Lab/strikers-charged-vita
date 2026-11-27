@@ -1,8 +1,8 @@
 #!/bin/bash
 # NPP job B (one heavy slot): block profiles of the heaviest scenes of job A's run (same variant, same nav script, virtual time = same frames).
 #   tools/heavy.sh -t 700 tools/perf/job_b.sh      env: V=tuned NSCENES=4 WLEN=60 TMO=420
-cd /home/claude/msc/npw/NPP2 || exit 1
-B=/home/claude/msc/build/np/NPP2
+cd /work/msc/npw/NPP2 || exit 1
+B=/work/msc/build/np/NPP2
 V=${V:-tuned}
 J=$B/runs/$V-nav/report.json
 [ -f $J ] || { echo "no $J (run job A first)"; exit 1; }
@@ -22,7 +22,7 @@ PY
 echo "windows: $SEL"
 [ -n "$SEL" ] || { echo "no scene heavy enough"; exit 0; }
 last=$(echo "$SEL" | tr '+-' '  ' | awk '{print $NF}')
-WINDOWS=$SEL TMO=${TMO:-420} tools/perf/run.sh $V prof $((last + 5)) profile MSC_INPUT_SCRIPT=${NAV:-/home/claude/msc/tools/scripts/nav_kickoff.txt} MSC_VIRTUAL_TIME=1
+WINDOWS=$SEL TMO=${TMO:-420} tools/perf/run.sh $V prof $((last + 5)) profile MSC_INPUT_SCRIPT=${NAV:-/work/msc/tools/scripts/nav_kickoff.txt} MSC_VIRTUAL_TIME=1
 D=$B/runs/$V-prof
 i=0
 for w in $(echo "$SEL" | tr '+' ' '); do

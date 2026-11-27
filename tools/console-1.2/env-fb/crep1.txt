@@ -1,0 +1,14 @@
+# console-1.2 run crep1: r15 defaults: goals, celebrations, replays with the goalie close-up (texture census, skipped-draw counters)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r15, route crep, version payload 1.3, role ab
+# The owner's 'light textures on goals' symptom: [texcensus] lines (light10) and the warm10 'draws left out for a program not ready' counters in the goalie close-up replay, plus the replay by eye. Same route as cur-rep1.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was crep.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HITCH_LINES=1500

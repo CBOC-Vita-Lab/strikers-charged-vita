@@ -15,11 +15,15 @@
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/io/stat.h>
+#include <bits/gthr.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <exception>
+#include <typeinfo>
+#include <cxxabi.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -33,7 +37,7 @@ extern "C" {
 // separate blocks), thread bookkeeping. The game's own allocations are NOT here: they go to the
 // Wii-style arenas (NpAllocArena).
 #ifndef NP_VITA_HEAP_MIB
-#define NP_VITA_HEAP_MIB 64u
+#define NP_VITA_HEAP_MIB 96u   // 1.3: was 64: 16 MiB for the larger vertex arenas (vgx_arena.h) and room against fragmentation. Console logs show 75+ MiB of system memory free in play at 64
 #endif
 unsigned int _newlib_heap_size_user = NP_VITA_HEAP_MIB * 1024u * 1024u;
 
@@ -158,6 +162,23 @@ extern "C" int __wrap_pte_osSemaphoreCancellablePend(SceUID semaphore, unsigned 
     return result == static_cast<int>(0x80028005) ? 3 : 2;   // SCE_KERNEL_ERROR_WAIT_TIMEOUT
 }
 
+// 1c. (1.2) The reason of an abort survives a quiet build. abort() and a failed assert() (newlib's __assert_func) say who called them in the
+//    player's basic log (np/fatal.h, ux0:data/mscharged/log.txt) and then do what they did before. std::terminate (an exception nobody
+//    caught: a failed std::thread, bad_alloc) names the exception first (InstallFatalHooks below).
+extern "C" void NpFatalNote(const char* kind, const void* caller, const char* detail) __attribute__((weak));   // compat/np_fatal.cpp (the smoke package has none)
+void __real_abort(void) __attribute__((noreturn));
+void __wrap_abort(void) {
+    if (NpFatalNote) NpFatalNote("abort", __builtin_return_address(0), nullptr);
+    __real_abort();
+}
+void __real___assert_func(const char*, int, const char*, const char*) __attribute__((noreturn));
+void __wrap___assert_func(const char* file, int line, const char* func, const char* expr) {
+    char text[300];
+    std::snprintf(text, sizeof(text), "%s:%d %s: %s", file ? file : "?", line, func ? func : "?", expr ? expr : "?");
+    if (NpFatalNote) NpFatalNote("assert", __builtin_return_address(0), text);
+    __real___assert_func(file, line, func, expr);
+}
+
 // 2. remove() does not remove directories. POSIX: remove(path) is unlink for a
 //    file and rmdir for a directory. VitaSDK's newlib only calls sceIoRemove,
 //    which fails on a directory, so std::filesystem::remove(directory) fails,
@@ -206,5 +227,75 @@ extern "C" void* NpAllocArena(size_t bytes, size_t alignment, const char* name) 
     if (VitaMem::RegisterArena) VitaMem::RegisterArena(name, base, request);
     return base;
 }
+
+// nxboot25 R2-9 (renderer vgx_cmd.h NoInitAlloc, MSC_VGX_VTX_BLOCK=1, default off): the frame buffers' vertex arenas (2 x 16 MiB) as memory blocks of their own, outside the 96 MiB C heap.
+// NpHostBlockNew returns a 4 KiB aligned USER_RW block (null when the system refuses: the caller takes the heap); NpHostBlockFree frees it and says true, or says false for a pointer that is not one
+// of these blocks (a heap pointer). A USER_RW block is a CACHED address at 0x88400000 and above on this system (the MEM1/MEM2 arenas, 6122.log:58-60), so wrcopy's DMA rule (both addresses below 0x81000000)
+// is NOT met by it: only the C heap's pressure changes, not the copy path.
+namespace {
+struct VtxBlock { SceUID uid; void* base; };
+VtxBlock g_vtxBlock[8];
+volatile int g_vtxBlockLock = 0;
+void VtxBlockLock() { while (__sync_lock_test_and_set(&g_vtxBlockLock, 1)) sceKernelDelayThread(50); }
+void VtxBlockUnlock() { __sync_lock_release(&g_vtxBlockLock); }
+}
+extern "C" void* NpHostBlockNew(size_t bytes) {
+    const size_t request = (bytes + 4095u) & ~static_cast<size_t>(4095u);
+    const SceUID uid = sceKernelAllocMemBlock("vgx_vtx", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, static_cast<SceSize>(request), nullptr);
+    if (uid < 0) {
+        std::fprintf(stderr, "[mem] vertex arena block of %u KiB refused (0x%08X): the C heap is used\n", static_cast<unsigned>(request / 1024u), static_cast<unsigned>(uid));
+        return nullptr;
+    }
+    void* base = nullptr;
+    if (sceKernelGetMemBlockBase(uid, &base) < 0 || !base) { sceKernelFreeMemBlock(uid); return nullptr; }
+    bool kept = false;
+    VtxBlockLock();
+    for (VtxBlock& b : g_vtxBlock) if (!b.base) { b.uid = uid; b.base = base; kept = true; break; }
+    VtxBlockUnlock();
+    if (!kept) { sceKernelFreeMemBlock(uid); return nullptr; }
+    std::fprintf(stderr, "[mem] vertex arena block: %u KiB at %p, outside the C heap (MSC_VGX_VTX_BLOCK=1); wrcopy DMA needs addresses below 0x81000000: %s\n", static_cast<unsigned>(request / 1024u), base,
+                 reinterpret_cast<uintptr_t>(base) < 0x81000000u ? "this one qualifies" : "this one does not");
+    return base;
+}
+extern "C" int NpHostBlockFree(void* p) {
+    SceUID uid = -1;
+    VtxBlockLock();
+    for (VtxBlock& b : g_vtxBlock) if (b.base && b.base == p) { uid = b.uid; b.base = nullptr; b.uid = 0; break; }
+    VtxBlockUnlock();
+    if (uid < 0) return 0;
+    sceKernelFreeMemBlock(uid);
+    return 1;
+}
+
+// ---- fatal hooks and the threading runtime (1.2) -----------------------------------------------------------------------------------
+namespace {
+[[noreturn]] void OnTerminate() {
+    char text[260] = "no exception is active";
+    if (const std::type_info* type = abi::__cxa_current_exception_type()) {
+        const char* name = type->name();
+        try {
+            throw;
+        } catch (const std::exception& e) {
+            std::snprintf(text, sizeof(text), "%s: %s", name, e.what());
+        } catch (...) {
+            std::snprintf(text, sizeof(text), "%s", name);
+        }
+    }
+    if (NpFatalNote) NpFatalNote("std::terminate", __builtin_return_address(0), text);
+    std::abort();
+}
+} // namespace
+
+namespace VitaPlatform {
+// Called once, early in main(). libstdc++ locks std::mutex, starts std::thread and guards function-local statics only while
+// __gthread_active_p() says the program is multithreaded; on this target that is "the weak reference to pthread_cancel resolved"
+// (VitaSDK's pthread-embedded; the GameCube Strikers port found the same: a link that does not pull pthread_cancel runs every std::mutex
+// as a no-op). Makefile.vpk forces the symbol with -Wl,-u,pthread_cancel; this says so in the basic log if it ever goes wrong.
+void InstallFatalHooks() {
+    std::set_terminate(OnTerminate);
+    if (!__gthread_active_p())
+        VitaLog::Event("libstdc++ treats this program as single-threaded (pthread_cancel is not linked): std::mutex does not lock and std::thread throws");
+}
+} // namespace VitaPlatform
 
 #endif // __vita__

@@ -1,71 +1,67 @@
 # Mario Strikers Charged for PS Vita
 
-**Mario Strikers Charged, running natively on your PS Vita.** No emulator, no
-streaming, no compromises on the parts that matter: the hard-hitting
-five-a-side football, the electric stadiums, the Mega Strikes and the
-trash-talking captains, all in your hands.
+**Full-speed, native Mario Strikers Charged in your hands — now running smoothly at up to 60 fps with crisp dynamic resolution (up to native `960×544`), native `960×544` HUD & menus, and online and local multiplayer.**
 
-This isn't the Wii game squeezed through an emulator. The game's own code has
-been rebuilt for the Vita's processor, with a renderer written from scratch for
-the Vita's graphics chip. Controls, touch, sound, saves and settings are all
-built for the handheld.
+This isn't emulation and it isn't streaming. The full Wii game has been rebuilt natively for the PlayStation Vita's processor and graphics chip, with Vita controls, touch support, crash-safe saves, in-game settings, and automatic artwork straight from your own disc.
 
 ![Gameplay on a PS Vita](store/screenshots/gameplay-vita.png)
 
-**[Download the latest version](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest)** ·
-[Install guide](MANUAL-INSTALL.md) · [Controls](CONTROLS.md) · [What's new](CHANGELOG.md)
+**[Download Version 2.0](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest)** ·
+[Easy Install](EASY-INSTALL.md) · [Manual Install](MANUAL-INSTALL.md) · [Controls](CONTROLS.md) · [Live Leaderboard](https://strikers.psvita.dev/leaderboard) · [Full Release Notes](CHANGELOG.md)
 
-You'll need your own copy of the game. No game data is included.
+> Bring your own Wii USA (Rev 1) disc copy of *Mario Strikers Charged*. No Nintendo game data or artwork is bundled in this repository or VPK.
 
-## New In Version 1.1
+---
 
-This is the big performance update, and the game feels like a different port
-for it.
+## Highlights — What's New In Version 2.0
 
-- **Up to 60 fps.** The game now runs at 60 frames per second whenever the
-  Vita can keep up, and holds a smooth 30 when the action gets heavy. You
-  don't have to do anything: it's automatic.
-- **Snappier controls.** The delay between pressing a button and seeing it on
-  screen is down by a third, to about a tenth of a second in normal play.
-- **Mega Strikes look great and play smoothly.** The glowing haze is drawn at
-  a lower resolution and blended over a full-resolution scene, so the players,
-  ball and stadium stay sharp while the scene runs at a steady 30 fps.
-  The previous version dropped to about 15 fps here.
-- **Mega Saves feel responsive again.** Stick and touch input reach the game
-  sooner, so blocking a Mega Strike is about reflexes, not guessing.
-- **Sharper picture everywhere.** A light sharpening filter is on by default,
-  it smooths jagged character outlines, and when the Vita has room to spare
-  the game draws above native resolution for cleaner edges.
-- **Optional HD characters.** Turn your own game files into sharper faces,
-  kits and a sharper ball for Mega Strikes, celebrations and menus, with no
-  cost to frame rate. [How](tools/hdtex/README.md).
-- **Resolution that adapts.** When the graphics chip is stretched, the game
-  softens effects first and the scene only slightly, so the frame rate holds
-  without the picture falling apart. Changes happen at camera cuts, so you
-  won't feel them mid-play.
-- **Tap anywhere to start** on the title screen.
-- **All seven camera zoom levels** on the Options slider, and the CPU plays
-  just as smart when you zoom in close.
-- **More reliable touch and buttons.** Quick taps are no longer missed, and
-  button presses are never lost or repeated.
+Version 2.0 is the biggest leap since launch — transforming how the game looks, feels, and plays on PS Vita (and rolling in every improvement from the withdrawn 1.2 preview).
 
-Want the fine print? See the [full list of changes](CHANGELOG.md).
+### Smooth 60 FPS & Crisp Dynamic Resolution
+- **Smooth 60 fps right out of the box.** **SMOOTH 60** is now the default: matches run cleanly at **60 frames per second** with dynamic 3D resolution that scales up to full native **`960×544`** whenever GPU headroom allows, while keeping the **2D HUD, menus, Title screen, and Mega Saves locked at full native `960×544`**.
+- **Seamless automatic pacing & locked 30 option.** When the stadium gets truly wild, the game steps down gracefully (`60 → 45 → 30`) instead of stuttering — and climbs right back to 60 fps the moment the action clears. Prefer max sharpness everywhere? Switch to **30 LOCKED** anytime in **VITA SETTINGS** for locked 30 fps at **full native `960×544` with `2× MSAA`**.
+- **Built for speed.** Deep engine, graphics, and compiler optimizations squeeze maximum performance from the Vita while automatically setting optimal clocks during play.
+
+### First-Ever Online & Local Multiplayer on PS Vita *(Beta)*
+- **Play friends anywhere with a room code.** Host a private match in seconds and share a short invite code, or jump straight into public matchmaking with **PLAY WITH ANYONE** (unranked) and **RANKED MATCH** (with season and daily leaderboards — view the live web leaderboard anytime at **[strikers.psvita.dev/leaderboard](https://strikers.psvita.dev/leaderboard)**).
+- **Face-to-face local play.** Challenge another Vita next to you with **Same Wi-Fi** or **Nearby** local multiplayer.
+- **Built for real-world play.** Clear connection status, live partner wait feedback, instant disconnect handling, and built-in **REPORT A PROBLEM** and **ONLINE ACCOUNT** tools right in the Multiplayer menu. *(Multiplayer is marked **Beta** while two-Vita testing continues — update both Vitas to 2.0 to connect.)*
+
+### Stutter-Free Play From Your Very First Kickoff
+- **Complete full-game shader pack included.** Over **4,200 graphics shaders** prebuilt on a real PS Vita across all 17 stadiums, 12 captains, 11 power-ups, menus, replays, Mega Strikes, and Mega Saves — virtually eliminating first-time shader freezes mid-match while keeping boot warm-up fast (~1.2 seconds).
+- **Razor-sharp Mega Strikes & Mega Saves.** Mega Strikes hold steady without mid-scene blur or resolution bounces, and Mega Save gloves, balls, and the Title screen stay crisp at full native resolution.
+- **Big stadium upgrades.** **Pipeline Central** and **The Dump** got dedicated graphics and performance passes — fixing rain/shadow flicker, kickoff hitches, and heavy reflective floors so every stadium plays great.
+
+### Polished, One-App Handheld Experience
+- **One VPK, redesigned in-game VITA SETTINGS.** Pause any match and choose **VITA SETTINGS**, or open **OPTIONS > VITA SETTINGS** on the main menu — five clean pages with clear descriptions, one-tap reset, and no separate Settings app or extra LiveArea tile. *(Hold **L + R** on launch for **Safe Start** if needed.)*
+- **Automatic artwork from your own disc.** On first launch, the game automatically creates its own *Mario Strikers Charged* loading screen, LiveArea background, START gate, launch splash, and circular Home bubble right on your Vita from your disc files — with zero game artwork bundled in the download and without overwriting custom icons. *(LiveArea and loading screen update right away; on manual VPK installs, reboot your Vita once to refresh the Home bubble — or use CBOC Vita Installer to brand it before install.)*
+- **English, Español & Français.** Pick your language in **VITA SETTINGS** and both the game's North American text and every Vita menu, guide, loading screen, and online screen switch automatically.
+- **Rock-solid saves, audio & stability.** Crash-safe atomic saves with automatic backup, cleaner audio recovery after sleep/resume, software fallback if a video stalls, and dozens of crash and progression fixes (Unlock All now defaults to OFF, and every locked stadium unlocks cleanly).
+
+See the [full Version 2.0 changelog](CHANGELOG.md) for the complete breakdown, including everything from 1.1.
 
 ## What To Expect
 
 | | |
 |---|---|
-| **Matches** | A smooth 30 fps in open play, up to 60 when the scene is light |
-| **Mega Strikes and Mega Saves** | Steady 30 fps at full resolution |
-| **Goal replays and celebrations** | Around 20-25 fps for now |
-| **Menus** | Mostly 30 fps; the main menu and the team and stadium screens run in the low 20s |
-| **Controls** | About a tenth of a second from button to screen in normal play |
-| **Picture** | Native Vita resolution or higher, lightly sharpened |
-| **Saves** | Your saves and settings carry over between updates |
+| **Matches** | Smooth **60 fps** with crisp dynamic resolution (up to native **960×544** when headroom allows, native **960×544** HUD; **30 LOCKED** runs full native **960×544 + 2× MSAA**) |
+| **Multiplayer *(Beta)*** | First-ever **Online** (Friend Room Codes, Quick Play, Ranked [Leaderboard](https://strikers.psvita.dev/leaderboard)) and **Local** (Same Wi-Fi & Nearby) play on PS Vita |
+| **Mega Strikes & Mega Saves** | Smooth, steady Mega Strikes with zero mid-scene resolution jumps; Mega Save gloves and balls sharp at full **960×544** |
+| **Loading & Stutters** | 4,281 prebuilt Vita shaders included (~1.2 s warm-up), virtually eliminating mid-match shader compile freezes |
+| **Controls** | Snappy Modern & Classic layouts, tuned Mega Save aiming, plus optional touch and rear-touch support |
+| **Artwork & Languages** | Auto-generated loading screen, LiveArea & Home bubble from your own disc; full English, Spanish, and French UI |
+| **Saves & Updates** | Crash-safe atomic saves with backup; updates cleanly right over 1.0/1.1 without touching your saves or game files |
 
-Prefer a locked 30? Open **Settings** from the LiveArea and set **Frame Rate**
-to **30 FPS**. A few things are still being worked on: see
-[Known Issues](KNOWN-ISSUES.md).
+Prefer a locked 30 fps? Pause a match and pick **VITA SETTINGS** (or **OPTIONS > VITA SETTINGS** in the main menu) and set **Frame Rate** to **30 LOCKED**; the default is **SMOOTH 60**. A few minor items are still being worked on — see [Known Issues](KNOWN-ISSUES.md).
+
+## Recommended Plug-ins For Best 60 FPS Performance *(Optional)*
+
+The game runs great on a stock homebrew Vita with no extra plug-ins — it already requests the Vita's highest built-in clocks automatically (`444 MHz` CPU / `222 MHz` GPU & bus). However, for the **smoothest 60 fps experience** (especially in heavy stadiums like The Dump and Pipeline Central), we strongly recommend two popular open-source Vita plug-ins:
+
+- **Overclocking — [PSVshell](https://github.com/Electry/PSVshell) / [PSVshellPlus](https://github.com/GrapheneCt/PSVshellPlus) (`500 MHz` CPU):** Unlocks the PS Vita's full **500 MHz CPU** (alongside **222 MHz GPU**, **222 MHz BUS**, and **166 MHz XBAR**). Version 2.0 automatically detects your overclock profile and leaves it untouched.
+- **4th CPU Core — [CapUnlocker](https://github.com/GrapheneCt/CapUnlocker):** Unlocks the Vita's 4th system CPU core for games. Version 2.0 **detects and uses it automatically** (no config edits needed!) to offload audio and background tasks for extra 60 fps headroom, and safely falls back to 3 cores if the plug-in isn't installed.
+
+*Plug-ins are completely optional and never bundled in the VPK. See [Optional Plug-ins](docs/PLUGINS.md) for install notes and safety tips.*
 
 ## Install
 
@@ -112,9 +108,11 @@ The default **Modern** layout:
 Prefer the original feel? Switch to **Classic** in Settings. Mega Saves work
 with touch or either stick.
 
-Press **PS** during play and tap **Settings** in the LiveArea to change
+Pause a match and pick **VITA SETTINGS** (it takes the place of the Wii controller
+map; not in an online or LAN match), or open **OPTIONS** in the main menu and pick **VITA SETTINGS** in the bottom corner, to change
 controls, picture and performance options, then jump straight back into your
-match. Camera zoom is in the game's own Options > Visual.
+match. **Language** (English, Spanish or French) is on the first page. Camera
+zoom is in the game's own Options > Visual.
 [All controls](CONTROLS.md).
 
 ## Download Contents
@@ -137,6 +135,27 @@ The full source is here and builds with VitaSDK.
 
 `native/` holds the game code and Vita platform layer, `renderer/` the
 graphics translation layer, and `dependencies/vitaGL/` our patched vitaGL.
+
+## What A Problem Report Contains
+
+VITA SETTINGS > ONLINE ACCOUNT > SEND A REPORT (or REPORT A PROBLEM in the Multiplayer menu, or the offer after a game that went wrong) sends one report to the online service, only
+when you press SEND on the screen that lists it. It holds:
+
+- your online name (the one on the rankings);
+- the last lines of the game's multiplayer log (about 8 KiB), your last connection check, and the multiplayer events of this run;
+- anonymous numbers from your last online game: how long it lasted, the input delay, reconnects, packet loss, whether it ended with an error;
+- what kind of game it was (online, Same Wi-Fi or Nearby; ranked, quick or a friend's room), how far it got (sign-in, queue, match found, connecting, the match, the result
+  upload), the errors on the way, counts of the online requests and connections, whether the two Vitas got out of step (and at which step), the longest wait for the other
+  player, and whether the other Vita had the same game version;
+- the game version and build.
+
+Without an online account on the Vita (Nearby or Same Wi-Fi only) a report cannot be sent; it is saved as `ux0:data/mscharged/mp-report.txt` instead, so you can attach it to a
+message.
+
+IP addresses, MAC addresses, account ids, tokens, invite codes and your friend list are never in it: the game removes anything that looks like one before sending, and the
+service removes it again when it arrives. A report is at most 48 KB, you can send 3 a day, and the service deletes it after 30 days. VITA SETTINGS > ONLINE ACCOUNT > DELETE MY ONLINE
+ACCOUNT removes your name, friends, invitations and reports from the service at once. Online games also leave the same anonymous numbers (no name, no address) at the end of a
+session so the owner can see how often games end badly; nothing else about you is kept with them. Single player and LAN play send nothing.
 
 ## Credits
 

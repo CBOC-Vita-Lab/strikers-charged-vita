@@ -1,4 +1,7 @@
 #ifdef NP_NATIVE
+#ifdef NP_NATIVE
+#include "np/bg30.h"
+#endif
 #include "np/framesend.h"
 #endif
 #include "Game/Task/GameTaskState.h"
@@ -32,6 +35,8 @@
 #include "NL/nlString.h"
 #include "NL/nlTask.h"
 #include "Game/Render/HighRange.h"
+#include "np/scenecut.h"
+#include "np/floorbake.h"
 #include "Game/Render/PlanarShadowDrawable.h"
 #include "Game/GameObjectLighting.h"
 #include "Game/AI/Powerups.h"
@@ -348,9 +353,14 @@ bool FinishLoadStadiumResources()
     {
         if (gStadiumTemporaryData != 0)
         {
-            glDiscardFrame(1);
+            glDiscardFrameWhy(1, "stadium data");
             pBasicStadiumInstance->LoadData(gStadiumTemporaryData, gStadiumTemporaryDataSize,
                 gStadiumResourceData, gStadiumResourceDataSize, true);
+#ifdef NP_NATIVE
+            NpStadiumCensusReport(gSkipGameplayModels ? -1 : GameInfoManager::Instance()->GetStadium(), pBasicStadiumInstance);   // (the front-end world loads before any mode is set: mCurrentMode is -1)
+            NpStadiumHeavySet(gSkipGameplayModels ? -1 : GameInfoManager::Instance()->GetStadium());   // (MSC_STADIUM_HEAVY; the front end's world is no stadium)
+            if (!gSkipGameplayModels) NpFloorBakeReport(GameInfoManager::Instance()->GetStadium());   // (same reason: no GetStadium() while no game mode is set; a real Vita faults on that read)
+#endif
             nlFree(gStadiumTemporaryData);
             gStadiumWorldLoaded = true;
         }
@@ -518,8 +528,15 @@ void FinishLoadTournamentTrophy()
     glEndResource();
 }
 
+extern "C" void VgxStadiumChanged(void) __attribute__((weak)); // renderer (vgx_dlcache.cpp): frees what the old stadium's lists left in the geometry cache
+
+extern "C" int NpHeapGuardCheck(const char* when);   // NL/nlMemory.cpp (MSC_HEAP_GUARD=1: the port's long-lived storage, np/host_alloc.h)
+
 void DestroyStadium()
 {
+    if (VgxStadiumChanged) VgxStadiumChanged();
+    NpHeapGuardCheck("stadium destroy");
+    NpStadiumHeavySet(-1);
     if (pBasicStadiumInstance != 0)
     {
         delete pBasicStadiumInstance;
@@ -555,13 +572,35 @@ void UpdateStadium(float fDeltaT)
     }
 
     unsigned int state = nlTaskManager::m_pInstance->mCurrentState;
+#ifdef NP_NATIVE
+    // 1.3 MSC_BG30: the stadium is background; a light picture does not show it (the kept one is re-projected), so its animation waits and the next full
+    // picture advances it by both pictures' time (same total time; the decorative NPCs and the hazards below still update every picture)
+    static float sBg30Owed = 0.0f;
+    static const int sBg30Skip = [] { const char* e = getenv("MSC_BG30_STADIUMSKIP"); return e && *e == '1' ? 1 : 0; }();   // (test: 1 skips it; the host pictures showed the stadium's animation off in the next full picture when skipped)
+    // wave 10 (MSC_BG30_BALANCE bit 2): the other way round: a full picture waits when a light one has updated the stadium for the pair, and the light picture's update takes both pictures' time
+    const int stadSlot = state == TASK_GAMEPLAY ? NpBg30StadiumSlot() : 0;
+    if ((sBg30Skip && state == TASK_GAMEPLAY && NpBg30Light()) || stadSlot == NPBG30_SLOT_SKIP)
+    {
+        sBg30Owed += fDeltaT;
+        NpBg30NoteStadiumSkip();
+        if (gNPCManager != 0)
+        {
+            gNPCManager->UpdateNPCs(fDeltaT);
+        }
+        return;
+    }
+    const float stadiumDt = fDeltaT + sBg30Owed;
+    sBg30Owed = 0.0f;
+#else
+    const float stadiumDt = fDeltaT;
+#endif
     if (state != 8 && state != 0x20000 && state != 0x10)
     {
-        pBasicStadiumInstance->Update(fDeltaT, bUpdateNPCs, true);
+        pBasicStadiumInstance->Update(stadiumDt, bUpdateNPCs, true);
     }
     else
     {
-        fn_802785FC(pBasicStadiumInstance, fDeltaT);
+        fn_802785FC(pBasicStadiumInstance, stadiumDt);
     }
 
     if (gNPCManager != 0)
@@ -573,6 +612,13 @@ void UpdateStadium(float fDeltaT)
 void UpdateHighRange()
 {
     bool bDisable = false;
+#ifdef NP_NATIVE
+    const int heldNow = g_pGame != 0 && nlTaskManager::m_pInstance != 0 && (nlTaskManager::m_pInstance->mCurrentState & (TASK_REPLAY | TASK_NIS)) != 0;
+    const int liveNow = g_pGame != 0 && nlTaskManager::m_pInstance != 0 && !heldNow && (nlTaskManager::m_pInstance->mCurrentState & TASK_GAMEPLAY) != 0;
+    const int heldSkip = HighRangeHeldSkip(heldNow);
+    const int skipGlow = heldSkip | HighRangeLiveSkip(liveNow);
+    const bool stagger = HighRangeStaggerOn(heldNow);   // (MSC_HELD_GLOW_STAGGER)   // (MSC_HELD_GLOW_HALF in a held scene, MSC_GLOW_HALF_PLAY in live play, both default as the plan says)
+#endif
 
     if (g_pGame == 0)
     {
@@ -608,7 +654,21 @@ void UpdateHighRange()
     if (bDisable)
     {
         SetHighRangeTargetsEnabled(&gHighRange, 1);
-        RenderHighRangeChain(&gHighRange);
+#ifdef NP_NATIVE
+        // MSC_HELD_GLOW_HALF: in a held scene the blur passes are redrawn only every other picture; the composite is drawn every time
+        if (stagger && heldSkip == skipGlow && HighRangeChainStagger(&gHighRange, skipGlow != 0))
+            HighRangeChainDrawn();
+        else if (skipGlow)
+            HighRangeChainOff(&gHighRange);
+        else
+        {
+            HighRangeChainDrawn();
+            HighRangeChainFull();
+#endif
+            RenderHighRangeChain(&gHighRange);
+#ifdef NP_NATIVE
+        }
+#endif
         CompositeHighRange(&gHighRange);
     }
     else

@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <cstdio>
 
 #if defined(__vita__)
 #include <psp2/kernel/processmgr.h>
@@ -29,6 +30,7 @@
 #include <pthread.h>
 #elif defined(__linux__)
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <pthread.h>
 #include <sched.h>
 #include <sys/syscall.h>
@@ -76,6 +78,9 @@ bool Enabled() {
     }
     return m == 1;
 }
+#if defined(__linux__)
+thread_local int t_main = -1;   // (block17: file scope, so that AdoptGameThread below can set it)
+#endif
 bool OnGameThread() {
 #if defined(__vita__)
     return sceKernelGetThreadId() == g_main.self;
@@ -83,7 +88,6 @@ bool OnGameThread() {
     // Cached per thread. NOT while g_main is unset: a library constructor that runs before ours (Mesa, libstdc++ ...) and reads
     // the interposed libc clock on the main thread would otherwise cache "not the game thread" for the whole run (the game's
     // clock reads then never advance the clock: alarms one tick short of their deadline hang the idle scheduler).
-    static thread_local int t_main = -1;
     if (t_main < 0) {
         if (g_main.self == 0) return false;
         t_main = (syscall(SYS_gettid) == g_main.self) ? 1 : 0;
@@ -93,8 +97,75 @@ bool OnGameThread() {
     return true;
 #endif
 }
+// MSC_CLOCK_STATS=1 (host audit tool, 1.2): counts every read of the port's clock (clock_gettime, std::chrono, gettimeofday, the SDK's
+// np_time_ns / OSGetTime ...), game thread and others apart, with the two innermost callers outside this file, and prints the table at exit
+// (module+offset: resolve with addr2line -e <exe> -f). The Vita pays one system call per such read (about 0.7 us), so the counts per frame
+// tell what the clock costs there. Nothing here runs without the variable.
+#if defined(__linux__)
+struct ClockStats {
+    static constexpr unsigned kSlots = 8192;
+    struct Slot { uintptr_t a, b; uint32_t game, other; };
+    Slot slots[kSlots];
+    std::atomic_flag lock = ATOMIC_FLAG_INIT;
+    uint64_t gameReads = 0, otherReads = 0, dropped = 0;
+    bool registered = false;
+};
+ClockStats& Stats() { static ClockStats* s = new ClockStats; return *s; }
+bool StatsOn() {
+    static const bool on = [] { const char* e = std::getenv("MSC_CLOCK_STATS"); return e && *e && *e != '0'; }();
+    return on;
+}
+void DumpStats() {
+    ClockStats& s = Stats();
+    std::fprintf(stderr, "[clockstats] clock reads: game thread %llu, other threads %llu, table overflow %llu\n", (unsigned long long)s.gameReads,
+                 (unsigned long long)s.otherReads, (unsigned long long)s.dropped);
+    for (int pass = 0; pass < 40; ++pass) {
+        unsigned best = ClockStats::kSlots;
+        uint64_t bestN = 0;
+        for (unsigned i = 0; i < ClockStats::kSlots; ++i) {
+            const uint64_t n = static_cast<uint64_t>(s.slots[i].game) + s.slots[i].other;
+            if (n > bestN) { bestN = n; best = i; }
+        }
+        if (best == ClockStats::kSlots) break;
+        const ClockStats::Slot sl = s.slots[best];
+        Dl_info ia{}, ib{};
+        dladdr(reinterpret_cast<void*>(sl.a), &ia);
+        dladdr(reinterpret_cast<void*>(sl.b), &ib);
+        std::fprintf(stderr, "[clockstats] game %u other %u  caller %s+0x%lx  <- %s+0x%lx\n", sl.game, sl.other, ia.dli_fname ? ia.dli_fname : "?",
+                     static_cast<unsigned long>(sl.a - reinterpret_cast<uintptr_t>(ia.dli_fbase)), ib.dli_fname ? ib.dli_fname : "?",
+                     static_cast<unsigned long>(sl.b - reinterpret_cast<uintptr_t>(ib.dli_fbase)));
+        s.slots[best].game = s.slots[best].other = 0;
+    }
+}
+void NoteRead(bool game) {
+    ClockStats& s = Stats();
+    void* frames[8];
+    const int n = backtrace(frames, 8);
+    // frames: 0 NoteRead, 1 Read, 2 the interposer / NpMonotonicNs, 3.. its callers. Take the first two past the clock layers.
+    uintptr_t a = n > 3 ? reinterpret_cast<uintptr_t>(frames[3]) : 0, b = n > 4 ? reinterpret_cast<uintptr_t>(frames[4]) : 0;
+    while (s.lock.test_and_set(std::memory_order_acquire)) {}
+    if (!s.registered) { s.registered = true; std::atexit(DumpStats); }
+    (game ? s.gameReads : s.otherReads)++;
+    unsigned h = static_cast<unsigned>((a * 2654435761u) ^ (b * 40503u)) % ClockStats::kSlots;
+    for (unsigned probe = 0; probe < 64; ++probe, h = (h + 1) % ClockStats::kSlots) {
+        ClockStats::Slot& sl = s.slots[h];
+        if ((sl.game | sl.other) == 0 || (sl.a == a && sl.b == b)) {
+            sl.a = a; sl.b = b;
+            (game ? sl.game : sl.other)++;
+            s.lock.clear(std::memory_order_release);
+            return;
+        }
+    }
+    ++s.dropped;
+    s.lock.clear(std::memory_order_release);
+}
+#endif
+
 // Only the game thread moves the clock; other threads read it.
 int64_t Read() {
+#if defined(__linux__)
+    if (StatsOn()) NoteRead(OnGameThread());
+#endif
     if (OnGameThread()) {
         g_reads.fetch_add(1, std::memory_order_relaxed);
         return g_ns.fetch_add(g_tickNs, std::memory_order_relaxed);
@@ -173,6 +244,16 @@ void NpSleepNs(int64_t ns) {
 
 void NpVirtualAdvanceNs(int64_t ns) { if (npclock::Enabled()) npclock::Advance(ns); }
 int64_t NpVirtualNowNs(void) { return npclock::Enabled() ? npclock::g_ns.load(std::memory_order_relaxed) + npclock::kMonoBaseNs : 0; }
+
+// block17 (MSC_SIMT=1): np_sim runs the step while the game thread blocks; for the virtual clock it IS the game thread for that time (its clock reads tick the clock as the
+// game thread's would, so the run reads the same times as with the step inline). Linux harness only; the console has no virtual clock.
+void NpVirtualAdoptGameThread(int on) {
+#if defined(__linux__)
+    npclock::t_main = on ? 1 : 0;
+#else
+    (void)on;
+#endif
+}
 
 double NpRealSeconds(void) {
 #if defined(__vita__)

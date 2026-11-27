@@ -1,0 +1,172 @@
+# PGO: friendly match that tries for Mega Strikes: long shot charge near the net (the captain may or may not have the ball), harder CPU that charges its own.
+# Derived from tools/console-1.2/routes/replay.txt; check the run with llvm-profdata show --function=Mega.
+# --- boot screens, intro movie, title -------------------------------------------------------
+# A dismisses the wrist-strap screen and skips the intro movie (scene 22); stops at the title.
+mash 100 20 scene == 0
+log STATE title screen
+# The title accepts A once its intro animation has finished; it is then popped (scene != 0).
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+# Without a save file the game asks to create one (pop-up scene 10, default button = yes);
+# the main menu keeps its buttons dead until the save is loaded or created.
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+# The port's menu navigation puts the pointer on the first button: Domination Mode (ctx 0).
+wait onctx == 0
+log STATE main menu
+idle 60
+launch mode=friendly stadium=13 home=3 away=6 hsk=0,1,2 ask=5,6,7 human=0 time=600 skill=2
+wait ingame == 1 4000
+try wait gs == 1 4000
+log STATE kick-off
+try wait gs == 5 1200
+log STATE open play
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+try wait gs == 2 120
+if gs == 2
+log @begin rep-sequence
+try wait gs == 1 3600
+log @end rep-sequence
+endif
+try wait gs == 5 1200
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+try wait gs == 2 120
+if gs == 2
+log @begin rep-sequence
+try wait gs == 1 3600
+log @end rep-sequence
+endif
+try wait gs == 5 1200
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+try wait gs == 2 120
+if gs == 2
+log @begin rep-sequence
+try wait gs == 1 3600
+log @end rep-sequence
+endif
+try wait gs == 5 1200
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+try wait gs == 2 120
+if gs == 2
+log @begin rep-sequence
+try wait gs == 1 3600
+log @end rep-sequence
+endif
+try wait gs == 5 1200
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+if gs == 5
+vchase 240 none ball
+vchase 150 none goal
+vhold 260 circle
+vpress circle 3 0
+idle 90
+endif
+try wait gs == 2 120
+if gs == 2
+log @begin rep-sequence
+try wait gs == 1 3600
+log @end rep-sequence
+endif
+try wait gs == 5 1200
+idle 60
+log megastrike route done
+exit

@@ -2,6 +2,7 @@
 #define GAME_AI_DESIREUPDATE_H
 
 #include "Game/AI/FuzzyVariant.h"
+#include "np/ai27.h"   // MSC_AI27_VCOPY
 
 enum eDesireUpdateResult
 {
@@ -219,6 +220,35 @@ inline void IndexedFuzzyVariant::operator delete(void* entry)
 inline FuzzyVariantCollection& FuzzyVariantCollection::operator=(
     const FuzzyVariantCollection& other)
 {
+    const int ai27 = NpAi27(NPAI27_VCOPY);
+    if (ai27)
+    {
+        // MSC_AI27_VCOPY: IsSet(i) is mData[i] != 0 for 0 <= i < 19; the slot pointers are read directly, same allocations and copies in the same order.
+        NPAI27_COUNT(NPAI27_VCOPY, 0, 1);
+        const bool brk = NpAi27Break() == 2;   // proof mutant: a slot both collections hold keeps its old value (not copied)
+        for (int i = 0; i < 19; i++)
+        {
+            IndexedFuzzyVariant* src = other.mData[i];
+            if (src != 0)
+            {
+                if (mData[i] == 0)
+                {
+                    mData[i] = new (lbl_80584200.Allocate())
+                        IndexedFuzzyVariant(
+                            i, (const FuzzyVariant&)*src);
+                }
+                else if (!brk)
+                {
+                    *mData[i] = *src;
+                }
+            }
+            else if (mData[i] != 0)
+            {
+                Remove(i);
+            }
+        }
+        return *this;
+    }
     for (int i = 0; i < 19; i++)
     {
         if (other.IsSet(i))

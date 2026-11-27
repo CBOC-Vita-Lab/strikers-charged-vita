@@ -4,9 +4,9 @@
 # presented frame and a block profile of the script's "prof begin/end" window. Takes the shared
 # heavy-job lock (tools/heavy.sh: yields to the emulator workstream's priority turns). Extra
 # variables pass through (MSC_VGX_HASH=1 MSC_DUMP_DIR=<dir> for a frame hash). Output: build/host-gl-arm/runs/<tag>.log, <tag>.prof
-#   afterwards: tools/prof_split.py <tag>   (or /home/claude/msc/tools/prof_report.py)
+#   afterwards: tools/prof_split.py <tag>   (or /work/msc/tools/prof_report.py)
 set -e
-MSC=/home/claude/msc
+MSC=/work/msc
 BIN=$(realpath "${1:?arm executable}"); TAG=${2:?tag}; SCRIPT=$(realpath "${3:-$MSC/vgx/scripts/prof_open_play.txt}")
 OUT=$MSC/build/host-gl-arm/runs
 mkdir -p "$OUT"

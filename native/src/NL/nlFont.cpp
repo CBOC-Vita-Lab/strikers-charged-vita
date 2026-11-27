@@ -441,6 +441,10 @@ private:
     const GlyphInfo& m_Fallback;
 };
 
+// np (set18): the view layer the glyph packets go to (0 as the game has it). A view draws its layers in order, so the VITA SETTINGS help line (np_notice.cpp
+// RenderSettingsHelp) sets 1 for its one call and is drawn over the pause panel's frame, which shares layer 0 with everything else of the panel.
+int g_npFontLayer = 0;
+
 void nlFont::DrawString(GLView* View, const FontCharString& Text, const nlVector2& Position, const nlColour& Colour, const nlColour& EffectColour, int Length, nlFont::TextPass Passes, bool FlipY, unsigned long* pMatrix, nlColour* pOverrideColour) const
 {
     gl_ScreenInfo* pScreenInfo = glGetScreenInfo();
@@ -626,11 +630,11 @@ void nlFont::DrawString(GLView* View, const FontCharString& Text, const nlVector
         {
             if (m_bScissorBox)
             {
-                glAttachPoly2(View, 0, UsedQuads, pQuads, &Scissor, pMatrix);
+                glAttachPoly2(View, g_npFontLayer, UsedQuads, pQuads, &Scissor, pMatrix);
             }
             else
             {
-                glAttachPoly2(View, 0, UsedQuads, pQuads, pMatrix);
+                glAttachPoly2(View, g_npFontLayer, UsedQuads, pQuads, pMatrix);
             }
         }
 

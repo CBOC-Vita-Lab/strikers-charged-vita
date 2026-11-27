@@ -1,0 +1,350 @@
+diff -ru a/source/custom_shaders.c b/source/custom_shaders.c
+--- a/source/custom_shaders.c	2026-10-30 13:11:33.756379916 -0400
++++ b/source/custom_shaders.c	2026-10-30 13:12:59.306159121 -0400
+@@ -249,7 +249,7 @@
+ // "up to date" over the previous program (the draw then used the wrong blend function for as long as the key stayed) or, for a program's first draw,
+ // over nothing (sceGxmSetFragmentProgram(NULL)). Now the draw is skipped (`failed`) and the next draw tries again.
+ #define setup_frag_program_tx(failed) \
+-	if ((p->blend_info.raw != blend_info.raw) || (is_fbo_float != p->is_fbo_float)) { \
++	if ((p->blend_info.raw != blend_info.raw) || (is_fbo_float != p->is_fbo_float) || (cur_msaa != p->msaa)) { \
+ 		if (vgl_robust_scenes) { \
+ 			SceGxmFragmentProgram *rebuilt = NULL; \
+ 			if (rebuild_frag_shader(p->fshader->id, &rebuilt, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4) || !rebuilt) { \
+@@ -257,9 +257,11 @@
+ 			} \
+ 			p->fprog = rebuilt; \
+ 			p->is_fbo_float = is_fbo_float; \
++			p->msaa = cur_msaa; \
+ 			p->blend_info.raw = blend_info.raw; \
+ 		} else { \
+ 			p->is_fbo_float = is_fbo_float; \
++			p->msaa = cur_msaa; \
+ 			p->blend_info.raw = blend_info.raw; \
+ 			rebuild_frag_shader(p->fshader->id, &p->fprog, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4); \
+ 		} \
+@@ -407,6 +409,7 @@
+ 	GLuint attr_highest_idx;
+ 	GLboolean has_unaligned_attrs;
+ 	GLboolean is_fbo_float;
++	SceGxmMultisampleMode msaa; // the multisample mode fprog was patched for
+ 	uint8_t num_glsl_attr;
+ 	attr_mapping *glsl_attr_map;
+ 	void *unif_fbuffer;
+@@ -2944,6 +2947,7 @@
+ 			p->stream, p->attr_mode == VGL_ATTRIB_UNPACKED ? p->attr_num : 1, &p->vprog);
+ 		rebuild_frag_shader(p->fshader->id, &p->fprog, (SceGxmProgram *)p->vshader->prog, is_fbo_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4);
+ 		p->is_fbo_float = is_fbo_float;
++		p->msaa = cur_msaa;
+ 
+ 		// Populating current blend settings
+ 		p->blend_info.raw = blend_info.raw;
+diff -ru a/source/ffp.c b/source/ffp.c
+--- a/source/ffp.c	2026-10-30 07:13:51.000000000 -0400
++++ b/source/ffp.c	2026-10-30 13:11:36.667634425 -0400
+@@ -393,6 +393,7 @@
+ SceGxmProgram *ffp_vertex_program = NULL;
+ SceGxmVertexProgram *ffp_vertex_program_patched; // Patched vertex program for the fixed function pipeline implementation
+ SceGxmFragmentProgram *ffp_fragment_program_patched; // Patched fragment program for the fixed function pipeline implementation
++static SceGxmMultisampleMode ffp_msaa_patched = SCE_GXM_MULTISAMPLE_NONE; // the multisample mode it was patched for
+ GLboolean ffp_dirty_frag = GL_TRUE;
+ GLboolean ffp_dirty_vert = GL_TRUE;
+ uint16_t ffp_dirty_vert_attr = 0xFFFF;
+@@ -595,6 +596,8 @@
+ 
+ 	// Checking if mask changed
+ 	GLboolean ffp_dirty_frag_blend = ffp_blend_info.raw != blend_info.raw;
++	if (ffp_msaa_patched != cur_msaa)
++		ffp_dirty_frag_blend = GL_TRUE;
+ 	shader_mask mask = {.raw = 0};
+ #ifndef DISABLE_TEXTURE_COMBINER
+ #ifdef HAVE_HIGH_FFP_TEXUNITS
+@@ -1178,6 +1181,7 @@
+ 
+ 		// Updating current fixed function pipeline blend config
+ 		ffp_blend_info.raw = blend_info.raw;
++		ffp_msaa_patched = cur_msaa;
+ 	}
+ 
+ 	sceGxmSetVertexProgram(gxm_context, ffp_vertex_program_patched);
+diff -ru a/source/framebuffers.c b/source/framebuffers.c
+--- a/source/framebuffers.c	2026-10-30 13:11:33.751409427 -0400
++++ b/source/framebuffers.c	2026-10-30 13:11:36.668160392 -0400
+@@ -217,6 +217,7 @@
+ 			framebuffers[i].depthbuffer_ptr = NULL;
+ 			framebuffers[i].target = NULL;
+ 			framebuffers[i].tex = NULL;
++			framebuffers[i].msaa = msaa_mode;
+ 		}
+ 		if (j >= n)
+ 			break;
+@@ -844,11 +845,7 @@
+ 
+ 	// Set framebuffer blit shader
+ 	sceGxmSetVertexProgram(gxm_context, blit_vertex_program_patched);
+-	if (is_fbo_float) {
+-		sceGxmSetFragmentProgram(gxm_context, blit_fragment_program_float_patched);
+-	} else {
+-		sceGxmSetFragmentProgram(gxm_context, blit_fragment_program_patched);
+-	}
++	sceGxmSetFragmentProgram(gxm_context, vgl_msaa_fp(1, is_fbo_float));
+ 	
+ 	// Set fragment texture to read framebuffer bound color attachment
+ 	framebuffer *read_fb = (framebuffer *)readFramebuffer;
+@@ -967,6 +964,8 @@
+ 	framebuffer *fb = (framebuffer *)fb_id;
+ 	if (!fb || !fb->active || !fb->depthbuffer_ptr || !(fb->depthbuffer_state & DEPTHBUFFER_READY) || !fb->depthbuffer_ptr->depthData)
+ 		return 0;
++	if (FB_MSAA(fb) != SCE_GXM_MULTISAMPLE_NONE)
++		return 0; // (a multisampled depth buffer is not laid out as a linear texture)
+ 	texture_unit *tex_unit = &texture_units[server_texture_unit];
+ 	texture *tex = &texture_slots[tex_unit->tex_id[0]];
+ 	if (tex->data)
+@@ -1007,3 +1006,40 @@
+ #endif
+ 	}
+ }
++
++/* Per-framebuffer multisampling: 1, 2 or 4 samples a pixel for the framebuffer object `fb_id` (a glGenFramebuffers name), whatever the global mode
++ * (vglInit's msaa) is. Its render target and hidden depth buffer (2x / 4x the samples; DF32M, the 4x one twice as wide) are the object's own and are
++ * made for the mode at its next scene; the colour surface is set up again on the same texture with a hardware down-scale when multisampled, so the
++ * samples are averaged into the texture when a scene stores it and the texture (what copies sample, what glReadPixels reads) only ever holds the
++ * resolved picture. What the texture held stays: the next scene loads it. Every fragment program follows the framebuffer in use (cur_msaa). Best
++ * called before the object's first scene (no render target to let go); the old ones are handed to the garbage collector otherwise.
++ * Returns GL_FALSE for an unknown object. */
++GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples) {
++	THREAD_SAFE()
++
++	framebuffer *fb = (framebuffer *)fb_id;
++	if (!fb || !fb->active)
++		return GL_FALSE;
++	const SceGxmMultisampleMode m = samples >= 4 ? SCE_GXM_MULTISAMPLE_4X : (samples >= 2 ? SCE_GXM_MULTISAMPLE_2X : SCE_GXM_MULTISAMPLE_NONE);
++	if (FB_MSAA(fb) == m)
++		return GL_TRUE;
++	fb->msaa = m;
++	if (fb->target) {
++		mark_rt_as_dirty(fb->target);
++		fb->target = NULL;
++	}
++	if (fb->depthbuffer_ptr) {
++#ifndef DEPTH_STENCIL_HACK
++		mark_as_dirty(fb->depthbuffer_ptr->depthData);
++		if (fb->depthbuffer_ptr->stencilData)
++			mark_as_dirty(fb->depthbuffer_ptr->stencilData);
++#endif
++		fb->depthbuffer_ptr = NULL;
++	}
++	fb->depthbuffer_state &= ~DEPTHBUFFER_READY;
++	if (fb->tex)
++		_glFramebufferTexture2D(fb, GL_COLOR_ATTACHMENT0, fb->tex, 1);
++	if (fb == in_use_framebuffer)
++		dirty_framebuffer = GL_TRUE;
++	return GL_TRUE;
++}
+diff -ru a/source/gxm.c b/source/gxm.c
+--- a/source/gxm.c	2026-10-30 13:11:33.751564890 -0400
++++ b/source/gxm.c	2026-10-30 13:12:59.296734522 -0400
+@@ -87,6 +87,7 @@
+ GLenum vgl_error = GL_NO_ERROR; // Error returned by glGetError
+ SceGxmShaderPatcher *gxm_shader_patcher; // sceGxmShaderPatcher shader patcher instance
+ GLboolean is_fbo_float = GL_FALSE; // Current framebuffer mode
++SceGxmMultisampleMode cur_msaa = SCE_GXM_MULTISAMPLE_NONE; // Current framebuffer's multisample mode (the display's: msaa_mode)
+ 
+ #ifndef STORE_DEPTH_STENCIL
+ extern GLboolean skip_scissor_invalidation; // Flag whether to skip mask update bit invalidation pass during scissor test region update
+@@ -172,17 +173,21 @@
+ GLboolean has_razor_live = GL_FALSE; // Flag for live metrics support with sceRazor
+ #endif
+ 
+-static inline __attribute__((always_inline)) int setup_render_target(SceGxmRenderTarget **rt, int w, int h, int refs) {
++static inline __attribute__((always_inline)) int setup_render_target_ms(SceGxmRenderTarget **rt, int w, int h, int refs, SceGxmMultisampleMode mode) {
+ 	SceGxmRenderTargetParams renderTargetParams;
+ 	vgl_memset(&renderTargetParams, 0, sizeof(SceGxmRenderTargetParams));
+ 	renderTargetParams.width = w ? w : 1;
+ 	renderTargetParams.height = h ? h : 1;
+ 	renderTargetParams.scenesPerFrame = refs;
+-	renderTargetParams.multisampleMode = msaa_mode;
++	renderTargetParams.multisampleMode = mode;
+ 	renderTargetParams.driverMemBlock = -1;
+ 	return sceGxmCreateRenderTarget(&renderTargetParams, rt);
+ }
+ 
++static inline __attribute__((always_inline)) int setup_render_target(SceGxmRenderTarget **rt, int w, int h, int refs) {
++	return setup_render_target_ms(rt, w, h, refs, msaa_mode);
++}
++
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ #define MAX_RENDER_TARGETS_NUM 47 // Maximum amount of dedicated render targets usable for fbos
+ #define MAX_SHARED_RT_SIZE 256 // Maximum  width value in pixels for shared rendertargets usage
+@@ -534,15 +539,15 @@
+ 
+ // 1.2: false when the surface could not be made (no memory); `surface` is then untouched and nothing allocated is kept. (With vglSetRobustScenes(0) the
+ // allocations are not checked, as before.)
+-GLboolean init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil) {
++GLboolean init_depth_stencil_buffer_ms(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil, SceGxmMultisampleMode mode) {
+ 	// Calculating sizes for depth and stencil surfaces
+ 	unsigned int depth_stencil_width = VGL_ALIGN(w, SCE_GXM_TILE_SIZEX);
+ #ifndef DEPTH_STENCIL_HACK
+ 	unsigned int depth_stencil_height = VGL_ALIGN(h, SCE_GXM_TILE_SIZEY);
+ 	unsigned int depth_stencil_samples = depth_stencil_width * depth_stencil_height;
+-	if (msaa_mode == SCE_GXM_MULTISAMPLE_2X)
++	if (mode == SCE_GXM_MULTISAMPLE_2X)
+ 		depth_stencil_samples *= 2;
+-	else if (msaa_mode == SCE_GXM_MULTISAMPLE_4X)
++	else if (mode == SCE_GXM_MULTISAMPLE_4X)
+ 		depth_stencil_samples *= 4;
+ 
+ 	// Allocating depth surface
+@@ -572,7 +577,7 @@
+ 	vglDepthStencilSurfaceInit(surface,
+ 		has_stencil ? SCE_GXM_DEPTH_STENCIL_FORMAT_DF32M_S8 : SCE_GXM_DEPTH_STENCIL_FORMAT_DF32M,
+ 		SCE_GXM_DEPTH_STENCIL_SURFACE_LINEAR,
+-		msaa_mode == SCE_GXM_MULTISAMPLE_4X ? depth_stencil_width * 2 : depth_stencil_width,
++		mode == SCE_GXM_MULTISAMPLE_4X ? depth_stencil_width * 2 : depth_stencil_width,
+ #ifdef DEPTH_STENCIL_HACK
+ 		// Vita's GPU can run without actual depth/stencil memory as far as no partial rendering is hit
+ 		NULL, NULL);
+@@ -587,6 +592,10 @@
+ 	return GL_TRUE;
+ }
+ 
++GLboolean init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil) {
++	return init_depth_stencil_buffer_ms(w, h, surface, has_stencil, msaa_mode);
++}
++
+ void init_display_depth_stencil_surfaces(void) {
+ 	init_depth_stencil_buffer(DISPLAY_WIDTH, DISPLAY_HEIGHT, &gxm_depth_stencil_surface, GL_TRUE);
+ }
+@@ -678,6 +687,7 @@
+ 		needs_scene_reset = GL_FALSE;
+ 		in_use_framebuffer = active_write_fb;
+ 		is_fbo_float = in_use_framebuffer ? in_use_framebuffer->is_float : GL_FALSE;
++		cur_msaa = in_use_framebuffer ? FB_MSAA(in_use_framebuffer) : msaa_mode;
+ 
+ 		// Ending drawing scene
+ 		if (needs_end_scene) {
+@@ -736,7 +746,7 @@
+ 			
+ 			// If the depthbuffer is dirty, we re-gen it
+ 			if (!(active_write_fb->depthbuffer_state & DEPTHBUFFER_READY)) {
+-				if (!init_depth_stencil_buffer(active_write_fb->width, active_write_fb->height, &active_write_fb->depthbuffer, active_write_fb->depthbuffer_state == DEPTHBUFFER_WANTS_STENCIL) && vgl_robust_scenes) {
++				if (!init_depth_stencil_buffer_ms(active_write_fb->width, active_write_fb->height, &active_write_fb->depthbuffer, active_write_fb->depthbuffer_state == DEPTHBUFFER_WANTS_STENCIL, FB_MSAA(active_write_fb)) && vgl_robust_scenes) {
+ 					vgl_log("%s:%d Scene reset failed: no depth/stencil surface for framebuffer 0x%08X (%dx%d).\n", __FILE__, __LINE__, active_write_fb, active_write_fb->width, active_write_fb->height);
+ 					return scene_reset_failed();
+ 				}
+@@ -749,7 +759,7 @@
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ 				active_write_fb->target = (SceGxmRenderTarget *)get_free_render_target(active_write_fb->width, active_write_fb->height);
+ #else
+-				int r = setup_render_target(&active_write_fb->target, active_write_fb->width, active_write_fb->height, gxm_fbo_rt_size);
++				int r = setup_render_target_ms(&active_write_fb->target, active_write_fb->width, active_write_fb->height, gxm_fbo_rt_size, FB_MSAA(active_write_fb));
+ #ifdef LOG_ERRORS
+ 				if (r) {
+ 					vgl_log("%s:%d Failed to create a rendertarget of size %dx%d for framebuffer 0x%08X (%s).\n", __FILE__, __LINE__, active_write_fb->width, active_write_fb->height, active_write_fb, get_gxm_error_literal(r));
+diff -ru a/source/misc.c b/source/misc.c
+--- a/source/misc.c	2026-10-30 13:11:33.751768400 -0400
++++ b/source/misc.c	2026-10-30 13:11:36.669023507 -0400
+@@ -678,7 +678,7 @@
+ 	sceGxmSetBackPolygonMode(gxm_context, SCE_GXM_POLYGON_MODE_TRIANGLE_FILL);
+ 
+ 	sceGxmSetVertexProgram(gxm_context, clear_vertex_program_patched);
+-	sceGxmSetFragmentProgram(gxm_context, is_fbo_float ? clear_fragment_program_float_patched : clear_fragment_program_patched);
++	sceGxmSetFragmentProgram(gxm_context, vgl_msaa_fp(0, is_fbo_float));
+ 
+ 	sceGxmReserveVertexDefaultUniformBuffer(gxm_context, &vbuffer);
+ 	sceGxmSetUniformDataF(vbuffer, clear_position, 0, 4, &clear_vertices->x);
+diff -ru a/source/rt.c b/source/rt.c
+--- a/source/rt.c	2026-10-30 13:11:33.751880254 -0400
++++ b/source/rt.c	2026-10-30 13:11:36.669187938 -0400
+@@ -85,9 +85,9 @@
+ 
+ uint32_t vgl_rt_ds_bytes(uint32_t w, uint32_t h, GLboolean stencil) {
+ 	uint32_t n = VGL_ALIGN(w, SCE_GXM_TILE_SIZEX) * VGL_ALIGN(h, SCE_GXM_TILE_SIZEY);
+-	if (msaa_mode == SCE_GXM_MULTISAMPLE_2X)
++	if (cur_msaa == SCE_GXM_MULTISAMPLE_2X)
+ 		n *= 2;
+-	else if (msaa_mode == SCE_GXM_MULTISAMPLE_4X)
++	else if (cur_msaa == SCE_GXM_MULTISAMPLE_4X)
+ 		n *= 4;
+ 	return n * (stencil ? 5 : 4);
+ }
+diff -ru a/source/shared.h b/source/shared.h
+--- a/source/shared.h	2026-10-30 13:11:33.752032155 -0400
++++ b/source/shared.h	2026-10-30 13:12:59.300736679 -0400
+@@ -509,7 +509,7 @@
+ 
+ #define recalculate_normal_matrix() matrix4x4_normal_matrix(normal_matrix, modelview_matrix)
+ 
+-#define rebuild_frag_shader(x, y, z, w) patch_fragment_program(x, w, msaa_mode, &blend_info.info, z, y) // Creates a new patched fragment program with proper blend settings
++#define rebuild_frag_shader(x, y, z, w) patch_fragment_program(x, w, cur_msaa, &blend_info.info, z, y) // Creates a new patched fragment program with proper blend settings
+ 
+ #ifdef HAVE_SOFTFP_ABI
+ extern __attribute__((naked)) void sceGxmSetViewport_sfp(SceGxmContext *context, float xOffset, float xScale, float yOffset, float yScale, float zOffset, float zScale);
+@@ -631,6 +631,7 @@
+ 	int stride;
+ 	void *data;
+ 	texture *tex;
++	SceGxmMultisampleMode msaa; // this framebuffer's own multisampling (vglFramebufferMultisample), msaa_mode for a new one
+ } framebuffer;
+ 
+ // Query struct
+@@ -887,6 +888,9 @@
+ extern void *frag_uniforms;
+ extern void *vert_uniforms;
+ extern SceGxmMultisampleMode msaa_mode;
++extern SceGxmMultisampleMode cur_msaa; // the multisample mode of the framebuffer in use (gxm.c scene_reset)
++#define FB_MSAA(fb) ((fb)->msaa)
++SceGxmFragmentProgram *vgl_msaa_fp(int blit, GLboolean is_float); // the clear (0) / blit (1) fragment program for cur_msaa
+ extern void *gxm_color_surfaces_addr[DISPLAY_MAX_BUFFER_COUNT]; // Display color surfaces memblock starting addresses
+ extern SceGxmColorSurface gxm_color_surfaces[DISPLAY_MAX_BUFFER_COUNT]; // Display color surfaces
+ extern unsigned int gxm_back_buffer_index; // Display back buffer id
+@@ -1245,6 +1249,7 @@
+ void init_gxm_context(SceGxmContext **ctx, uint8_t ctx_slot); // Inits sceGxm context
+ void create_display_render_target(void); // Creates render target for the display
+ void init_display_color_surfaces(GLboolean is_swap); // Creates color surfaces for the display
++GLboolean init_depth_stencil_buffer_ms(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil, SceGxmMultisampleMode mode); // ... for a given multisample mode
+ GLboolean init_depth_stencil_buffer(uint32_t w, uint32_t h, SceGxmDepthStencilSurface *surface, GLboolean has_stencil); // Creates depth and stencil surfaces
+ void init_display_depth_stencil_surfaces(void); // Creates depth and stencil surfaces for the display
+ void start_shader_patcher(void); // Creates a shader patcher instance
+@@ -1423,7 +1428,7 @@
+ 
+ 		// Allocating colorbuffer
+ 		sceGxmColorSurfaceInit(&fb->colorbuffer, get_color_from_texture(fmt), SCE_GXM_COLOR_SURFACE_LINEAR,
+-			msaa_mode == SCE_GXM_MULTISAMPLE_NONE ? SCE_GXM_COLOR_SURFACE_SCALE_NONE : SCE_GXM_COLOR_SURFACE_SCALE_MSAA_DOWNSCALE,
++			FB_MSAA(fb) == SCE_GXM_MULTISAMPLE_NONE ? SCE_GXM_COLOR_SURFACE_SCALE_NONE : SCE_GXM_COLOR_SURFACE_SCALE_MSAA_DOWNSCALE,
+ 			fb->is_float ? SCE_GXM_OUTPUT_REGISTER_SIZE_64BIT : SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT,
+ 			fb->width, fb->height, VGL_ALIGN(fb->width, 8), fb->data);
+ 		
+diff -ru a/source/vgl.c b/source/vgl.c
+--- a/source/vgl.c	2026-10-30 13:11:33.742455074 -0400
++++ b/source/vgl.c	2026-10-30 13:11:36.669826514 -0400
+@@ -116,6 +116,19 @@
+ 
+ // Internal stuffs
+ SceGxmMultisampleMode msaa_mode = SCE_GXM_MULTISAMPLE_NONE;
++
++// The clear (0) and blit (1) fragment programs for the framebuffer in use: the ones made at start-up for the global mode, otherwise one
++// per mode and output format, made on first use (the shader patcher keeps them for good).
++SceGxmFragmentProgram *vgl_msaa_fp(int blit, GLboolean is_float) {
++	if (cur_msaa == msaa_mode)
++		return blit ? (is_float ? blit_fragment_program_float_patched : blit_fragment_program_patched) : (is_float ? clear_fragment_program_float_patched : clear_fragment_program_patched);
++	static SceGxmFragmentProgram *made[2][2][3];
++	const int m = cur_msaa == SCE_GXM_MULTISAMPLE_4X ? 2 : (cur_msaa == SCE_GXM_MULTISAMPLE_2X ? 1 : 0);
++	SceGxmFragmentProgram **p = &made[blit ? 1 : 0][is_float ? 1 : 0][m];
++	if (!*p)
++		patch_fragment_program(blit ? blit_fragment_id : clear_fragment_id, is_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4, cur_msaa, NULL, NULL, p);
++	return *p;
++}
+ extern GLboolean use_vram_for_usse;
+ 
+ uint16_t *default_idx_ptr; // sceGxm mapped progressive indices buffer
+diff -ru a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h	2026-10-30 13:11:33.757334970 -0400
++++ b/source/vitaGL.h	2026-10-30 13:11:36.670125115 -0400
+@@ -1324,6 +1324,7 @@
+ 
+ // Loads the depth buffer of the currently bound renderbuffer into the currently bound GL texture.
+ void vglTexImageDepthBuffer(GLenum target);
++GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples); // 1, 2 or 4 samples a pixel for this framebuffer object alone (framebuffers.c)
+ int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
+ 
+ // Makes vitaGL use cached memory instead of uncached memory for its internal memory pools. Must be called before vglInit*.

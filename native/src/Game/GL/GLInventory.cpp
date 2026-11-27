@@ -16,6 +16,7 @@
 #include "NL/glx/glxTexture.h"
 #include "NL/nlDLRing.h"
 #include "NL/nlMemory.h"
+#include "NL/gl/glTextureManager.h"
 
 #include <string.h>
 
@@ -187,10 +188,16 @@ void GLInventory::ResourceRelease(int nLevel)
         }
     }
 #endif
+    bool lookups = false;   // (a level without textures changes no lookup: this release runs every frame for the net mesh)
     while (m_nLevel != nLevel)
     {
+        lookups = lookups || m_pTextures[m_nLevel]->m_pItems->m_Root != 0 || m_pTextureAnims[m_nLevel]->m_pItems->m_Root != 0;
         ReleaseLevel(m_nLevel);
         NP_LEVEL_WRITE(m_nLevel, m_nLevel - 1);
+    }
+    if (lookups)
+    {
+        glTextureLookupChanged();
     }
 }
 
@@ -230,6 +237,7 @@ void GLInventory::AddTexture(unsigned long key, PlatTexture* texture)
     PlatTexture* value = texture;
     clearing_GLInventory<PlatTexture>::Tree* pTree = m_pTextures[m_nLevel]->m_pItems;
     pTree->Add(k, value);
+    glTextureLookupChanged();
 }
 
 PlatTexture* GLInventory::GetTexture(unsigned long id)
@@ -259,6 +267,7 @@ void GLInventory::AddTextureAnim(unsigned long key, GLTextureAnim* anim)
     GLTextureAnim* value = anim;
     clearing_GLInventory<GLTextureAnim>::Tree* pTree = m_pTextureAnims[m_nLevel]->m_pItems;
     pTree->Add(k, value);
+    glTextureLookupChanged();
 }
 
 GLTextureAnim* GLInventory::GetTextureAnim(unsigned long id)

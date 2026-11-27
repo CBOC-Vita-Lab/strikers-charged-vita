@@ -1,6 +1,9 @@
 #include "Game/Task/GameTaskState.h"
 #include "NL/nlDLListContainer.inl"
 #include "Game/BasicStadium.h"
+#ifdef NP_NATIVE
+#include "np/cpu22.h"
+#endif
 #include "Game/Render/StadiumWorldObjects.h"
 #include "Game/Render/StadiumPhysicsObject.h"
 #include "Game/Render/SolarFlareEffect.h"
@@ -129,6 +132,9 @@ DrawableObject* BasicStadium::HandleObjectCreation(
  */
 BasicStadium::~BasicStadium()
 {
+#ifdef NP_NATIVE
+    NpCpu22DrawEpochBump();
+#endif
     typedef nlAVLTreeIterator<unsigned long, DrawableObject*,
         DefaultKeyCompare<unsigned long> > DrawableIterator;
     DrawableIterator* pIterator = m_registeredDrawables.GetIterator();
@@ -243,6 +249,9 @@ void fn_802785FC(BasicStadium* pStadium, float fDeltaT)
 void fn_8027876C(BasicStadium* pStadium, DrawableObject* pObject)
 {
     unsigned long uKey = pObject->m_uHashID;
+#ifdef NP_NATIVE
+    NpCpu22DrawEpochBump();   // (MSC_CPU22_POWERUP)
+#endif
     pStadium->m_registeredDrawables.Add(uKey, pObject);
 }
 

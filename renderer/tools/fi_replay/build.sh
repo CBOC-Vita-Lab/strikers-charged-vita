@@ -4,7 +4,7 @@
 #   arm  -> build/fi/tool/fi_replay_arm    (armhf, stub GL: instruction counts under qemu)
 # FI_MAXCC=<n> compiles at most n files and stops (three at a time outside the heavy lock).
 set -e
-MSC=/home/claude/msc; V=$MSC/vgx; T=$MSC/build/fi/tool; ARCH=${1:-host}
+MSC=/work/msc; V=$MSC/vgx; T=$MSC/build/fi/tool; ARCH=${1:-host}
 SRCS="$V/src/vgx_interp.cpp $V/src/vgx_capture.cpp $V/src/vgx_backend_gl.cpp $V/tools/fi_replay/fi_replay.cpp"
 COMMON="-std=c++20 -O2 -g -pipe -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -DTARGET_PC -DNOMINMAX -I$V/src -I$MSC/deps/xxHash -I$MSC/deps/stb"
 if [ $ARCH = arm ]; then

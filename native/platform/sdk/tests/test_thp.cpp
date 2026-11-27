@@ -131,7 +131,7 @@ int main() {
     NpSdk_Init(&cfg);
     THPInit();
     const char* dir = getenv("MSC_DISC_FILES");
-    if (!dir) dir = "/home/claude/msc/game/files";
+    if (!dir) dir = "/work/msc/game/files";
     const char* names[] = {"Art/movies/nlglogo.thp", "Art/movies/nlgintrowide.thp", "Art/movies/stad_classroom_pal.thp"};
     int ran = 0;
     for (const char* n : names) {

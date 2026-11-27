@@ -24,6 +24,8 @@
 #include "Game/Team.h"
 #include "NL/globalpad.h"
 
+#include "np_control_table.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +34,7 @@
 
 #include "platform/sdk/include/np/np_pad.h"
 #include "platform/sdk/input/np_controls.h"
+#include "platform/sdk/input/np_feel.h"
 #include "platform/sdk/input/np_game_input.h"
 
 // Weak: a build without the SDK layer has no controller (the capture then leaves the record alone).
@@ -202,8 +205,22 @@ extern "C" void NpPadAdjust(NpPadSample* s) {
     }
     const float speed = 1.6f * multiplier;
     auto dz = [](float v) { return fabsf(v) < 0.2f ? 0.0f : v; };
-    s->cursor[0] = clampf(s->cursor[0] + dz(moveX) * speed * s->dt, -1.0f, 1.0f);
-    s->cursor[1] = clampf(s->cursor[1] - dz(moveY) * speed * s->dt, -1.0f, 1.0f);
+    // Wave 6 (MSC_MEGA_CURVE / MSC_MEGA_DEAD / MSC_MEGA_TRAP, np_feel.h): the Mega Save hand of a person (live pad) moves by a radial dead zone, a
+    // power curve and trapezoid integration, so it is precise at a small throw and the same at 30 and 60 pictures a second. Menus, scripts and
+    // everything else keep the old per-axis formula (the picture harness is unchanged). MSC_MEGA_CURVE=0: the old formula for the hand too.
+    static NpFeel::MegaHand s_hand[4];
+    NpFeel::MegaHand& hand = s_hand[chan >= 0 && chan < 4 ? chan : 0];
+    if (liveSave && !NpFeel::MegaLegacy(NpFeel::ConfiguredMegaCurve())) {
+        float vx, vy, dx, dy;
+        NpFeel::MegaVelocity(NpFeel::ConfiguredMegaCurve(), moveX, moveY, &vx, &vy);
+        hand.Step(NpFeel::MegaTrapezoid(), s->dt, vx, vy, speed, &dx, &dy);
+        s->cursor[0] = clampf(s->cursor[0] + dx, -1.0f, 1.0f);
+        s->cursor[1] = clampf(s->cursor[1] - dy, -1.0f, 1.0f);
+    } else {
+        hand.Reset();
+        s->cursor[0] = clampf(s->cursor[0] + dz(moveX) * speed * s->dt, -1.0f, 1.0f);
+        s->cursor[1] = clampf(s->cursor[1] - dz(moveY) * speed * s->dt, -1.0f, 1.0f);
+    }
     s->pointer_hidden = nr.hidePointer ? 1 : 0;
 
     // The touch minigames (they may move the cursor: the Mega Save pointer) ...
@@ -526,7 +543,7 @@ extern "C" void NpInputAfterCapture(NetworkPeerChannel* channel) {
 }
 
 // The capture is already the final record: nothing to normalize for the network.
-extern "C" bool NpInputNormalizeForNetwork(DetInput*) { return true; }
+extern "C" __attribute__((used, noinline)) bool NpInputNormalizeForNetwork(DetInput*) { return true; }   // (used: kept in the ELF for check_elf_hooks.py)
 
 // ---- the GameCube forms of the Wii-only actions -------------------------------------------------------------------------
 extern "C" bool NpInputGcRightShake(cAIPad* pad, uint16_t* direction) {
@@ -584,4 +601,13 @@ extern "C" bool NpInputGcActionAngle(cFielder* fielder, uint16_t* direction) {
         return true;
     }
     return false;
+}
+
+// 1.2: the controls rows of the Settings screen as the input code reads them, one line of the run header (tools/settings-audit checks it per choice).
+extern "C" int NpInputDescribe(char* out, int size) {
+    const NpControlTable::Config c = NpControlTable::ConfigFromEnv();
+    return snprintf(out, (size_t)size, "controls: layout=%s rear-touch=%s menu-stick=%s touch-pointer=%s pointer-speed=%.2f mega-save=%s mega-speed=%.0fx touch-mega-strike=%s touch-shakedown=%s",
+                    c.layout == 1 ? "modern" : "classic", c.rear ? "on" : "off", NpMenuNav::Enabled() ? "on" : "off", touch_pointer_enabled() ? "on" : "off",
+                    (double)pointer_speed(), c.rearSave ? "rear" : (c.touchSave ? "front-touch" : "buttons"), (double)NpControls::MegaPointerGain(), c.touchMeter ? "on" : "off",
+                    c.touchShake ? "on" : "off");
 }

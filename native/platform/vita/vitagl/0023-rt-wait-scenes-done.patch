@@ -1,0 +1,75 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: vglRtWaitScenesDone: block on an event flag until the GPU watcher has finished a scene
+
+MSC_VITA_QUEUE_WAIT=event (default off): the renderer's GPU queue limit waits here instead of
+polling vglRtSceneProgress every 200 us. The watcher sets the flag only while someone waits.
+
+
+--- a/source/rt.c
++++ b/source/rt.c
+@@ -69,6 +69,8 @@
+ static volatile unsigned int *rt_vslots = NULL; // 0021 vglRtSetSplit: each scene's vertex notification, the words after rt_slots
+ static GLboolean rt_split = GL_FALSE;
+ static SceUID rt_sema = -1, rt_thread = -1;
++static SceUID rt_done_ev = -1;                   // 0022 vglRtWaitScenesDone: set by the watcher when it finishes a scene while a thread waits
++static volatile uint32_t rt_done_waiters = 0;
+ static uint32_t rt_frame = 0; // render thread: frames (vglSwapBuffers) so far
+ static vglRtGpuFrame rt_gpu_frames[RT_FRAMES];
+ static volatile uint32_t rt_gpu_frame_head = 0;
+@@ -300,10 +302,38 @@
+ 		}
+ 		__sync_synchronize();
+ 		rt_consumed = seq + 1;
++		__sync_synchronize(); // (0022: the store above before the read of the waiter count; vglRtWaitScenesDone orders the other way)
++		if (rt_done_waiters)
++			sceKernelSetEventFlag(rt_done_ev, 1);
+ 	}
+ 	return 0;
+ }
+ 
++// 0022: blocks until the watcher has finished scene `target` (vglRtSceneProgress's done reaches target) or about timeout_us passed, instead of polling
++// vglRtSceneProgress. 0: done, 1: timed out, -1: no GPU timers or no event (the caller polls as before).
++int vglRtWaitScenesDone(uint32_t target, uint32_t timeout_us) {
++	if (!rt_slots || rt_done_ev < 0)
++		return -1;
++	const uint32_t t0 = rt_now();
++	for (;;) {
++		if ((int32_t)(rt_consumed - target) >= 0)
++			return 0;
++		const uint32_t spent = rt_now() - t0;
++		if (spent >= timeout_us)
++			return 1;
++		__sync_fetch_and_add(&rt_done_waiters, 1);
++		__sync_synchronize();
++		int r = 0;
++		if ((int32_t)(rt_consumed - target) < 0) {
++			SceUInt left = timeout_us - spent;
++			r = sceKernelWaitEventFlag(rt_done_ev, 1, SCE_EVENT_WAITOR | SCE_EVENT_WAITCLEAR_PAT, NULL, &left);
++		}
++		__sync_fetch_and_sub(&rt_done_waiters, 1);
++		if (r < 0 && r != (int)0x80028005 && (int32_t)(rt_consumed - target) < 0) // anything but SCE_KERNEL_ERROR_WAIT_TIMEOUT: give the wait back to the caller
++			return -1;
++	}
++}
++
+ void vglRtSetSplit(uint32_t enabled) { rt_split = enabled ? GL_TRUE : GL_FALSE; } // (default off; before vglRtSetup)
+ 
+ void vglRtSetup(uint32_t flags, int watcher_priority, int watcher_affinity) {
+@@ -326,6 +356,7 @@
+ 				rt_vslots[i] = 0;
+ 		}
+ 		rt_sema = sceKernelCreateSema("vgl_rt_sema", 0, 0, 0x7FFFFFFF, NULL);
++		rt_done_ev = sceKernelCreateEventFlag("vgl_rt_done", SCE_EVENT_WAITMULTIPLE, 0, NULL); // 0022 (a failure leaves vglRtWaitScenesDone at -1)
+ 		rt_thread = sceKernelCreateThread("vgl_rt_gpu", rt_watcher, watcher_priority ? watcher_priority : 0x10000100, 0x2000, 0, watcher_affinity, NULL);
+ 		if (rt_sema < 0 || rt_thread < 0 || sceKernelStartThread(rt_thread, 0, NULL) < 0) {
+ 			vgl_log("%s:%d GPU timer thread not started (0x%08X, 0x%08X).\n", __FILE__, __LINE__, rt_sema, rt_thread);
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1477,6 +1477,7 @@
+ void vglSetRobustScenes(uint32_t enabled); // default 1; 0 = the 1.1 behaviour (before any drawing)
+ uint32_t vglRobustFailures(uint32_t *scene_begins, uint32_t *shader_patches); // scene entries refused / shader programs not made, so far (returns their sum)
+ void vglRtSceneProgress(uint32_t *submitted, uint32_t *done); // scenes ended / seen completed by the GPU watcher (GPU timers on; else 0 / 0)
++int vglRtWaitScenesDone(uint32_t target, uint32_t timeout_us); // 0022: blocks until done reaches target (0), timeout (1), or -1: poll vglRtSceneProgress instead
+ void vglSetAnisotropicFilter(uint32_t sceFilter); // 0 off; 2 or 3: the minification filter of trilinear textures (see utils/gxm_utils.h) // the newest finished GPU frame; returns frames finished so far (0: none)
+ 
+ #ifdef __cplusplus

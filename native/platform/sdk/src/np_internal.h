@@ -30,6 +30,8 @@ void np_irq_enter(void);
 void np_exit_quiesce(void);       // atexit handler (NpSdk_Init): handler threads stop running game code
 void np_irq_leave(void);
 int np_in_irq(void);              // the calling thread is between enter and leave
+int np_irq_waitstat(void);         // MSC_IRQ_WAITSTAT (os_interrupt.cpp)
+void np_irq_note_hold(uint64_t ns);  // the AX frame callback held the interrupt lock this long (MSC_IRQ_WAITSTAT)
 int np_irq_disabled(void);        // the calling thread holds the lock
 void np_irq_release_for_wait(int* saved); // blocks of the scheduler: drop the lock while parked
 void np_irq_reacquire_after_wait(int saved);

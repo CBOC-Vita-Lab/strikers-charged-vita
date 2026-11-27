@@ -5,6 +5,7 @@
 #include "Game/AI/Desire.h"
 #include "Game/AI/DesireReceivePass.h"
 #include "Game/AI/Scripts/ScriptCaching.h"
+#include "np/ai27.h"   // MSC_AI27_CTRL
 #include "Game/FormationDefines.h"
 #include "Game/AI/AIContext.h"
 #include "Game/AI/AiUtil.h"
@@ -3547,6 +3548,37 @@ float UserControlledT(cTeam* team)
 {
     if (team == NULL)
     {
+        return 0.0f;
+    }
+
+    if (const int ai27 = NpAi27(NPAI27_CTRL))
+    {
+        // MSC_AI27_CTRL: GetNumAssignedControllers() > 0 asks only whether one of the 16 pads plays for this side (a pure array read each):
+        // stop at the first. (BREAK=4, proof mutant: pads 0 and 1 are not looked at.)
+        NPAI27_COUNT(NPAI27_CTRL, 0, 1);
+        const int mySide = team->m_nSide;
+        GameInfoManager* info = GameInfoManager::Instance();
+        const unsigned short first = NpAi27Break() == 4 ? 2 : 0;
+        for (unsigned short i = first; i < 16; i++)
+        {
+            if (info->GetPlayingSide(i) == mySide)
+            {
+                NPAI27_COUNT(NPAI27_CTRL, 1, 1);
+                if (ai27 == 2)
+                {
+                    NPAI27_COUNT(NPAI27_CTRL, 2, 1);
+                    if (!(team->GetNumAssignedControllers() > 0))
+                        NPAI27_COUNT(NPAI27_CTRL, 3, 1);
+                }
+                return 1.0f;
+            }
+        }
+        if (ai27 == 2)
+        {
+            NPAI27_COUNT(NPAI27_CTRL, 2, 1);
+            if (team->GetNumAssignedControllers() > 0)
+                NPAI27_COUNT(NPAI27_CTRL, 3, 1);
+        }
         return 0.0f;
     }
 

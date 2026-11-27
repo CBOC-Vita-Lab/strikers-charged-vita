@@ -10,6 +10,7 @@
 #include "NL/nlMemory.h"
 #include "Game/Render/StadiumLoading.h"
 #include "NL/gl/glTexture.h"
+extern unsigned gNpNetStaticEpoch;   // MSC_SIM26_NETGRAB (Render/NetMesh.cpp)
 
 typedef NetMeshModelLoader::NetMeshVertex NetMeshVertex;
 typedef NetMeshModelLoader::NetMeshEdge NetMeshEdge;
@@ -395,6 +396,7 @@ void NetMeshModelLoader::CreateNetMeshFromVertexList()
         pNetMesh->m_v3Position[particle] = position;
         pNetMesh->m_v3Normal[particle] = normal;
         pNetMesh->m_v2TextureCoords[particle] = shortCoord;
+        gNpNetStaticEpoch++;   // MSC_SIM26_NETGRAB (Render/NetMesh.cpp)
         particle = pNetMesh->m_NumParticles;
         pNetMesh->m_NumParticles = particle + 1;
 

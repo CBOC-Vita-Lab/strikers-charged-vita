@@ -6,9 +6,9 @@
 #   NOBATCH=1 : skip step 1 (use the finished rec/ ones)   NOVITA=1 : no emulator run   TEST=1 : write into build/np/W5SEED/test-final3 instead of seed-core / pkg
 #   HL=<glob> : which runs are the held-out set (default hl_*; a test can use hx_*)
 cd "$(dirname "$0")/../.."
-R=/home/claude/msc/build/np/W5SEED
-LAB=/home/claude/msc/build/np/W5INT/lto/vita/pkg/np/mscharged-np.vpk
-PLAYER=/home/claude/msc/build/np/W5INT/lto/vita/pkg-player/np/mscharged-np.vpk
+R=/work/msc/build/np/W5SEED
+LAB=/work/msc/build/np/W5INT/lto/vita/pkg/np/mscharged-np.vpk
+PLAYER=/work/msc/build/np/W5INT/lto/vita/pkg-player/np/mscharged-np.vpk
 HL=${HL:-hl_*}
 V=; [ "${NOVITA:-0}" = 1 ] && V=echo
 U=$R/union/final
@@ -27,7 +27,7 @@ if [ -s $U/new_hl.shl ]; then
   rm -rf $OUT; mkdir -p $OUT
   tools/seed/make_seed.sh $R/v3k/pref $U/core.shl $OUT/shadercache bc447993 || echo "SEED: make_seed reported a problem"
   cp -a $OUT/shadercache/bc447993 $OUT/shadercache/30223cc9
-  SC=/home/claude/msc/build/np/W5SEED/tools/seedcheck
+  SC=/work/msc/build/np/W5SEED/tools/seedcheck
   echo "catalogue check against the seed's cache: $($SC $U/catalogue.shl $OUT/shadercache/bc447993/v2 | tail -1)"
   mkdir -p $PK
   tools/seed/pack_vpk.sh $LAB $OUT/shadercache $PK/lab-core.vpk

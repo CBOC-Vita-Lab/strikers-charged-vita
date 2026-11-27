@@ -90,7 +90,7 @@ static int cvt_world_objects(NpaCtx* c, const NpaChunk* k)
         else if (npa_swap32_range(c, p, size / 4, k->data, end)) return c->res->status;
         p += size;
     }
-    NPA_EXPECT(c, p == end, "world object stream: %u records end %zd bytes before the chunk end", count, (ptrdiff_t)(end - p));
+    NPA_EXPECT(c, p == end, "world object stream: %u records end %ld bytes before the chunk end", count, (long)(end - p));
     return 0;
 }
 

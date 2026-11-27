@@ -118,33 +118,12 @@ NP_WEAK int DWC_SetupGameServer() { NP_STUB_HIT("DWC_SetupGameServer"); return (
 NP_WEAK int DWC_StopSCMatchingAsync() { NP_STUB_HIT("DWC_StopSCMatchingAsync"); return (int)0; }
 NP_WEAK int DWC_ConnectToGameServerAsync() { NP_STUB_HIT("DWC_ConnectToGameServerAsync"); return (int)0; }
 NP_WEAK int DWC_GetMOMinCompState() { NP_STUB_HIT("DWC_GetMOMinCompState"); return (int)0; }
-NP_WEAK int DWC_GetDateTime() { NP_STUB_HIT("DWC_GetDateTime"); return (int)0; }
-NP_WEAK void DWC_ProcessFriendsMatch() { NP_STUB_HIT("DWC_ProcessFriendsMatch"); }
-NP_WEAK int DWC_GetLastErrorEx() { NP_STUB_HIT("DWC_GetLastErrorEx"); return (int)0; }
-NP_WEAK void DWC_ClearError() { NP_STUB_HIT("DWC_ClearError"); }
-NP_WEAK int DWC_Init() { NP_STUB_HIT("DWC_Init"); return (int)0; }
-NP_WEAK void DWC_SetReportLevel() { NP_STUB_HIT("DWC_SetReportLevel"); }
-NP_WEAK int DWC_CheckUserData() { NP_STUB_HIT("DWC_CheckUserData"); return (int)0; }
-NP_WEAK void DWC_CreateUserData() { NP_STUB_HIT("DWC_CreateUserData"); }
-NP_WEAK void DWC_ReportUserData() { NP_STUB_HIT("DWC_ReportUserData"); }
-NP_WEAK void DWC_InitFriendsMatch() { NP_STUB_HIT("DWC_InitFriendsMatch"); }
-NP_WEAK int DWC_LoginAsync() { NP_STUB_HIT("DWC_LoginAsync"); return (int)0; }
 NP_WEAK int OSIsThreadTerminated() { NP_STUB_HIT("OSIsThreadTerminated"); return (int)0; }
-NP_WEAK int DWC_GetIngamesnCheckResult() { NP_STUB_HIT("DWC_GetIngamesnCheckResult"); return (int)0; }
-NP_WEAK void DWC_ShutdownFriendsMatch() { NP_STUB_HIT("DWC_ShutdownFriendsMatch"); }
-NP_WEAK void DWC_Shutdown() { NP_STUB_HIT("DWC_Shutdown"); }
 NP_WEAK int DWC_SendUnreliable() { NP_STUB_HIT("DWC_SendUnreliable"); return (int)0; }
-NP_WEAK int DWC_RnkShutdown() { NP_STUB_HIT("DWC_RnkShutdown"); return (int)0; }
-NP_WEAK int DWC_RnkInitialize() { NP_STUB_HIT("DWC_RnkInitialize"); return (int)0; }
 NP_WEAK void* NETGetMD5Interface() { NP_STUB_HIT("NETGetMD5Interface"); return (void*)0; }
 NP_WEAK void NETHMACInit() { NP_STUB_HIT("NETHMACInit"); }
 NP_WEAK void NETHMACUpdate() { NP_STUB_HIT("NETHMACUpdate"); }
 NP_WEAK void NETHMACGetDigest() { NP_STUB_HIT("NETHMACGetDigest"); }
-NP_WEAK int DWC_RnkPutScoreAsync() { NP_STUB_HIT("DWC_RnkPutScoreAsync"); return (int)0; }
-NP_WEAK int DWC_RnkGetScoreAsync() { NP_STUB_HIT("DWC_RnkGetScoreAsync"); return (int)0; }
-NP_WEAK int DWC_RnkResGetRowCount() { NP_STUB_HIT("DWC_RnkResGetRowCount"); return (int)0; }
-NP_WEAK int DWC_RnkResGetRow() { NP_STUB_HIT("DWC_RnkResGetRow"); return (int)0; }
-NP_WEAK int DWC_RnkProcess() { NP_STUB_HIT("DWC_RnkProcess"); return (int)0; }
 NP_WEAK void GXGetProjectionv() { NP_STUB_HIT("GXGetProjectionv"); }
 NP_WEAK void GXGetViewportv() { NP_STUB_HIT("GXGetViewportv"); }
 NP_WEAK void PSMTXIdentity() { NP_STUB_HIT("PSMTXIdentity"); }
@@ -243,8 +222,6 @@ NP_WEAK int DWC_SetOwnStatusData() { NP_STUB_HIT("DWC_SetOwnStatusData"); return
 NP_WEAK void DWC_DeleteBuddyFriendData() { NP_STUB_HIT("DWC_DeleteBuddyFriendData"); }
 NP_WEAK void DCStoreRangeNoSync() { NP_STUB_HIT("DCStoreRangeNoSync"); }
 NP_WEAK int RFLSearchOfficialData() { NP_STUB_HIT("RFLSearchOfficialData"); return (int)0; }
-NP_WEAK int DWC_CheckDirtyFlag() { NP_STUB_HIT("DWC_CheckDirtyFlag"); return (int)0; }
-NP_WEAK void DWC_ClearDirtyFlag() { NP_STUB_HIT("DWC_ClearDirtyFlag"); }
 NP_WEAK int RFLGetMiddleDBBufferSize() { NP_STUB_HIT("RFLGetMiddleDBBufferSize"); return (int)0; }
 NP_WEAK void RFLInitMiddleDB() { NP_STUB_HIT("RFLInitMiddleDB"); }
 NP_WEAK void RFLExit() { NP_STUB_HIT("RFLExit"); }

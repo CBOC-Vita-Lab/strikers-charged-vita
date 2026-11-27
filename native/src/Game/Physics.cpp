@@ -1,4 +1,5 @@
 #include "Game/Physics/Physics.h"
+#include "np/gsplit.h"   // MSC_GSPLIT phase markers
 #include <cstring>
 #include "Game/Physics/PhysicsEventQueue.h"
 
@@ -163,6 +164,7 @@ void PhysicsUpdate(PhysicsWorld* world, float dt)
 
     if (world == g_PhysicsWorld && !sbDisableCollisionDetection)
     {
+        NP_GS(NPGS_PH_NETBALL);
         int ballFlags = dGeomGetGFlags(g_pBall->m_pPhysicsBall->m_geomID);
 
         if (!sbNonMovingAABBsInitialized)
@@ -201,6 +203,7 @@ void PhysicsUpdate(PhysicsWorld* world, float dt)
 
     if (world == g_PhysicsWorld)
     {
+        NP_GS(NPGS_PH_PHYEV);
         DispatchPhysicsEvents(gPhysicsEventQueue);
     }
 }

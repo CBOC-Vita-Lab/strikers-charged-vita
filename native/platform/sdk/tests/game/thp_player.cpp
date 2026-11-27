@@ -36,11 +36,18 @@ static int g_fail = 0;
 nlFile::nlFile() {}
 nlFile::~nlFile() {}
 
+// nonzero: FileSize reports this (a file table that still says the size of the whole movie)
+static long g_fileSizeOverride;
+
 struct FakeFile : public nlFile {
     FILE* f;
     long pos;
     FakeFile() : f(0), pos(0) {}
     virtual u32 FileSize(unsigned int* size) {
+        if (g_fileSizeOverride) {
+            *size = (unsigned int)((g_fileSizeOverride + 31) & ~31L);
+            return (u32)g_fileSizeOverride;
+        }
         long cur = ftell(f);
         fseek(f, 0, SEEK_END);
         *size = (unsigned int)ftell(f);
@@ -65,6 +72,21 @@ struct Pending {
     bool used;
 };
 static Pending g_pending[16];
+static bool g_rejectReadSubmission;
+static bool g_completeReadSynchronously;
+static bool g_zeroFillShortReads;   // the disc layer zero-fills the tail of a read past the end of a file
+static unsigned g_readSubmissions;
+
+static void CompleteRead(Pending& pending) {
+    const Pending q = pending;
+    pending.used = false;
+    fseek(q.file->f, q.at, SEEK_SET);
+    size_t n = fread(q.buffer, 1, q.size, q.file->f);
+    if (g_zeroFillShortReads && n < q.size) memset((char*)q.buffer + n, 0, q.size - n);
+    BOOL en = OSDisableInterrupts();
+    q.cb(q.file, q.buffer, q.size, q.user);
+    OSRestoreInterrupts(en);
+}
 
 nlFile* nlOpen(const char* filename) {
     FILE* f = fopen(filename, "rb");
@@ -83,6 +105,8 @@ void nlClose(nlFile* file) {
 void nlRead(nlFile* file, void* buffer, unsigned int size, unsigned long bs) { file->Read(buffer, size, bs); }
 void nlSeek(nlFile* file, unsigned int offset, unsigned long) { ((FakeFile*)file)->pos = (long)offset; }
 AsyncEntry* nlReadAsync(nlFile* file, void* buffer, unsigned int size, ReadAsyncCallback cb, unsigned long user, unsigned long) {
+    ++g_readSubmissions;
+    if (g_rejectReadSubmission) return 0;
     for (Pending& p : g_pending) {
         if (!p.used) {
             p.used = true;
@@ -92,7 +116,8 @@ AsyncEntry* nlReadAsync(nlFile* file, void* buffer, unsigned int size, ReadAsync
             p.cb = cb;
             p.user = user;
             p.at = ((FakeFile*)file)->pos;
-            return 0;
+            if (g_completeReadSynchronously) CompleteRead(p);
+            return reinterpret_cast<AsyncEntry*>(&p);
         }
     }
     printf("FAIL: too many pending reads\n");
@@ -111,14 +136,7 @@ void nlCancelPendingAsyncReads(nlFile*, void (*)(nlFile*, void*, unsigned int, u
 void nlServiceFileSystem(void) {
     for (Pending& p : g_pending) {
         if (!p.used) continue;
-        Pending q = p;
-        p.used = false;
-        fseek(q.file->f, q.at, SEEK_SET);
-        size_t n = fread(q.buffer, 1, q.size, q.file->f);
-        (void)n;
-        BOOL en = OSDisableInterrupts();
-        q.cb(q.file, q.buffer, q.size, q.user);
-        OSRestoreInterrupts(en);
+        CompleteRead(p);
     }
 }
 
@@ -153,7 +171,7 @@ static void ax_frame_cb(void) { MIXUpdateSettings(); }
 
 int main() {
     const char* dir = getenv("MSC_DISC_FILES");
-    if (!dir) dir = "/home/claude/msc/game/files";
+    if (!dir) dir = "/work/msc/game/files";
     char path[512];
     snprintf(path, sizeof(path), "%s/Art/movies/stad_classroom_pal.thp", dir);
     FILE* probe = fopen(path, "rb");

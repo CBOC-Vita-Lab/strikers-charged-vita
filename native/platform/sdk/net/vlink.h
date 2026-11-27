@@ -31,6 +31,7 @@ const size_t kPeerAddrSize = 8;   // opaque backend address: IPv4 + port, or a 6
 const int kMaxSockets = 8;
 const size_t kFragHeader = 12;       // fragment of a longer frame: magic "MSLF", id, index, count, offset, total (see vlink.cpp)
 const unsigned kReassemblyMs = 1000; // an incomplete frame is dropped after this long
+const unsigned kKeepAwakePeerWindowMs = 10000; // a peer is kept awake while a unicast of ours was sent to it within this long (the game's own keep-alive is every 1 s)
 
 struct PeerAddr {
     uint8_t bytes[kPeerAddrSize];
@@ -68,6 +69,19 @@ struct Stats {
     uint64_t backendSends, sendUsTotal;
     uint32_t sendUsMax, queueHighWater;
     uint64_t sendsRefusedLost;
+    // Wave 12 (STR-146): frames addressed to another console (wrong destination vip), and stale frames thrown away when the link started.
+    uint64_t droppedAddress, droppedStale;
+    // Wave 14 (wake14, MSC_NET_KEEPAWAKE_MS): keep-awake filler frames sent / received (header only, no payload, never queued for a socket), and filler sends the backend refused.
+    uint64_t keepAwakeSent, keepAwakeReceived, keepAwakeFailed;
+};
+
+// The last console refused for a different fingerprint (build, protocol or rule set). `rules` is its rule byte (header byte 5, Link::SetRules).
+struct Incompatible {
+    uint64_t count;       // frames refused since Start()
+    uint32_t fingerprint; // the refused console's
+    uint32_t srcVip;
+    uint64_t lastMs;      // Link clock
+    uint8_t rules;
 };
 
 // Maxima since the previous TakeWindow() call (the "[mp-lan] net" log line of np_lan.cpp takes one per line).
@@ -96,6 +110,11 @@ public:
     const Backend* GetBackend() const;
     void SetFingerprint(uint32_t fingerprint);
     uint32_t Fingerprint() const;
+    // The rule byte (np_lan_rules: the settings that change what a match computes) goes into byte 5 of every frame header, so that a console
+    // that refuses a frame for its fingerprint can say which rules the other one runs. It is information only; the fingerprint decides.
+    void SetRules(uint8_t rules);
+    // True when a frame was refused for another fingerprint since Start(); `out` receives the last one.
+    bool GetIncompatible(Incompatible* out) const;
     // Millisecond clock for delayed (impaired) frames; default is the steady clock.
     void SetClock(uint64_t (*nowMs)(void*), void* ctx);
     void SetImpairment(const Impairment& impairment, uint32_t seed);
@@ -127,6 +146,19 @@ public:
     Stats GetStats() const;
     WindowStats TakeWindow();
 
+    // ---- Wi-Fi keep-awake filler (wave 14, wake14) --------------------------------------------------------------------------------
+    // The Vita's Wi-Fi dozes (power save) when the link is quiet, and the first datagram after that takes ~100 ms (median) to ~200 ms (p95) instead of ~7 ms. While a peer link
+    // carries nothing for `gapMs`, one header-only frame (dst port 0, no payload) goes to that peer: the radio stays awake. The receiving link counts and drops it before any
+    // socket (stats.keepAwakeReceived): it never reaches the game, the lockstep or its digest, and an older build drops it as a datagram for a port nobody has bound.
+    // Peers are the consoles this link sent a unicast to in the last kKeepAwakePeerWindowMs (a lobby stranger's broadcast never makes one). Checked whenever the link is pumped
+    // (every RecvFrom), so a frame that runs long on the game thread delays it exactly as it delays the game's own sends. 0 = off (the default of the class). Not sent while
+    // test impairment is on, nor while SetKeepAwakeSuspended(true) (the idle limit of np_keep_awake.h).
+    void SetKeepAwake(uint32_t gapMs);
+    void SetKeepAwakeSuspended(bool suspended);
+    // Diagnostic (MSC_LINK_GAPLOG=<ms>): every datagram of a peer that ends a quiet spell of at least `thresholdMs` (each direction) is logged with the phase `phase()` names,
+    // and the table (count, longest) per phase and direction is logged when the link goes down. nullptr phase = "-". 0 = off.
+    void SetGapLog(uint32_t thresholdMs, const char* (*phase)(void));
+
     // The link is gone (the Wi-Fi watch, a resume from sleep, a test): every SendTo fails from now on, so the game's transport sees a
     // socket error at its next send and ends the session with its own "connection lost". Cleared by Start() and SetLost(false).
     void SetLost(bool lost, const char* why);
@@ -139,7 +171,7 @@ private:
 };
 
 // ---- built-in backends -------------------------------------------------------------------------------------
-// POSIX UDP (host32 / armhf). bindPort: local UDP port (0 = 41000). broadcastTargets: "host:port,host:port"
+// POSIX UDP (host32 / armhf). bindPort: local UDP port (0 = 25100, NpNet::kLanDefaultPort). broadcastTargets: "host:port,host:port"
 // (null or empty = 255.255.255.255:bindPort). vip: 0 picks a random 10.x.y.z. Every call makes a new backend
 // (tests run several consoles in one process); the UDP socket is opened lazily by Link::Start. Returns nullptr
 // on bad arguments, and always on the Vita (vlink_vita.cpp has the Vita's own).

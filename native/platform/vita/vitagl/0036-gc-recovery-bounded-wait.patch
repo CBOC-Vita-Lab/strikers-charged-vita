@@ -1,0 +1,303 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 22:30:00 -0500
+Subject: [PATCH] GPU memory recovery with a bounded wait (vglSetGcPauseMs, vglGetGcRecoveryStats): the 1 s sceKernelDelayThread of patch 0005, once per recursion level, becomes a timed wait of at most 16 ms after the collector cycles; counters and a note
+
+MSC_VGL_GC_PAUSE_MS. When every pool refuses an allocation, 0005 finished the GPU, ran a collector cycle and slept one second, then recursed up to FRAME_PURGE_FREQ levels
+and slept one second more on each unwinding level (up to 4 s). Now (utils/gc_retry.h, plain C over a table of operations so a host test runs it with a model allocator
+and clock): finish the GPU once, up to FRAME_PURGE_FREQ acknowledged collector cycles with a try after each, then a wait of at most vglSetGcPauseMs (default 16, 0 none,
+1000 about the old one second) in 2 ms steps with a try after each. The path with no collector running yet waits the same bounded time. Counters: recoveries, resolved,
+failed, timed waits, legacy waits, collector cycles, longest and total time, time in the wait, bytes asked; one vgl_log line for each of the first eight recoveries, then one in 64.
+Nothing is freed earlier than before: only the collector frees, after the GPU finish, exactly as in 0005.
+
+---
+
+diff -ruN a/source/shared.h b/source/shared.h
+--- a/source/shared.h	2026-11-14 03:04:43.555861272 -0500
++++ b/source/shared.h	2026-11-14 06:13:34.947589283 -0500
+@@ -943,6 +943,8 @@
+ extern int vgl_gc_failed(void);
+ extern int vgl_gc_recover(void);
+ extern int vgl_gc_retry_pause(void);
++extern uint32_t vgl_gc_pause_ms; // 0036
++extern void vgl_gc_note_legacy(void);
+ extern GLboolean has_cached_mem; // Flag for whether to use cached memory for mempools or not
+ extern uint8_t gxm_display_buffer_count; // Display buffers count
+ 
+diff -ruN a/source/utils/gc_recovery.h b/source/utils/gc_recovery.h
+--- a/source/utils/gc_recovery.h	2026-11-14 03:04:43.557823380 -0500
++++ b/source/utils/gc_recovery.h	2026-11-14 06:13:34.953632140 -0500
+@@ -78,9 +78,11 @@
+ 		__atomic_store_n(&gc_ready, 1, __ATOMIC_RELEASE);
+ }
+ 
++// 0036: only the path with no collector running yet; waits vglSetGcPauseMs (default 16 ms), not 1 s.
+ int vgl_gc_retry_pause(void) {
+ 	if (vgl_gc_failed()) return 0;
+-	int res = sceKernelDelayThread(1000000);
++	vgl_gc_note_legacy();
++	int res = vgl_gc_pause_ms ? sceKernelDelayThread(vgl_gc_pause_ms * 1000u) : 0;
+ 	if (res < 0) gc_failure("delayed retry", res);
+ 	return !vgl_gc_failed();
+ }
+diff -ruN a/source/utils/gc_retry.h b/source/utils/gc_retry.h
+--- a/source/utils/gc_retry.h	1969-12-31 19:00:00.000000000 -0500
++++ b/source/utils/gc_retry.h	2026-11-14 06:13:34.953664334 -0500
+@@ -0,0 +1,84 @@
++/* 0036: the retry loop of a failed GPU allocation (the recovery that patch 0005 made), as plain C over a table of operations so a host test can run it with a model
++ * allocator and a model clock (renderer/tests/run_vitagl_gcretry_test.sh includes this file as it is). In the library the operations are sceGxmFinish / glFinish, one
++ * acknowledged collector cycle, the pool allocation, sceKernelDelayThread and the system clock.
++ *
++ * Before 0036 every level of the recursion that follows the collector cycles ended with sceKernelDelayThread(1000000) and one more try: a failed allocation could stop the
++ * calling thread for up to FRAME_PURGE_FREQ seconds. Now: finish the GPU once (nothing that was drawn may be freed under it), then up to max_cycles collector cycles
++ * with a try after each (a cycle frees every retired block of its bucket, the deferred texture / buffer / target frees, no waiting), and only if that did not give the
++ * memory a timed wait of at most pause_us in steps of step_us, a try after each step (memory another thread gives back). pause_us 0: no wait at all. */
++#ifndef VGL_GC_RETRY_H
++#define VGL_GC_RETRY_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++typedef struct vgl_gc_stats {
++	uint32_t recoveries; // allocations that came here (every pool had refused)
++	uint32_t resolved; // ... that got their memory
++	uint32_t failed; // ... that did not (the caller sees NULL)
++	uint32_t pauses; // recoveries that needed the timed wait
++	uint32_t legacy; // collector not running yet: one plain wait instead of a cycle
++	uint32_t cycles; // collector cycles forced
++	uint32_t max_us; // longest recovery, the GPU finish and the waits included
++	uint64_t total_us; // time spent in recoveries on the failing threads
++	uint64_t pause_us; // ... of which in the timed wait
++	uint64_t bytes; // bytes asked by the allocations that came here
++} vgl_gc_stats;
++
++typedef struct vgl_gc_ops {
++	void *ctx;
++	void (*finish)(void *ctx); // the GPU is idle after this (first cycle only)
++	int (*cycle)(void *ctx); // one collector cycle: 0 failed, 1 ran without an acknowledgement (no wait done), 2 acknowledged
++	void *(*attempt)(void *ctx); // the allocation in every pool
++	void (*delay_us)(void *ctx, uint32_t us);
++	uint64_t (*now_us)(void *ctx);
++} vgl_gc_ops;
++
++static inline void *vgl_gc_retry(const vgl_gc_ops *ops, vgl_gc_stats *st, size_t size, int max_cycles, uint32_t pause_us, uint32_t step_us) {
++	const uint64_t t0 = ops->now_us(ops->ctx);
++	uint32_t cycles = 0;
++	int last = 2;
++	void *res = NULL;
++	__atomic_add_fetch(&st->recoveries, 1, __ATOMIC_RELAXED);
++	__atomic_add_fetch(&st->bytes, (uint64_t)size, __ATOMIC_RELAXED);
++	for (int n = 1; n <= max_cycles; n++) {
++		if (n == 1)
++			ops->finish(ops->ctx);
++		last = ops->cycle(ops->ctx);
++		if (!last)
++			break;
++		cycles++;
++		res = ops->attempt(ops->ctx);
++		if (res)
++			break;
++	}
++	uint64_t waited = 0;
++	if (!res && last == 2 && pause_us) {
++		const uint64_t p0 = ops->now_us(ops->ctx);
++		if (step_us == 0)
++			step_us = 1000;
++		for (;;) {
++			const uint64_t el = ops->now_us(ops->ctx) - p0;
++			if (el >= pause_us)
++				break;
++			const uint64_t left = pause_us - el;
++			ops->delay_us(ops->ctx, left < step_us ? (uint32_t)left : step_us);
++			res = ops->attempt(ops->ctx);
++			if (res)
++				break;
++		}
++		waited = ops->now_us(ops->ctx) - p0;
++		__atomic_add_fetch(&st->pauses, 1, __ATOMIC_RELAXED);
++		__atomic_add_fetch(&st->pause_us, waited, __ATOMIC_RELAXED);
++	}
++	const uint64_t total = ops->now_us(ops->ctx) - t0;
++	__atomic_add_fetch(&st->cycles, cycles, __ATOMIC_RELAXED);
++	__atomic_add_fetch(res ? &st->resolved : &st->failed, 1, __ATOMIC_RELAXED);
++	__atomic_add_fetch(&st->total_us, total, __ATOMIC_RELAXED);
++	uint32_t m = __atomic_load_n(&st->max_us, __ATOMIC_RELAXED);
++	while (total > m && !__atomic_compare_exchange_n(&st->max_us, &m, (uint32_t)total, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
++	}
++	return res;
++}
++
++#endif
+diff -ruN a/source/utils/gpu_utils.c b/source/utils/gpu_utils.c
+--- a/source/utils/gpu_utils.c	2026-11-14 03:04:43.558164260 -0500
++++ b/source/utils/gpu_utils.c	2026-11-14 06:13:34.953696668 -0500
+@@ -155,43 +155,105 @@
+ #endif
+ 
+ int unsafe_allocator_counter = 0;
+-static void *gpu_alloc_mapped_aligned_recover(size_t alignment, size_t size, GLboolean for_gpu) {
+-	if (vgl_gc_failed()) return NULL;
+-	// Performing a garbage collection cycle prior to attempting to allocate the memory again
+-	unsafe_allocator_counter++;
+-	if (unsafe_allocator_counter == 1) {
+-		if (for_gpu) {
+-			// glFinish can recursively allocate the depth surface being recovered.
+-			sceGxmFinish(gxm_context);
+-		} else {
+-			glFinish();
+-		}
++
++// 0036: the recovery's wait is bounded (vglSetGcPauseMs, default 16 ms; 1000 = about the 1 s a failed allocation used to stop the thread for) and counted (vglGetGcRecoveryStats).
++#include "gc_retry.h"
++uint32_t vgl_gc_pause_ms = 16;
++static vgl_gc_stats gc_stats;
++static uint32_t gc_note_count;
++
++void vglSetGcPauseMs(int ms) {
++	vgl_gc_pause_ms = ms < 0 ? 0 : (ms > 5000 ? 5000 : (uint32_t)ms);
++}
++
++void vglGetGcRecoveryStats(uint32_t *recoveries, uint32_t *resolved, uint32_t *failed, uint32_t *pauses, uint32_t *legacy, uint32_t *cycles, uint32_t *max_us, uint64_t *total_us, uint64_t *pause_us, uint64_t *bytes) {
++	if (recoveries) *recoveries = __atomic_load_n(&gc_stats.recoveries, __ATOMIC_RELAXED);
++	if (resolved) *resolved = __atomic_load_n(&gc_stats.resolved, __ATOMIC_RELAXED);
++	if (failed) *failed = __atomic_load_n(&gc_stats.failed, __ATOMIC_RELAXED);
++	if (pauses) *pauses = __atomic_load_n(&gc_stats.pauses, __ATOMIC_RELAXED);
++	if (legacy) *legacy = __atomic_load_n(&gc_stats.legacy, __ATOMIC_RELAXED);
++	if (cycles) *cycles = __atomic_load_n(&gc_stats.cycles, __ATOMIC_RELAXED);
++	if (max_us) *max_us = __atomic_load_n(&gc_stats.max_us, __ATOMIC_RELAXED);
++	if (total_us) *total_us = __atomic_load_n(&gc_stats.total_us, __ATOMIC_RELAXED);
++	if (pause_us) *pause_us = __atomic_load_n(&gc_stats.pause_us, __ATOMIC_RELAXED);
++	if (bytes) *bytes = __atomic_load_n(&gc_stats.bytes, __ATOMIC_RELAXED);
++}
++
++// 0036 test knob (default off): every `every`-th GPU allocation of 64 KiB or more is treated as refused by every pool, and the following `fails` tries of its recovery are refused too, so the
++// recovery runs (finish, collector cycles, timed wait when fails > 4) in an emulator that has memory to spare. vglSetGcTestInject(0, 0) = off.
++static uint32_t gc_inject_every, gc_inject_fails, gc_inject_count, gc_inject_hits;
++static int gc_inject_left;
++void vglSetGcTestInject(int every, int fails) {
++	gc_inject_every = every < 0 ? 0 : (uint32_t)every;
++	gc_inject_fails = fails < 0 ? 0 : (uint32_t)fails;
++}
++static int gc_inject_hit(size_t size) {
++	if (!gc_inject_every || size < 65536) return 0;
++	if (__atomic_add_fetch(&gc_inject_count, 1, __ATOMIC_RELAXED) % gc_inject_every) return 0;
++	__atomic_add_fetch(&gc_inject_hits, 1, __ATOMIC_RELAXED);
++	__atomic_store_n(&gc_inject_left, (int)gc_inject_fails, __ATOMIC_RELAXED);
++	return 1;
++}
++uint32_t vglGetGcTestInjectHits(void) {
++	return __atomic_load_n(&gc_inject_hits, __ATOMIC_RELAXED);
++}
++
++void vgl_gc_note_legacy(void) {
++	__atomic_add_fetch(&gc_stats.legacy, 1, __ATOMIC_RELAXED);
++}
++
++typedef struct gc_rec_ctx {
++	size_t alignment, size;
++	GLboolean for_gpu;
++} gc_rec_ctx;
++
++static void gc_rec_finish(void *c) {
++	if (((gc_rec_ctx *)c)->for_gpu) {
++		// glFinish can recursively allocate the depth surface being recovered.
++		sceGxmFinish(gxm_context);
++	} else {
++		glFinish();
+ 	}
++}
++
++static int gc_rec_cycle(void *c) {
+ 	// A nested depth allocation may have failed through the void glFinish call.
+-	if (vgl_gc_failed()) return NULL;
+-	int collected = 1;
++	if (vgl_gc_failed()) return 0;
++	unsafe_allocator_counter++;
+ #if defined(HAVE_SINGLE_THREADED_GC) && !defined(HAVE_PTHREAD)
+ 	garbage_collector(0, NULL);
++	return 1;
+ #else
+-	collected = vgl_gc_recover();
+-	if (!collected) return NULL;
++	return vgl_gc_recover();
+ #endif
++}
+ 
+-	// Allocating requested memblock
++static void *gc_rec_attempt(void *c) {
+ 	if (vgl_gc_failed()) return NULL;
+-	void *res = for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size)
+-	                   : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
++	const gc_rec_ctx *r = (const gc_rec_ctx *)c;
++	if (__atomic_load_n(&gc_inject_left, __ATOMIC_RELAXED) > 0 && __atomic_sub_fetch(&gc_inject_left, 1, __ATOMIC_RELAXED) >= 0) return NULL; // test knob
++	return r->for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(r->alignment, r->size) : gpu_alloc_mapped_aligned_for_cpu_inner(r->alignment, r->size);
++}
+ 
+-	// Iterating for as many as possible max pending garbage collector cycles
+-	if (!res && unsafe_allocator_counter < FRAME_PURGE_FREQ) {
+-		res = gpu_alloc_mapped_aligned_recover(alignment, size, for_gpu);
+-	}
++static void gc_rec_delay(void *c, uint32_t us) {
++	sceKernelDelayThread(us);
++}
+ 
+-	// Inspect all retired buckets promptly. If none suffices, retain the legacy
+-	// waiting opportunities for other threads to release shared-heap memory.
+-	if (!res && collected == 2 && vgl_gc_retry_pause())
+-		res = for_gpu ? gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size)
+-		              : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
++static uint64_t gc_rec_now(void *c) {
++	return sceKernelGetSystemTimeWide();
++}
++
++static void *gpu_alloc_mapped_aligned_recover(size_t alignment, size_t size, GLboolean for_gpu) {
++	if (vgl_gc_failed()) return NULL;
++	gc_rec_ctx ctx = {alignment, size, for_gpu};
++	const vgl_gc_ops ops = {&ctx, gc_rec_finish, gc_rec_cycle, gc_rec_attempt, gc_rec_delay, gc_rec_now};
++	const uint32_t before_pauses = __atomic_load_n(&gc_stats.pauses, __ATOMIC_RELAXED);
++	const uint64_t t0 = sceKernelGetSystemTimeWide();
++	void *res = vgl_gc_retry(&ops, &gc_stats, size, FRAME_PURGE_FREQ, vgl_gc_pause_ms * 1000u, 2000);
++	const uint32_t n = __atomic_add_fetch(&gc_note_count, 1, __ATOMIC_RELAXED);
++	if (n <= 8 || (n & 63) == 0) // one line per recovery for the first eight, then one in 64
++		vgl_log("%s:%d GPU memory recovery #%u: %u bytes asked, %s after %u us (%s, limit %u ms)\n", __FILE__, __LINE__, n, (unsigned)size, res ? "obtained" : "NOT obtained",
++		        (unsigned)(sceKernelGetSystemTimeWide() - t0), __atomic_load_n(&gc_stats.pauses, __ATOMIC_RELAXED) != before_pauses ? "timed wait used" : "no timed wait", (unsigned)vgl_gc_pause_ms);
+ 	return res;
+ }
+ 
+@@ -204,7 +266,7 @@
+ }
+ 
+ void *gpu_alloc_mapped_aligned_for_cpu(size_t alignment, size_t size) {
+-	void *res = gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
++	void *res = gc_inject_hit(size) ? NULL : gpu_alloc_mapped_aligned_for_cpu_inner(alignment, size);
+ 	if (res) {
+ 		return res;
+ 	}
+@@ -234,7 +296,7 @@
+ }
+ 
+ void *gpu_alloc_mapped_aligned_for_gpu(size_t alignment, size_t size) {
+-	void *res = gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size);
++	void *res = gc_inject_hit(size) ? NULL : gpu_alloc_mapped_aligned_for_gpu_inner(alignment, size);
+ 	if (res) {
+ 		return res;
+ 	}
+diff -ruN a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h	2026-11-14 03:04:43.564857860 -0500
++++ b/source/vitaGL.h	2026-11-14 06:13:34.947543574 -0500
+@@ -1177,6 +1177,15 @@
+ // calls answered from the counters / by a walk; checks made, found different, skipped because another thread allocated or freed meanwhile; the largest difference seen (bytes);
+ // pools whose counters are usable (bit per vglMemType). Any pointer may be NULL.
+ void vglGetMemFreeStats(uint32_t *fast, uint32_t *walked, uint32_t *checks, uint32_t *mismatches, uint32_t *raced, int32_t *worst, uint32_t *pools);
++
++// 0036: the wait after a failed GPU allocation. Every pool refusing: the GPU is finished once, up to FRAME_PURGE_FREQ collector cycles run with a try after each, and only then
++// the thread waits up to ms (default 16; 0 = not at all; 1000 = about what patch 0005 did, 1 s per level) trying every 2 ms. vglGetGcRecoveryStats: recoveries entered,
++// resolved, failed (the caller got NULL), those that needed the timed wait, collector-not-running-yet waits, collector cycles forced, longest recovery (us, GPU finish and
++// waits included), total time (us), time in the timed wait (us), bytes asked.
++void vglSetGcPauseMs(int ms);
++void vglSetGcTestInject(int every, int fails); // test only: every `every`-th allocation of 64 KiB or more runs the recovery, whose first `fails` tries are refused too
++uint32_t vglGetGcTestInjectHits(void);
++void vglGetGcRecoveryStats(uint32_t *recoveries, uint32_t *resolved, uint32_t *failed, uint32_t *pauses, uint32_t *legacy, uint32_t *cycles, uint32_t *max_us, uint64_t *total_us, uint64_t *pause_us, uint64_t *bytes);
+ GLboolean vglGetUniformShadow(GLuint prog, GLint location, void **vptr, void **fptr, uint32_t *bytes); // 1.3 vgx uniform shadows (patch 0024)
+ void vglUniformShadowWritten(GLuint prog, uint32_t stages);
+ 

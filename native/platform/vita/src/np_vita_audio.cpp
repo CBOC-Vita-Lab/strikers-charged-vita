@@ -19,6 +19,14 @@
 //
 // The ring and the conversion are plain C++ and also run on armhf Linux and x86, where the "device"
 // is a thread that discards a period of audio every period.
+//
+// 1.2, music after the system suspends the game (the Home menu, standby): Galaxy had to fix this one and so does any BGM port. Two ways in to the same repair, both
+// ending in "close the port, open it again, set the volume again" (the ring, the mixer and the AX voices above it are plain memory and keep going, so nothing
+// else needs to be started):
+//   * the system says so: the platform's power callback (np_vita_wire.cpp) calls VitaAudio::NotifyResume() when the console wakes up;
+//   * the port says so: sceAudioOutOutput returns an error (the port was taken away or closed while the game slept). Until it is open again the thread
+//     drops the period it would have played and waits one period's time, so the mixer above keeps its real-time pace instead of racing ahead with nobody listening.
+// MSC_AUDIO_RESUME=0 turns both off (the 1.1 behaviour: the output thread ignores the result of sceAudioOutOutput).
 #include "np_vita.h"
 #include "np_vita_internal.h"
 
@@ -50,6 +58,8 @@ std::atomic<bool> g_run{false};
 std::atomic<bool> g_open{false};
 std::atomic<bool> g_paused{false}, g_pauseAcknowledged{false};
 std::atomic<int> g_volume{32768};     // 0..32768 (0 dB), already includes mute
+std::atomic<uint32_t> g_resumeSeq{0}; // VitaAudio::NotifyResume() counts here; the output thread compares with what it last acted on
+std::atomic<uint32_t> g_reopens{0};   // times the output port was closed and opened again
 bool g_reportedDrop = false;
 
 inline uint32_t Queued() { return g_queue.Queued(); }
@@ -83,7 +93,21 @@ uint32_t g_delayPeriods = 0;
 // could be heard as a buzz at the period rate, here 62.5 Hz).
 constexpr int kOutBuffers = 3;
 
+// Close the output port and open it again (the thread's own call). Returns whether the new port is open (g_port >= 0).
+bool ReopenPort(const char* why, uint32_t sampleRate) {
+    const int old = g_port;
+    if (old >= 0) sceAudioOutReleasePort(old);
+    g_port = -1;
+    sceKernelDelayThread(20 * 1000);   // (the system needs a moment after a wake-up before it hands a port out)
+    g_port = sceAudioOutOpenPort(SCE_AUDIO_OUT_PORT_TYPE_BGM, kPeriodFrames, static_cast<int>(sampleRate), SCE_AUDIO_OUT_MODE_STEREO);
+    const uint32_t n = g_reopens.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 8)
+        std::fprintf(stderr, "[audio] output port reopened (%s): old port %d, new port 0x%08X%s\n", why, old, static_cast<unsigned>(g_port), g_port >= 0 ? "" : " (failed, will try again)");
+    return g_port >= 0;
+}
+
 int OutputThread(SceSize, void*) {
+    if (VitaThreads::CoreMask(VitaThreads::kAudioOut) & 0x00080000) VitaThreads::Core3Register(sceKernelGetThreadId());   // (T8) listed for the online guard and the stray sweep
     static Frame periods[kOutBuffers][kPeriodFrames];
     int cur = 0;
     Frame* ring = nullptr;   // g_delayPeriods periods: a slot is sent g_delayPeriods iterations after it was filled
@@ -93,10 +117,28 @@ int OutputThread(SceSize, void*) {
         if (!ring) g_delayPeriods = 0;
     }
     int applied = -1;
+    static const bool recover = [] { const char* e = std::getenv("MSC_AUDIO_RESUME"); return !(e && e[0] == '0'); }();
+    const uint32_t rate = g_sampleRate.load(std::memory_order_relaxed);
+    const SceUInt periodUs = rate ? static_cast<SceUInt>(1000000ull * kPeriodFrames / rate) : 16000u;
+    uint32_t seenResume = g_resumeSeq.load(std::memory_order_acquire);
+    unsigned failStreak = 0, cooldown = 0;
     if (VitaMem::RegisterThread) VitaMem::RegisterThread("audio output");
     while (g_run.load(std::memory_order_relaxed)) {
+        if (recover) {
+            const uint32_t resume = g_resumeSeq.load(std::memory_order_acquire);
+            if (resume != seenResume) {
+                seenResume = resume;
+                if (cooldown == 0) {   // (the system may say "waking up" in more than one notification: one repair is enough)
+                    ReopenPort("the console woke up", rate);
+                    applied = -1;
+                    failStreak = 0;
+                    cooldown = 60;     // about a second
+                }
+            }
+            if (cooldown != 0) --cooldown;
+        }
         const int volume = g_volume.load(std::memory_order_relaxed);
-        if (volume != applied) {
+        if (volume != applied && g_port >= 0) {
             int both[2] = {volume, volume};
             sceAudioOutSetVolume(g_port, static_cast<SceAudioOutChannelFlag>(SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH), both);
             applied = volume;
@@ -116,7 +158,28 @@ int OutputThread(SceSize, void*) {
         } else {
             Dequeue(period, kPeriodFrames);
         }
-        sceAudioOutOutput(g_port, period);   // blocks until the previous buffer is taken
+        if (!recover) {
+            sceAudioOutOutput(g_port, period);   // blocks until the previous buffer is taken
+            continue;
+        }
+        const int rc = g_port >= 0 ? sceAudioOutOutput(g_port, period) : -1;   // blocks until the previous buffer is taken
+        if (rc >= 0) {
+            if (failStreak != 0) {
+                std::fprintf(stderr, "[audio] output is back after %u failed period(s)\n", failStreak);
+                failStreak = 0;
+            }
+            continue;
+        }
+        // The port does not take sound (closed or taken away while the game slept, or not open yet). The period was already dequeued, so the mixer is
+        // kept at its real-time pace by waiting one period here; the port is opened again after three bad periods and then every 30 (about half a second).
+        if (failStreak == 0 && g_port >= 0)
+            std::fprintf(stderr, "[audio] sceAudioOutOutput failed: 0x%08X\n", static_cast<unsigned>(rc));
+        ++failStreak;
+        sceKernelDelayThread(periodUs);
+        if (failStreak == 3 || (failStreak > 3 && (failStreak - 3) % 30 == 0)) {
+            ReopenPort("the output failed", rate);
+            applied = -1;
+        }
     }
     std::free(ring);
     return sceKernelExitDeleteThread(0);
@@ -140,8 +203,45 @@ bool StartDevice(uint32_t sampleRate) {
     // Above the game thread's default priority (lower number = higher
     // priority) and on the third core, away from the game thread (core 0);
     // vita_threads.cpp has the plan (MSC_VITA_CORE_AUDIO in env.txt).
-    g_thread = sceKernelCreateThread("msc_audio_out", OutputThread, 0x10000100 - 32, 0x10000, 0,
+    // MSC_AUDIO_PRIO=<n> (1.2; np-player.txt / env.txt): the output thread's priority in sceKernel's form (default 0x10000100 - 32 = 128, the
+    // same as the SDK's mixer and timer threads on this core; 0x10000100 - 48 = 112 puts the device feed ahead of the mixer, the timers and the
+    // job and frame-send workers (144), so that a mix burst or a worker chunk can never delay the hand-over of a period).
+    // A value the kernel cannot take (neither 64..191 absolute nor 0x10000100 +- an offset that lands in that range) or a thread that
+    // cannot be created with it must not cost the game its sound: the default is tried once instead (and logged).
+    const int kDefaultPriority = 0x10000100 - 32;
+    int outputPriority = kDefaultPriority;
+    if (const char* p = std::getenv("MSC_AUDIO_PRIO"); p && *p) {
+        const long long v = std::strtoll(p, nullptr, 0);
+        const long long absolute = (v >= 0x10000000LL && v <= 0x1000FFFFLL) ? 160 + (v - 0x10000100LL) : v;
+        if (absolute >= 64 && absolute <= 191 && v >= 0 && v <= 0x7FFFFFFFLL) {
+            outputPriority = static_cast<int>(v);
+        } else {
+            std::fprintf(stderr, "[audio] MSC_AUDIO_PRIO=%s is out of range (64..191, or 0x10000100 +- offset): using the default 0x%X\n", p,
+                         static_cast<unsigned>(kDefaultPriority));
+        }
+    }
+    // (T8, Galaxy's CORE3.md: its audio thread at the top user priority, 64, is the only thing it runs that can delay system threads on core 3) With the core rules on, the output thread is no more
+    // urgent than MSC_VITA_CORE3_AUDIO_PRIO (default 128) while it is on the system core. The default priority is 128 already: this only bites when a line asked for more.
+    {
+        const int onSystem = VitaThreads::CoreMask(VitaThreads::kAudioOut) & 0x00080000;
+        const int capped = NpVitaCore3::PriorityOnCore3(VitaThreads::CurrentRulesNow(), onSystem != 0, outputPriority, NpVitaCore3::Core3PrioFloor(std::getenv("MSC_VITA_CORE3_AUDIO_PRIO")));
+        if (capped != outputPriority) {
+            std::fprintf(stderr, "[audio] core 3 rules: output priority 0x%X is more urgent than MSC_VITA_CORE3_AUDIO_PRIO allows on the system core: 0x%X\n", static_cast<unsigned>(outputPriority), static_cast<unsigned>(capped));
+            outputPriority = capped;
+        }
+    }
+    g_thread = sceKernelCreateThread("msc_audio_out", OutputThread, outputPriority, 0x10000, 0,
                                      VitaThreads::CoreMask(VitaThreads::kAudioOut), nullptr);
+    if (g_thread < 0 && outputPriority != kDefaultPriority) {
+        std::fprintf(stderr, "[audio] output thread with priority 0x%X failed (0x%08X): retrying with the default 0x%X\n",
+                     static_cast<unsigned>(outputPriority), static_cast<unsigned>(g_thread), static_cast<unsigned>(kDefaultPriority));
+        g_thread = sceKernelCreateThread("msc_audio_out", OutputThread, kDefaultPriority, 0x10000, 0,
+                                         VitaThreads::CoreMask(VitaThreads::kAudioOut), nullptr);
+    }
+    if (g_thread < 0 && VitaThreads::CoreMask(VitaThreads::kAudioOut) != VitaThreads::PlainMask(VitaThreads::kAudioOut)) {   // (1.3) the fourth core was refused after all: never lose the sound over it
+        std::fprintf(stderr, "[audio] output thread on mask 0x%X failed (0x%08X): retrying on the plan's core\n", static_cast<unsigned>(VitaThreads::CoreMask(VitaThreads::kAudioOut)), static_cast<unsigned>(g_thread));
+        g_thread = sceKernelCreateThread("msc_audio_out", OutputThread, kDefaultPriority, 0x10000, 0, VitaThreads::PlainMask(VitaThreads::kAudioOut), nullptr);
+    }
     if (g_thread < 0 || sceKernelStartThread(g_thread, 0, nullptr) < 0) {
         std::fprintf(stderr, "[audio] could not start the output thread: 0x%08X\n", static_cast<unsigned>(g_thread));
         g_run.store(false);
@@ -222,6 +322,7 @@ int NpAudioOpen(uint32_t sampleRate) {
         g_policy = (policy && std::strcmp(policy, "fixed") == 0) ? VitaAudioQueue::Policy::kFixed : VitaAudioQueue::Policy::kElastic;
     }
     g_queue.Reset(sampleRate, g_policy);
+    if (const char* e = std::getenv("MSC_AUDIO_PACE_SLACK"); e && *e) g_queue.SetPaceSlack(static_cast<uint32_t>(std::strtoul(e, nullptr, 10)));   // (1.3) see vita_audio_queue.h
     g_sampleRate.store(sampleRate);
     if (!StartDevice(sampleRate)) return 0;
     g_openRate = sampleRate;
@@ -280,6 +381,8 @@ void NpAudioSetMuted(int muted) {
     ApplyVolume();
 }
 
+int NpAudioIsOpen(void) { return g_open.load(std::memory_order_relaxed) ? 1 : 0; }
+
 // How many frames fit before the mixer produces a block: with the elastic queue no block is
 // produced that would have to be dropped. A negative answer means "not known" (fixed policy).
 int NpAudioSpaceFrames(void) {
@@ -300,6 +403,8 @@ int NpAudioPaceFrames(void) {
 } // extern "C"
 
 namespace VitaAudio {
+void NotifyResume() { g_resumeSeq.fetch_add(1, std::memory_order_release); }
+uint32_t Reopens() { return g_reopens.load(std::memory_order_relaxed); }
 bool Pause(bool paused) {
     g_paused.store(paused, std::memory_order_release);
     for (int i = 0; i < 100; ++i) {

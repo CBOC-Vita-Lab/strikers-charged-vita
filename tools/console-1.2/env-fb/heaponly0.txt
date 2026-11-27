@@ -1,0 +1,14 @@
+# console-1.2 run heaponly0: Shader compile worker may take vitaGL's pools again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# MSC_VGX_ASYNC_HEAPONLY=0 (gxvgx14; on in the plan: the shader compile worker's vglMalloc family takes newlib's heap only, a block newlib cannot give fails the compile and the render thread compiles the shader itself). Never run on a Vita before: d1 and heaponly0 should match within noise. Read the '[vgx] async-shaders-heap:' line of d1 (blocks from the C heap, refused, foreign reallocs): any refused block, a 'GUEST' or crash, or a longer first-match [frame-timing] max / p99 than heaponly0 means the default is wrong (=0 in the release).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_ASYNC_HEAPONLY=0

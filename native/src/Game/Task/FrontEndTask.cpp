@@ -1,5 +1,6 @@
 #include "Game/Task/GameTaskState.h"
 #include "revolution/types.h"
+#include "np/gsplit.h"   // MSC_GSPLIT
 #include "NL/nlDLListContainer.inl"
 #include <revolution/pad.h>
 #include "Game/Render/StadiumLoading.h"
@@ -34,6 +35,7 @@
 #include "Game/SH/SHHallOfFame.h"
 
 #include <math.h>
+#include "np/scenecut.h"
 
 float g_fE3DebugTime;
 float g_fUpTime;
@@ -52,8 +54,10 @@ static inline bool IsHBMActive()
 
 static void DrawFrontEndElements(float fDeltaT)
 {
+    NpGsSeq gsq(NPGS_FE_LIGHT);   // gt27 (MSC_GSPLIT): the front end's draw by part
     UpdateGameObjectLighting();
 
+    gsq.Next(NPGS_FE_UPDATE);
     if ((nlTaskManager::m_pInstance->mCurrentState & 0x1b)
         && !IsHBMActive())
     {
@@ -62,7 +66,9 @@ static void DrawFrontEndElements(float fDeltaT)
 
     if (FEResourceManager::Instance() != 0)
     {
+        gsq.Next(NPGS_FE_RES);
         FEResourceManager::Instance()->Run(fDeltaT);
+        gsq.Next(NPGS_FE_SCUPD);
 
         if (!IsHBMActive())
         {
@@ -78,6 +84,7 @@ static void DrawFrontEndElements(float fDeltaT)
             }
         }
 
+        gsq.Next(NPGS_FE_SCRENDER);
         if (!IsHBMActive())
         {
             FESceneManager::Instance()->RenderActiveScenes();
@@ -85,10 +92,11 @@ static void DrawFrontEndElements(float fDeltaT)
 
         if (!FESceneManager::Instance()->AreAllScenesValid())
         {
-            glDiscardFrame(1);
+            glDiscardFrameWhy(1, "front end scenes not valid yet");
         }
     }
 
+    gsq.Next(NPGS_FE_MODELS);
     if (FEModelManager::Instance() != 0
         && !IsHBMActive())
     {
@@ -96,13 +104,17 @@ static void DrawFrontEndElements(float fDeltaT)
         FEModelManager::Instance()->Render();
     }
 
+    gsq.Next(NPGS_FE_REST);
     if (nlTaskManager::m_pInstance->mCurrentState == TASK_FRONTEND && IsStadiumWorldLoaded()
         && !IsHBMActive())
     {
         glx_Fog(true);
         glGetCurrentResourcePool()->m_inventory->Update(fDeltaT);
         UpdateStadium(fDeltaT);
-        RenderWorldNPCs();
+        if (NpMenuLod() < 3)   // MSC_MENU_LOD=3 (np/scenecut.h): the backdrop world is not drawn; it goes on updating
+        {
+            RenderWorldNPCs();
+        }
         UpdateHighRange();
     }
 
@@ -125,6 +137,7 @@ FrontEndTask::FrontEndTask()
 
 void FrontEndTask::Run(float dt)
 {
+    NpGsSeq gsq(NPGS_FE_INPUT);   // MSC_GSPLIT
     g_fUpTime += dt;
     g_pFEInput->Update(dt);
     HandleE3IdleReset(dt);
@@ -143,8 +156,11 @@ void FrontEndTask::Run(float dt)
         }
     }
 
+    gsq.Next(NPGS_FE_PRES);
     FrontEndPresentation::GetInstance()->Update(dt);
+    gsq.Next(NPGS_FE_DRAW);
     DrawFrontEndElements(dt);
+    gsq.Next(NPGS_FE);
 
     if (nlTaskManager::m_pInstance->mCurrentState != TASK_FRONTEND)
     {

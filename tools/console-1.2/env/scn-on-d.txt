@@ -1,0 +1,14 @@
+# console-1.2 run scn-on-d: Held moments with the held-scene governor (defaults), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group s30, route worstgpu, version payload 1.3, role ab
+# scenes30: as scn-on-v at the heaviest stadium (walk-out GPU 42-48 ms, celebrations and Mega results 42-50 ms, replays 40-52 ms on 23 Nov). If walk-outs / celebrations still show late over 10 % with `[heldgov]` at level 3 most of the scene, the next step is scn-size3-d (the owner's call: below the floor).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500

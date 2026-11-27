@@ -1,0 +1,16 @@
+# console-1.2 run dg20-s2-size-d960: Dump GPU S2: one-sample size 960x544, The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route worstgpu, version payload 1.3, role ab
+# dumpgpu20 S2: one-sample slope and intercept in one build (a fixed size turns the GPU timers off; the two timer keys put them back: check `[lane] gpu` is not 0).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_RENDER=960x544
+MSC_VITA_RT_TIMERS=2
+MSC_VITA_RT_LOG=300

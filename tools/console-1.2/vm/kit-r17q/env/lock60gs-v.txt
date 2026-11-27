@@ -1,0 +1,18 @@
+# console-1.2 run lock60gs-v: LOCKED 60 with the headroom and split lines, Vice tour
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route tour, version payload 1.3, role ab
+# head17 + split17: the pass lines of the 60 mode. Read `[head]` (game-thread busy p50 / p95 / max per scene class, with and without a step, render-thread p95, GPU p95, pictures over 16.7 ms by cause), `[gsplit]`, `[split] held == finished, leaked 0`. Ship rule: p50 16.7, late under 2 %, no relief in open play, game-thread p95 under 14.5 ms. Check that the render-lane samples are not 0.0 (they read 0.0 in the emulator) and that the with-step column has samples (the emulator had 0 steps in the window).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_HEAD_STAT=1
+MSC_GSPLIT=2
+MSC_FX_STAT=1
+MSC_HITCH_LINES=1500

@@ -116,6 +116,19 @@ uint16_t *depth_clear_indices = NULL; // Memblock starting address for clear scr
 
 // Internal stuffs
 SceGxmMultisampleMode msaa_mode = SCE_GXM_MULTISAMPLE_NONE;
+
+// The clear (0) and blit (1) fragment programs for the framebuffer in use: the ones made at start-up for the global mode, otherwise one
+// per mode and output format, made on first use (the shader patcher keeps them for good).
+SceGxmFragmentProgram *vgl_msaa_fp(int blit, GLboolean is_float) {
+	if (cur_msaa == msaa_mode)
+		return blit ? (is_float ? blit_fragment_program_float_patched : blit_fragment_program_patched) : (is_float ? clear_fragment_program_float_patched : clear_fragment_program_patched);
+	static SceGxmFragmentProgram *made[2][2][3];
+	const int m = cur_msaa == SCE_GXM_MULTISAMPLE_4X ? 2 : (cur_msaa == SCE_GXM_MULTISAMPLE_2X ? 1 : 0);
+	SceGxmFragmentProgram **p = &made[blit ? 1 : 0][is_float ? 1 : 0][m];
+	if (!*p)
+		patch_fragment_program(blit ? blit_fragment_id : clear_fragment_id, is_float ? SCE_GXM_OUTPUT_REGISTER_FORMAT_HALF4 : SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4, cur_msaa, NULL, NULL, p);
+	return *p;
+}
 extern GLboolean use_vram_for_usse;
 
 uint16_t *default_idx_ptr; // sceGxm mapped progressive indices buffer
@@ -226,15 +239,17 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
 	sprintf(fname, "ux0:data/shader_cache/v%d/f", FFP_SHADER_CACHE_MAGIC);
 	sceIoMkdir(fname, 0777);
 #ifdef HAVE_SHADER_CACHE
-	if (!shader_cache_root[0])
+	if (!shader_cache_root[0]) {
 		sprintf(shader_cache_root, "ux0:data/shader_cache/%s", titleid);
+	}
 	sceIoMkdir(shader_cache_root, 0777);
 	sprintf(vgl_shader_cache_path, "%s/v%d", shader_cache_root, SHADER_CACHE_MAGIC);
-	sceIoMkdir(vgl_shader_cache_path, 0777);
-	sprintf(fname, "%s/v", vgl_shader_cache_path);
-	sceIoMkdir(fname, 0777);
-	sprintf(fname, "%s/f", vgl_shader_cache_path);
-	sceIoMkdir(fname, 0777);
+	if (!sceIoMkdir(vgl_shader_cache_path, 0777)) {
+		int fname_len = sprintf(fname, "%s/v", vgl_shader_cache_path);
+		sceIoMkdir(fname, 0777);
+		fname[fname_len - 1] = 'f';
+		sceIoMkdir(fname, 0777);
+	}
 #endif
 	// Check if framebuffer size is valid
 	GLboolean res_fallback = GL_FALSE;
@@ -272,6 +287,8 @@ GLboolean vglInitWithCustomSizes(int pool_size, int width, int height, int ram_p
 
 	// Initializing sceGxm
 	init_gxm();
+	if (vgl_pb_lpddr_shrink && cdram_pool_size > (int)vgl_pb_lpddr_shrink)
+		cdram_pool_size -= (int)vgl_pb_lpddr_shrink; // 0042: PB_LPDDR refused, the parameter buffer took video memory the caller counted as free
 
 	// Initializing memory heaps for CDRAM and RAM memory (both standard and physically contiguous)
 	vgl_mem_init(ram_pool_size, cdram_pool_size, phycont_pool_size, cdlg_pool_size);
@@ -594,8 +611,12 @@ void *vglAlloc(uint32_t size, vglMemType type) {
 	return vgl_malloc(size, type);
 }
 
-void *vglForceAlloc(uint32_t size) {
-	return gpu_alloc_mapped_for_cpu(size);
+void *vglForceAlloc(uint32_t size, GLboolean for_gpu) {
+	return for_gpu ? gpu_alloc_mapped_for_gpu(size) : gpu_alloc_mapped_for_cpu(size);
+}
+
+void *vglForceAllocAligned(uint32_t alignment, uint32_t size, GLboolean for_gpu) {
+	return for_gpu ? gpu_alloc_mapped_aligned_for_gpu(alignment, size) : gpu_alloc_mapped_aligned_for_cpu(alignment, size);
 }
 
 void *vglMalloc(uint32_t size) {
@@ -781,6 +802,8 @@ void vglSetTextureCacheFrequency(GLuint freq) {
 // ---- GLB: cached stream arena -------------------------------------------------------------------------------------------------------------------------
 #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
 GLboolean vgl_stream_cached = GL_FALSE, vgl_stream_unflushed = GL_FALSE;
+GLboolean vgl_stream_scene_mode = GL_FALSE; // 0060: the write-back is made once at the scene submit (gxm.c scene_end), not before every draw
+uint32_t vgl_stream_scene_flushes = 0;
 static uint32_t stream_slice_req = 0, stream_slice = 0;
 static int stream_mem = 0; // vglStreamMem: 0 cached RAM + write-back, 1 CDRAM (write-combined, nothing to write back), 2 uncached RAM (diagnostic)
 static vglCacheFlushFn stream_flush_fn = NULL;
@@ -828,7 +851,8 @@ uint8_t *vgl_reserve_stream_pool(uint32_t size) {
 	return vgl_reserve_data_pool(size);
 }
 
-// Writes back what was reserved since the last flush. Called before a draw (VGL_STREAM_FLUSH_IF_NEEDED) and at the frame end.
+// Writes back what was reserved since the last flush. Called before a draw (VGL_STREAM_FLUSH_IF_NEEDED), in scene mode (0060) before sceGxmEndScene
+// (VGL_STREAM_SCENE_SUBMIT: the GPU reads the scene's vertex and index data after the submit, never before), and at the frame end.
 void vgl_stream_flush(void) {
 	vgl_stream_unflushed = GL_FALSE;
 	uint8_t *from = stream_flushed[vgl_circular_idx], *to = stream_ptr[vgl_circular_idx];
@@ -853,6 +877,14 @@ void vgl_stream_touch(const void *addr) {
 			stream_flushed[vgl_circular_idx] = a;
 		vgl_stream_unflushed = GL_TRUE;
 	}
+}
+
+// int31: true iff `addr` lives inside the active cached USER_RW stream arena slice (must be CPU-written, never sceDmacMemcpy behind ARM D-cache).
+GLboolean vgl_stream_is_cached_addr(const void *addr) {
+	if (!vgl_stream_cached || stream_mem != 0)
+		return GL_FALSE;
+	const uint8_t *a = (const uint8_t *)addr;
+	return (a >= stream_base[vgl_circular_idx] && a < stream_ptr[vgl_circular_idx]) ? GL_TRUE : GL_FALSE;
 }
 
 // Frame end (gxm.c, before the pool index moves on): peaks, then the slice the next frame will use starts empty.
@@ -894,6 +926,13 @@ void vglSetupCachedStream(uint32_t slice_bytes, vglCacheFlushFn flush) {
 	vglSetupStreamArena(slice_bytes, VGL_STREAM_CACHED, flush);
 }
 
+// 0060 (MSC_VITA_STREAM_CACHED): cached arena written back once per scene submit instead of before every draw. Only meaningful with a cached arena (VGL_STREAM_CACHED).
+void vglSetStreamFlushAtScene(GLboolean on) {
+#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+	vgl_stream_scene_mode = on ? GL_TRUE : GL_FALSE;
+#endif
+}
+
 extern GLboolean vgl_glb_ring_cdram_req, vgl_glb_ring_cdram;
 void vglSetUniformRingMem(int cdram) {
 	vgl_glb_ring_cdram_req = cdram ? GL_TRUE : GL_FALSE;
@@ -903,9 +942,42 @@ void vglSetSkipRedundantSets(GLboolean enable) {
 	vgl_gxc_enabled = enable;
 }
 
+// gem2b: with vglSetDrawCaches uni_reuse 2, keep the uniform copy history only for buffers of at most `bytes` bytes (0: all, as be26 made it)
+void vglSetUniHistCap(uint32_t bytes) {
+	extern uint32_t vgl_uni_hist_cap;
+	vgl_uni_hist_cap = bytes;
+}
+
 void vglGlbGetStats(vglGlbStats *s) {
 	vgl_memset(s, 0, sizeof(*s));
-	s->version = 1;
+	s->version = 5;
+	{
+		extern uint32_t vgl_uni_stat[7];
+		s->uni_copies = vgl_uni_stat[0];
+		s->uni_copy_bytes = vgl_uni_stat[1];
+		s->uni_last_hits = vgl_uni_stat[2];
+		s->uni_last_bytes = vgl_uni_stat[3];
+		s->uni_hist_hits = vgl_uni_stat[4];
+		s->uni_hist_bytes = vgl_uni_stat[5];
+		s->uni_bad = vgl_uni_stat[6];
+	}
+	s->frame = vgl_framecount;
+#ifdef LAZY_CLEAR
+	extern uint32_t vgl_lc_stat[4];
+	s->lazy_built = 1;
+	s->lazy_on = vgl_lc_on;
+	s->lazy_clears = vgl_lc_stat[0];
+	s->lazy_restores = vgl_lc_stat[1];
+	s->lazy_continued = vgl_lc_stat[2];
+#endif
+#ifdef GXM_STATE_CACHE
+	s->state_built = 1;
+	s->state_mask = vgl_gxs_mask;
+	for (int i = 0; i < GXS_KINDS; i++) {
+		s->state_calls[i] = vgl_gxs_calls[i];
+		s->state_skipped[i] = vgl_gxs_skipped[i];
+	}
+#endif
 #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
 	s->pool_slice_bytes = circular_data_pool_size / (gxm_display_buffer_count ? gxm_display_buffer_count : 1);
 	s->pool_frame_peak = vgl_glb_pool_frame_peak;
@@ -921,6 +993,7 @@ void vglGlbGetStats(vglGlbStats *s) {
 	s->stream_overrun_bytes = stream_overrun_bytes;
 	s->stream_flushes = stream_flushes;
 	s->stream_flushed_bytes = stream_flushed_bytes;
+	s->stream_scene_flushes = vgl_stream_scene_flushes;
 #endif
 	s->ring_bytes = vgl_glb_ring_size;
 	s->ring_cdram = vgl_glb_ring_cdram;
@@ -943,6 +1016,31 @@ void vglGlbGetStats(vglGlbStats *s) {
 GLboolean vgl_gxc_enabled = GL_FALSE;
 vgl_gxc_t vgl_gxc;
 uint32_t vgl_gxc_calls[4], vgl_gxc_skipped[4];
+#ifdef GXM_STATE_CACHE
+_Static_assert(GXS_KINDS == VGL_GXS_KINDS, "vitaGL.h VGL_GXS_KINDS");
+uint32_t vgl_gxs_valid = 0;
+uint32_t vgl_gxs_val[GXS_KINDS][8];
+uint32_t vgl_gxs_mask = 0;
+uint32_t vgl_gxs_calls[GXS_KINDS], vgl_gxs_skipped[GXS_KINDS];
+uint32_t vgl_gxs_ubo_valid_v = 0, vgl_gxs_ubo_valid_f = 0;
+const uint8_t vgl_gxs_group[GXS_KINDS] = {
+	GXS_GROUP_DEPTH, GXS_GROUP_DEPTH, GXS_GROUP_DEPTH, GXS_GROUP_DEPTH, // front/back depth func, front/back depth write
+	GXS_GROUP_STENCIL, GXS_GROUP_STENCIL, GXS_GROUP_STENCIL, GXS_GROUP_STENCIL, // front/back stencil func, front/back stencil ref
+	GXS_GROUP_RASTER, GXS_GROUP_RASTER, GXS_GROUP_RASTER, GXS_GROUP_RASTER, GXS_GROUP_RASTER, GXS_GROUP_RASTER, // polygon mode f/b, cull, two-sided, depth bias f/b
+	GXS_GROUP_VIEW, GXS_GROUP_VIEW, // viewport, region clip
+	GXS_GROUP_VTEX, GXS_GROUP_VTEX, GXS_GROUP_VTEX, GXS_GROUP_VTEX, // vertex texture units 0-3
+	GXS_GROUP_UBUF, GXS_GROUP_UBUF, GXS_GROUP_UBUF, GXS_GROUP_UBUF, // default vertex / fragment buffer, vertex / fragment uniform buffer objects
+};
+uint32_t vglSetStateCache(uint32_t mask) {
+	vgl_gxs_mask = mask & 0x3F;
+	vgl_gxs_valid = 0; // (the cache starts empty whenever the switch changes)
+	return vgl_gxs_mask;
+}
+#else
+uint32_t vglSetStateCache(uint32_t mask) {
+	return 0;
+}
+#endif
 
 void vglSetupScratchMemory(GLboolean scratch_for_dynamic, GLboolean scratch_for_stream) {
 #if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL)

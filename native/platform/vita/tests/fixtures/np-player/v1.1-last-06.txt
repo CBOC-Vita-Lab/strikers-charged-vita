@@ -1,0 +1,3 @@
+# ---- Settings screen (LiveArea > Settings): the lines below are written by it; the rest of this file is kept ----
+MSC_VITA_ANISO=3
+# ---- end of the Settings screen's lines ----

@@ -1,0 +1,38 @@
+# fast boot (test only): a match, then the pause menu, the VITA SETTINGS item (np_pause_settings.cpp) and the VITA SETTINGS screen (SHVitaSettings.cpp, the pause panel): rows, page 2, the leave popup, back to the pause menu.
+# Run: emu.sh <tag> <vpk> env/fb-pause.txt <seconds> <this file>; SHOTEVERY=<s> takes the X screen's pictures.
+# The screen is driven by the route's pad and finger presses (vpress, touch); the pictures are SHOTEVERY's.
+bootmatch 13:3:6 hsk=0,1,2 ask=5,6,7 time=600 skill=3
+wait ingame == 1 4000
+try wait gs == 5 1200
+log STATE open play
+idle 90
+vmash start 120 paused == 1 1500
+log STATE pause pressed
+idle 300
+log STATE pause shown
+try wait ovl == 80 600
+idle 200
+touch 480 369 4 30
+log STATE vita settings pressed
+idle 240
+log STATE page 1
+touch 480 127 4 40
+idle 80
+log STATE row changed
+touch 480 369 4 30
+idle 120
+log STATE page 2
+touch 480 127 4 40
+idle 80
+touch 480 418 4 30
+idle 150
+log STATE leave popup
+vpress circle 3 60
+idle 80
+touch 480 418 4 30
+idle 150
+vpress cross 3 60
+log STATE saved, leaving
+idle 300
+log STATE back on the pause menu
+log STATE end

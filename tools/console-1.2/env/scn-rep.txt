@@ -1,0 +1,14 @@
+# console-1.2 run scn-rep: Replays with the held-scene governor (defaults), Vice crep route
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group s30, route crep, version payload 1.3, role ab
+# scenes30: five goal sequences: the second and later replays start at the level the first learned (`[heldgov] replay begins at ... level L (what the last one of its kind spent most pictures at)`). Read [head] replay late % (23 Nov: 44-63 % late) and GPU p95, [heldgov] per replay.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500

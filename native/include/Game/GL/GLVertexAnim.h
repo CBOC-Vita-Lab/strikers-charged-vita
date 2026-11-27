@@ -19,6 +19,7 @@ public:
 
     int GetNumFrames() const { return m_nNumFrames; }
     glModel* GetModel(int frame);
+    void PatchSharedStreams(int frame);   // NP_NATIVE (MSC_FX_RAIN_FAST): GetModel's stream patching alone, on the source model's own (shared) streams, no copy
     void Update(float dt);
 
     /* 0x00 */ u32 m_uHashID;

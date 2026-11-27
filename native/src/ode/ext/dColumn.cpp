@@ -200,6 +200,48 @@ int dCollideColumnPlane(dGeomID column, dGeomID plane, int,
     return 0;
 }
 
+// MSC_PHYS27_PLANE (wave 12, phys27): 1 when dCollideColumnPlane returns 0 for the column at `position` (its geom's position, or a transform's final position)
+// and the plane: the same statements, the same operands (a copy, the collider stays as it is). Pure.
+int NpOdeColumnPlaneEmpty(dGeomID column, const float* position, dGeomID plane)
+{
+    dVector4 normal;
+    float radius = *(float*)dGeomGetClassData(column);
+    dGeomPlaneGetParams(plane, normal);
+    float planeDistance = normal[3];
+    unsigned char axis1 = 0xFF;
+    unsigned char axis2 = 0xFF;
+    int perpendicular = 0;
+
+    if (lengthwiseAxis == 0)
+    {
+        axis1 = 1;
+        axis2 = 2;
+        if (normal[0] < 0.001f)
+            perpendicular = 1;
+    }
+    else if (lengthwiseAxis == 1)
+    {
+        axis1 = 0;
+        axis2 = 2;
+        if (normal[1] < 0.001f)
+            perpendicular = 1;
+    }
+    else if (lengthwiseAxis == 2)
+    {
+        axis1 = 0;
+        axis2 = 1;
+        if (normal[2] < 0.001f)
+            perpendicular = 1;
+    }
+
+    if (!perpendicular)
+        return 1;
+
+    float distance = normal[axis1] * position[axis1]
+                   + normal[axis2] * position[axis2] - planeDistance;
+    return distance < radius ? 0 : 1;
+}
+
 int dCollideColumnBox(dGeomID column, dGeomID box, int,
     dContactGeom* contact, int)
 {

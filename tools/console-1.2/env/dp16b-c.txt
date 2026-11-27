@@ -1,0 +1,13 @@
+# console-1.2 run dp16b-c: The Dump start step: seed on (the r16 default), run c
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r16, route worstgpu, version payload 1.3, role ab
+# dumpplay16, three a side alternating (dp16a, dp16b, dp16b, dp16a, ...): a = MSC_DUMP_START=0 (start step 9, 752x424), b = the default (the first match at The Dump starts on the bottom picture step 704x400). b: `[hold] match starts ... starting at step 10`, no `step 9 -> 10` line; late pictures in the first two windows (16-27 before, est. 14-25 fewer). a: the kick-off windows and the 9 -> 10 move and its objects.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+# (no switch)

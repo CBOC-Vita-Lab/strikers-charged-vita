@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "Game/Task/GameTaskState.h"
 #include "NL/nlDLListContainer.inl"
 #include "Game/SharedStaticStorage.h"
@@ -429,6 +430,19 @@ void NumberDisplay::RenderGlyph(
         glSetRasterState(packet->rasterState, GLS_AlphaBlend, 1);
         glSetRasterState(packet->rasterState, GLS_AlphaTest, 1);
         glSetRasterState(packet->rasterState, GLS_AlphaTestRef, 3);
+#ifdef NP_NATIVE
+        // MSC_SCORE_NODEPTH=1: a digit neither tests nor writes depth. Tested, the score is hidden wherever the scene's depth lies in front of it (the early-match bug: both digits gone over the
+        // pitch); written, it stays in the depth buffer in the way of what comes after. Render state of this frame's copy of the model only.
+        static const bool noDepth = [] {
+            const char* e = getenv("MSC_SCORE_NODEPTH");
+            return e != 0 && e[0] == '1';
+        }();
+        if (noDepth)
+        {
+            glSetRasterState(packet->rasterState, GLS_DepthTest, 0);
+            glSetRasterState(packet->rasterState, GLS_DepthWrite, 0);
+        }
+#endif
         ++packet;
     }
     GetLayerView(eCLV_UnsortedOrtho640)->AttachModel(model, 0);

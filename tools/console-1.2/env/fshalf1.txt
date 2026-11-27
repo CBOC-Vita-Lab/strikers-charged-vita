@@ -1,0 +1,13 @@
+# console-1.2 run fshalf1: Half-precision shader arithmetic
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# Compiles its variants once at the first boot of this run (a long progress bar). Run it twice and judge the second. Read `[vgx] shader forms:` and any MSC_VGX_FS_HALF refusals.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_FS_HALF=1

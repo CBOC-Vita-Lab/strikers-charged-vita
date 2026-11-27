@@ -374,8 +374,11 @@ inline bool PeekFrame(const uint8_t* c, Frame& frame, uint32_t maxBytes = 4096)
 // when the frame needs a path this decoder does not have (a width that is not a multiple of 16,
 // table selectors outside the original's arrays); the caller then runs the translated original.
 // Otherwise the return value is THPVideoDecode's.
+// `end` (optional): the first byte after the frame's video component. With it a truncated or damaged frame ends in kBadSyntax
+// instead of decoding the memory behind the buffer (a header that claims more than there is, a scan that stops early); a valid frame
+// is decoded exactly as without it. The buffer must have at least 64 readable bytes behind `end`.
 inline int DecodeFrame(const uint8_t* file, uint8_t* tileY, uint8_t* tileU, uint8_t* tileV, const Tables& tables, Frame& frame,
-                       bool& supported)
+                       bool& supported, const uint8_t* end = nullptr)
 {
     using namespace detail;
     supported = true;
@@ -389,6 +392,7 @@ inline int DecodeFrame(const uint8_t* file, uint8_t* tileY, uint8_t* tileU, uint
     const uint8_t* c = file;
 
     for (bool allDone = false; !allDone;) {
+        if (end && c + 32 > end) return kBadSyntax;   // header runs out of the frame
         if (*c++ != 0xFF) return kBadSyntax;
         while (*c == 0xFF) ++c;
         const uint8_t marker = *c++;
@@ -397,6 +401,7 @@ inline int DecodeFrame(const uint8_t* file, uint8_t* tileY, uint8_t* tileU, uint
                 int32_t length = static_cast<int32_t>(Be16(c)) - 2;
                 c += 2;
                 for (;;) {
+                    if (end && c + 17 + 256 > end + 64) return kBadSyntax;
                     const uint8_t b0 = *c++;
                     const uint32_t tabIndex = ((b0 & 15u) << 1) + (b0 >> 4);
                     if (tabIndex >= 4) { supported = false; return 0; }
@@ -477,6 +482,7 @@ inline int DecodeFrame(const uint8_t* file, uint8_t* tileY, uint8_t* tileU, uint
                 int32_t length = static_cast<int32_t>(Be16(c)) - 2;
                 c += 2;
                 for (;;) {
+                    if (end && c + 65 > end + 64) return kBadSyntax;
                     const uint32_t id = *c++;
                     if (id >= 3) { supported = false; return 0; }
                     float temp[64];
@@ -561,6 +567,7 @@ inline int DecodeFrame(const uint8_t* file, uint8_t* tileY, uint8_t* tileU, uint
             InverseBlock(block[4], f4, qu, u0, u0 + cw * 4u);
             uint8_t* const v0 = tileV + mcu * 32u;
             InverseBlock(block[5], f5, qv, v0, v0 + cw * 4u);
+            if (end && bits.p > end + 8) return kBadSyntax;   // the scan ended before the picture did
             if (restart) {
                 mcusLeft = (mcusLeft - 1u) & 0xFFFFu;
                 if (mcusLeft == 0) {

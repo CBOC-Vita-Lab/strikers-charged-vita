@@ -393,6 +393,7 @@ SceGxmProgram *ffp_fragment_program = NULL;
 SceGxmProgram *ffp_vertex_program = NULL;
 SceGxmVertexProgram *ffp_vertex_program_patched; // Patched vertex program for the fixed function pipeline implementation
 SceGxmFragmentProgram *ffp_fragment_program_patched; // Patched fragment program for the fixed function pipeline implementation
+static SceGxmMultisampleMode ffp_msaa_patched = SCE_GXM_MULTISAMPLE_NONE; // the multisample mode it was patched for
 GLboolean ffp_dirty_frag = GL_TRUE;
 GLboolean ffp_dirty_vert = GL_TRUE;
 uint16_t ffp_dirty_vert_attr = 0xFFFF;
@@ -595,6 +596,8 @@ uint8_t reload_ffp_shaders(SceGxmVertexAttribute *attrs, SceGxmVertexStream *str
 
 	// Checking if mask changed
 	GLboolean ffp_dirty_frag_blend = ffp_blend_info.raw != blend_info.raw;
+	if (ffp_msaa_patched != cur_msaa)
+		ffp_dirty_frag_blend = GL_TRUE;
 	shader_mask mask = {.raw = 0};
 #ifndef DISABLE_TEXTURE_COMBINER
 #ifdef HAVE_HIGH_FFP_TEXUNITS
@@ -1178,6 +1181,7 @@ uint8_t reload_ffp_shaders(SceGxmVertexAttribute *attrs, SceGxmVertexStream *str
 
 		// Updating current fixed function pipeline blend config
 		ffp_blend_info.raw = blend_info.raw;
+		ffp_msaa_patched = cur_msaa;
 	}
 
 	sceGxmSetVertexProgram(gxm_context, ffp_vertex_program_patched);
@@ -1325,6 +1329,28 @@ uint8_t reload_ffp_shaders(SceGxmVertexAttribute *attrs, SceGxmVertexStream *str
 	return draw_mask_state;
 }
 
+static inline __attribute__((always_inline)) void *ffp_client_color_shared(void **cached, GLint first, GLsizei count) {
+	if (*cached)
+		return *cached;
+	const uint32_t stride = ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride;
+	const uint32_t size = count * stride;
+	const uint8_t *src = (const uint8_t *)ffp_vertex_attrib_offsets[FFP_ATTRIB_COLOR] + first * stride;
+#ifdef DRAW_SPEEDHACK
+	*cached = (void *)src;
+#else
+#ifdef SAFER_DRAW_SPEEDHACK
+	if (size > SAFE_DRAW_SIZE_THRESHOLD) {
+		*cached = (void *)src;
+	} else
+#endif
+	{
+		*cached = gpu_alloc_mapped_temp(size);
+		vgl_fast_memcpy(*cached, src, size);
+	}
+#endif
+	return *cached;
+}
+
 void _glDrawArrays_FixedFunctionIMPL(GLint first, GLsizei count) {
 	uint8_t mask_state = reload_ffp_shaders(NULL, NULL, SCE_GXM_INDEX_SOURCE_INDEX_16BIT);
 #ifdef HAVE_PROFILING
@@ -1366,6 +1392,7 @@ void _glDrawArrays_FixedFunctionIMPL(GLint first, GLsizei count) {
 
 	// Uploading vertex streams
 	int j = 0;
+	void *color_client_stream = NULL;
 	for (int i = 0; i < FFP_VERTEX_ATTRIBS_NUM; i++) {
 		if (mask_state & (1 << i)) {
 			int id;
@@ -1399,7 +1426,7 @@ void _glDrawArrays_FixedFunctionIMPL(GLint first, GLsizei count) {
 						}
 						ptr = materials;
 						materials += 4;
-					} else { // Color array mapped to this attribute (FIXME: This could be optimized by re-using color temp mem)
+					} else { // Color array mapped to this attribute
 						if (id != FFP_ATTRIB_NORMAL && ffp_vertex_attrib_vbo[FFP_ATTRIB_COLOR]) {
 							vbo *gpu_buf = (vbo *)ffp_vertex_attrib_vbo[FFP_ATTRIB_COLOR];
 							gpu_buf->last_frame = vgl_framecount;
@@ -1413,16 +1440,7 @@ void _glDrawArrays_FixedFunctionIMPL(GLint first, GLsizei count) {
 							}
 #else
 							if (id != FFP_ATTRIB_NORMAL) {
-								uint32_t size = count * ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride;
-#ifdef SAFER_DRAW_SPEEDHACK
-								if (size > SAFE_DRAW_SIZE_THRESHOLD) {
-									ptr = (void *)ffp_vertex_attrib_offsets[FFP_ATTRIB_COLOR] + first * ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride;
-								} else
-#endif
-								{
-									ptr = gpu_alloc_mapped_temp(size);
-									vgl_fast_memcpy(ptr, (void *)ffp_vertex_attrib_offsets[FFP_ATTRIB_COLOR] + first * ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride, size);
-								}
+								ptr = ffp_client_color_shared(&color_client_stream, first, count);
 							} else {
 								uint32_t size = count * ffp_vertex_stream_config[FFP_ATTRIB_NORMAL].stride;
 #ifdef SAFER_DRAW_SPEEDHACK
@@ -1507,6 +1525,7 @@ void _glMultiDrawArrays_FixedFunctionIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 	int j = 0;
 	void *ptrs[FFP_VERTEX_ATTRIBS_NUM];
 	uint32_t strides[FFP_VERTEX_ATTRIBS_NUM];
+	void *color_client_stream = NULL;
 	for (int i = 0; i < FFP_VERTEX_ATTRIBS_NUM; i++) {
 		if (mask_state & (1 << i)) {
 			int id;
@@ -1543,7 +1562,7 @@ void _glMultiDrawArrays_FixedFunctionIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 						ptrs[j] = materials;
 						strides[j] = 0;
 						materials += 4;
-					} else { // Color array mapped to this attribute (FIXME: This could be optimized by re-using color temp mem)
+					} else { // Color array mapped to this attribute
 						if (id != FFP_ATTRIB_NORMAL && ffp_vertex_attrib_vbo[FFP_ATTRIB_COLOR]) {
 							vbo *gpu_buf = (vbo *)ffp_vertex_attrib_vbo[FFP_ATTRIB_COLOR];
 							gpu_buf->last_frame = vgl_framecount;
@@ -1560,16 +1579,7 @@ void _glMultiDrawArrays_FixedFunctionIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 							}
 #else
 							if (id != FFP_ATTRIB_NORMAL) {
-								uint32_t size = (highest - lowest) * ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride;
-#ifdef SAFER_DRAW_SPEEDHACK
-								if (size > SAFE_DRAW_SIZE_THRESHOLD) {
-									ptrs[j] = (void *)ffp_vertex_attrib_offsets[FFP_ATTRIB_COLOR] + lowest * ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride;
-								} else
-#endif
-								{
-									ptrs[j] = gpu_alloc_mapped_temp(size);
-									vgl_fast_memcpy(ptrs[j], (void *)ffp_vertex_attrib_offsets[FFP_ATTRIB_COLOR] + lowest * ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride, size);
-								}
+								ptrs[j] = ffp_client_color_shared(&color_client_stream, lowest, highest - lowest);
 								strides[j] = ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride;
 							} else {
 								uint32_t size = (highest - lowest) * ffp_vertex_stream_config[FFP_ATTRIB_NORMAL].stride;
@@ -1718,6 +1728,7 @@ void _glDrawElements_FixedFunctionIMPL(uint16_t *idx_buf, GLsizei count, uint32_
 	}
 
 	// Uploading vertex streams
+	void *color_client_stream = NULL;
 	for (int i = 0; i < attr_num; i++) {
 		void *ptr;
 		int attr_idx = attr_idxs[i];
@@ -1735,7 +1746,7 @@ void _glDrawElements_FixedFunctionIMPL(uint16_t *idx_buf, GLsizei count, uint32_
 					}
 					ptr = materials;
 					materials += 4;
-				} else { // Color array mapped to this attribute (FIXME: This could be optimized by re-using color temp mem)
+				} else { // Color array mapped to this attribute
 					if (attr_idx != FFP_ATTRIB_NORMAL && ffp_vertex_attrib_vbo[FFP_ATTRIB_COLOR]) {
 						vbo *gpu_buf = (vbo *)ffp_vertex_attrib_vbo[FFP_ATTRIB_COLOR];
 						gpu_buf->last_frame = vgl_framecount;
@@ -1749,16 +1760,7 @@ void _glDrawElements_FixedFunctionIMPL(uint16_t *idx_buf, GLsizei count, uint32_
 						}
 #else
 						if (attr_idx != FFP_ATTRIB_NORMAL) {
-							uint32_t size = top_idx * ffp_vertex_stream_config[FFP_ATTRIB_COLOR].stride;
-#ifdef SAFER_DRAW_SPEEDHACK
-							if (size > SAFE_DRAW_SIZE_THRESHOLD) {
-								ptr = (void *)ffp_vertex_attrib_offsets[FFP_ATTRIB_COLOR];
-							} else
-#endif
-							{
-								ptr = gpu_alloc_mapped_temp(size);
-								vgl_fast_memcpy(ptr, (void *)ffp_vertex_attrib_offsets[FFP_ATTRIB_COLOR], size);
-							}
+							ptr = ffp_client_color_shared(&color_client_stream, 0, top_idx);
 						} else {
 							uint32_t size = top_idx * ffp_vertex_stream_config[FFP_ATTRIB_NORMAL].stride;
 #ifdef SAFER_DRAW_SPEEDHACK

@@ -15,6 +15,7 @@ namespace {
 
 const char kTitleData[] = "/NAND/title/00010000/52345145/data";   // "R4QE" as hex: the title's data directory (nand_native.cpp kHome)
 const char kSave[] = "Strikers2";
+const char kMarker[] = "np-save-import.done";   // <destRoot>/np-save-import.done: the import has been decided once; never again (see NpSaveImportRecompiled)
 const size_t kSaveSize = 35616;          // 8 byte header + 35578 payload, padded to 32 (platform/sdk/save: np_save_game.cpp)
 
 void Say(char* message, size_t size, const char* format, ...) __attribute__((format(printf, 3, 4)));
@@ -111,6 +112,14 @@ bool CopyFile(const char* from, const char* to) {
     return ok;
 }
 
+// An empty file whose existence says "this directory has had its one import decision". Best effort: a failed write only means the next start asks again.
+void WriteMarker(const char* destRoot, size_t len) {
+    char path[1200];
+    snprintf(path, sizeof(path), "%.*s/%s", int(len), destRoot, kMarker);
+    if (IsFile(path)) return;
+    if (FILE* f = fopen(path, "wb")) fclose(f);
+}
+
 } // namespace
 
 extern "C" int NpSaveImportRecompiled(const char* sourceRoot, const char* destRoot, char* message, size_t messageSize) {
@@ -125,7 +134,20 @@ extern "C" int NpSaveImportRecompiled(const char* sourceRoot, const char* destRo
     snprintf(fromDir, sizeof(fromDir), "%.*s%s", int(a), sourceRoot, kTitleData);
     snprintf(toDir, sizeof(toDir), "%.*s%s", int(b), destRoot, kTitleData);
     snprintf(to, sizeof(to), "%s/%s", toDir, kSave);
-    if (IsFile(to)) { Say(message, messageSize, "save import: the native game has its own save (%s), nothing to copy", to); return NP_SAVE_IMPORT_NOT_NEEDED; }
+    // The import happens ONCE per native data directory. Without that, a save the player (or the game, which offers to delete a save it finds damaged) deleted would come
+    // back at the next start from the recompiled build's older copy: a deleted save returning from a backup. The marker is written when the native game has a save of its
+    // own and when the import has been done; delete it to have the import happen again.
+    char marker[1200];
+    snprintf(marker, sizeof(marker), "%.*s/%s", int(b), destRoot, kMarker);
+    if (IsFile(to)) {
+        WriteMarker(destRoot, b);
+        Say(message, messageSize, "save import: the native game has its own save (%s), nothing to copy", to);
+        return NP_SAVE_IMPORT_NOT_NEEDED;
+    }
+    if (IsFile(marker)) {
+        Say(message, messageSize, "save import: the native game has no save, but the recompiled build's save was already taken over (or the native save deleted) at an earlier start: not copied again (delete %s to import again)", marker);
+        return NP_SAVE_IMPORT_NOT_NEEDED;
+    }
     snprintf(from, sizeof(from), "%s/%s", fromDir, kSave);
     size_t size = 0;
     if (!IsFile(from, &size)) { Say(message, messageSize, "save import: no save of the recompiled build at %s", from); return NP_SAVE_IMPORT_NO_SOURCE; }
@@ -155,6 +177,7 @@ extern "C" int NpSaveImportRecompiled(const char* sourceRoot, const char* destRo
         closedir(dir);
     }
     if (!CopyFile(from, to)) { Say(message, messageSize, "save import: could not copy %s to %s", from, to); return NP_SAVE_IMPORT_FAILED; }
+    WriteMarker(destRoot, b);
     Say(message, messageSize, "save import: copied the recompiled build's save (%s, %u bytes, and %u other file(s)) to %s; the original is untouched", kSave, unsigned(size), copied, toDir);
     return NP_SAVE_IMPORT_DONE;
 }

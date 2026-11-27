@@ -1,0 +1,43 @@
+# UX pictures (tools/mp/ux_shots.py): ONLINE -> JOIN WITH A CODE with the code the environment types: the failure popup, then OK
+mash 100 20 scene == 0
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+idle 60
+shot 01-main-menu
+idle 12
+idle 10
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+press 100
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 90
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 90
+mash 4 15 onctx == 1 180
+idle 10
+press 100
+wait scene == 1 900
+idle 400
+shot 20-join-failure
+idle 12
+press 100
+wait scene == 1 1200
+idle 90
+shot 21-join-after-ok
+idle 12
+exit

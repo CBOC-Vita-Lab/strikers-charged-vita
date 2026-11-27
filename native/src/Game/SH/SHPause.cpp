@@ -29,6 +29,7 @@
 #include "NL/nlFunction.inl"
 #include "Game/FE/feDPD.h"
 #include "Game/FE/tlDefault.h"
+#include "platform/sdk/net/np_pause_settings.h"
 
 
 static const char* MENU_NAMES[7] = {
@@ -189,6 +190,7 @@ void PauseMenuScene::SceneCreated()
             presentation->m_currentSlide, "Layer", MENU_NAMES[i]);
     }
     FEAudio::EnableSounds(true);
+    NpPauseSettingsOffer(mOptionInstances[PAUSE_CONTROLLER_MAP]);   // Vita: the Wii's controller map button becomes VITA SETTINGS (not in a multiplayer session)
     if (GameInfoManager::Instance()->IsInMode4())
     {
         if (GetRegion() == GAME_REGION_EU)
@@ -284,6 +286,10 @@ void PauseMenuScene::Update(float fDeltaT)
             scene->SetDisplayMode(NEWS_PAUSE_STATISTICS);
             break;
         }
+        case TT_VITA_SETTINGS:
+            mSelectionMade = true;
+            g_pOverlayManager->Push(SCENE_PAUSE_VITA_SETTINGS, SCREEN_FORWARD, true);
+            break;
         case TT_CONTROLLER_MAP:
             mSelectionMade = true;
             g_pOverlayManager->Push(OVERLAY_CONTROLLER_MAP, SCREEN_NOTHING, true);
@@ -430,6 +436,11 @@ void PauseMenuScene::OnOptionPointerPress(unsigned int index, void* context)
         OnSelectQUIT();
         break;
     case PAUSE_CONTROLLER_MAP:
+        if (NpPauseSettingsPress())
+        {
+            TransitionOut(TT_VITA_SETTINGS);   // np: the panel slides out and the VITA SETTINGS scene (the same panel, SHVitaSettings.cpp) takes its place
+            break;
+        }
         TransitionOut(TT_CONTROLLER_MAP);
         break;
     }

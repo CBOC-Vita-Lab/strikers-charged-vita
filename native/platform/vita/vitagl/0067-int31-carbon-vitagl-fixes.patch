@@ -1,0 +1,449 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 17:34:00 -0500
+Subject: [PATCH] int31 (Carbon vitaGL hardening + int26/int28 sync): FBO last_frame GC, odd-FBO lazy clear, MASK_CLIP clamp, detached FBO fb->data/null guards, RT pool thread-safety/shrink/disable leak fix, full-span wrcopy/texcopy DMA guard, cached stream arena CPU write, vglSetTiledTargets(GLint), color-skip cleanup, and %u display-list logs
+
+---
+diff --git a/source/buffers.c b/source/buffers.c
+index 71845ff..db4baf1 100644
+--- a/source/buffers.c
++++ b/source/buffers.c
+@@ -434,8 +434,14 @@ inline void glNamedBufferData(GLuint buffer, GLsizei size, const void *data, GLe
+ 	gpu_buf->size = size;
+ 	gpu_buf->last_frame = OBJ_NOT_USED;
+ 
+-	if (data)
+-		vgl_wr_copy(gpu_buf->ptr, data, size); // 0045: NEON bursts into the uncached pool when vglSetWriteCopy asks
++	if (data) {
++#if defined(HAVE_SCRATCH_MEMORY) && !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++		if (from_stream_arena && vgl_stream_is_cached_addr(gpu_buf->ptr))
++			vgl_fast_memcpy(gpu_buf->ptr, data, size); // int31: CPU write into cached USER_RW arena (never sceDmacMemcpy behind D-cache)
++		else
++#endif
++			vgl_wr_copy(gpu_buf->ptr, data, size); // 0045: NEON bursts into the uncached pool when vglSetWriteCopy asks
++	}
+ }
+ 
+ void glBufferData(GLenum target, GLsizei size, const GLvoid *data, GLenum usage) {
+@@ -509,9 +515,14 @@ inline void glNamedBufferSubData(GLuint buffer, GLintptr offset, GLsizeiptr size
+ 	} else
+ #endif
+ 	{
+-		vgl_wr_copy((uint8_t *)gpu_buf->ptr + offset, data, size); // 0045
+ #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++		if (vgl_stream_is_cached_addr((uint8_t *)gpu_buf->ptr + offset))
++			vgl_fast_memcpy((uint8_t *)gpu_buf->ptr + offset, data, size); // int31: CPU write into cached USER_RW arena
++		else
++			vgl_wr_copy((uint8_t *)gpu_buf->ptr + offset, data, size); // 0045
+ 		vgl_stream_touch((uint8_t *)gpu_buf->ptr + offset); // GLB
++#else
++		vgl_wr_copy((uint8_t *)gpu_buf->ptr + offset, data, size); // 0045
+ #endif
+ 	}
+ }
+diff --git a/source/display_lists.c b/source/display_lists.c
+index 7b99d3a..03805ff 100644
+--- a/source/display_lists.c
++++ b/source/display_lists.c
+@@ -311,7 +311,7 @@ void glCallList(GLuint list) {
+ 			break;
+ 		case DLIST_FUNC_U8_U8_U8:
+ #ifdef DEBUG_DLISTS
+-			vgl_log("%s:%d %s: %s(%hhu, %hhu, %hhu)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), *(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]));
++			vgl_log("%s:%d %s: %s(%u, %u, %u)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), (unsigned)(*(uint8_t *)(l->args)), (unsigned)(*(uint8_t *)(&l->args[1])), (unsigned)(*(uint8_t *)(&l->args[2])));
+ #endif
+ 			f_u8_u8_u8 = l->func;
+ 			f_u8_u8_u8(*(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]));
+@@ -382,7 +382,7 @@ void glCallList(GLuint list) {
+ 			break;
+ 		case DLIST_FUNC_U8_U8_U8_U8:
+ #ifdef DEBUG_DLISTS
+-			vgl_log("%s:%d %s: %s(%hhu, %hhu, %hhu, %hhu)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), *(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]), *(uint8_t *)(&l->args[3]));
++			vgl_log("%s:%d %s: %s(%u, %u, %u, %u)\n", __FILE__, __LINE__, __func__, vglGetFuncName(l->func), (unsigned)(*(uint8_t *)(l->args)), (unsigned)(*(uint8_t *)(&l->args[1])), (unsigned)(*(uint8_t *)(&l->args[2])), (unsigned)(*(uint8_t *)(&l->args[3])));
+ #endif
+ 			f_u8_u8_u8_u8 = l->func;
+ 			f_u8_u8_u8_u8(*(uint8_t *)(l->args), *(uint8_t *)(&l->args[1]), *(uint8_t *)(&l->args[2]), *(uint8_t *)(&l->args[3]));
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index ea40a95..a4570b0 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -106,6 +106,9 @@ GLboolean _glReadPixels_gpu(GLint x, GLint y, GLsizei width, GLsizei height, GLe
+ 	
+ 	void *dst;
+ 	if (active_read_fb) {
++		if (!active_read_fb->tex || !active_read_fb->data) {
++			return GL_FALSE;
++		}
+ 		SceGxmTransferFormat src_fmt = tex_format_to_transfer(active_read_fb->format);
+ 		if (src_fmt == 0xFFFFFFFF) {
+ 			return GL_FALSE;
+@@ -607,10 +610,15 @@ void glGetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment, GLe
+ void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *data) {
+ 	THREAD_SAFE()
+ 
+-	// 0057: the CPU reads linear rows; a tiled colour surface (vglTexMakeTiledTarget) is not one: nothing is read
+-	if (active_read_fb && active_read_fb->tex && sceGxmTextureGetType(&active_read_fb->tex->gxm_tex) == SCE_GXM_TEXTURE_TILED) {
+-		vgl_tiled_read_refused++;
+-		return;
++	if (active_read_fb) {
++		if (!active_read_fb->tex || !active_read_fb->data) {
++			return;
++		}
++		// 0057: the CPU reads linear rows; a tiled colour surface (vglTexMakeTiledTarget) is not one: nothing is read
++		if (sceGxmTextureGetType(&active_read_fb->tex->gxm_tex) == SCE_GXM_TEXTURE_TILED) {
++			vgl_tiled_read_refused++;
++			return;
++		}
+ 	}
+ 
+ 	/*
+@@ -831,9 +839,14 @@ void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format
+ void vglReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *data) {
+ 	THREAD_SAFE()
+ 
+-	if (active_read_fb && active_read_fb->tex && sceGxmTextureGetType(&active_read_fb->tex->gxm_tex) == SCE_GXM_TEXTURE_TILED) { // 0057
+-		vgl_tiled_read_refused++;
+-		return;
++	if (active_read_fb) {
++		if (!active_read_fb->tex || !active_read_fb->data) {
++			return;
++		}
++		if (sceGxmTextureGetType(&active_read_fb->tex->gxm_tex) == SCE_GXM_TEXTURE_TILED) { // 0057
++			vgl_tiled_read_refused++;
++			return;
++		}
+ 	}
+ 
+ 	GLboolean res = _glReadPixels_gpu(x, y, width, height, format, type, data, GL_TRUE);
+@@ -855,9 +868,16 @@ void glBlitNamedFramebuffer(GLuint readFramebuffer, GLuint drawFramebuffer, GLin
+ 	case GL_COLOR_BUFFER_BIT:
+ 		break;
+ 	default:
++		active_write_fb = real_write_fb;
+ 		SET_GL_ERROR_WITH_VALUE(GL_INVALID_OPERATION, mask)
+ 	}
+ 
++	framebuffer *read_fb = (framebuffer *)readFramebuffer;
++	if (readFramebuffer && !read_fb->tex) {
++		active_write_fb = real_write_fb;
++		return;
++	}
++
+ 	if (!scene_reset()) { // 1.2: no scene could be started: the blit is skipped
+ 		active_write_fb = real_write_fb;
+ 		return;
+@@ -883,7 +903,6 @@ void glBlitNamedFramebuffer(GLuint readFramebuffer, GLuint drawFramebuffer, GLin
+ 	sceGxmSetFragmentProgram(gxm_context, vgl_msaa_fp(1, is_fbo_float));
+ 	
+ 	// Set fragment texture to read framebuffer bound color attachment
+-	framebuffer *read_fb = (framebuffer *)readFramebuffer;
+ 	SceGxmTexture *tex = readFramebuffer ? &read_fb->tex->gxm_tex : &gxm_color_surfaces[display_read_mode == GL_BACK ? gxm_back_buffer_index : gxm_front_buffer_index].backgroundTex;
+ 	if (filter == GL_LINEAR) {
+ 		vglSetTexMagFilter(tex, SCE_GXM_TEXTURE_FILTER_LINEAR);
+diff --git a/source/gxm.c b/source/gxm.c
+index 93cb4a0..1097464 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -468,7 +468,7 @@ typedef struct {
+ } vgl_rtp_slot;
+ static vgl_rtp_slot vgl_rtp[VGL_RTP_SLOTS];
+ static volatile int vgl_rtp_lock = 0;
+-static uint32_t vgl_rtp_max_count = 0, vgl_rtp_max_kib = 0;
++static volatile uint32_t vgl_rtp_max_count = 0, vgl_rtp_max_kib = 0, vgl_rtp_any = 0;
+ static uint32_t vgl_rtp_stat[6] = {0, 0, 0, 0, 0, 0}; // hits, creates (missed or not pooled), kept, let go (over the cap or off), kept now, KiB kept now
+ #define VGL_RTP_LOCK() while (__sync_lock_test_and_set(&vgl_rtp_lock, 1)) { sceKernelDelayThread(100); } /* yield: a higher-priority spinner must let a lower-priority holder run (fix16) */
+ #define VGL_RTP_UNLOCK() __sync_lock_release(&vgl_rtp_lock)
+@@ -478,7 +478,7 @@ void vglSetRenderTargetPool(uint32_t count, uint32_t kib) {
+ 	SceGxmRenderTarget *gone[VGL_RTP_SLOTS];
+ 	int n = 0;
+ 	VGL_RTP_LOCK()
+-	vgl_rtp_max_count = count > VGL_RTP_SLOTS ? VGL_RTP_SLOTS : count;
++	__atomic_store_n(&vgl_rtp_max_count, count > VGL_RTP_SLOTS ? VGL_RTP_SLOTS : count, __ATOMIC_RELEASE);
+ 	vgl_rtp_max_kib = kib;
+ 	if (!vgl_rtp_max_count) {
+ 		for (int i = 0; i < VGL_RTP_SLOTS; i++)
+@@ -489,18 +489,32 @@ void vglSetRenderTargetPool(uint32_t count, uint32_t kib) {
+ 		vgl_rtp_stat[3] += n;
+ 		vgl_rtp_stat[4] = 0;
+ 		vgl_rtp_stat[5] = 0;
++	} else {
++		for (int i = 0; i < VGL_RTP_SLOTS && (vgl_rtp_stat[4] > vgl_rtp_max_count || (vgl_rtp_max_kib && vgl_rtp_stat[5] > vgl_rtp_max_kib)); i++)
++			if (vgl_rtp[i].state == 2) {
++				gone[n++] = vgl_rtp[i].rt;
++				vgl_rtp[i].state = 0;
++				vgl_rtp_stat[3]++;
++				vgl_rtp_stat[4]--;
++				vgl_rtp_stat[5] -= vgl_rtp[i].kib;
++			}
+ 	}
+ 	VGL_RTP_UNLOCK();
+ 	for (int i = 0; i < n; i++)
+ 		sceGxmDestroyRenderTarget(gone[i]);
+ }
+ void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now) {
+-	if (hits) *hits = vgl_rtp_stat[0];
+-	if (creates) *creates = vgl_rtp_stat[1];
+-	if (kept) *kept = vgl_rtp_stat[2];
+-	if (let_go) *let_go = vgl_rtp_stat[3];
+-	if (kept_now) *kept_now = vgl_rtp_stat[4];
+-	if (kib_now) *kib_now = vgl_rtp_stat[5];
++	uint32_t s[6];
++	VGL_RTP_LOCK()
++	for (int i = 0; i < 6; i++)
++		s[i] = vgl_rtp_stat[i];
++	VGL_RTP_UNLOCK();
++	if (hits) *hits = s[0];
++	if (creates) *creates = s[1];
++	if (kept) *kept = s[2];
++	if (let_go) *let_go = s[3];
++	if (kept_now) *kept_now = s[4];
++	if (kib_now) *kib_now = s[5];
+ }
+ 
+ // 0064: the collector's figures since the last call (the three maxima are of the time since the last call and are cleared): jobs and destroys so far, the longest job, the longest single
+@@ -517,7 +531,7 @@ void vglGetGcJobStats(uint32_t *jobs, uint32_t *destroys, uint32_t *job_max_us,
+ 
+ // a framebuffer object's render target: a kept one of the same shape, else a new one (tracked so that the collector can keep it when it is let go)
+ static int setup_fbo_render_target_ms(SceGxmRenderTarget **rt, int w, int h, int refs, SceGxmMultisampleMode mode) {
+-	if (!vgl_rtp_max_count)
++	if (!__atomic_load_n(&vgl_rtp_max_count, __ATOMIC_ACQUIRE))
+ 		return setup_render_target_ms(rt, w, h, refs, mode);
+ 	VGL_RTP_LOCK()
+ 	for (int i = 0; i < VGL_RTP_SLOTS; i++) {
+@@ -557,6 +571,7 @@ static int setup_fbo_render_target_ms(SceGxmRenderTarget **rt, int w, int h, int
+ 			vgl_rtp[i].mode = mode;
+ 			vgl_rtp[i].kib = drv ? (drv + 1023) / 1024 : 1;
+ 			vgl_rtp[i].state = 1;
++			__atomic_store_n(&vgl_rtp_any, 1, __ATOMIC_RELEASE);
+ 			break;
+ 		}
+ 	VGL_RTP_UNLOCK();
+@@ -565,7 +580,7 @@ static int setup_fbo_render_target_ms(SceGxmRenderTarget **rt, int w, int h, int
+ 
+ // the garbage collector's end of a framebuffer object's render target (the GPU is done with it): kept when the pool has room, else destroyed
+ static void vgl_rtp_release(SceGxmRenderTarget *rt) {
+-	if (vgl_rtp_max_count) {
++	if (__atomic_load_n(&vgl_rtp_any, __ATOMIC_ACQUIRE)) {
+ 		VGL_RTP_LOCK()
+ 		for (int i = 0; i < VGL_RTP_SLOTS; i++) {
+ 			vgl_rtp_slot *s = &vgl_rtp[i];
+@@ -1286,8 +1301,8 @@ GLboolean vglColorLoadSkipColor(GLboolean arm, uint32_t rgba) {
+ 			p[i] = rgba; // U8U8U8U8_ABGR: red in low byte
+ 		vgl_color_skip_colors[idx] = p;
+ 	}
+-	if (!vglColorLoadSkip(GL_TRUE))
+-		return GL_FALSE;
++	vgl_color_skip_armed = GL_TRUE;
++	vgl_color_skip_fb = active_write_fb;
+ 	vgl_color_skip_cur = vgl_color_skip_colors[idx];
+ 	vgl_color_skip_need_rgba8 = GL_TRUE;
+ 	return GL_TRUE;
+@@ -1496,6 +1511,10 @@ GLboolean scene_reset(void) {
+ 			rt_applied = vgl_rt_scene_begin(active_write_fb->depthbuffer_ptr, active_write_fb->width, active_write_fb->height);
+ 			SceGxmRenderTarget *scene_rt = vgl_dual_pick(active_write_fb, vgl_framecount); // 0063 (the target of this picture's parity; ->target unless dual_rt)
+ 			scn_begin(scene_rt, 0);
++#ifndef TEXTURES_SPEEDHACK
++			if (active_write_fb->tex)
++				active_write_fb->tex->last_frame = vgl_framecount; // int28 (Carbon #2): keep FBO-written textures in 4-frame deferred GC even if never sampled yet
++#endif
+ 			if (vgl_fg_on && active_write_fb->tex)
+ 				active_write_fb->tex->fg_rt_frame = vgl_framecount + 1; // 0034
+ 			vgl_mb_scene_begin(active_write_fb->depthbuffer_ptr, rt_applied); // 1.3 MASK_BG (tests.c)
+@@ -1504,26 +1523,40 @@ GLboolean scene_reset(void) {
+ #ifdef RECYCLE_RENDERTARGETS
+ 			fbo_rt->last_frame = vgl_framecount;
+ #endif
+-			SceGxmRenderTarget *fbo_begin_rt = fbo_rt->rt;
++			SceGxmColorSurface *fbo_cs = vgl_color_skip_fbo(active_write_fb); // 0066
++			const uint32_t rt_bf0 = rt_time ? vgl_rt_now() : 0; // 0065: only the sceGxmBeginScene call below
++			int r = sceGxmBeginScene(gxm_context, 0, fbo_rt->rt,
++					NULL, NULL, NULL,
++					fbo_cs,
++					active_write_fb->depthbuffer_ptr);
++			if (r && fbo_cs != &active_write_fb->colorbuffer) { // 0066: immediate retry with untouched surface if GXM refuses
++				vgl_color_surface_refused(r, "a framebuffer object");
++				fbo_cs = &active_write_fb->colorbuffer;
++				r = sceGxmBeginScene(gxm_context, 0, fbo_rt->rt,
++					NULL, NULL, NULL,
++					fbo_cs,
++					active_write_fb->depthbuffer_ptr);
++			} else if (!r && fbo_cs != &active_write_fb->colorbuffer) {
++				vgl_color_load_skips++;
++			}
+ #else
+-			SceGxmRenderTarget *fbo_begin_rt = scene_rt;
+-#endif
+ 			SceGxmColorSurface *fbo_cs = vgl_color_skip_fbo(active_write_fb); // 0066
+ 			const uint32_t rt_bf0 = rt_time ? vgl_rt_now() : 0; // 0065: only the sceGxmBeginScene call below
+-			int r = sceGxmBeginScene(gxm_context, 0, fbo_begin_rt,
++			int r = sceGxmBeginScene(gxm_context, 0, scene_rt,
+ 					NULL, NULL, NULL,
+ 					fbo_cs,
+ 					active_write_fb->depthbuffer_ptr);
+ 			if (r && fbo_cs != &active_write_fb->colorbuffer) { // 0066: immediate retry with untouched surface if GXM refuses
+ 				vgl_color_surface_refused(r, "a framebuffer object");
+ 				fbo_cs = &active_write_fb->colorbuffer;
+-				r = sceGxmBeginScene(gxm_context, 0, fbo_begin_rt,
++				r = sceGxmBeginScene(gxm_context, 0, scene_rt,
+ 					NULL, NULL, NULL,
+ 					fbo_cs,
+ 					active_write_fb->depthbuffer_ptr);
+ 			} else if (!r && fbo_cs != &active_write_fb->colorbuffer) {
+ 				vgl_color_load_skips++;
+ 			}
++#endif
+ 			if (rt_time)
+ 				vgl_rt_begin_split(1, vgl_rt_now() - rt_bf0);
+ #ifdef LOG_ERRORS
+diff --git a/source/misc.c b/source/misc.c
+index 59b90bf..2e70bb5 100644
+--- a/source/misc.c
++++ b/source/misc.c
+@@ -708,12 +708,12 @@ static void lc_set_full_viewport(void) {
+ 	if (is_rendering_display) {
+ 		vglSetViewport(gxm_context, fullscreen_x_port, fullscreen_x_scale, fullscreen_y_port, fullscreen_y_scale, fullscreen_z_port, fullscreen_z_scale);
+ 	} else {
+-		float xs = in_use_framebuffer->width >> 1;
+-		float xp = 0 + xs;
+-		float ys = -(in_use_framebuffer->height >> 1);
+-		float yp = in_use_framebuffer->height - 0 + ys;
++		float xs = vgl_viewport_exact ? ((float)in_use_framebuffer->width * 0.5f) : (float)(in_use_framebuffer->width >> 1);
++		float xp = xs;
++		float ys = vgl_viewport_exact ? -((float)in_use_framebuffer->height * 0.5f) : (float)(-(in_use_framebuffer->height >> 1));
++		float yp = (float)in_use_framebuffer->height + ys;
+ #ifndef HAVE_UNFLIPPED_FBOS
+-		yp = in_use_framebuffer->height - yp;
++		yp = (float)in_use_framebuffer->height - yp;
+ 		ys = -ys;
+ #endif
+ 		vglSetViewport(gxm_context, xp, xs, yp, ys, z_port, z_scale);
+diff --git a/source/shared.h b/source/shared.h
+index db7cc0d..4f4c3c0 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -120,6 +120,7 @@ void vgl_glb_frame_end(void);
+ void vgl_stream_next_slice(void);
+ void vgl_stream_init(int count);
+ void vgl_stream_touch(const void *addr);
++GLboolean vgl_stream_is_cached_addr(const void *addr);
+ #define VGL_STREAM_FLUSH_IF_NEEDED() if (vgl_stream_unflushed && !vgl_stream_scene_mode) vgl_stream_flush(); // 0060: scene mode writes back at the scene submit instead
+ #define VGL_STREAM_SCENE_SUBMIT() if (vgl_stream_unflushed) { vgl_stream_scene_flushes++; vgl_stream_flush(); } // 0060: gxm.c scene_end, right before sceGxmEndScene
+ #else
+@@ -1479,6 +1480,7 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
+ 					gpu_free_texture(fb->tex);
+ 				}
+ 			}
++			fb->data = NULL;
+ 			fb->tex = NULL;
+ 			if (in_use_framebuffer == fb) dirty_framebuffer = GL_TRUE; // nxr6b: the scene running into this object has lost its colour surface: the next draw must go through scene_reset (which refuses it: no colour texture)
+ 			return;
+@@ -1505,6 +1507,7 @@ static inline __attribute__((always_inline)) void _glFramebufferTexture2D(frameb
+ 				fb->target = NULL;
+ 			}
+ 			VGL_FB_DROP_RT2(fb);
++			fb->data = NULL;
+ 			fb->tex = NULL;
+ 			return;
+ 		} else if (old_w != fb->width || old_h != fb->height) {
+diff --git a/source/tests.c b/source/tests.c
+index 61bac69..12e9802 100644
+--- a/source/tests.c
++++ b/source/tests.c
+@@ -466,8 +466,10 @@ void update_scissor_test() {
+ #else
+ 		mc_y = vgl_mk_cur->y;
+ #endif
+-		if (mc_y < 0)
++		if (mc_y < 0 || mc_y >= (int)active_h || mc_h <= 0)
+ 			mc_have = GL_FALSE;
++		else if (mc_y + mc_h > (int)active_h)
++			mc_h = (int)active_h - mc_y;
+ 	}
+ 	if (vgl_mk_cur) {
+ 		vgl_mk_cur->on = scissor_test_state ? 1 : 0;
+@@ -478,7 +480,8 @@ void update_scissor_test() {
+ 		vgl_mk_cur->y = region.y;
+ 		vgl_mk_cur->rw = region.w;
+ 		vgl_mk_cur->rh = region.h;
+-		vgl_mk_cur->gly = region.gl_y > 0 ? region.gl_y : 0;
++		// int26 (Carbon #4): if GL y was out-of-bounds (< 0 or >= active_h) or extended past active_h, invalidate FBO clip height mismatch by marking gly = -1 so next rebuild falls back to whole-target clear safely.
++		vgl_mk_cur->gly = (region.gl_y >= 0 && region.gl_y + region.h <= (int)active_h) ? region.gl_y : -1;
+ 		vgl_mk_cur->valid = 1;
+ 	}
+ 	
+diff --git a/source/textures.c b/source/textures.c
+index 506db45..921600f 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -1837,6 +1837,8 @@ void glDeleteTextures(GLsizei n, const GLuint *gl_textures) {
+ 								fb->target = NULL;
+ 							}
+ 							VGL_FB_DROP_RT2(fb); // 0063
++							vgl_color_skip_forget_fb(fb); // 0066/int31: disarm if armed FBO loses its colour texture
++							fb->data = NULL;
+ 							fb->tex = NULL;
+ 						} else {
+ 							texture_slots[i].dirty = GL_TRUE;
+@@ -2752,7 +2754,7 @@ void vglTiledStats(uint32_t *made, uint32_t *refused) {
+ 	if (refused)
+ 		*refused = vgl_tiled_read_refused;
+ }
+-void vglSetTiledTargets(GLboolean mode) { vgl_tiled_rt = mode; } // 0 off; 1 any size from 32 x 32 (storage padded to whole tiles); 2 only sizes that are whole tiles already (no padding)
++void vglSetTiledTargets(GLint mode) { vgl_tiled_rt = (uint32_t)(mode > 0 ? mode : 0); } // 0 off; 1 any size from 32 x 32 (storage padded to whole tiles); 2 only sizes that are whole tiles already (no padding)
+ GLboolean vglTexMakeTiledTarget(void) {
+ 	if (!vgl_tiled_rt)
+ 		return GL_FALSE;
+diff --git a/source/utils/wrcopy.c b/source/utils/wrcopy.c
+index 8b3b39e..2598ce0 100644
+--- a/source/utils/wrcopy.c
++++ b/source/utils/wrcopy.c
+@@ -76,7 +76,7 @@ void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n) {
+ 	const uint8_t *s = (const uint8_t *)src;
+ 	if (mode == 3) {
+ 		if (n >= 0x2000u) {
+-			if (VGL_WR_ADDR(s) < 0x81000000u && VGL_WR_ADDR(d) < 0x81000000u) {
++			if (VGL_WR_ADDR(s) < 0x81000000u && VGL_WR_ADDR(d) < 0x81000000u && n <= 0x81000000u - VGL_WR_ADDR(s) && n <= 0x81000000u - VGL_WR_ADDR(d)) {
+ 				if (sceDmacMemcpy(d, s, n) >= 0) {
+ 					vgl_wr_stat[4]++;
+ 					vgl_wr_stat[5] += n;
+@@ -162,7 +162,7 @@ void vgl_tex_copy(void *dst, const void *src, uint32_t n) {
+ 		vgl_fast_memcpy(dst, src, n);
+ 		return;
+ 	}
+-	if (n >= 0x2000u && (uint32_t)src < 0x81000000u && (uint32_t)dst < 0x81000000u) {
++	if (n >= 0x2000u && VGL_WR_ADDR(src) < 0x81000000u && VGL_WR_ADDR(dst) < 0x81000000u && n <= 0x81000000u - VGL_WR_ADDR(src) && n <= 0x81000000u - VGL_WR_ADDR(dst)) {
+ 		const uint64_t t0 = sceKernelGetProcessTimeWide();
+ 		if (sceDmacMemcpy(dst, src, n) >= 0) {
+ 			vgl_tex_stat[0]++;
+diff --git a/source/vgl.c b/source/vgl.c
+index 156a9fd..1c32eaf 100644
+--- a/source/vgl.c
++++ b/source/vgl.c
+@@ -879,6 +879,14 @@ void vgl_stream_touch(const void *addr) {
+ 	}
+ }
+ 
++// int31: true iff `addr` lives inside the active cached USER_RW stream arena slice (must be CPU-written, never sceDmacMemcpy behind ARM D-cache).
++GLboolean vgl_stream_is_cached_addr(const void *addr) {
++	if (!vgl_stream_cached || stream_mem != 0)
++		return GL_FALSE;
++	const uint8_t *a = (const uint8_t *)addr;
++	return (a >= stream_base[vgl_circular_idx] && a < stream_ptr[vgl_circular_idx]) ? GL_TRUE : GL_FALSE;
++}
++
+ // Frame end (gxm.c, before the pool index moves on): peaks, then the slice the next frame will use starts empty.
+ void vgl_glb_frame_end(void) {
+ 	if (vgl_stream_cached) {
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 61bfc83..56f969f 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1605,7 +1605,7 @@ int vglRtWaitScenesDone(uint32_t target, uint32_t timeout_us); // 0022: blocks u
+ void vglSetAnisotropicFilter(uint32_t sceFilter); // 0 off; 2 or 3: the minification filter of trilinear textures (see utils/gxm_utils.h) // the newest finished GPU frame; returns frames finished so far (0: none)
+ void vglSetAnisotropicMinSize(uint32_t texels); // Strikers 1.3 (0031): textures whose larger side is below this keep trilinear when the anisotropic filter is on (0: none excluded)
+ void vglTexAnisoOff(GLboolean off); // Strikers 1.3 wave 24 (0057): the texture on the active unit samples trilinear (GL_TRUE) or, again, with the anisotropic filter vglSetAnisotropicFilter chose (GL_FALSE); its descriptor's filter bits only
+-void vglSetTiledTargets(GLboolean mode); // Strikers 1.3 wave 24 (0057): allow vglTexMakeTiledTarget: 0 off (default), 1 any size from 32 x 32, 2 only whole-tile sizes
++void vglSetTiledTargets(GLint mode); // Strikers 1.3 wave 24 (0057): allow vglTexMakeTiledTarget: 0 off (default), 1 any size from 32 x 32, 2 only whole-tile sizes
+ GLboolean vglTexMakeTiledTarget(void); // 0057: the fresh RGBA8 render-target texture on the active unit becomes a tiled one (32 x 32 tiles, zeroed); GL_FALSE: unchanged
+ void vglTiledStats(uint32_t *made, uint32_t *refused); // 0057: tiled targets made, glReadPixels from one refused
+ GLboolean vglTexIsTiled(void); // 0057: the texture on the active unit is tiled

@@ -1,0 +1,14 @@
+# console-1.2 run s60t-d: Smooth 60 in tiers (MSC_LOCK60=1; the tiers are its default), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group f45, route worstgpu, version payload 1.3, role ab
+# tiers (Fable): as s60t-v at the heaviest GPU stadium: expect little 60, the 45 at the ladder's floor or one sticky fall to the 30; the question is time per tier and that it never flaps. Pass rule: the log has `[tier] Smooth 60 in tiers` and `[tier] 300 live pictures` lines (INVALID without). 60<->30 changes 0; no more than 2 tier changes in any 30 s; at the 45 tier `[f45]` off the pattern 0; `[speed]` 98 % or better; held scenes as in a Smooth 60 run without tiers.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1
+MSC_HEAD_STAT=1

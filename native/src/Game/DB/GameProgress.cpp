@@ -98,16 +98,25 @@ bool IsPeteyUnlocked()
 
 bool IsWastelandsUnlocked()
 {
+#ifdef NP_NATIVE
+    if (NpUnlockStadiums()) return true;   // UNLOCK ALL STADIUMS (np/unlocks.h), default off; the save is not changed
+#endif
     return IsUnlockOverrideEnabled(true) || (IsUnlockFlagSet(8) && IsUnlockFlagSet(16));
 }
 
 bool IsDumpUnlocked()
 {
+#ifdef NP_NATIVE
+    if (NpUnlockStadiums()) return true;   // UNLOCK ALL STADIUMS (np/unlocks.h), default off; the save is not changed
+#endif
     return IsUnlockOverrideEnabled(true) || (IsUnlockFlagSet(32) && IsUnlockFlagSet(64));
 }
 
 bool IsGalacticStadiumUnlocked()
 {
+#ifdef NP_NATIVE
+    if (NpUnlockStadiums()) return true;   // UNLOCK ALL STADIUMS (np/unlocks.h), default off; the save is not changed
+#endif
     return IsUnlockOverrideEnabled(true) || (IsUnlockFlagSet(128) && IsUnlockFlagSet(256));
 }
 

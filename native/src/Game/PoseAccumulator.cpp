@@ -1,11 +1,70 @@
 #include "Game/PoseAccumulator.h"
 
 #include "Game/PoseNode.h"
+#include "np/render_neon.h"
+#include "np/fpbits.h"
 #include "Game/SHierarchy.h"
 #include "NL/nlMemory.h"
 
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+// MSC_PHYS27_DIV (wave 12, phys27): the blend weight t = w / acc, acc = before + w. When nothing was accumulated before (before == 0) and w is finite,
+// acc is exactly w (0 + w) and w / w is exactly 1.0f (IEEE division is correctly rounded), so the divide (VFP vdiv: not pipelined, ~15 cycles on the A9, and
+// the result feeds the blend) is not made. Same bits as the division. =2 verify: the division is made as well, compared and used (counted; a [phys27div] line).
+// MSC_PHYS27_DIV_BREAK=1: proof mutant (every 4th skipped divide gives 1.0009765625f). The counters are plain (racy beside the pose lanes: approximate).
+extern int gNpGt18Quat;   // MSC_GT18_QUAT, NL/math.cpp
+int NpGt18QuatInit();
+
+namespace
+{
+int sP27DivMode = -1, sP27DivBreak = 0;
+// MSC_GT18_QUAT >= 1 (gt18): the three counters below were plain globals that every pose lane (and the game thread) incremented on every call (83 k calls per 60 pictures of
+// play): one cache line written by up to four cores, and the loads and stores of each call. Only the verify mode and the proof mutant read them, so with the switch on the
+// fast path touches none of them (the value returned is the same).
+inline bool NpGt18CntOff()
+{
+    return (gNpGt18Quat >= 0 ? gNpGt18Quat : NpGt18QuatInit()) != 0;   // MSC_GT18_QUAT (math.cpp)
+}
+unsigned long long sP27DivSkipped, sP27DivDone, sP27DivChecked, sP27DivWrong;
+int NpP27DivInit()
+{
+    const char* e = getenv("MSC_PHYS27_DIV");
+    sP27DivMode = (e && (e[0] == '1' || e[0] == '2')) ? e[0] - '0' : 0;
+    const char* b = getenv("MSC_PHYS27_DIV_BREAK");
+    sP27DivBreak = (b && b[0] == '1') ? 1 : 0;
+    return sP27DivMode;
+}
+inline float NpWeightT(float before, float w, float acc)
+{
+    const int m = sP27DivMode >= 0 ? sP27DivMode : NpP27DivInit();
+    if (m != 0 && before == 0.0f && fabsf(w) <= 3.0e38f)
+    {
+        if (m == 1 && sP27DivBreak == 0 && NpGt18CntOff())
+            return 1.0f;
+        float t = 1.0f;
+        sP27DivSkipped++;
+        if (sP27DivBreak == 1 && (sP27DivSkipped & 3) == 0)
+            t = 1.0009765625f;   // proof mutant
+        if (m == 2)
+        {
+            sP27DivChecked++;
+            const float d = w / acc;
+            if (memcmp(&d, &t, sizeof(float)) != 0)
+                sP27DivWrong++;
+            if ((sP27DivChecked % 400000) == 0)
+                printf("[phys27div] checked=%llu wrong=%llu\n", sP27DivChecked, sP27DivWrong);
+            return d;   // verify decides nothing: the division's value
+        }
+        return t;
+    }
+    if (!NpGt18CntOff())
+        sP27DivDone++;
+    return w / acc;
+}
+}
 
 static nlQuaternion qRotIdentity = { 0.0f, 0.0f, 0.0f, 1.0f };
 static nlVector3 v3ScaleIdentity = { 1.0f, 1.0f, 1.0f };
@@ -124,6 +183,29 @@ cPoseAccumulator& cPoseAccumulator::operator=(const cPoseAccumulator& other)
     return *this;
 }
 
+// MSC_SNAP_ONECOPY (np/snap_onecopy.h): operator= without the previous node matrices (see the header); mode 2 poisons them, mode 3 nudges a quaternion (proofs)
+void cPoseAccumulator::CopyForSnapshot(const cPoseAccumulator& other, int mode)
+{
+    m_BaseSHierarchy = other.m_BaseSHierarchy;
+    if (mode == 2 && m_PrevNodeMatrices != NULL)
+    {
+        memset(m_PrevNodeMatrices, 0xFF, other.m_nNumNodes * sizeof(nlMatrix4));
+    }
+    memcpy(m_NodeMatrices, other.m_NodeMatrices, other.m_nNumNodes * sizeof(nlMatrix4));
+    memcpy(m_pQuaternions, other.m_pQuaternions, other.m_nNumNodes * sizeof(nlQuaternion));
+    memcpy(m_rot, other.m_rot, other.m_nNumNodes * sizeof(RotAccum));
+    memcpy(m_scale, other.m_scale, other.m_nNumNodes * sizeof(ScaleAccum));
+    memcpy(m_trans, other.m_trans, other.m_nNumNodes * sizeof(TransAccum));
+    memcpy(m_cb, other.m_cb, other.m_nNumNodes * sizeof(cBuildNodeMatrixCallbackInfo));
+    memcpy(&m_MorphWeights, &other.m_MorphWeights, sizeof(MorphWeightAccum));
+    m_Scale = other.m_Scale;
+    m_bUseObject = other.m_bUseObject;
+    if (mode == 3 && m_nNumNodes > 2)
+    {
+        m_pQuaternions[2].x += 0.01f;
+    }
+}
+
 /**
  * Offset/Address/Size: 0x444 | 0x8030AE14 | size: 0x9C
  */
@@ -143,6 +225,9 @@ cPoseAccumulator::~cPoseAccumulator()
 
 static inline void PoseAccumulatorInitNodeAccumulators(cPoseAccumulator* pose)
 {
+    // (the flag store was inside the loop, one byte store a node that the compiler cannot hoist past the char stores; it is made once, when a node exists)
+    if (pose->m_BaseSHierarchy->m_nNumNodes > 0)
+        pose->m_bUseObject = false;
     for (int i = 0; i < pose->m_BaseSHierarchy->m_nNumNodes; ++i)
     {
         RotAccum& r = pose->m_rot[i];
@@ -171,7 +256,6 @@ static inline void PoseAccumulatorInitNodeAccumulators(cPoseAccumulator* pose)
             t.fAccumulatedWeight = 0.0f;
             t.bIdentity = true;
         }
-        pose->m_bUseObject = false;
     }
 }
 
@@ -212,6 +296,8 @@ void cPoseAccumulator::Pose(
  */
 void cPoseAccumulator::InitAccumulators()
 {
+    if (m_BaseSHierarchy->m_nNumNodes > 0)
+        m_bUseObject = false;
     for (int i = 0; i < m_BaseSHierarchy->m_nNumNodes; ++i)
     {
         RotAccum& r = m_rot[i];
@@ -240,7 +326,6 @@ void cPoseAccumulator::InitAccumulators()
             t.fAccumulatedWeight = 0.0f;
             t.bIdentity = true;
         }
-        m_bUseObject = false;
     }
 
     for (int k = 0; k < 20; ++k)
@@ -249,13 +334,31 @@ void cPoseAccumulator::InitAccumulators()
     }
 }
 
+void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix)
+{
+    BuildNodeMatricesImpl(pWorldMatrix, false);
+}
+
+// link shim: the two-argument form of an intermediate wave 11 header, kept so that an object compiled against it (the shared console build root keeps objects across branches) still links
+void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix, bool renderPose)
+{
+    BuildNodeMatricesImpl(pWorldMatrix, renderPose);
+}
+
+void cPoseAccumulator::BuildNodeMatricesRender(const nlMatrix4& pWorldMatrix)
+{
+    BuildNodeMatricesImpl(pWorldMatrix, true);   // MSC_RENDER_NEON: a render pose
+}
+
 /**
  * Offset/Address/Size: 0x948 | 0x8030B318 | size: 0x6B0
  */
 // Preserve the shared scalar lifetimes used to remove world scale.
 #pragma opt_lifetimes off
-void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix)
+void cPoseAccumulator::BuildNodeMatricesImpl(const nlMatrix4& pWorldMatrix, bool renderPose)
 {
+    // MSC_RENDER_NEON: only the blended snapshot poses of the drawable characters pass renderPose; the simulation's accumulators never do
+    const bool neon = renderPose && NpRenderNeon() != 0;
     float scratch0, scratch1, scratch2, scratch3, scratch4, scratch5, scratch6, scratch7, scratch8, scaledX, rightZ, rightY, rightX, forwardZ, forwardY, forwardX;
     register float fWorldScaleY, fWorldScaleX;
     float scaleUpper, scaleLower, weightEpsilon;
@@ -273,7 +376,7 @@ void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix)
     int nStackIndex = -1;
     int nScaleIndex = 0;
 
-    if (m_scale[0].bIdentity && fabsf(m_Scale - 1.0f) < 0.0001f)
+    if (m_scale[0].bIdentity && NP_FP_ABSLT(m_Scale - 1.0f, 0.0001f))
     {
         ScaleIdentityStack[0] = true;
         ScaleStack[0].x = 1.0f;
@@ -286,13 +389,28 @@ void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix)
         nlVec3Scale(ScaleStack[0], m_scale[0].s, m_Scale);
     }
 
+    const bool prefetchNodes = NpPrefetchOn(1);
+    if (prefetchNodes)
+    {
+        // the matrices of the buffer that was last written a picture ago, the first accumulators and quaternions
+        NpPrefetchLines(&m_NodeMatrices[1], 4 * sizeof(nlMatrix4), 1);
+        NpPrefetchLines(&m_pQuaternions[1], 8 * sizeof(nlQuaternion), 1);
+        NpPrefetchLines(&m_rot[0], 4 * sizeof(m_rot[0]), 0);
+        NpPrefetchLines(&m_trans[0], 4 * sizeof(m_trans[0]), 0);
+    }
     for (int i = 0; i < m_BaseSHierarchy->m_nNumNodes; ++i)
     {
+        if (prefetchNodes)
+        {
+            NpPrefetchLines(&m_NodeMatrices[i + 5], sizeof(nlMatrix4), 1);
+            NpPrefetchLines(&m_rot[i + 4], sizeof(m_rot[0]), 0);
+            NpPrefetchLines(&m_trans[i + 4], sizeof(m_trans[0]), 0);
+        }
         nlMatrix4* pLocalMatrix = &m_NodeMatrices[i + 1];
         nlQuaternion* pLocalQuaternion = &m_pQuaternions[i + 1];
         if (!m_rot[i].bIdentity)
         {
-            if (m_rot[i].quatAccumulatedWeight == 0.0f)
+            if (NP_FP_ISZERO(m_rot[i].quatAccumulatedWeight))
             {
                 fn_802B549C(*pLocalQuaternion, m_rot[i].rotAroundZ);
             }
@@ -301,11 +419,15 @@ void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix)
                 float fTotalWeight = m_rot[i].rotAroundZAccumulatedWeight
                                    + m_rot[i].quatAccumulatedWeight;
                 weightEpsilon = 0.0001f;
-                if (fabsf(fTotalWeight) > weightEpsilon)
+                if (NP_FP_ABSGT(fTotalWeight, 0.0001f))
                 {
-                    nlQuaternion quatAroundZ;
-                    fn_802B549C(quatAroundZ, m_rot[i].rotAroundZ);
-                    nlQuatNLerp(m_rot[i].q, m_rot[i].q, quatAroundZ, m_rot[i].rotAroundZAccumulatedWeight / fTotalWeight);
+                    // Every bone with no around-Z weight (t below is 0) blended a sine and cosine it then multiplied by 0: MSC_POSE_FAST skips them, same bits.
+                    if (NP_FP_NOTZERO(m_rot[i].rotAroundZAccumulatedWeight) || !NpPoseFast() || !nlQuatRenormalize(m_rot[i].q))
+                    {
+                        nlQuaternion quatAroundZ;
+                        fn_802B549C(quatAroundZ, m_rot[i].rotAroundZ);
+                        nlQuatNLerp(m_rot[i].q, m_rot[i].q, quatAroundZ, m_rot[i].rotAroundZAccumulatedWeight / fTotalWeight);
+                    }
                 }
                 *pLocalQuaternion = m_rot[i].q;
             }
@@ -338,8 +460,14 @@ void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix)
         {
             nParentIndex = ParentStack[nStackIndex];
             nScaleIndex = nStackIndex + 1;
-            nlMultQuat(m_pQuaternions[i], m_pQuaternions[nParentIndex], *pLocalQuaternion);
-            nlMultPosVectorMatrix(v3Position, pLocalMatrix->GetTranslation(), m_NodeMatrices[nParentIndex]);
+            if (neon)
+                NpRQuatMult(m_pQuaternions[i], m_pQuaternions[nParentIndex], *pLocalQuaternion);
+            else
+                nlMultQuat(m_pQuaternions[i], m_pQuaternions[nParentIndex], *pLocalQuaternion);
+            if (neon)
+                NpRMultPosVectorMatrix(v3Position, pLocalMatrix->GetTranslation(), m_NodeMatrices[nParentIndex]);
+            else
+                nlMultPosVectorMatrix(v3Position, pLocalMatrix->GetTranslation(), m_NodeMatrices[nParentIndex]);
 
             ScaleAccum& s = m_scale[i];
             if (s.bIdentity)
@@ -460,8 +588,14 @@ void cPoseAccumulator::BuildNodeMatrices(const nlMatrix4& pWorldMatrix)
             {
                 nlMatrixToQuat(qWorld, pWorldMatrix);
             }
-            nlMultQuat(m_pQuaternions[i], qWorld, *pLocalQuaternion);
-            nlMultPosVectorMatrix(v3Position, pLocalMatrix->GetTranslation(), pWorldMatrix);
+            if (neon)
+                NpRQuatMult(m_pQuaternions[i], qWorld, *pLocalQuaternion);
+            else
+                nlMultQuat(m_pQuaternions[i], qWorld, *pLocalQuaternion);
+            if (neon)
+                NpRMultPosVectorMatrix(v3Position, pLocalMatrix->GetTranslation(), pWorldMatrix);
+            else
+                nlMultPosVectorMatrix(v3Position, pLocalMatrix->GetTranslation(), pWorldMatrix);
         }
 
         nlQuatToMatrix(m_NodeMatrices[i], m_pQuaternions[i], false);
@@ -510,7 +644,7 @@ void cPoseAccumulator::BuildNodeMatricesFromQuaternions(
     int nStackIndex = 0;
 
     if (m_scale[0].bIdentity
-        && fabsf(m_Scale - 1.0f) < 0.0001f)
+        && NP_FP_ABSLT(m_Scale - 1.0f, 0.0001f))
     {
         ScaleIdentityStack[0] = true;
     }
@@ -596,7 +730,7 @@ void cPoseAccumulator::BlendRot(int nNode, const nlQuaternion* pRot,
     float fWeight, bool bMirror)
 {
     RotAccum* e = m_rot + nNode;
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
@@ -629,11 +763,25 @@ void cPoseAccumulator::BlendRot(int nNode, const nlQuaternion* pRot,
         pRot = &qtemp;
     }
 
+    const float before = e->quatAccumulatedWeight;
     e->quatAccumulatedWeight += fWeight;
-    float t = fWeight / e->quatAccumulatedWeight;
+    float t = NpWeightT(before, fWeight, e->quatAccumulatedWeight);
     nlQuaternion tmp = e->q;
     nlQuatNLerp(e->q, tmp, *pRot, t);
     e = m_rot + nNode;
+    e->bIdentity = false;
+}
+
+// BlendRot (no mirror) for the blended render pose of DrawableCharacter::Blend: the same accumulation, the nlerp through the MSC_RENDER_NEON wrapper
+void cPoseAccumulator::BlendRotRender(int nNode, const nlQuaternion* pRot, float fWeight)
+{
+    RotAccum* e = m_rot + nNode;
+    if (NP_FP_ABSLT(fWeight, 0.001f))
+        return;
+    e->quatAccumulatedWeight += fWeight;
+    float t = fWeight / e->quatAccumulatedWeight;
+    nlQuaternion tmp = e->q;
+    NpRQuatNLerp(e->q, tmp, *pRot, t);
     e->bIdentity = false;
 }
 
@@ -643,13 +791,14 @@ void cPoseAccumulator::BlendRot(int nNode, const nlQuaternion* pRot,
 void cPoseAccumulator::BlendRotAroundZ(
     int nNode, unsigned short rot, float fWeight)
 {
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
     RotAccum* e = m_rot + nNode;
+    const float before = e->rotAroundZAccumulatedWeight;
     e->rotAroundZAccumulatedWeight += fWeight;
-    float t = fWeight / e->rotAroundZAccumulatedWeight;
+    float t = NpWeightT(before, fWeight, e->rotAroundZAccumulatedWeight);
     int delta = (short)(rot - e->rotAroundZ);
     delta = (short)(t * delta);
     e->rotAroundZ = e->rotAroundZ + delta;
@@ -663,13 +812,14 @@ void cPoseAccumulator::BlendRotAroundZ(
 void cPoseAccumulator::BlendScale(int nNode, const nlVector3* pScale,
     float fWeight, bool bMirror)
 {
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
     ScaleAccum* e = m_scale + nNode;
+    const float before = e->fAccumulatedWeight;
     e->fAccumulatedWeight += fWeight;
-    float t = fWeight / e->fAccumulatedWeight;
+    float t = NpWeightT(before, fWeight, e->fAccumulatedWeight);
     float inv = 1.0f - t;
     e->s.x = inv * e->s.x + t * pScale->x;
     e->s.y = inv * e->s.y + t * pScale->y;
@@ -683,7 +833,7 @@ void cPoseAccumulator::BlendScale(int nNode, const nlVector3* pScale,
 void cPoseAccumulator::BlendTrans(int nNode, const nlVector3* pTrans,
     float fWeight, bool bMirror)
 {
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
@@ -710,8 +860,9 @@ void cPoseAccumulator::BlendTrans(int nNode, const nlVector3* pTrans,
     }
 
     TransAccum* e = m_trans + nNode;
+    const float before = e->fAccumulatedWeight;
     e->fAccumulatedWeight += fWeight;
-    float t = fWeight / e->fAccumulatedWeight;
+    float t = NpWeightT(before, fWeight, e->fAccumulatedWeight);
     float inv = 1.0f - t;
     e->t.x = inv * e->t.x + t * pTrans->x;
     e->t.y = inv * e->t.y + t * pTrans->y;
@@ -725,16 +876,17 @@ void cPoseAccumulator::BlendTrans(int nNode, const nlVector3* pTrans,
  */
 void cPoseAccumulator::BlendRotIdentity(int nNode, float fWeight)
 {
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
     RotAccum* a = &m_rot[nNode];
+    const float before = a->quatAccumulatedWeight;
     a->quatAccumulatedWeight += fWeight;
     if (a->bIdentity)
         return;
 
-    const float t = fWeight / a->quatAccumulatedWeight;
+    const float t = NpWeightT(before, fWeight, a->quatAccumulatedWeight);
     nlQuaternion tmp = a->q;
     nlQuatNLerp(a->q, tmp, qRotIdentity, t);
 }
@@ -744,16 +896,17 @@ void cPoseAccumulator::BlendRotIdentity(int nNode, float fWeight)
  */
 void cPoseAccumulator::BlendScaleIdentity(int nNode, float fWeight)
 {
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
     ScaleAccum* e = &m_scale[nNode];
+    const float before = e->fAccumulatedWeight;
     e->fAccumulatedWeight += fWeight;
     if (e->bIdentity)
         return;
 
-    float f3 = fWeight / e->fAccumulatedWeight;
+    float f3 = NpWeightT(before, fWeight, e->fAccumulatedWeight);
     float f2 = 1.0f - f3;
     e->s.x = f2 * e->s.x + f3 * v3ScaleIdentity.x;
     e->s.y = f2 * e->s.y + f3 * v3ScaleIdentity.y;
@@ -766,7 +919,7 @@ void cPoseAccumulator::BlendScaleIdentity(int nNode, float fWeight)
 void cPoseAccumulator::MultiplyScale(
     int nNode, const nlVector3* pScale, float fWeight)
 {
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
@@ -788,16 +941,17 @@ void cPoseAccumulator::MultiplyScale(
  */
 void cPoseAccumulator::BlendTransIdentity(int nNode, float fWeight)
 {
-    bool bNegligibleWeight = fabsf(fWeight) < 0.001f;
+    bool bNegligibleWeight = NP_FP_ABSLT(fWeight, 0.001f);
     if (bNegligibleWeight)
         return;
 
     TransAccum* e = &m_trans[nNode];
+    const float before = e->fAccumulatedWeight;
     e->fAccumulatedWeight += fWeight;
     if (e->bIdentity)
         return;
 
-    const float f3 = fWeight / e->fAccumulatedWeight;
+    const float f3 = NpWeightT(before, fWeight, e->fAccumulatedWeight);
     const float f2 = 1.0f - f3;
     e->t.x = f2 * e->t.x + f3 * v3TransIdentity.x;
     e->t.y = f2 * e->t.y + f3 * v3TransIdentity.y;

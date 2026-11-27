@@ -25,8 +25,8 @@ def git(directory, *args):
                                    cwd=directory, env=env, text=True).strip()
 
 
-def load_lock(path):
-    rows = json.loads(path.read_text())["dependencies"]
+def load_lock(path, key="dependencies"):
+    rows = json.loads(path.read_text())[key]
     seen = set()
     if not rows:
         raise ValueError("Dependency lock is empty")

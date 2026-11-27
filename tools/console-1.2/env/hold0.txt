@@ -1,0 +1,13 @@
+# console-1.2 run hold0: AUTO frame rate: the ladder hold off (a GPU-limited miss at 60 drops to 30 at once)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group pacing, route tour, version payload 1.3, role ab
+# MSC_FPS_LADDERHOLD=1 is on in the default: a GPU-limited miss at 60 waits (8 s at most) while the dynamic resolution still has picture steps to give, and a CPU-limited one drops to 30 at once. This is the A/B on the match route, the busiest of the three: compare the share of the match at 60 (the [fps] auto lines and the frame-timing windows), the number of 60 <-> 30 switches, the late-frame count and the picture level (the [vgx] dynamic resolution lines) with d1/d2.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FPS_LADDERHOLD=0

@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 20:30:00 -0500
+Subject: [PATCH] gem2b: vglSetUniHistCap (MSC_VGX_VGL_UNIHIST_CAP, default 0 = off): the uniform copy history of patch 0046 only for default uniform buffers of at most N bytes
+
+---
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index b3dab62b9..361f71662 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -395,6 +395,7 @@ GLboolean vgl_frag_memo = GL_FALSE, vgl_uni_reuse = GL_FALSE; // vglSetDrawCache
+ #define VGL_UNI_HIST_BUDGET (1536u * 1024u) // bytes of main memory all programs' history copies may take together; a program past it gets none (it copies as before)
+ uint32_t vgl_uni_stat[7]; // copies made, their bytes; last-copy reuses, their bytes; history reuses, their bytes; (uni_reuse 3, verify) reuses whose ring copy differs from the buffer now (since start; vglGlbGetStats)
+ static uint32_t vgl_uni_hist_bytes;
++uint32_t vgl_uni_hist_cap = 0; // gem2b (vglSetUniHistCap): 0 every buffer size keeps a history (be26); else only the buffers of at most this many bytes (the big skin / palette buffers rarely repeat: their misses cost a scan and a copy for nothing)
+ static const vglDirectLayout *direct_layout = NULL; // vglDrawElementsDirect: the layout of the draw in progress
+ static vbo *direct_vbo = NULL;
+ static uint32_t direct_base = 0;
+@@ -553,7 +554,7 @@ static inline __attribute__((always_inline)) int uni_hist_eq(const void *a, cons
+ }
+ // be26 (uni_reuse 2): the ring address of a copy of this program's stage `st` (0 vertex, 1 fragment) made in this generation that holds exactly the n bytes at buf, or NULL.
+ static inline __attribute__((always_inline)) void *uni_hist_find(program *p, int st, const void *buf, uint32_t n) {
+-	if (!p->unif_hdata[st] || p->unif_hsize[st] != n)
++	if (!p->unif_hdata[st] || p->unif_hsize[st] != n || (vgl_uni_hist_cap && n > vgl_uni_hist_cap))
+ 		return NULL;
+ 	for (int i = 0; i < VGL_UNI_HIST; i++) {
+ 		if (p->unif_hgen[st][i] == vgl_unif_gen && uni_hist_eq(p->unif_hdata[st] + (size_t)i * n, buf, n))
+@@ -563,6 +564,8 @@ static inline __attribute__((always_inline)) void *uni_hist_find(program *p, int
+ }
+ // be26: remember a copy just made (ring address `ring`, contents buf). The slots are taken round robin; the memory is made at the first copy while the budget lasts.
+ static inline __attribute__((always_inline)) void uni_hist_add(program *p, int st, void *ring, const void *buf, uint32_t n) {
++	if (vgl_uni_hist_cap && n > vgl_uni_hist_cap)
++		return;
+ 	if (!p->unif_hdata[st]) {
+ 		if (n == 0 || n > 65536 || vgl_uni_hist_bytes + n * VGL_UNI_HIST > VGL_UNI_HIST_BUDGET)
+ 			return;
+diff --git a/source/vgl.c b/source/vgl.c
+index 8a8123340..0fb4ef12c 100644
+--- a/source/vgl.c
++++ b/source/vgl.c
+@@ -924,6 +924,12 @@ void vglSetSkipRedundantSets(GLboolean enable) {
+ 	vgl_gxc_enabled = enable;
+ }
+ 
++// gem2b: with vglSetDrawCaches uni_reuse 2, keep the uniform copy history only for buffers of at most `bytes` bytes (0: all, as be26 made it)
++void vglSetUniHistCap(uint32_t bytes) {
++	extern uint32_t vgl_uni_hist_cap;
++	vgl_uni_hist_cap = bytes;
++}
++
+ void vglGlbGetStats(vglGlbStats *s) {
+ 	vgl_memset(s, 0, sizeof(*s));
+ 	s->version = 4;
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 7688d8879..a57f44748 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1133,6 +1133,7 @@ GLboolean vglDrawElementsDirect(GLenum mode, GLsizei count, uint32_t idx_offset,
+ // copy in this scene name that copy again. Neither changes what is drawn.
+ #define VGL_HAS_DRAW_CACHES 1
+ void vglSetDrawCaches(GLboolean frag_memo, GLboolean uni_reuse); // uni_reuse 2 (be26): also an older copy of the scene that holds the same bytes (VGL_UNI_HIST per program and stage)
++void vglSetUniHistCap(uint32_t bytes); // gem2b: the uni_reuse 2 history only for default uniform buffers of at most this many bytes (0: all)
+ void vglSetViewportExact(GLboolean exact); // 1.3 glViewport halves as floats (patch 0025; default GL_TRUE)
+ void vglSetMaskKeep(GLboolean on); // 1.3 MASK_KEEP (patch 0026; default GL_FALSE): a scissor mask rebuild the depth/stencil surface already holds is not drawn
+ void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept); // 1.3 MASK_KEEP: mask rebuilds drawn and not drawn so far (counted with the switch off too)

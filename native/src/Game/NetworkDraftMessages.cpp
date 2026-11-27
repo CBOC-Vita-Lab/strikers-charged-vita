@@ -6,6 +6,13 @@ void NetMessageDraft::Serialize(NetworkMessageSerializer* serializer)
     serializer->Transfer(&mMachineCount, sizeof(mMachineCount));
     serializer->Transfer(&mChooseSides, sizeof(mChooseSides));
     serializer->Transfer(&mPlayerSides, sizeof(mPlayerSides));
+    if (serializer->mDirection == NETWORK_SERIALIZE_READ && (mMachineCount < 0 || mMachineCount > 8))
+    {
+        // np (STR-145): mEntries holds 8 machines; a count the wire made up would write past it
+        serializer->mFailed = true;
+        mMachineCount = 0;
+        return;
+    }
     NetworkDraftMachineInfo* entry = mEntries;
     for (int i = 0; i < mMachineCount; ++entry, ++i)
     {

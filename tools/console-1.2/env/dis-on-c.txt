@@ -1,0 +1,13 @@
+# console-1.2 run dis-on-c: Discarded frames paced fast (MSC_DISCARD_FAST=1, the default), The Dump, run c
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r15, route worstgpu, version payload 1.3, role ab
+# stall10 A/B, three a side alternating (dis-on, dis-off, dis-off, dis-on, dis-on, dis-off): the [discard] lines (time spent in discarded frames at the stadium load, estimate 3520 -> 1545 ms) and the [hitch] gaps at the load; against each other, not against worstgpu1.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HITCH_LINES=1500

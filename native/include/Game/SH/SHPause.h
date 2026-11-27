@@ -31,6 +31,7 @@ public:
         TT_CHALLENGE_PREVIEW = 5,
         TT_STATISTICS = 6,
         TT_CONTROLLER_MAP = 7,
+        TT_VITA_SETTINGS = 8,   // np
     };
 
     PauseMenuScene();

@@ -1,0 +1,15 @@
+# console-1.2 run heldsize0: Held scenes at the full 960x544 (no smaller held size)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# held30: MSC_HELD_SIZE_DOWN=1 is on in the Vita plan (console 18 Nov: the 30 path drew walk-outs and cut-scenes at 784x544 1x and measured 35 ms where the Quality hold at 960x544 measured 47): walk-outs, goal cut-scenes and replays are drawn at 864x488 (the Quality floor) with one sample. This run is the A/B off side (960x544): run it with fb-tour and fb-crep on Vice and compare [head] class cut-scene p50, [lane] gpu, and the [hold] 'picture size' lines (with it on: one change to 864x488 at the walk-out, one back at kick-off; any 'NEW: made in this frame' at the cut is a remake: stop and say). The picture is 19 % smaller in pixels in those scenes only.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HELD_SIZE_DOWN=0
+MSC_HEAD_STAT=1

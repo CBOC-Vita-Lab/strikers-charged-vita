@@ -14,6 +14,7 @@
 # Heavy: a game link is one heavy job (tools/heavy.sh). The platform layer is 14 small files.
 include $(dir $(lastword $(MAKEFILE_LIST)))vita.mk
 comma := ,
+include $(dir $(lastword $(MAKEFILE_LIST)))vita_require.mk
 
 NAME   ?= np
 OUT    ?= $(NP_VBUILD)
@@ -37,13 +38,15 @@ NP_LTOLINK := $(if $(filter 1,$(NP_LTO)),-flto=2 -fuse-linker-plugin,)
 # the command line: -emulated-tls (VitaSDK's libraries expect __emutls_get_address; without it TLS access becomes __aeabi_read_tp, which does
 # not exist: a link error), -O2. A cache directory makes a link that the heavy queue cut at its time limit resume with the modules it finished.
 LLVMGOLD ?= /usr/lib/llvm-18/lib/LLVMgold.so
+# (1.2: the optimisation level of the LTO code generation, 2 as before; 3 for an A/B: the make variable NP_LTO_OLEVEL of np/Makefile)
+NP_LTO_OLEVEL ?= 2
 ifneq ($(NP_CLANG_LTO),)
 NP_LTOLINK := -Wl$(comma)-plugin$(comma)$(LLVMGOLD) $(if $(filter thin,$(NP_CLANG_LTO)),-Wl$(comma)-plugin-opt=thinlto) -Wl$(comma)-plugin-opt=jobs=2 \
-              -Wl$(comma)-plugin-opt=-emulated-tls -Wl$(comma)-plugin-opt=O2 -Wl$(comma)-plugin-opt=cache-dir=$(NP_VBUILD)/../ltocache
+              -Wl$(comma)-plugin-opt=-emulated-tls -Wl$(comma)-plugin-opt=O$(NP_LTO_OLEVEL) -Wl$(comma)-plugin-opt=cache-dir=$(NP_VBUILD)/../ltocache
 endif
 CXXFLAGS := -std=gnu++17 $(NP_OPT) $(NP_VARCH) $(NP_VDEFS) $(NP_VCXXSYS) $(INC) -w -Wno-psabi -MMD
-PLATSRC := np_vita_main np_vita_process np_vita_platform np_vita_input np_vita_audio np_vita_crash np_jobs np_framesend \
-           vita_log vita_silent_stdio vita_console vita_lab vita_memreport vita_threads vita_probe vita_plan np_vita_selftest np_vita_wire np_vita_settings np_settings np_fps_probe vita_bootscreen
+PLATSRC := np_vita_main np_vita_process np_vita_platform np_vita_input np_vita_audio np_vita_crash np_jobs np_port_parallel np_framesend \
+           vita_log np_stdio_lock np_fasttls np_vita_envlock vita_silent_stdio vita_console vita_lab vita_memreport vita_threads vita_probe vita_plan np_vita_selftest np_vita_wire np_vita_settings np_settings np_settings_guard np_settings_guard_vita np_change_guard np_change_guard_vita np_startup_check np_brand_art np_fps_probe vita_bootscreen vita_bootart vita_livearea_art vita_sampler
 HARNSRC := np_harness np_vclock np_harness_game np_wrap_swap
 POBJS := $(patsubst %,$(D)/obj/%.o,$(PLATSRC)) $(patsubst %,$(D)/obj/h_%.o,$(HARNSRC)) $(D)/obj/vita_pad.o
 objs: $(POBJS)
@@ -56,6 +59,8 @@ $(D)/obj/%.o: $(NPV_DIR)/src/%.cpp
 	$(NP_VCXX) $(CXXFLAGS) -c $< -o $@
 # np_fps_probe.cpp reads the policy's probe interface (the repository's include/np/fps.h); no other platform file needs the game's include directory
 $(D)/obj/np_fps_probe.o: CXXFLAGS += -I$(NPV_DIR)/../../include
+# vita_livearea_art.cpp uses stbi_zlib_compress from renderer/third_party/stb_image_write.h for 8-bit indexed PNG encoding
+$(D)/obj/vita_livearea_art.o: CXXFLAGS += -I$(NPV_DIR)/../../../renderer/third_party
 $(D)/obj/vita_pad.o: $(NPV_DIR)/src/vita_pad.c
 	@mkdir -p $(dir $@)
 	$(NP_VCC) $(NP_VARCH) $(NP_OPT) -c $< -o $@
@@ -68,7 +73,9 @@ $(D)/obj/smoke_game.o: $(NPV_DIR)/tests/smoke_game.cpp
 # It used to name vita_pad.o a second time: "multiple definition of msc_segment_pad", so a link that needed the pad could not be made.)
 # -q keeps the relocations vita-elf-create needs; ld inserts long-branch veneers where a BL crosses +-16 MiB.
 NP_GC ?= 1   # --gc-sections: the game objects are compiled with -ffunction-sections -fdata-sections (np/Makefile OPT)
-LINKCMD = $(NP_VLINK) $(NP_VARCH_ISA) $(NP_OPT) $(NP_LTOLINK) $(NP_PGOLINK) $(if $(filter 1,$(NP_GC)),-Wl$(comma)--gc-sections) -Wl,-u,sceUserMainThreadStackSize -Wl,-u,sceUserMainThreadName -Wl,-q -Wl,-Map,$(basename $@).map $(NP_VWRAPS) $(NP_EXTRA_WRAPS) -o $@
+# NP_ORDER=<file> (default empty = the shipped link, unchanged): a GNU ld --section-ordering-file (binutils >= 2.43) from tools/vita_hot_order.py: the listed
+# .text.* input sections (profile-hot functions, hottest first) are placed first in .text. ld ignores a name that matches nothing: run `vita_hot_order.py check`.
+LINKCMD = $(NP_VLINK) $(NP_VARCH_ISA) $(NP_OPT) $(NP_LTOLINK) $(NP_PGOLINK) $(if $(filter 1,$(NP_GC)),-Wl$(comma)--gc-sections) $(if $(NP_ORDER),-Wl$(comma)--section-ordering-file$(comma)$(NP_ORDER)) -Wl,-u,sceUserMainThreadStackSize -Wl,-u,sceUserMainThreadName -Wl,-u,pthread_cancel $(NP_REQUIRE) -Wl,-q -Wl,-Map,$(basename $@).map $(NP_VWRAPS) $(NP_EXTRA_WRAPS) -o $@
 GAPOK = $(NPV_DIR)/tools/seg_gap.sh $@
 define LINKRULE
 	@echo "linking $@"; $(LINKCMD) $(1) $(NP_VLIBS) $(NP_PGOLIBS) 2> $@.err || { grep -o "undefined reference to .*" $@.err | sort | uniq -c | sort -rn | head -40; tail -5 $@.err; false; }
@@ -77,11 +84,43 @@ define LINKRULE
 	@echo "$@: $$(grep -c 'wchar_t yet the output' $@.err) ABI-attribute warnings (2-byte wchar_t / 4-byte enums against the SDK's libc: expected, see np/docs/vita.md 1.1) filtered out of this log; full list in $@.err"
 endef
 
-$(D)/np-smoke.elf: $(POBJS) $(D)/obj/smoke_game.o $(NP_VBUILD)/stubs/libkubridge_stub_weak.a
-	$(call LINKRULE,$(POBJS) $(D)/obj/smoke_game.o)
+# (defined before the link rules: prerequisites are expanded when make reads the rule; the extract rule is further down)
+NP_FORVM_DIR := $(NP_VBUILD)/stubs/forvm
+NP_FORVM_OBJS := $(NP_FORVM_DIR)/SceThreadmgr_Suspend.wo $(NP_FORVM_DIR)/SceThreadmgr_Resume.wo $(NP_FORVM_DIR)/SceLibKernel_GetContext.wo
+$(D)/np-smoke.elf: $(POBJS) $(D)/obj/smoke_game.o $(NP_VBUILD)/stubs/libkubridge_stub_weak.a $(NP_FORVM_OBJS)
+	$(call LINKRULE,$(NP_FORVM_OBJS) $(POBJS) $(D)/obj/smoke_game.o)
 # (the archives are prerequisites too: a rebuilt libnpsdk.a / libvgx must relink; found when a fixed SDK object did not reach the image)
-$(D)/mscharged-np.elf: $(POBJS) $(NP_GAME_OBJS) $(filter %.a,$(NP_GAME_LIBS)) $(NP_VBUILD)/stubs/libkubridge_stub_weak.a
-	$(call LINKRULE,$(POBJS) $(NP_GAME_OBJS) $(NP_GAME_LIBS))
+# the game image (not the smoke one, which has no renderer) must define what the game reaches through weak references: vita_require.mk
+# Lockstep guard (wave 9): np_fps.cpp NpSlipDelta (MSC_SLIP / MSC_SLIP_STEPS) leaves the game clock untouched while NpLanActive() says a LAN or online session
+# exists, through a WEAK reference (the host harness has no np_lan). A weak reference that resolves to nothing reads as "no session", and the slip would then run in
+# a lockstep match. The game image therefore requires the definition (a missing one fails the link, LTO cannot drop it), and the check after the link confirms
+# the symbol is defined in the image. (Plain object of sdk/net, so it is not on vita_require.mk, which lists archive members.)
+NP_LOCKSTEP_REQUIRE := -Wl,--require-defined=_Z11NpLanActivev
+# Hardware JPEG (wave 9, galcheck): thp_jpeg_vita.cpp reaches the four sceJpeg MJpeg calls through weak declarations and -lSceJpeg_stub_weak is an archive, so in image r7
+# they stayed null and MSC_THP_HWJPEG (console default 1) never opened the codec. Requiring them pulls the stub members in; the stub library stays WEAK, so the import is a
+# weak one and a firmware without SceJpeg still loads the game. MSC_THP_HWJPEG=0 is the off switch; every failure of the codec falls back to software (thp_native.cpp).
+# kuKernelFlushCaches / kuKernelRegisterExceptionHandler are deliberately NOT required: kubridge is an optional plug-in (tools/check-image-weak.py says why).
+NP_JPEG_SYMS := sceJpegInitMJpegWithParam sceJpegFinishMJpeg sceJpegGetOutputInfo sceJpegDecodeMJpegYCbCr
+NP_JPEG_REQUIRE := $(addprefix -Wl$(comma)--require-defined=,$(NP_JPEG_SYMS))
+$(D)/mscharged-np.elf: NP_REQUIRE := $(NP_REQUIRE_FLAGS) $(NP_LOCKSTEP_REQUIRE) $(NP_JPEG_REQUIRE)
+$(D)/mscharged-np.elf: $(POBJS) $(NP_GAME_OBJS) $(filter %.a,$(NP_GAME_LIBS)) $(NP_VBUILD)/stubs/libkubridge_stub_weak.a $(NP_FORVM_OBJS)
+	$(call LINKRULE,$(NP_FORVM_OBJS) $(POBJS) $(NP_GAME_OBJS) $(NP_GAME_LIBS))
+	@$(VBIN)/arm-vita-eabi-nm $@ | grep -qE ' [TtW] _Z11NpLanActivev$$' || { echo "LOCKSTEP GUARD: NpLanActive is not defined in $@: MSC_SLIP would run in LAN / online play"; rm -f $@; false; }
+	@echo "lockstep guard: NpLanActive defined in the image (NpSlipDelta's session check is live)"
+	@for f in $(NP_JPEG_SYMS); do $(VBIN)/arm-vita-eabi-nm $@ | grep -qE " [TtW] $$f$$" || { echo "JPEG GUARD: $$f is not defined in $@: hardware JPEG would be dead"; rm -f $@; false; }; done
+	@echo "jpeg guard: the four sceJpeg calls are defined in the image (hardware JPEG can open)"
+	@for f in __env_lock __env_unlock; do h=$$($(VBIN)/arm-vita-eabi-nm -S $@ | awk -v f=$$f '$$4==f {print $$2}'); n=$$(( 0x$${h:-0} )); [ "$$n" -gt 8 ] || { echo "ENV LOCK GUARD: $$f is $$n bytes in $@ (the SDK's empty one is 2): getenv/setenv would not lock"; $(RM) $@; false; }; done
+	@echo "env lock guard: __env_lock and __env_unlock are ours (np_vita_envlock.cpp), not libc's empty ones"
+# diag13 (MSC_SAMPLER): sceKernelSuspendThreadForVM / ResumeThreadForVM / GetThreadContextForVM must not be able to stop the eboot from loading on a firmware or setup that lacks them. The
+# VitaSDK has weak stub archives, but taking whole archives weak would turn every ThreadMgr / LibKernel import weak, so the three .wo members are extracted and given to the linker as LOOSE
+# objects at the front of the object list (an archive on the library line comes too late: the strong ThreadMgr stub is scanned earlier and wins). Every other import stays strong. The sampler
+# reads the three through weak declarations and checks them (vita_sampler.cpp).
+$(NP_FORVM_OBJS):
+	@mkdir -p $(NP_FORVM_DIR); T=$$(mktemp -d); L=$(VBIN)/../arm-vita-eabi/lib; \
+	$(VBIN)/arm-vita-eabi-ar x --output=$$T $$L/libSceKernelThreadMgr_stub_weak.a SceKernelThreadMgr_SceThreadmgr_sceKernelSuspendThreadForVM.wo SceKernelThreadMgr_SceThreadmgr_sceKernelResumeThreadForVM.wo && \
+	$(VBIN)/arm-vita-eabi-ar x --output=$$T $$L/libSceLibKernel_stub_weak.a SceLibKernel_SceLibKernel_sceKernelGetThreadContextForVM.wo && \
+	cp $$T/SceKernelThreadMgr_SceThreadmgr_sceKernelSuspendThreadForVM.wo $(NP_FORVM_DIR)/SceThreadmgr_Suspend.wo && cp $$T/SceKernelThreadMgr_SceThreadmgr_sceKernelResumeThreadForVM.wo $(NP_FORVM_DIR)/SceThreadmgr_Resume.wo && \
+	cp $$T/SceLibKernel_SceLibKernel_sceKernelGetThreadContextForVM.wo $(NP_FORVM_DIR)/SceLibKernel_GetContext.wo; rm -rf $$T
 $(NP_VBUILD)/stubs/libkubridge_stub_weak.a:
 	VBIN=$(VBIN) $(NPV_DIR)/tools/gen_kubridge_stubs.sh $(NP_VBUILD)/stubs
 
@@ -135,20 +174,22 @@ ifneq ($(NP_SEED_DIR),)
 SEED_LIST := $(shell cd $(NP_SEED_DIR) && find . -type f | sed 's|^\./||' | sort)
 VPK_FILES += $(foreach f,$(SEED_LIST),-a $(NP_SEED_DIR)/$(f)=seed/$(f))
 endif
-# NP_SHADER_SEED=<dir>: a copy of a finished session's ux0:data/mscharged/shadercache (v3k / console: <key>/v2/{v,f}/<HH>/<hash>.gxp and vgx_shaderlist.bin), packed as
+# NP_SHADER_SEED=<dir>: a copy of a finished session's ux0:data/mscharged/shadercache (v3k / console: <key>/v3/{v,f}/<HH>/<hash>.gxp (v2 with shorter names for a session of the vitaGL before 9a14d17) and vgx_shaderlist.bin), packed as
 # app0:shadercache/... where the renderer's Vita host looks for compiled shaders that come with the package (vgx vita/vgx_host_vita.cpp "a cache that came with the package"):
 # the game then does not compile its shaders on the console while the owner plays. A seed made by another vitaGL / shader generator has another <key> and is simply not found.
 # W5 BOOT: by default the compiled shaders go into the package as ONE file per key, shadercache/<key>.pack (tools/make_shader_pack.py), which
 # vgx reads once at start-up (MSC_VITA_SEED=pack): no copy at an install or an update, no file opened per shader (about 7 ms each on a
 # console's memory card), and the installer writes one file instead of 761 files and 380 folders. NP_SEED_LOOSE=1 packs the folder as it is
 # (the copy / link modes).
+# NP_SHADER_BASE=<dir> (1.2): a folder of <key>.pack files (the previous release's shadercache/, unzipped) whose shaders are kept; NP_SHADER_SEED then needs only the
+# shaders that are new (see docs/BUILDING.md, "Making the shader seed").
 ifneq ($(NP_SHADER_SEED),)
 ifeq ($(NP_SEED_LOOSE),1)
 SSEED_LIST := $(shell cd $(NP_SHADER_SEED) && find . -type f | sed 's|^\./||' | sort)
 VPK_FILES += $(foreach f,$(SSEED_LIST),-a $(NP_SHADER_SEED)/$(f)=shadercache/$(f))
 else
 SPACK_DIR := $(D)/shaderpack
-SPACK_LIST := $(shell python3 -I $(NPV_DIR)/tools/make_shader_pack.py $(NP_SHADER_SEED) $(SPACK_DIR) >&2 && cd $(SPACK_DIR) && ls)
+SPACK_LIST := $(shell python3 -I $(NPV_DIR)/tools/make_shader_pack.py $(if $(NP_SHADER_BASE),--base $(NP_SHADER_BASE)) $(NP_SHADER_SEED) $(SPACK_DIR) >&2 && cd $(SPACK_DIR) && ls)
 VPK_FILES += $(foreach f,$(SPACK_LIST),-a $(SPACK_DIR)/$(f)=shadercache/$(f))
 endif
 endif

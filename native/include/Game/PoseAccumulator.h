@@ -67,6 +67,7 @@ public:
     cPoseAccumulator(const cPoseAccumulator& other);
     ~cPoseAccumulator();
     cPoseAccumulator& operator=(const cPoseAccumulator& other);
+    void CopyForSnapshot(const cPoseAccumulator& other, int mode);
     template <typename T>
     void Replay(T& frame);
     void SetScale(float fScale)
@@ -79,9 +80,13 @@ public:
         return m_BaseSHierarchy;
     }
     void BuildNodeMatrices(const nlMatrix4& pWorldMatrix);
+    void BuildNodeMatrices(const nlMatrix4& pWorldMatrix, bool renderPose);   // link shim (see PoseAccumulator.cpp)
+    void BuildNodeMatricesRender(const nlMatrix4& pWorldMatrix);   // MSC_RENDER_NEON: for the drawable characters' blended poses
+    void BuildNodeMatricesImpl(const nlMatrix4& pWorldMatrix, bool renderPose);
     void BuildNodeMatricesFromQuaternions(const nlMatrix4& pWorldMatrix);
     void BlendRot(int nNode, const nlQuaternion* pRot, float fWeight,
         bool bMirror);
+    void BlendRotRender(int nNode, const nlQuaternion* pRot, float fWeight);
     void BlendRotAroundZ(int nNode, unsigned short rot, float fWeight);
     void BlendScale(int nNode, const nlVector3* pScale, float fWeight,
         bool bMirror);

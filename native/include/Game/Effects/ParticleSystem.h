@@ -93,6 +93,9 @@ public:
     /* 0xC4 */ unsigned short m_aFacing;
     /* 0xC6 */ bool m_bVisible;
     /* 0xC7 */ unsigned char mPadding0C7;
+#ifdef NP_NATIVE
+    nlVector3 m_vDrawOffset;   // wave 7 (MSC_FX_ATTACH): see EmissionController::m_vDrawOffset; copied from the controller at each update, added at draw only
+#endif
 
     static int m_NumInstances;
     static bool (*m_Callback)(ParticleSystem*, GLView*,
@@ -102,6 +105,32 @@ public:
     static bool m_AllowInFront;
     static float m_fAspect;
 }; // size: 0xC8
+
+#ifdef NP_NATIVE
+#include <stdlib.h>
+// MSC_FX_ATTACH=1 (default off in the code, the Vita plan turns it on): the draw-side offset above. MSC_FX_ATTACH_TAPER_MS (default 40): the age at which a particle no longer follows it.
+static inline int NpFxAttachOn()
+{
+    static int v = -1;
+    if (v < 0)
+    {
+        const char* e = getenv("MSC_FX_ATTACH");
+        v = (e && *e && atoi(e) != 0) ? 1 : 0;
+    }
+    return v;
+}
+static inline float NpFxAttachTaper()
+{
+    static float v = -1.0f;
+    if (v < 0.0f)
+    {
+        const char* e = getenv("MSC_FX_ATTACH_TAPER_MS");
+        v = (e && *e) ? (float)atof(e) * 0.001f : 0.04f;
+        if (v < 0.001f) v = 0.001f;
+    }
+    return v;
+}
+#endif
 
 bool fxParticleStartup(int maxNumParticles);
 bool fxParticleShutdown();

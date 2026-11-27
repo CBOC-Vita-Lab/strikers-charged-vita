@@ -1,0 +1,14 @@
+# console-1.2 run ctrect0: Crowd trim cell set by rectangle off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_VGX_CROWDTRIM_RECT is on in the 1.3 plan (febe24: exact on the host over 2800 pictures, verify 0 differ). This run is the A/B: off. Against the tour: the back-end thread's ms in the walk-out, cut-scenes and replays (CtScan was about 15 % of the host back-end instructions there).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_CROWDTRIM_RECT=0

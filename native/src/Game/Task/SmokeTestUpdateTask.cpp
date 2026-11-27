@@ -102,7 +102,7 @@ void SmokeTestLogGraphValue(const char* name, const char* units, float value)
     }
 
     nlStrNCat(output, output, "\n", sizeof(output));
-    SmokeTestLog(output);
+    SmokeTestLog("%s", output);
 }
 
 char sSmokeLogPathString[] = "..\\smokelog.txt";

@@ -20,6 +20,7 @@ void NetMessageGameStart::Serialize(NetworkMessageSerializer* serializer)
     serializer->Transfer(&mTournamentSetup[1], sizeof(mTournamentSetup) - 1);
     serializer->Transfer(&mSecondGameRandomSeed, sizeof(mSecondGameRandomSeed));
     serializer->Transfer(&mThirdGameRandomSeed, sizeof(mThirdGameRandomSeed));
+    serializer->Transfer(&mInputDelay, sizeof(mInputDelay));
 }
 
 int NetMessageGameStart::GetType()

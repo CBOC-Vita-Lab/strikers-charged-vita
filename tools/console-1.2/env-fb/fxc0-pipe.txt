@@ -1,0 +1,14 @@
+# console-1.2 run fxc0-pipe: Effects compositor off (the control), Pipeline Central
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route cpipe, version payload 1.3, role ab
+# census19: the control side for fxtight-c0-pipe (tight polygons only match the picture with the compositor off).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was cpipe.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-pipe.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FX_COMPOSITE=0

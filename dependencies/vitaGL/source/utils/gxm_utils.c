@@ -22,6 +22,7 @@
  */
 #include "../shared.h"
 #include <stdio.h>
+#include <stddef.h>
 
 #define XXH_INLINE_ALL
 #define XXH_memcpy vgl_fast_memcpy
@@ -81,12 +82,37 @@ static inline __attribute__((always_inline)) void vertex_program_cache_profile_e
 }
 #endif
 
+static inline __attribute__((always_inline)) GLboolean vgl_fast_memcmp(const void *a, const void *b, uint32_t size) {
+	switch (size) {
+	case 4: {
+		uint32_t x, y;
+		__builtin_memcpy(&x, a, 4);
+		__builtin_memcpy(&y, b, 4);
+		return x == y;
+	}
+	case 8: {
+		uint32_t x[2], y[2];
+		__builtin_memcpy(x, a, 8);
+		__builtin_memcpy(y, b, 8);
+		return x[0] == y[0] && x[1] == y[1];
+	}
+	case 16: {
+		uint32_t x[4], y[4];
+		__builtin_memcpy(x, a, 16);
+		__builtin_memcpy(y, b, 16);
+		return x[0] == y[0] && x[1] == y[1] && x[2] == y[2] && x[3] == y[3];
+	}
+	default:
+		return sceClibMemcmp(a, b, size) == 0;
+	}
+}
+
 static inline __attribute__((always_inline)) GLboolean vertex_program_is_mru(const vertex_program_cache_mru_entry *entry, SceGxmShaderPatcherId id, const SceGxmVertexAttribute *attr, uint32_t attr_num, const SceGxmVertexStream *stream, uint32_t stream_num) {
 	if (entry->id != id || entry->attr_num != attr_num || entry->stream_num != stream_num) {
 		return GL_FALSE;
-	} else if (attr_num && sceClibMemcmp(entry->attr, attr, attr_num * sizeof(SceGxmVertexAttribute))) {
+	} else if (attr_num && !vgl_fast_memcmp(entry->attr, attr, attr_num * sizeof(SceGxmVertexAttribute))) {
 		return GL_FALSE;
-	} else if (stream_num && sceClibMemcmp(entry->stream, stream, stream_num * sizeof(SceGxmVertexStream))) {
+	} else if (stream_num && !vgl_fast_memcmp(entry->stream, stream, stream_num * sizeof(SceGxmVertexStream))) {
 		return GL_FALSE;
 	}
 	return GL_TRUE;
@@ -242,11 +268,14 @@ void vglSetupUniformCircularPool() {
 // GLB: ring statistics (the size is the compile-time constant UNIFORM_CIRCULAR_POOL_SIZE, 8 MiB in our builds: Makefile.vitadeps VGL_UNIFORM_RING_MIB)
 uint32_t vgl_glb_ring_frame_bytes = 0, vgl_glb_ring_frame_peak = 0, vgl_glb_ring_peak = 0, vgl_glb_ring_wraps = 0, vgl_glb_ring_size = UNIFORM_CIRCULAR_POOL_SIZE;
 
+uint32_t vgl_unif_gen = 1; // 1.3 vglSetDrawCaches: moves at every scene end (gxm.c) and every wrap of the ring
+
 void *vglReserveUniformCircularPoolBuffer(uint32_t size) {
 	void *r;
 	vgl_glb_ring_frame_bytes += size;
 	if (unif_idx + size >= UNIFORM_CIRCULAR_POOL_SIZE) {
 		vgl_glb_ring_wraps++;
+		vgl_unif_gen++;
 #ifndef SKIP_ERROR_HANDLING
 		static uint32_t last_frame_swap = 0;
 		if (last_frame_swap == vgl_framecount) {
@@ -274,6 +303,45 @@ void *vglReserveUniformCircularPoolBuffer(uint32_t size) {
 		src += componentCount; \
 		dst += align_size; \
 	}
+
+// Keep common vec2/vec4 copies as direct fast paths, then inline other small sizes.
+static inline __attribute__((always_inline)) void vgl_uniform_copy(void *dst, const void *src, size_t size) {
+	if (size == 8) {
+		__builtin_memcpy(dst, src, 8);
+	} else if (size == 16) {
+		__builtin_memcpy(dst, src, 16);
+	} else if (size <= 16) {
+		switch (size) {
+		case 1:
+			__builtin_memcpy(dst, src, 1);
+			break;
+		case 2:
+			__builtin_memcpy(dst, src, 2);
+			break;
+		case 3:
+			__builtin_memcpy(dst, src, 3);
+			break;
+		case 4:
+			__builtin_memcpy(dst, src, 4);
+			break;
+		case 6:
+			__builtin_memcpy(dst, src, 6);
+			break;
+		case 12:
+			__builtin_memcpy(dst, src, 12);
+			break;
+		default:
+			vgl_fast_memcpy(dst, src, size);
+			break;
+		}
+	} else if (size == 24) {
+		__builtin_memcpy(dst, src, 24);
+	} else if (size == 48) {
+		__builtin_memcpy(dst, src, 48);
+	} else {
+		vgl_fast_memcpy(dst, src, size);
+	}
+}
 
 void vglSetUniformData(uint8_t *uniformBuffer, const SceGxmParameterType t, const int offset, const uint32_t count, const uint32_t componentCount, const void *sourceData, const SceGxmParameterType input_type) {
 	if (offset != 0) {
@@ -306,29 +374,29 @@ void vglSetUniformData(uint8_t *uniformBuffer, const SceGxmParameterType t, cons
 			case SCE_GXM_PARAMETER_TYPE_F32:
 			case SCE_GXM_PARAMETER_TYPE_U32:
 			case SCE_GXM_PARAMETER_TYPE_S32:
-				vgl_fast_memcpy(uniformBuffer, sourceData, componentCount * 4);
+				vgl_uniform_copy(uniformBuffer, sourceData, componentCount * 4);
 				break;
 			case SCE_GXM_PARAMETER_TYPE_F16:
 			case SCE_GXM_PARAMETER_TYPE_U16:
 			case SCE_GXM_PARAMETER_TYPE_S16:
-				vgl_fast_memcpy(uniformBuffer, sourceData, componentCount * 2);
+				vgl_uniform_copy(uniformBuffer, sourceData, componentCount * 2);
 				break;
 			case SCE_GXM_PARAMETER_TYPE_U8:
 			case SCE_GXM_PARAMETER_TYPE_S8:
 			default:
-				vgl_fast_memcpy(uniformBuffer, sourceData, componentCount);
+				vgl_uniform_copy(uniformBuffer, sourceData, componentCount);
 				break;
 			}
 		} else {
 			switch (t) {
 			case SCE_GXM_PARAMETER_TYPE_F32:
 				if (componentCount == 2 || componentCount == 4) {
-					vgl_fast_memcpy(uniformBuffer, sourceData, componentCount * 4 * count);
+					vgl_uniform_copy(uniformBuffer, sourceData, componentCount * 4 * count);
 				} else {
 					uint32_t align_size = componentCount == 1 ? 8 : 16;
 					float *src = (float *)sourceData;
 					for (int i = 0; i < count; i++) {
-						vgl_fast_memcpy(uniformBuffer, src, componentCount * 4);
+						vgl_uniform_copy(uniformBuffer, src, componentCount * 4);
 						src += componentCount;
 						uniformBuffer += align_size;
 					}
@@ -336,11 +404,11 @@ void vglSetUniformData(uint8_t *uniformBuffer, const SceGxmParameterType t, cons
 				break;
 			case SCE_GXM_PARAMETER_TYPE_F16:
 				if (componentCount == 4) {
-					vgl_fast_memcpy(uniformBuffer, sourceData, componentCount * 2 * count);
+					vgl_uniform_copy(uniformBuffer, sourceData, componentCount * 2 * count);
 				} else {
 					uint16_t *src = (uint16_t *)sourceData;
 					for (int i = 0; i < count; i++) {
-						vgl_fast_memcpy(uniformBuffer, src, componentCount * 2);
+						vgl_uniform_copy(uniformBuffer, src, componentCount * 2);
 						src += componentCount;
 						uniformBuffer += 8;
 					}
@@ -348,17 +416,17 @@ void vglSetUniformData(uint8_t *uniformBuffer, const SceGxmParameterType t, cons
 				break;
 			case SCE_GXM_PARAMETER_TYPE_U32:
 			case SCE_GXM_PARAMETER_TYPE_S32:
-				vgl_fast_memcpy(uniformBuffer, sourceData, componentCount * 4 * count);
+				vgl_uniform_copy(uniformBuffer, sourceData, componentCount * 4 * count);
 				break;
 			case SCE_GXM_PARAMETER_TYPE_U16:
 			case SCE_GXM_PARAMETER_TYPE_S16:
 				if (componentCount == 2 || componentCount == 4) {
-					vgl_fast_memcpy(uniformBuffer, sourceData, componentCount * 2 * count);
+					vgl_uniform_copy(uniformBuffer, sourceData, componentCount * 2 * count);
 				} else {
 					uint32_t align_size = componentCount == 1 ? 4 : 8;
 					uint16_t *src = (uint16_t *)sourceData;
 					for (int i = 0; i < count; i++) {
-						vgl_fast_memcpy(uniformBuffer, src, componentCount * 2);
+						vgl_uniform_copy(uniformBuffer, src, componentCount * 2);
 						src += componentCount;
 						uniformBuffer += align_size;
 					}
@@ -367,12 +435,12 @@ void vglSetUniformData(uint8_t *uniformBuffer, const SceGxmParameterType t, cons
 			case SCE_GXM_PARAMETER_TYPE_U8:
 			case SCE_GXM_PARAMETER_TYPE_S8:
 				if (componentCount == 4) {
-					vgl_fast_memcpy(uniformBuffer, sourceData, componentCount * count);
+					vgl_uniform_copy(uniformBuffer, sourceData, componentCount * count);
 				} else {
 					
 					uint8_t *src = (uint8_t *)sourceData;
 					for (int i = 0; i < count; i++) {
-						vgl_fast_memcpy(uniformBuffer, src, componentCount);
+						vgl_uniform_copy(uniformBuffer, src, componentCount);
 						src += componentCount;
 						uniformBuffer += 4;
 					}

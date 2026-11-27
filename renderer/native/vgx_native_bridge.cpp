@@ -5,6 +5,7 @@
 #include "vgx_native.h"
 
 #include "vgx_guestmem.h"
+#include "vgx_ext.h"
 #include "vgx_hle.h"
 #include "vgx_rec.h"
 
@@ -69,6 +70,7 @@ void vgxn_set_array(int attr, const void* p, uint32_t size, uint32_t stride, int
 }
 
 void vgxn_ext(uint32_t kind, const uint32_t* words, uint32_t n) { rec::Ext(kind, words, n); }
+int vgxn_fg_marks(void) { return FgMarksOn() ? 1 : 0; }
 
 uint32_t vgxn_begin_raw(int prim, int fmt, uint32_t count) {
     const uint32_t bytes = hle::ShadowStreamVertexBytes(fmt);

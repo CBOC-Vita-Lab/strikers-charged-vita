@@ -5,8 +5,8 @@
 #   $B/armhf/np-armhf-full-<variant>   libraries in $B/armhf/gx-<variant>   map in $B/armhf/np-armhf-full-<variant>.map
 # Resumable (make is incremental): call it again after a timeout.
 V=${1:?variant}; VGX=${2:?vgx source dir}; shift 2
-SRC=${SRC:-/home/claude/msc/npw/W5GXD}
-B=${GXDB:-/home/claude/msc/build/np/W5GXD/b}
+SRC=${SRC:-/work/msc/npw/W5GXD}
+B=${GXDB:-/work/msc/build/np/W5GXD/b}
 L=$(dirname $B)
 # A queued job that is no longer needed (the W5 integration build covers it) is made a no-op without killing it: touch $L/skip-<variant>
 if [ -e $L/skip-$V ]; then echo "== build $V skipped ($L/skip-$V)"; exit 0; fi
@@ -15,7 +15,7 @@ if [ -e $L/skip-$V ]; then echo "== build $V skipped ($L/skip-$V)"; exit 0; fi
 if [ -f $L/late-$V ]; then
   read BR NV < $L/late-$V
   bash $SRC/tools/gxd/snap.sh $V $BR > /dev/null || exit 1
-  echo "$BR $(git -C ${DEV:-/home/claude/msc/npw/W5GXD-vgx-dev} rev-parse --short $BR)" > $L/late-$V.done
+  echo "$BR $(git -C ${DEV:-/work/msc/npw/W5GXD-vgx-dev} rev-parse --short $BR)" > $L/late-$V.done
   echo $NV > $L/variant-$V; rm -f $L/late-$V
 fi
 [ -f $L/variant-$V ] && V=$(cat $L/variant-$V)

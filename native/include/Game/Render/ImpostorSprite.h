@@ -63,6 +63,13 @@ public:
     /* 0x84 */ int mNumRenderSlots;
     /* 0x88 */ u8 mUseIntensityAlpha;
     /* 0x89 */ u8 m_pad89[3];
-}; // size: 0x8C
+    // MSC_CROWD_SIZED (np/crowdcut.h): render-side bookkeeping, not part of the game's object
+    float mNearPx;       // height in screen lines of the nearest figure that shows this sprite, as last measured
+    int mNearFrame;      // sized-picture counter at that measure; -1: never
+    int mSizedStep;      // the size class in force (1 near, 2 middling, 3 far); 0: none yet
+    bool mSeenLast;      // it had figures to show at the previous sized picture
+    bool mBlankCaptured; // MSC_CROWD_BLANKSKIP: the last capture was the empty one (clear + copy with nothing drawn), so the picture is the blank one
+    bool mViewPrepared;  // MSC_POSE_JOBS: a job made this picture's view matrices (UpdateSprites takes the flag down)
+}; // size: 0x8C + the bookkeeping
 
 #endif // GAME_RENDER_IMPOSTOR_SPRITE_H

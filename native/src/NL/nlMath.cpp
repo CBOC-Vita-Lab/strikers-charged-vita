@@ -3,6 +3,11 @@
 #include "types.h"
 
 #include <math.h>
+#include <string.h>
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
 
 struct nlATanCoefficients
 {
@@ -48,6 +53,20 @@ float nlSqrt(float x, bool accurate)
 
 float nlRecipSqrt(float x, bool accurate)
 {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    // MSC_POSE_FAST: every normalised bone takes three VFP compares, each with its FPSCR transfer, to learn x is a positive normal float (x > 0, then the two range tests in
+    // __frsqrte). One integer test says the same; the estimate and the steps are the ones below.
+    unsigned bits;
+    memcpy(&bits, &x, 4);
+    if (bits - 0x00800000u < 0x7F000000u && NpPoseFast())
+    {
+        float y = vget_lane_f32(vrsqrte_f32(vdup_n_f32(x)), 0);
+        y = 0.5f * y * (3.0f - y * y * x);
+        y = 0.5f * y * (3.0f - y * y * x);
+        y = 0.5f * y * (3.0f - y * y * x);
+        return y;
+    }
+#endif
     float zero = 0.0f;
     if (x > zero)
     {

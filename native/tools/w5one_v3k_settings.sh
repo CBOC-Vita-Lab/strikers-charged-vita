@@ -7,7 +7,7 @@
 #   tools/heavy.sh -t 590 tools/w5one_v3k_settings.sh <vpk> <title id>      Result: build/np/W5ONE/v3k-settings/{A,B}/ (log.txt, np-player.txt, shots, stdout.head)
 VPK=${1:?vpk}; TID=${2:-MSCN00003}
 cd "$(dirname "$0")/.."
-B=/home/claude/msc/build/np/W5ONE; R=$B/v3k-settings; rm -rf $R; mkdir -p $R/A $R/B $R/files
+B=/work/msc/build/np/W5ONE; R=$B/v3k-settings; rm -rf $R; mkdir -p $R/A $R/B $R/files
 cat > $R/np-player.txt <<EOT
 # test np-player.txt of the Settings screen run (a comment and two variables of the tester's own: they must survive)
 MSC_WATCH=1

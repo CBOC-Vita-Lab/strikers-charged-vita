@@ -1,0 +1,17 @@
+# console-1.2 run ab-scn-rep: In-run A/B in the replay route: held-scene governor and the fill governor's hold (MSC_HELD_GOV 0 against 1, MSC_FX_GOV_HOLD 0 against 60)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group s30, route replay, version payload 1.3, role ab
+# scenes30: only the windows inside a replay or cut-scene can show these keys (the governor acts only there), so read `n` and expect few usable b windows; the pairs scn-on-v / scn-gov0-v are the main answer. Read: abpair.py --inrun LOG (key, metric, diff b minus a, 90 % interval, verdict); the `[ab] flip` lines show the clock of each flip, `[lane] ... ab KEY=v a wN` the windows. Replaces the pairs listed in w8/ab15.md and w8/ab15b.md.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_AB=MSC_HELD_GOV,0,1;MSC_FX_GOV_HOLD,0,60
+MSC_AB_START_S=20
+MSC_AB_REPEATS=4
+MSC_HEAD_STAT=1

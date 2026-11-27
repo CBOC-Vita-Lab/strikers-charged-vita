@@ -3,11 +3,11 @@
 # NP_DET_NAN=1 run of the same script with the same data dir state), print where.
 #   heavy.sh -t 600 tools/det/gdbnan.sh <addr> [frames]    (fresh data dir, nav_fulltime, the layout of matrix.sh's `nan` config)
 ADDR=${1:?addr}; FR=${2:-6700}; PORT=${PORT:-23457}
-B=/home/claude/msc/build/np; NP=/home/claude/msc/np; EXE=${EXE:-$B/B3a/armhf/np-armhf-full}
+B=/work/msc/build/np; NP=/work/msc/np; EXE=${EXE:-$B/B3a/armhf/np-armhf-full}
 D=$B/B3/data-gdbnan; rm -rf $D; mkdir -p $D; cd $D
-export NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$NP/tools/nav/nav_fulltime.txt MSC_MAX_FRAMES=$FR MSC_VIRTUAL_TIME=1 \
+export NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$NP/tools/nav/nav_fulltime.txt MSC_MAX_FRAMES=$FR MSC_VIRTUAL_TIME=1 \
        MSC_FRAME_LOG=100000 MSC_WATCH_EVERY=100000 MSC_STATE_HASH=30 NP_DET_NAN=1 MSC_WATCH=1 MSC_NO_CRASH_HANDLER=1
-timeout -k 3 ${TMO:-500} /home/claude/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf -g $PORT $EXE > $B/B3/gdbnan-run.log 2>&1 &
+timeout -k 3 ${TMO:-500} /work/research/qemu-full/build/qemu-arm -cpu cortex-a9 -L /usr/arm-linux-gnueabihf -g $PORT $EXE > $B/B3/gdbnan-run.log 2>&1 &
 Q=$!
 sleep 2
 timeout -k 3 ${TMO:-500} gdb-multiarch -batch -nx -ex "set pagination off" -ex "set architecture arm" -ex "file $EXE" -ex "target remote :$PORT" \

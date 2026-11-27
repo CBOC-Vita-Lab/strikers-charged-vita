@@ -10,6 +10,8 @@
 #include "NL/nlMath.h"
 #ifdef NP_NATIVE
 #include "np/framesend.h"
+#include <stdio.h>
+#include <stdlib.h>
 #endif
 
 typedef float Mtx[3][4];
@@ -46,8 +48,43 @@ void DepthOfFieldManager::Initialize()
 {
 }
 
+#ifdef NP_NATIVE
+// NP: MSC_DOF (STR-081). The game's depth of field is a chain of three parts: the UnsortedPerspective layer copies the frame drawn so far to the
+// half-size "dof" texture (every frame, whether the effect is on or not: Update below), the cut-scene script (NIS_TRIGGER_TYPE_DEPTH_OF_FIELD,
+// NisPlayer) switches the effect on, and a full-screen quad textured with the half-size copy is drawn at the depth of the focal plane, so that
+// only what lies behind it is replaced by the soft picture.
+//   MSC_DOF=1 (default)  as the game
+//   MSC_DOF=0            the effect never turns on: no quad, and the capture that only the quad would read is not made either (the whole chain,
+//                        not just the last quad). The cut-scenes show the sharp picture. A drawing option: the simulation does not see it.
+//   MSC_DOF=lazy         the same picture as the game, but the capture is made only on frames that draw the quad (a capture that no quad reads
+//                        is dead work: the copy and the quad are both made in the same frame, nothing reads last frame's)
+static int DepthOfFieldMode()
+{
+    static int mode = -1;
+    if (mode < 0)
+    {
+        const char* e = getenv("MSC_DOF");
+        mode = 1;
+        if (e && *e)
+        {
+            if (e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) mode = 0;
+            else if (e[0] == 'l') mode = 2;
+            fprintf(stderr, "[dof] MSC_DOF=%s: depth of field %s\n", e, mode == 0 ? "OFF" : mode == 2 ? "as the game, capture only when drawn" : "as the game");
+        }
+    }
+    return mode;
+}
+#endif
+
 void DepthOfFieldManager::TurnOn()
 {
+#ifdef NP_NATIVE
+    if (DepthOfFieldMode() == 0)
+    {
+        m_bOn = false;
+        return;
+    }
+#endif
     m_bOn = true;
 }
 
@@ -78,7 +115,26 @@ void DepthOfFieldManager::Update()
     nlVector3 position;
 
     GLView* view = GetLayerView(eCLV_UnsortedPerspective);
+#ifdef NP_NATIVE
+    // (the capture is made when the frame will draw the quad; MSC_DOF=1 keeps the game's capture on every frame)
+    const bool quadFollows = m_bOn && lbl_806DCDE0;
+    const int dofMode = DepthOfFieldMode();
+    view->m_Target = (dofMode == 1 || (dofMode == 2 && quadFollows)) ? 8 : 0;
+    {
+        // MSC_DOF_LOG=1: one line each time the effect turns on or off (the cut-scenes that use it)
+        static const bool log = getenv("MSC_DOF_LOG") != 0;
+        static bool last = false;
+        static unsigned frame = 0;
+        ++frame;
+        if (log && quadFollows != last)
+        {
+            fprintf(stderr, "[dof] frame %u: depth of field %s (focal distance %.2f)\n", frame, quadFollows ? "ON" : "off", m_fDistanceFromCamera);
+            last = quadFollows;
+        }
+    }
+#else
     view->m_Target = 8;
+#endif
 
     if (!m_bOn)
     {

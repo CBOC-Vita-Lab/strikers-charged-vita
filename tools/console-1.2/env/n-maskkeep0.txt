@@ -1,0 +1,16 @@
+# console-1.2 run n-maskkeep0: Scissor mask redrawn at every scene again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group draw, route nlava, version payload 1.3, role nab
+# MSC_VGX_VGL_MASKKEEP (on, vitaGL 0026, the Galaxy port's r84 MASK_KEEP): a scissor-mask rebuild the depth surface already holds is not drawn (two full-target quads each). Same picture by construction; check it anyway by eye (any part of the picture missing or drawn past its frame means the mask did not survive and the switch must go off). Against d1: GPU busy ms ([rt]/[gpu] lines) and the '[rt] ... scissor mask rebuilds' line (drawn and kept per frame).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/nlava.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_CAMERA_ZOOM=1
+MSC_CAMERA_AUTO=0
+MSC_VGX_VGL_MASKKEEP=0

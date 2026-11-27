@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 20:11:45 -0400
+Subject: [PATCH] 1.2: glUseProgram guard for upstream 9bf3e3f (a relinked or deleted program in use marks its uniforms dirty)
+
+
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 7fdcbb2..611617c 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -332,6 +332,14 @@ shark_opt compiler_opts = SHARK_OPT_FAST;
+ 
+ GLuint cur_program = 0; // Current in use custom program (0 = No custom program)
+ 
++// What glUseProgram did before upstream 9bf3e3f for every call: the uniform buffers of the program in use are reserved and copied again by the next draw.
++static inline __attribute__((always_inline)) void vgl_dirty_all_uniforms(void) {
++	dirty_shader_frag_unifs = GL_TRUE;
++	dirty_shader_vert_unifs = GL_TRUE;
++	dirty_vert_unifs = 0xFFFF;
++	dirty_frag_unifs = 0xFFFFFFFF;
++}
++
+ typedef enum {
+ 	UNIFORM_DATA,
+ 	UNIFORM_SAMPLER,
+@@ -2563,6 +2571,9 @@ void glDeleteProgram(GLuint prog) {
+ 		}
+ 	}
+ 	p->status = PROG_INVALID;
++	// 1.2 (upstream 9bf3e3f): see glLinkProgram. A program id that is deleted and made again is the same id to glUseProgram's early return.
++	if (prog == cur_program)
++		vgl_dirty_all_uniforms();
+ }
+ 
+ void glGetProgramInfoLog(GLuint program, GLsizei maxLength, GLsizei *length, GLchar *infoLog) {
+@@ -2977,6 +2988,10 @@ void glLinkProgram(GLuint progr) {
+ 		}
+ 	}
+ 	p->status = PROG_LINKED;
++	// 1.2 (upstream 9bf3e3f): glUseProgram(cur_program) no longer marks the uniform buffers dirty. A (re)linked program that is the one in use has fresh
++	// uniform buffers that no draw has uploaded yet: mark them here, where the old glUseProgram(same id) used to.
++	if (progr == cur_program)
++		vgl_dirty_all_uniforms();
+ 	return;
+ link_failed:
+ 	vgl_free(p->unif_vbuffer);
+@@ -3005,10 +3020,7 @@ void glUseProgram(GLuint prog) {
+ 
+ 	// Setting current custom program to passed program
+ 	cur_program = prog;
+-	dirty_shader_frag_unifs = GL_TRUE;
+-	dirty_shader_vert_unifs = GL_TRUE;
+-	dirty_vert_unifs = 0xFFFF;
+-	dirty_frag_unifs = 0xFFFFFFFF;
++	vgl_dirty_all_uniforms();
+ }
+ 
+ GLuint glGetUniformBlockIndex(GLuint prog, const GLchar *uniformBlockName) {

@@ -86,7 +86,14 @@ public:
     /* 0x85 */ u8 unknown_0x85[0x03];
     /* 0x88 */ EmissionManager* m_pManager;
     /* 0x8C */ u32 m_View;
+#ifdef NP_NATIVE
+    // Wave 7 (MSC_FX_ATTACH): what to add to the DRAWN position of this emitter's particles (world units, newest particle: the whole offset, tapering to none over
+    // NpFxAttachTaper() seconds of the particle's age). Set by an update callback that knows both the simulated position the emission used and the position the object is
+    // drawn at (UpdateEmitterFromBallTrail), zero otherwise. Nothing that emits, counts or rolls reads it.
+    nlVector3 m_vDrawOffset;
+#endif
 };
+
 
 void ComputeAscendingJointPosition(nlVector3& out, const cPoseAccumulator* pPose,
     u32 uJointID, float fVelocity, float fcurrentTime);

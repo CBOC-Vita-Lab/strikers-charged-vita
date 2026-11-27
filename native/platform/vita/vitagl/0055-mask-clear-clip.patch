@@ -1,0 +1,116 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: the clear quad of a scissor mask rebuild reaches only the region the mask holds now (vglSetMaskClip, MASK_CLIP)
+
+MSC_VGX_VGL_MASKCLIP (gpu24; default 0): with the scissor test on, every rebuild of the mask drew a full-target quad that clears the mask bit, then the region's quad that sets it. When
+patch 0026's record says what the surface holds (the mask of an earlier region: ones inside it, zeros everywhere else) the clear need only reach that region: the bit is clear outside it
+already. The clear quad is drawn with the tile region clip set to the old region (outward to whole tiles; a tile's extra pixels are zero already), then the clip goes back to the whole
+target for the set quad as before. The clip is given in the frame update_scissor_test's last step uses (a framebuffer object's in GL rows, the display's from the top; the record keeps the
+GL row). Same mask after every rebuild, same number of quads; the fill of the clear falls from the whole target to the old region. Host model test renderer/tests/run_vitagl_maskkeep_test.sh
+(the sceGxmSetRegionClip stub is a real tile clip; ten configurations; BREAK=7..9 caught). vglGetMaskClipStats: clears narrowed, kilopixels left out.
+
+diff -ruN a/source/tests.c b/source/tests.c
+--- a/source/tests.c
++++ b/source/tests.c
+@@ -60,6 +60,7 @@ typedef struct {
+ 	const void *surface; // the surface's depth memory (NULL: unused)
+ 	uint32_t w, h; // the target the mask was drawn for
+ 	int x, y, rw, rh; // the region (sceGxm rows from the top) when on
++	int gly; // the region's GL y (rows from the bottom): the tile clip of a framebuffer object is given in it (MASK_CLIP, patch 0055)
+ 	uint8_t on, disp, valid;
+ } vgl_mk_rec;
+ #define VGL_MK_RECS 16
+@@ -77,6 +78,23 @@ void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept) {
+ 	if (kept)
+ 		*kept = vgl_mk_stat[1];
+ }
++// 1.3 MASK_CLIP (patch 0055, MSC_VGX_VGL_MASKCLIP): the rebuild of a scissor mask under an enabled scissor draws a full-target quad that clears the bit (then the region's quad that sets
++// it). When the record says what the surface holds (the mask of an earlier region: ones inside it, zeros everywhere else) the clear needs to reach only that region: the bit is clear
++// outside it already. The clear quad is drawn with the tile region clip set to the old region (the clip rounds outward to whole tiles; a tile's extra pixels are zero already), then the
++// clip goes back to the whole target for the set quad as before. Same mask after the rebuild; the fill of the clear falls from the whole target to the old region's tiles (a held scene's
++// crowd atlas, 990x1139, rebuilt about 20 times a picture). The record is the one MASK_KEEP keeps (valid only as MASK_KEEP trusts it); no record: the whole-target clear as before.
++// vglSetMaskClip(GL_FALSE) (the default) draws every clear over the whole target.
++GLboolean vgl_mask_clip = GL_FALSE;
++uint32_t vgl_mc_stat[2]; // clears drawn over the old region only, kilopixels of whole-target clear fill that left out
++void vglSetMaskClip(GLboolean on) {
++	vgl_mask_clip = on;
++}
++void vglGetMaskClipStats(uint32_t *narrowed, uint32_t *kpx_saved) {
++	if (narrowed)
++		*narrowed = vgl_mc_stat[0];
++	if (kpx_saved)
++		*kpx_saved = vgl_mc_stat[1];
++}
+ static vgl_mk_rec *vgl_mk_find(const void *surface) {
+ 	for (int i = 0; i < VGL_MK_RECS; i++) {
+ 		if (vgl_mk_recs[i].surface == surface)
+@@ -433,6 +451,24 @@ void update_scissor_test() {
+ 		goto mask_done;
+ 	}
+ 	vgl_mk_stat[0]++;
++	// MASK_CLIP (patch 0055): the region the surface's mask holds now, if the record says so (read before the record is replaced below)
++	GLboolean mc_have = GL_FALSE;
++	int mc_x = 0, mc_y = 0, mc_w = 0, mc_h = 0;
++	if (vgl_mask_clip && scissor_test_state && vgl_mk_cur && vgl_mk_cur->valid && vgl_mk_cur->on && vgl_mk_cur->disp == (is_rendering_display ? 1 : 0) &&
++		vgl_mk_cur->w == active_w && vgl_mk_cur->h == active_h && vgl_mk_cur->rw > 0 && vgl_mk_cur->rh > 0 && vgl_mk_cur->x >= 0 && vgl_mk_cur->y >= 0 &&
++		vgl_mk_cur->x + vgl_mk_cur->rw <= (int)active_w && vgl_mk_cur->y + vgl_mk_cur->rh <= (int)active_h) {
++		mc_have = GL_TRUE;
++		mc_x = vgl_mk_cur->x;
++		mc_w = vgl_mk_cur->rw;
++		mc_h = vgl_mk_cur->rh;
++#ifndef HAVE_UNFLIPPED_FBOS
++		mc_y = is_rendering_display ? vgl_mk_cur->y : vgl_mk_cur->gly; // (the tile clip of the final update below: a framebuffer object's in GL rows)
++#else
++		mc_y = vgl_mk_cur->y;
++#endif
++		if (mc_y < 0)
++			mc_have = GL_FALSE;
++	}
+ 	if (vgl_mk_cur) {
+ 		vgl_mk_cur->on = scissor_test_state ? 1 : 0;
+ 		vgl_mk_cur->disp = is_rendering_display ? 1 : 0;
+@@ -442,6 +478,7 @@ void update_scissor_test() {
+ 		vgl_mk_cur->y = region.y;
+ 		vgl_mk_cur->rw = region.w;
+ 		vgl_mk_cur->rh = region.h;
++		vgl_mk_cur->gly = region.gl_y > 0 ? region.gl_y : 0;
+ 		vgl_mk_cur->valid = 1;
+ 	}
+ 	
+@@ -471,6 +508,14 @@ void update_scissor_test() {
+ 		// Calculating scissor test region vertices
+ 		vector4f_convert_to_local_space(scissor_test_vertices, region.x, region.y, region.w, region.h);
+ 
++#ifndef DISABLE_TILE_CLIPPER
++		// MASK_CLIP (patch 0055): the clear reaches only the region the mask holds now (the tile clip rounds outward; the bit is clear outside the region already)
++		if (mc_have) {
++			sceGxmSetRegionClip(gxm_context, SCE_GXM_REGION_CLIP_OUTSIDE, mc_x, mc_y, mc_x + mc_w - 1, mc_y + mc_h - 1);
++			vgl_mc_stat[0]++;
++			vgl_mc_stat[1] += ((uint32_t)active_w * active_h - (uint32_t)mc_w * mc_h) / 1000;
++		}
++#endif
+ 		sceGxmSetPrecomputedVertexState(gxm_context, &scissor_clear_vertex_state);
+ 
+ 		// Cleaning stencil surface mask update bit on the whole screen
+@@ -489,6 +534,10 @@ void update_scissor_test() {
+ 		sceGxmDrawPrecomputed(gxm_context, &clear_draw_state);
+ 
+ 		sceGxmSetPrecomputedVertexState(gxm_context, NULL);
++#ifndef DISABLE_TILE_CLIPPER
++		if (mc_have)
++			sceGxmSetRegionClip(gxm_context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, active_w - 1, active_h - 1); // (the set quad below is the new region: no clip of the old one)
++#endif
+ 	}
+ 
+ 	// Setting stencil surface mask update bit on the scissor test region
+diff -ruN a/source/vitaGL.h b/source/vitaGL.h
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1171,6 +1171,8 @@ void vglGetFreeGuardStats(vglFreeGuardStats *out);
+ int vglFreeGuardTake(vglFreeGuardEvent *out); // 1: an event was returned
+ void vglSetMaskBackground(int mode); // 1.3 MASK_BG (patch 0029; default 0): a scene that does not load its depth/stencil surface and has the scissor test off begins with the background mask set, and the full-target quad that sets it is not drawn. Bit 0: framebuffer-object scenes, bit 1: the display's scene
+ void vglGetMaskBackgroundStats(uint32_t *armed, uint32_t *kept); // 1.3 MASK_BG: scenes begun that way, quads left out
++void vglSetMaskClip(GLboolean on); // 1.3 MASK_CLIP (patch 0055; default GL_FALSE): the clear quad of a scissor mask rebuild is drawn over the region the mask holds now (tile region clip), not the whole target
++void vglGetMaskClipStats(uint32_t *narrowed, uint32_t *kpx_saved); // 1.3 MASK_CLIP: clears narrowed, kilopixels of whole-target fill left out
+ // 1.3 MEMFREE (patch 0028): vglMemFree / vgl_mem_get_free_space without walking the heap. The allocator wrappers keep per pool the usable bytes and the count of live blocks;
+ // a pool's free figure is then (free when empty) - (usable + overhead * count), O(1), where `overhead` is the allocator's per-block cost measured at start-up with probe blocks.
+ // A pool whose probes do not show one constant overhead (or whose statistics call answers nothing: Vita3K) is never answered from the counters.

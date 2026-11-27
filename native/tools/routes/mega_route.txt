@@ -1,0 +1,46 @@
+# Mega Save route: Strikers 101 tutorial, Mega Saves lesson, through the active save phase (keeper substate 5), pointer swiped. Env: MSC_WATCH=keepstate:s32:[[g_pTeams]+B4]+334 (defines keepstate; without it the wait is skipped after 400 frames), MSC_DYNRES=off.
+# Enter the real tutorial through main-menu and lesson navigation.
+vmash cross 20 scene == 0 3000
+idle 30
+vmash cross 20 scene == 1 1000
+idle 90
+vmash cross 20 scene == 1 1000
+idle 30
+vmash left 12 onoff == 892 300
+vpress cross 3 30
+wait scene == 76 1000
+idle 90
+touch 445 412 3 30
+idle 30
+log Mega Saves selected
+wait scene == 77 1000
+idle 90
+vmash down 12 onoff == 1312 300
+vpress cross 3 30
+log News advanced to story
+idle 30
+vmash down 12 onoff == 268 300
+vpress cross 3 30
+wait scene == 78 1000
+idle 90
+wait onoff == 32 300
+vpress cross 3 30
+vmash right 12 onoff == 392 300
+vpress cross 3 30
+wait ingame == 1 2000
+log Tutorial match initialized
+vmash cross 30 cmode == 1 2000
+# The pointer is parked before the active save phase.
+touch 480 272 2 8
+# keepstate = the defending keeper's Mega Strike substate (env MSC_WATCH, see the header); 5 is the active save phase.
+try wait keepstate == 5 400
+if keepstate == 5
+log KEEPSTATE 5 reached
+endif
+log Active save phase
+swipe 300 200 660 340 40 0
+swipe 660 340 300 340 40 0
+swipe 300 340 480 272 40 0
+idle 20
+log Active save census completed
+exit

@@ -1,0 +1,14 @@
+# console-1.2 run l-ntour-2: LOCKED 60, ntour (end)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group baseline, route ntour, version payload 1.3, role n60
+# The second LOCKED 60 run of the night: its spread with l-ntour-1 is the noise of the locked mode.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/ntour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_LOCK60=1

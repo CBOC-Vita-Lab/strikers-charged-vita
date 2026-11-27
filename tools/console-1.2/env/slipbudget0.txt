@@ -1,0 +1,14 @@
+# console-1.2 run slipbudget0: Slip without the budget (stateless rule)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route replay, version payload 1.3, role ab
+# MSC_SLIP_BUDGET_MS=0 (the Vita plan sets 30 since wave 9: a late frame is cut only from a 30 ms bucket that fills at 2 % of real time, so a sustained overload runs the game at 98 % of real time, not 83 %). Against the default: the `[slip] match #n` lines (game time lost to slip of the match's play time, the worst 2 s window, fixed steps a second of play: 50.00 is exact) and by eye whether the game is in slow motion while frames are late; the stateless rule loses up to 17-20 % of game time in a scene that is late every frame. MSC_PACE_LOG=0 rides on this run (the [pace] lines are a diagnostic with no effect on timing beyond a log line a window). Single player only. Host table: native/tools/fps/run_slip_budget_test.sh.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_SLIP_BUDGET_MS=0
+MSC_PACE_LOG=0

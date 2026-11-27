@@ -1,0 +1,14 @@
+# console-1.2 run aapolicy0: No per-stadium anti-aliasing table
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# MSC_AA_POLICY=same (default auto: Dump, Lava Pit, Bowser Stadium and Sand Tomb play at one sample from kick-off, Crater Field and Crystal Canyon and Sand Tomb draw replays and cut-scenes at one sample; MSC_AA_TABLE=id:live:held,... corrects entries without a rebuild). Against the default at those stadiums: GPU busy ms and late frames in play (budget 15.0 ms), the [fxaa] policy and per-class lines.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_AA_POLICY=same

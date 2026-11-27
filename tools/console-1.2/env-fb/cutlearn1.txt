@@ -1,0 +1,14 @@
+# console-1.2 run cutlearn1: Cut learning (MSC_CUT_LEARN=1), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r16, route tour, version payload 1.3, role ab
+# learn16: what the first launch uses at a goal cut is written per stadium beside the shader list and made ahead at the next match (bit 1 textures, bit 2 programs and variants made as degenerate triangles before kick-off, 4 ms a present, 12 MiB video-memory floor, at most 96). First launch records the list. Read `[cutlearn]` (list loaded, made, linked new, not made, floor), `[cuts] match` totals and `first use` lines at the goal cuts (emulator: 23 -> 1), the [hitch] at the cuts and [mem] FAILED.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_CUT_LEARN=1

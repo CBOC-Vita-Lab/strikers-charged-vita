@@ -1021,6 +1021,15 @@ void NetTournManager::HandleTournamentGameUpdate(
         return;
     }
 
+#ifdef NP_NATIVE
+    // NP (online audit, 1.3): the index comes off the wire (any console in the session); mGames holds 7 games, so a larger one wrote game
+    // state and a whole BasicGameInfo past the array. Refused like the out-of-range machine index above. Test: tools/mp/tourn_bounds/run.sh
+    if (message->mGameIndex >= sizeof(mGames) / sizeof(mGames[0]))
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "Ignoring NetworkTournamentGameUpdate for game %d out of range\n", (int)message->mGameIndex);
+        return;
+    }
+#endif
     NetworkTournamentGame& game = mGames[message->mGameIndex];
     if (message->mUpdateType == NET_TOURN_UPDATE_DID_NOT_FINISH)
     {

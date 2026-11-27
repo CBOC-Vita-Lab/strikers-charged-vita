@@ -9,7 +9,7 @@
 #   VGX_RATE=<30|60> (the game's frame_rate setting, default 60)
 #   VGX_WATCH_EVERY=<n> ([watch] line period)
 set -e
-MSC=/home/claude/msc
+MSC=/work/msc
 SCRIPT=${1:?nav script}; DIR=${2:?dump dir}; EVERY=${3:-0}; FRAMES=${4:-0}
 mkdir -p "$DIR"
 SCRIPT=$(realpath "$SCRIPT"); DIR=$(realpath "$DIR")

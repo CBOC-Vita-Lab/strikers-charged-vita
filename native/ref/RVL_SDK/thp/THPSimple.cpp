@@ -483,7 +483,11 @@ static inline void readFrameAsync()
 
     SimpleControl.readProgress = 1;
     nlSeek(SimpleControl.fileInfo, SimpleControl.curOffset, 0);
-    nlReadAsync(SimpleControl.fileInfo, SimpleControl.readBuffer[SimpleControl.readIndex].ptr, SimpleControl.readSize, __THPSimpleDVDCallback, 0, 0);
+    if (!nlReadAsync(SimpleControl.fileInfo, SimpleControl.readBuffer[SimpleControl.readIndex].ptr, SimpleControl.readSize, __THPSimpleDVDCallback, 0, 0))
+    {
+        // Rejected requests have no callback to make the read head retryable.
+        SimpleControl.readProgress = 0;
+    }
 }
 
 static void __THPSimpleDVDCallback(nlFile*, void*, unsigned int, unsigned long)

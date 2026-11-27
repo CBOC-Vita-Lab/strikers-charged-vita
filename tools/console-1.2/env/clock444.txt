@@ -1,0 +1,14 @@
+# console-1.2 run clock444: Clock held at 444 MHz (what 500 gives the game thread: the A/B against d1)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group clock, route tour, version payload 1.3, role ab
+# clock17/clockfix17. d1 runs the player's policy (500 asked 1 s after the start; the owner's PSVshellPlus profile and CapUnlocker are on his Vita, as for Galaxy). Here exactly 444 is asked ALSO 1 s into the process (MSC_VITA_CLOCK_DEFER=1 with MSC_VITA_CPU_MHZ=444), after the profile has been applied. The PSVshellPlus profile of the test title must NOT lock 500 during these two runs (switch it off or unlock its CPU): a lock answers 0 and changes nothing, and the run would be 500 against 500. Read the `clocks: policy ... (MSC_VITA_CPU_MHZ)` line (requested ARM 444) and, because that line's `measured after` is taken at the request, the later `clocks: the ARM core measures N MHz now` line (30 s): it must say about 444 here, ~498 in d1. Then the game thread's ms in [frame-timing]. Clock speed changes no result, only the time a step takes. Not battery or heat: 500 costs more of both.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_CPU_MHZ=444
+MSC_VITA_CLOCK_DEFER=1

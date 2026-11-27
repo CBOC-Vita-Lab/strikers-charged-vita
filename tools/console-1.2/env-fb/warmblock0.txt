@@ -1,0 +1,14 @@
+# console-1.2 run warmblock0: Draws that feed a copy may be left out for a program not ready
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route replay, version payload 1.3, role ab
+# MSC_WARM_BLOCK=0 (default 1: a copy or off-screen draw compiles and links at once). Against the default: `[match] end` draws left out feeding a copy, and by eye the goalie's texture in a replay close-up.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was replay.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_WARM_BLOCK=0

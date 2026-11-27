@@ -1,0 +1,16 @@
+# console-1.2 run mp-hub: mp18: online login with the 1.3 plan (fourth core on): signed in, the guard moves the core-3 threads off and back
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group mp18, route onhub, version payload 1.3, role ab
+# mp18 (owner 23 Nov 'make sure multiplayer works'; ONE Vita): the on-hub route with TODAY's plan (fourth core on, LOCKED 60 hold, GT18, held governor). Besides the online rules: `[vita] core 3 rules: an online or LAN session is up: N thread(s) moved off the system core` when the online screens open (the online guard, np_vita_core3.h). Needs CapUnlocker (without it `fourth core: not available` and the guard line cannot appear: report, not a failure of multiplayer). PASS (tools/console-1.2/online_check.py <log> --run <id> reads it all): every STATE line of the route in order and `script exit`, no `[script] TIMEOUT`, no crash; the `[np-net] req` lines show every request ANSWERED by the service (an HTTP 2xx or the service's own JSON error with a code), no `trying the other address` line (either `[np-net]` or `[online]`: in an auto run one means the new address FAILED: report it), host=new on every request of an auto run, host=old in the old variant; at most 100 requests in any 10 s window (the zone's shared rule) and the requests per minute stay far below the service's daily budget; every pollScale / over_budget level / retryAfterSec the log shows is reported; the menu returns after the cancel. Needs a package built from agent/online24 (MSC_NET_REQLOG: before it the client logs no request line and the rules cannot be read).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/on-hub.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_ONLINE_HOST=auto
+MSC_NET_REQLOG=1
+MSC_ONLINE_NAME=VitaKit24

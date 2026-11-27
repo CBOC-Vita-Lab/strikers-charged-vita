@@ -1,0 +1,13 @@
+# console-1.2 run heldscn3: Held scenes: bits 1 and 2 (MSC_HELD_SCENES=3), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r16, route tour, version payload 1.3, role ab
+# scenes16: render-only, held scenes only. Bit 1 no depth load/store on scenes whose depth is never read, bit 2 the pass memo and run merge in held scenes. Offscreen scenes per held picture and front/back end ms in held scenes (14 -> about 8 scenes is the aim, estimate); pictures must look the same.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HELD_SCENES=3

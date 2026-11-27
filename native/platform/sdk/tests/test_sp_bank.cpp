@@ -85,7 +85,7 @@ static std::vector<int16_t> decode_adpcm(const uint8_t* data, uint32_t startNibb
 
 int main() {
     const char* dir = getenv("MSC_DISC_FILES");
-    if (!dir) dir = "/home/claude/msc/game/files";
+    if (!dir) dir = "/work/msc/game/files";
     char p1[512], p2[512];
     snprintf(p1, sizeof(p1), "%s/audio/CHAR_BOO_Sfx.resbun", dir);
     snprintf(p2, sizeof(p2), "%s/audio/CHAR_BOO_Sfx.nlxwb", dir);

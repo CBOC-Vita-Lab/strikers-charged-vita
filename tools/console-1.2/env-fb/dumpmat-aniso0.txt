@@ -1,0 +1,14 @@
+# console-1.2 run dumpmat-aniso0: The Dump: anisotropic filtering off
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route worstgpu, version payload 1.3, role ab
+# gpu25: The Dump's main stadium material is ONE fragment shader of four texture layers (each with its own uv: ((T1 x T1.alpha x K x T2) + vertex colour x T0) x T3, 22 instructions) that shades about 0.7 of a screen at 960x544 in open play (host FSCENSUS), about 2.7 of the ~7.7 fetch-screens it shades; all four are trilinear + anisotropic 2. Against the default on the same route: [lane] gpu ms p50/p95 in open play, then the far half of the pitch by eye. Gain here says what the filter is worth on this material (expect 0.5 to 2 ms if the fill is texture bound; estimate, no basis on the console).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_ANISO=0

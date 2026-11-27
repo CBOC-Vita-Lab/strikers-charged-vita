@@ -28,6 +28,11 @@
 #include "NL/nlPrint.h"
 #include "NL/nlString.h"
 #include "NL/nlFunction.inl"
+#ifdef NP_NATIVE
+// NP (1.3 ranked, platform/sdk/dwc/np_dwc_match.cpp): a ranked match of the service is one game (one match record per pairing); the
+// series setting does not apply to it and the players go back to Online Central after the game, also after a draw
+extern "C" int NpRankedSingleGame(void) __attribute__((weak));
+#endif
 
 int gPostGameCountdownSeconds = 10;
 
@@ -87,7 +92,14 @@ bool IsCurrentSeriesComplete()
 void ContinuePostGame(bool online)
 {
     const GameplaySettings* settings = GameInfoManager::Instance()->GetCurrentSettings();
-    if (IsCurrentSeriesComplete())
+    bool seriesOver = IsCurrentSeriesComplete();
+#ifdef NP_NATIVE
+    if (online && NpRankedSingleGame != 0 && NpRankedSingleGame())
+    {
+        seriesOver = true;
+    }
+#endif
+    if (seriesOver)
     {
         if (!online)
         {

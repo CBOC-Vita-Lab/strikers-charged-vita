@@ -1,4 +1,5 @@
 #include <revolution/gx.h>
+#include "np/gsplit.h"
 #include <revolution/mtx.h>
 
 #include "NL/glx/glxSkinMatrix.h"
@@ -26,6 +27,7 @@ void glx_LoadSkinMatrices(const Mtx* matrices, int count, const nlMatrix4* matri
     Mtx matrix0;
     Mtx matrix1;
     Mtx matrix2;
+    NP_GS(NPGS_E_SKIN);
     glxCopyMatrix(matrix0, *matrix);
     for (int i = 0; i < count; ++i)
     {

@@ -133,6 +133,11 @@ void BasicGameInfo::Reset(bool clearTeams)
     mStadiumIndex = STAD_VICE;
 }
 
+int GetCharacterCount()
+{
+    return NUM_CHARACTERS;
+}
+
 const CharacterInfo& GetCharacterInfo(int index)
 {
     if (index < 0 || index >= NUM_CHARACTERS) {

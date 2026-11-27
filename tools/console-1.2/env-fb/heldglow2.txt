@@ -1,0 +1,15 @@
+# console-1.2 run heldglow2: Glow chain redrawn every third picture in held scenes
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group picture, route replay, version payload 1.3, role ab
+# held30: the stronger setting of MSC_HELD_GLOW_HALF (two of three pictures reuse the chain): only if heldglow0 shows the walk-out or the replay still over 33 ms and the picture is clean to the eye.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was replay.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_HELD_GLOW_HALF=2

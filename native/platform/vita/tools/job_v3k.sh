@@ -6,12 +6,12 @@
 # Result: build/np/NPV3/v3k-runs/<tag>/{log.txt (the game's), stdout.txt (the emulator's), shots/, end.png, env.txt, run.txt}
 cd "$(dirname "$0")/../../.."
 TAG=${1:?tag}; SECS=${2:?seconds}; ENV=${3:?env file}; UNTIL=${4:-}
-VPK=${5:-/home/claude/msc/build/np/NPV3/vita/pkg/np/mscharged-np.vpk}; TID=${6:-MSCN00001}
+VPK=${5:-/work/msc/build/np/NPV3/vita/pkg/np/mscharged-np.vpk}; TID=${6:-MSCN00001}
 export VITASDK=/opt/vitasdk PATH=/opt/vitasdk/bin:$PATH
-OUT=${RUNS_DIR:-/home/claude/msc/build/np/NPV3/v3k-runs}/$TAG; rm -rf "$OUT"; mkdir -p "$OUT"   # (RUNS_DIR: VRS, another workstream keeps its runs elsewhere)
-P=${PROFILE_DIR:-/home/claude/msc/build/np/NPV3/v3k}
+OUT=${RUNS_DIR:-/work/msc/build/np/NPV3/v3k-runs}/$TAG; rm -rf "$OUT"; mkdir -p "$OUT"   # (RUNS_DIR: VRS, another workstream keeps its runs elsewhere)
+P=${PROFILE_DIR:-/work/msc/build/np/NPV3/v3k}
 { echo "tag=$TAG secs=$SECS env=$ENV until=$UNTIL vpk=$VPK ($(sha256sum "$VPK" | cut -c1-16)) start=$(date +%T)"; } > "$OUT/run.txt"
-if [ "${NOHEAVY:-0}" = 1 ]; then HV="timeout $((SECS + 90))"; else HV="/home/claude/msc/tools/heavy.sh -t $((SECS + 90))"; fi
+if [ "${NOHEAVY:-0}" = 1 ]; then HV="timeout $((SECS + 90))"; else HV="/work/msc/tools/heavy.sh -t $((SECS + 90))"; fi
 GAME=1 ENVTXT=$ENV SHOTEVERY=${SHOTEVERY:-20} FILES="${FILES:-}" \
   $HV platform/vita/tools/v3k_run.sh "$VPK" "$TID" "$SECS" "$UNTIL" >> "$OUT/run.txt" 2>&1
 echo "end=$(date +%T)" >> "$OUT/run.txt"

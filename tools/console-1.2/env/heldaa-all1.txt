@@ -1,0 +1,14 @@
+# console-1.2 run heldaa-all1: Replays and cut-scenes as r15 (auto: one sample only where the table says)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group picture, route replay, version payload 1.3, role ab
+# The r15 held-scene samples (auto) against the r16 default 0 (one sample in every stadium, owner 14 Nov 16:55): GPU ms and held-scene fps in a replay, compositor acted counts
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD_MSAA_HELD=auto

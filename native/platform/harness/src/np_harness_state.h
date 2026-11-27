@@ -79,9 +79,13 @@ struct LaunchSpec {
     int human = -1;            // side (0 home, 1 away) the pad 0 plays; -1 keeps the pad sides cleared (nobody plays)
     int skill = -1;            // GameplaySettings::eSkillLevel 0..4 (mUserInfo.mGameplayOptions)
     int time = -1;             // match length in seconds (mUserInfo.mGameplayOptions.GameTime)
+    bool pinSeed = false;      // MSC_BOOT_MATCH: write `seed` to the simulation's random seed (gNetworkRandomSeed) with the rest of the state
+    uint32_t seed = 0x12345678;
     int push = 1;              // 0: only set the state (mode, teams, ...), do not push the loading scene: a later `scene <id>` then finds a plausible game state
 };
 bool LaunchMatch(const LaunchSpec& spec, std::string& msg);
+// MSC_SIM_SEED (test): writes the simulation's random seed. False when the game has no such variable.
+bool PinSimSeed(uint32_t seed);
 // W5-SEED: the script command `scene <id> [pop]`: BaseGameSceneManager::Push(id, SCREEN_FORWARD, pop) (SceneList numbers: include/Game/BaseGameSceneManager.h);
 // `popscene` pops the top scene. For visiting every front-end screen without walking to it.
 bool PushScene(int id, bool popFirst, std::string& msg);
@@ -89,6 +93,9 @@ bool PopScene(std::string& msg);
 // W5-SEED: the script command `setf <name> <value>` sets one of a few game tuning globals (weather start chances) so that a short match meets the weather that a
 // 3-minute match only meets by chance. Only the names SetGlobalFloat knows; false (with a message) for any other or a game without the symbol.
 bool SetGlobalFloat(const char* name, float value, std::string& msg);
+// The script command `score <side>` (test only, routes only): the ball is put in front of the other team's net and kicked in, so the game's own goal path runs. False (with a
+// message) in a LAN, online or recorded game, with no match, outside open play, or when the game's calls are not linked.
+bool ScoreGoal(int side, std::string& msg);
 // A hash of the simulation state (positions, clock, score...), the portable determinism check.
 uint64_t SimDigest();
 // The game's own whole-simulation checksum (FixedUpdateTask::CalculateChecksum: game state, ball, every character of both

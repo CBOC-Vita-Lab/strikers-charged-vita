@@ -27,6 +27,7 @@
 #ifdef NP_NATIVE
 #include <stdio.h>
 #include "np/gamefixes.h"
+#include "np/fx.h"
 #ifdef NP_NATIVE
 #include "np/framesend.h"
 #endif
@@ -776,6 +777,9 @@ void EmissionManager::Render()
 {
     g_nNumLights = 0;
     gNumRenderedParticles = 0;
+#ifdef NP_NATIVE
+    NpFxOffViewStat();   // MSC_FX_OFFVIEW: the periodic line (np/fx.h)
+#endif
 
     int i;
     EmissionResourceStats* stats = Instance()->mResourceStats;

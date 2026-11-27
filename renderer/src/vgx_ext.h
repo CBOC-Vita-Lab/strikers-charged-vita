@@ -14,6 +14,10 @@
 //                 POSITION index. A slot after the first zero weight, and a bone index >= nBones, do not count (the
 //                 game's CPU loop stops at the first zero weight and only visits bones below nBones).
 //   EXT_SKIN_OFF  []             back to plain vertices
+//   EXT_SCENE     [cls]          (W12 OVERDRAW) the kind of scene the frame is (CmdBuf::scene): 0 other, 1 match play, 2 replay, 3 cut-scene
+//   EXT_LAYER     [cls | layer << 8]   (W12 FG) the draws until the next record belong to the game's layer view `layer` (eCLV) of draw class `cls`
+//                                (np/fx.h NPFX_*): DrawRec::cls. 0 = unknown, which counts as foreground. Only recorded when FgMarksOn().
+//   EXT_TOUCH_TEX [mode, TexObj fields x 9] (1.3 MSC_TEX_PRETOUCH) the texture described is resolved without a draw, binding nothing: uploaded now. mode 0 upload, 1 upload and pin, 2 release every pin (n = 1)
 //   EXT_FX        [on]           (FX, 23 Oct) the draws until [0] are additive effect sprites (the native port's np/fx.h): DrawRec::fx, which
 //                                the back end may draw at a lower resolution (vgx_backend_gl.cpp "FX")
 #pragma once
@@ -21,8 +25,16 @@
 
 namespace vgx {
 
-enum : uint32_t { EXT_TAG = 1, EXT_SKIN = 2, EXT_SKIN_OFF = 3, EXT_FX = 4 };
+enum : uint32_t { EXT_TAG = 1, EXT_SKIN = 2, EXT_SKIN_OFF = 3, EXT_FX = 4, EXT_SCENE = 5, EXT_LAYER = 6, EXT_TOUCH_TEX = 7, EXT_BG30 = 8, EXT_HIDDEN = 9 };
+extern uint8_t g_layerCls;   // EXT_LAYER in force (player side); reset when the frame is sent
+extern uint8_t g_layerId;
+bool FgRequested();          // MSC_DYNRES_FG (default in vgx_skin.cpp)
+bool FgMarksOn();            // MSC_DYNRES_FG (the game reports the layers), the census (MSC_VGX_FGCENSUS) or a crowd option (MSC_VGX_CROWDSORT / CROWDPREZ)
 extern bool g_fxDraws; // EXT_FX in force (player side)
+extern uint8_t g_bg30Kind;    // EXT_BG30 (MSC_BG30): the kind of the frame being recorded; reset when the frame is sent
+extern float g_bg30View[16]; // EXT_BG30: its view matrix
+extern bool g_hiddenFrame; // EXT_HIDDEN [on]: the frame being recorded is executed hidden (CmdBuf::hidden); reset when the frame is sent
+extern uint8_t g_sceneCls; // EXT_SCENE: the scene class of the frame being recorded (0 other, 1 match play, 2 replay, 3 cut-scene); reset when the frame is sent
 constexpr uint32_t kSkinMaxBones = 32;
 
 // Player side (vgx_skin.cpp).

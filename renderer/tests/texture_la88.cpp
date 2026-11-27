@@ -8,7 +8,9 @@
 #include <vector>
 
 namespace vgx {
+const char* ShaderListPath() { return ""; }   // (vgx_draw.cpp, not linked here)
 State g;
+uint32_t g_gxd = 0x3FFFFFFFu;
 static CmdBuf commands;
 static uint64_t frame = 1;
 static int64_t liveBytes = 0;
@@ -48,14 +50,18 @@ vgx::TexUpload MakeUpload(unsigned fmt, unsigned w, unsigned h, bool mip, unsign
     return vgx::Pending().uploads[0];
 }
 
-void VerifyPixels(const vgx::TexUpload& up, unsigned fmt, bool compact) {
+// i8: GX I4 and I8 go as one byte a texel (MSC_VGX_LA88=2, vgx::TF_I8)
+void VerifyPixels(const vgx::TexUpload& up, unsigned fmt, bool compact, bool i8 = false) {
     const size_t pixels = static_cast<size_t>(up.width) * up.height;
-    Check(up.levels[0].size() == pixels * (compact ? 2 : 4), "compact intensity payload must use two bytes per pixel");
+    Check(up.levels[0].size() == pixels * (i8 ? 1 : compact ? 2 : 4), "compact intensity payload must use one byte (I8), two bytes (LA88) or four (RGBA8) per pixel");
+    Check(up.format == (i8 ? vgx::TF_I8 : compact ? vgx::TF_LA88 : vgx::TF_RGBA8), "the format the switch asks for");
     std::vector<uint8_t> rgba(pixels * 4);
     vgx::DecodeTexture(sources.back().data(), up.width, up.height, fmt, palette.data(), 0, 256, rgba.data());
     for (size_t i = 0; i < pixels; ++i) {
-        const auto* p = &up.levels[0][i * (compact ? 2 : 4)];
-        if (compact) {
+        const auto* p = &up.levels[0][i * (i8 ? 1 : compact ? 2 : 4)];
+        if (i8) {
+            Check(p[0] == rgba[i * 4] && p[0] == rgba[i * 4 + 1] && p[0] == rgba[i * 4 + 2] && p[0] == rgba[i * 4 + 3], "I8 byte is all four channels of the RGBA decode");
+        } else if (compact) {
             Check(p[0] == rgba[i * 4] && p[0] == rgba[i * 4 + 1] && p[0] == rgba[i * 4 + 2], "LA luminance preserves all RGB channels");
             Check(p[1] == rgba[i * 4 + 3], "LA alpha preserves GX intensity/alpha");
         } else {
@@ -102,12 +108,13 @@ int main(int argc, char** argv) {
     vgx::g.tlut[0].valid = true;
     vgx::g.tlut[0].obj.data = palette.data();
     vgx::g.tlut[0].obj.entries = 256;
-    const bool compact = argc > 1 && std::strcmp(argv[1], "compact") == 0;
+    const bool i8mode = argc > 1 && std::strcmp(argv[1], "i8") == 0;
+    const bool compact = (argc > 1 && std::strcmp(argv[1], "compact") == 0) || i8mode;
     const unsigned dims[][2] = {{1,1}, {3,5}, {7,3}, {8,4}, {9,5}, {16,8}, {31,17}};
     for (unsigned fmt = 0; fmt < 4; ++fmt)
         for (const auto& dim : dims)
             for (unsigned pattern = 0; pattern < 256; ++pattern)
-                VerifyPixels(MakeUpload(fmt, dim[0], dim[1], false, pattern), fmt, compact);
+                VerifyPixels(MakeUpload(fmt, dim[0], dim[1], false, pattern), fmt, compact, i8mode && fmt <= 1);
 
     for (unsigned fmt = 0; fmt < 4; ++fmt) {
         auto up = MakeUpload(fmt, 8, 8, true, 17);
@@ -141,7 +148,7 @@ int main(int argc, char** argv) {
     Check(vgx::Pending().uploads.size() == 1, "changed texture reuploads");
     auto changed = vgx::Pending().uploads[0];
     Check(changed.texId == first.texId && changed.levels[0] != first.levels[0], "rewrite retains id but changes pixels");
-    VerifyPixels(changed, 1, compact);
+    VerifyPixels(changed, 1, compact, i8mode);
 
     const auto copied = vgx::AcquireCopyTexture(sources.back().data(), 3, 5, 1);
     vgx::Pending() = {};
@@ -155,7 +162,7 @@ int main(int argc, char** argv) {
     Check(vgx::liveBytes == 0, "eviction accounts for actual texture payloads");
     Check(vgx::ResolveTexture(0, bind, w, h), "evicted texture resolves again");
     Check(bind.texId != first.texId && vgx::Pending().uploads.size() == 1, "eviction reuploads under new id");
-    VerifyPixels(vgx::Pending().uploads[0], 1, compact);
-    Check(vgx::liveBytes == (compact ? 30 : 60), "live byte accounting matches LA/RGBA storage");
-    std::printf("PASS: texture cache %s; 7168 tiled fixtures, exhaustive I/IA channels, guards, invalid inputs, mip/format fallbacks, rewrite, EFB priority, eviction\n", compact ? "LA88" : "RGBA8");
+    VerifyPixels(vgx::Pending().uploads[0], 1, compact, i8mode);
+    Check(vgx::liveBytes == (i8mode ? 15 : compact ? 30 : 60), "live byte accounting matches I8/LA/RGBA storage");
+    std::printf("PASS: texture cache %s; 7168 tiled fixtures, exhaustive I/IA channels, guards, invalid inputs, mip/format fallbacks, rewrite, EFB priority, eviction\n", i8mode ? "I8 + LA88" : compact ? "LA88" : "RGBA8");
 }

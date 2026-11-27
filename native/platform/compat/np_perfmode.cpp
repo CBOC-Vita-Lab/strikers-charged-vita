@@ -1,15 +1,8 @@
-// Performance Mode switch: see include/np/perfmode.h.
+// Performance Mode switch: see include/np/perfmode.h. 1.3: one shared cell (np/live_settings.h); the settings screen changes it live (draw-only readers).
 #include "np/perfmode.h"
-
-#include <stdlib.h>
+#include "../../include/np/live_settings.h"
 
 extern "C" int NpPerformanceMode(void)
 {
-    static int mode = -1;
-    if (mode < 0)
-    {
-        const char* e = getenv("MSC_PERFORMANCE_MODE");
-        mode = (e && *e && *e != '0') ? 1 : 0;
-    }
-    return mode;
+    return NpLiveCrowdHidden();
 }

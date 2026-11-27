@@ -1,0 +1,16 @@
+# console-1.2 run on-report: ONLINE page > SAVE A REPORT (the pixel screen by its hook; fresh process: the report's build / settings rows)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group online24, route settings, version payload 1.3, role settings
+# (f) ONLINE page > SAVE A REPORT on the pixel screen (opened by the np-settings-open hook; Vita-only code, no host proof): log `[settings] save a report: written`; then fetch ux0:data/mscharged-perf-test/mp-report.txt by hand (no names, addresses or codes in it). A fresh process: the report has the build and settings rows and no online events (the screen is not reachable after the online menu in one process).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/look.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- session.sh puts np-settings-open (the Settings screen's test hook) next to this file: wait:2500 rtrigger wait:800 shot:mp-page down wait:300 down wait:500 shot:mp-row cross wait:1500 shot:mp-saved wait:500 circle
+# ---- under test: nothing here means the default ----
+MSC_ONLINE_HOST=auto
+MSC_NET_REQLOG=1
+MSC_ONLINE_NAME=VitaKit24

@@ -1,0 +1,149 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 22:00:00 -0500
+Subject: [PATCH] vgl24 (bugs 1 and 4 of the GT3 Revisited list, written again from the description): glTexSubImage2D takes a mip level's start, stride and width from one function (stride was unset, width was orig_w / (2 x level)) and ignores a level the chain has no room for; gpu_alloc_mipmaps takes no level past the chain's end (it stops where the smaller side reaches 1), so mip_count never names levels the block lacks
+
+---
+diff --git a/source/textures.c b/source/textures.c
+index 4465c6c56..9e9d106c5 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -22,6 +22,7 @@
+  */
+ 
+ #include "shared.h"
++#include "utils/geom_fix.h" // 0058
+ 
+ #ifdef HAVE_UNPURE_TEXFORMATS
+ #define resolve_tex_target(target, unresolved_action) \
+@@ -976,6 +977,10 @@ static inline __attribute__((always_inline)) void _glTexSubImage2D(texture *tex,
+ 	}
+ #endif	
+ 
++	// 0058: a level the texture's chain does not hold has no room in its block (the chain stops where the smaller side reaches 1, and mip_count never counts past it)
++	if (level < 0 || (level > 0 && (level >= tex->mip_count || (uint32_t)level >= vgl_mip_chain_levels(nearest_po2(orig_w), nearest_po2(orig_h)))))
++		return;
++
+ #ifdef HAVE_TEX_CACHE
+ 	restore_tex_cache(tex);
+ #endif
+@@ -1215,23 +1220,16 @@ static inline __attribute__((always_inline)) void _glTexSubImage2D(texture *tex,
+ 		}
+ 		uint32_t mip_w, mip_stride;
+ 		if (level > 0) {
+-			if (po2_w == 0) { // We didn't calculate already the mip jump chain, so we do it now
++			// 0058: the start and the row stride of the level come from one function (utils/geom_fix.h). The stride was left unset when the chain's jumps had been
++			// calculated above, and the width was orig_w / (2 * level), which is not a halving per level from level 3 on.
++			if (po2_w == 0) {
+ 				po2_w = nearest_po2(orig_w);
+ 				po2_h = nearest_po2(orig_h);
+-				mip_stride = po2_w;
+-				uint32_t _mip_h = po2_h;
+-				for (int j = 0; j < level; j++) {
+-					ptr += MAX(mip_stride, 8) * _mip_h * bpp;
+-					mip_stride /= 2;
+-					_mip_h /= 2;
+-				}
+-			} else {
+-				for (int j = 0; j < level; j++) {
+-					ptr += jumps[j];
+-				}
+ 			}
+-			mip_w = orig_w / (2 * level);
+-			mip_stride = VGL_ALIGN(mip_stride, 8) * bpp;
++			uint32_t mip_off;
++			vgl_mip_level_geom(po2_w, po2_h, bpp, level, &mip_off, &mip_stride);
++			ptr += mip_off;
++			mip_w = vgl_mip_level_width(orig_w, level);
+ 		} else {
+ 			mip_w = orig_w;
+ 			mip_stride = VGL_ALIGN(orig_w, 8) * bpp;
+diff --git a/source/utils/geom_fix.h b/source/utils/geom_fix.h
+new file mode 100644
+index 000000000..7f1a751ac
+--- /dev/null
++++ b/source/utils/geom_fix.h
+@@ -0,0 +1,59 @@
++/* 0058 / 0059: the arithmetic of two places where vitaGL's own text went wrong, with no GXM and no allocator in it, so that a host test
++ * (renderer/tests/vitagl_geom_fix.c) runs the very text the console runs.
++ *
++ * Mip chains (textures.c _glTexSubImage2D, utils/gpu_utils.c gpu_alloc_mipmaps). The linear chain gpu_alloc_mipmaps lays out puts level j after the levels before
++ * it, each MAX(w, 8) * h * bpp bytes (w and h rounded up to a power of two and halved per level), and stops where the SMALLER side reaches 1: a 128 x 32 texture has
++ * 6 levels (128x32 .. 4x1), not the 8 of a square chain. A level past that has no room in the block.
++ *
++ * Interleaved attributes in one buffer (custom_shaders.c). A GXM vertex attribute's offset is 16 bits; an attribute's offset into a buffer (glVertexAttribPointer
++ * with a buffer bound) is not. */
++#ifndef VGL_GEOM_FIX_H
++#define VGL_GEOM_FIX_H
++
++#include <stdint.h>
++
++#define VGL_GEOM_MAX(a, b) (((a) < (b)) ? (b) : (a))
++
++/* Levels in the chain of a w x h texture (both already powers of two): halve both while the smaller side is above 1. Same count as the loop in gpu_alloc_mipmaps
++ * (its `mips` plus the last level). */
++static inline uint32_t vgl_mip_chain_levels(uint32_t w, uint32_t h) {
++	uint32_t n = 1;
++	while (w > 1 && h > 1) {
++		w >>= 1;
++		h >>= 1;
++		n++;
++	}
++	return n;
++}
++
++/* Where level `level` (0 .. vgl_mip_chain_levels - 1) starts in the block, and its row stride, both in bytes. The stride is the one gpu_alloc_mipmaps writes the level
++ * with (rows of the level's width rounded up to 8 texels). */
++static inline void vgl_mip_level_geom(uint32_t po2_w, uint32_t po2_h, uint32_t bpp, uint32_t level, uint32_t *offset, uint32_t *stride) {
++	uint32_t off = 0, w = po2_w, h = po2_h;
++	for (uint32_t j = 0; j < level; j++) {
++		off += VGL_GEOM_MAX(w, 8) * h * bpp;
++		w >>= 1;
++		h >>= 1;
++	}
++	*offset = off;
++	*stride = VGL_GEOM_MAX(w, 8) * bpp; /* (w is a power of two: rounding up to 8 is MAX(w, 8)) */
++}
++
++/* Width of level `level` as GL sizes it: halved per level, never below 1. */
++static inline uint32_t vgl_mip_level_width(uint32_t orig_w, uint32_t level) {
++	const uint32_t w = level >= 31 ? 0 : orig_w >> level;
++	return w ? w : 1;
++}
++
++/* One buffer, one vertex stream (the packed-VBO draw): each enabled attribute of `map` (n of them, `state` the enabled bits) is placed by a GXM attribute offset, which is
++ * 16 bits, and the offset the draw has for it is its distance into the buffer (glVertexAttribPointer with a buffer bound), which is not. Returns 1 when every enabled
++ * offset fits. Otherwise 0: the draw takes a stream of its own for each attribute (stream pointer = buffer + offset, attribute offset 0), which places every attribute
++ * exactly where the offset says. */
++static inline int vgl_pack_offsets_fit(const uint32_t *offs, uint32_t state, const uint8_t *map, uint32_t n) {
++	for (uint32_t i = 0; i < n; i++)
++		if ((state & (1u << map[i])) && offs[map[i]] > 0xFFFFu)
++			return 0;
++	return 1;
++}
++
++#endif
+diff --git a/source/utils/gpu_utils.c b/source/utils/gpu_utils.c
+index 7c3ef83ce..5dd0156ec 100644
+--- a/source/utils/gpu_utils.c
++++ b/source/utils/gpu_utils.c
+@@ -24,6 +24,7 @@
+ #include "../shared.h"
+ 
+ #include "texture_swizzler.h"
++#include "geom_fix.h" // 0058
+ 
+ #ifdef HAVE_TEX_CACHE
+ #define XXH_STATIC_LINKING_ONLY
+@@ -962,6 +963,11 @@ void gpu_alloc_mipmaps(int level, texture *tex) {
+ 		uint32_t w = nearest_po2(orig_w);
+ 		uint32_t h = nearest_po2(orig_h);
+ 
++		// 0058: the block is laid out for a chain that stops where the smaller side reaches 1. A level past it (a full chain of a non-square texture, down to 1x1) has no room:
++		// mip_count would name levels the block does not hold, and the sampler, a swizzle of the chain and glTexSubImage2D would read and write past its end.
++		if (level >= (int)vgl_mip_chain_levels(w, h))
++			return;
++
+ 		// Calculating new texture data buffer size
+ 		uint32_t jumps[16];
+ 		uint32_t size = 0;

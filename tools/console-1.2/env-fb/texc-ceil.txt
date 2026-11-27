@@ -1,0 +1,15 @@
+# console-1.2 run texc-ceil: Texture compression ceiling (MSC_VGX_TEX_COMPRESS=ceiling): the price of the best case, wrong pictures on purpose
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route worstgpu, version payload 1.3, role ab
+# texc15b.md PRICE: `[lane]` gpu p50 / p95 and 3D ms against plain worstgpu1 at the Dump in play; `[texcomp]` eligible MiB and `LEFT FOR THE BYTE CAP OR HEAP FLOOR`, REFUSED UPLOADS. Under 0.3 ms: stop (no texc-1/2/r); over 1 ms: go on.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_VGX_TEX_COMPRESS=ceiling

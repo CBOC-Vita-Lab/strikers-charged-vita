@@ -1,0 +1,17 @@
+# console-1.2 run maskbg1-d: Held moments with the display scene's mask background off (MSC_VGX_VGL_MASKBG=1: the value before gpu24; plan default 3), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group s30, route worstgpu, version payload 1.3, role ab
+# gpu24: A side of scn-on-d for the display scene's mask quad (one full-target 960x544 quad a picture). `[rt] scissor mask background` must show scenes begun with the mask set one more a picture in scn-on-d than here; a garbled or black present = stop (first Vita run of the display bit in this port).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500
+MSC_VGX_VGL_MASKBG=1

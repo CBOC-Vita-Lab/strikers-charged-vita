@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Audit of a Vita package of the player build (a .vpk is a zip): identity, art, LiveArea, and what must NOT be inside.
-  python3 tools/verify_vpk.py <file.vpk> [--id MSCH00002] [--title "Mario Strikers Charged"]
+  python3 tools/verify_vpk.py <file.vpk> [--id MSCH00002] [--title "Mario Strikers Charged"] [--app-ver 01.30]
 Exit 0 when every check passes. Checks: param.sfo TITLE_ID / TITLE (and the ones asked for), icon0.png 128x128, the LiveArea files named by template.xml exist,
 the Settings frame (target psla:-settings) is there, an eboot.bin that is a SELF, the shader compiler of the owner (libshacccg.suprx, by name and by its ELF
 signature "SCE" + the module name) and game data (disc images, .arc/.bin of the game's files, the extracted disc folders) are NOT inside."""
@@ -24,6 +24,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('vpk')
 ap.add_argument('--id')
 ap.add_argument('--title')
+ap.add_argument('--app-ver', help='the APP_VER the package must show on the console (NN.NN); default: NP_APP_VER of platform/vita/vita.mk (2.0: 02.00)')
 a = ap.parse_args()
 z = zipfile.ZipFile(a.vpk)
 names = z.namelist()
@@ -37,6 +38,16 @@ p = sfo(z.read('sce_sys/param.sfo'))
 print('param.sfo:', {k: p[k] for k in ('TITLE_ID', 'TITLE', 'STITLE', 'APP_VER', 'CONTENT_ID', 'CATEGORY') if k in p})
 if a.id: check(p.get('TITLE_ID') == a.id, 'TITLE_ID is %s' % a.id)
 if a.title: check(p.get('TITLE') == a.title, 'TITLE is "%s"' % a.title)
+# 1.3 (SC10): the public 1.1 package showed APP_VER 01.00 (repack-release.py copied its donor's SFO). The version must be the release's.
+expected = a.app_ver
+if not expected:
+    import os
+    mk = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'platform', 'vita', 'vita.mk')
+    if os.path.exists(mk):
+        m = re.search(r'^NP_APP_VER\s*\?=\s*([0-9]{2}\.[0-9]{2})', open(mk).read(), re.M)
+        expected = m.group(1) if m else None
+if expected: check(p.get('APP_VER') == expected, 'APP_VER is %s (the console and VitaDB show it; found %s)' % (expected, p.get('APP_VER')))
+else: print('note  no expected APP_VER (give --app-ver NN.NN); found %s' % p.get('APP_VER'))
 check('eboot.bin' in names and z.read('eboot.bin')[:4] == b'SCE\0', 'eboot.bin is a SELF (%d bytes)' % z.getinfo('eboot.bin').file_size)
 icon = png_size(z.read('sce_sys/icon0.png'))
 check(icon == (128, 128), 'icon0.png is 128x128 (%s)' % (icon,))
@@ -47,7 +58,7 @@ for f in files:
     check(path in names, 'LiveArea file %s is packed' % f)
 bg = [f for f in files if f.startswith('bg')]
 check(any(png_size(z.read('sce_sys/livearea/contents/' + f)) == (840, 500) for f in bg), 'LiveArea background is 840x500')
-check('psla:-settings' in tpl, 'LiveArea Settings button (target psla:-settings)')
+check('psla:-settings' not in tpl, 'LiveArea has no Settings tile (1.3: the settings are in the game; an old tile is still answered by main())')
 bad = [n for n in names if 'libshacccg' in n.lower() or n.lower().endswith('.suprx') and 'shacc' in n.lower()]
 check(not bad, 'no libshacccg.suprx by name %s' % bad)
 sig = []
@@ -58,7 +69,7 @@ for i in z.infolist():
 check(not sig, 'no libshacccg module inside a file (%s)' % sig)
 game = [n for n in names if n.startswith(('game/', 'files/', 'sys/')) or n.lower().endswith(('.iso', '.wbfs', '.rvz', '.gcm', '.dol'))]
 check(not game, 'no game data folders or disc images %s' % game[:3])
-big = [(i.filename, i.file_size) for i in z.infolist() if i.file_size > 12 * 1024 * 1024]
+big = [(i.filename, i.file_size) for i in z.infolist() if i.filename != 'eboot.bin' and i.file_size > 12 * 1024 * 1024]
 check(not big, 'no file above 12 MiB besides the eboot: %s' % big)
 seed = [n for n in names if n.startswith('shadercache/')]
 print('shader seed: %d file(s); first-run seed: %d file(s)' % (len(seed), len([n for n in names if n.startswith('seed/')])))

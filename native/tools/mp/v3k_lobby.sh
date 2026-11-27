@@ -5,9 +5,9 @@
 # presses Create Game. Result: build/np/NPM2/v3k-runs/TAG/{log.txt (the game's own log), stdout.head/.errors (the emulator's), shots/, end.png}.
 cd "$(dirname "$0")/../.."
 TAG=${1:?tag}; SECS=${2:?seconds}; MODE=${3:-wifi}
-VPK=${4:-/home/claude/msc/build/np/NPM2/keep/mscharged-np-npm2-ba4e1d3a.vpk}; TID=MSCN00001
-P=/home/claude/msc/build/np/NPM2/v3k
-OUT=/home/claude/msc/build/np/NPM2/v3k-runs/$TAG; rm -rf "$OUT"; mkdir -p "$OUT"
+VPK=${4:-/work/msc/build/np/NPM2/keep/mscharged-np-npm2-ba4e1d3a.vpk}; TID=MSCN00001
+P=/work/msc/build/np/NPM2/v3k
+OUT=/work/msc/build/np/NPM2/v3k-runs/$TAG; rm -rf "$OUT"; mkdir -p "$OUT"
 ENVF=$OUT/env.txt
 cat > $ENVF <<EOT
 # Vita3K (container, software GL): boot, MULTIPLAYER entry, lobby, Create Game (tools/mp/v3k_lobby.sh)
@@ -25,7 +25,7 @@ MSC_LINK_NAME=VITA-1
 EOT
 { echo "tag=$TAG secs=$SECS mode=$MODE vpk=$VPK ($(sha256sum "$VPK" | cut -c1-16)) start=$(date +%T)"; } > "$OUT/run.txt"
 PROFILE_DIR=$P GAME=1 ENVTXT=$ENVF SHOTEVERY=${SHOTEVERY:-30} FILES="tools/mp/lan/lan_lobby_only.txt" KEEPDATA=${KEEPDATA:-0} \
-  /home/claude/msc/tools/heavy.sh -t $((SECS + 90)) /home/claude/msc/npw/NPV3/platform/vita/tools/v3k_run.sh "$VPK" "$TID" "$SECS" "${UNTIL:-created game}" >> "$OUT/run.txt" 2>&1
+  /work/msc/tools/heavy.sh -t $((SECS + 90)) /work/msc/npw/NPV3/platform/vita/tools/v3k_run.sh "$VPK" "$TID" "$SECS" "${UNTIL:-created game}" >> "$OUT/run.txt" 2>&1
 echo "end=$(date +%T)" >> "$OUT/run.txt"
 cp "$P/log.txt" "$P/stdout.txt" "$P/end.png" "$OUT/" 2>/dev/null
 cp -r "$P/shots" "$OUT/" 2>/dev/null

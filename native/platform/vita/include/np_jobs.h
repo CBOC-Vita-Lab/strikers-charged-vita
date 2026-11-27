@@ -22,7 +22,7 @@
  *   MSC_JOBS_VERIFY=1     NpParallelForChecked runs the job in parallel, hashes its outputs with the
  *                         caller's hash function, runs it again serially and compares: a mismatch
  *                         is logged ("[jobs] MISMATCH ...") and counted
- *   MSC_JOBS_CORES=<set>  cores of the workers, e.g. "12" (default: workers on core 2 then 1)
+ *   MSC_JOBS_CORES=<set>  cores of the workers, e.g. "12" (default: workers on core 2 then 1; Vita with MSC_SIMT=2 in force (pace18): 0 then 1, core 2 is np_sim's)
  *   MSC_JOBS_PRIO=<n>     worker thread priority (Vita; default: just below audio output, above render)
  *   MSC_JOBS_SPIN_US=<n>  how long an idle worker polls before it sleeps (default 200)
  * Statistics: NpJobsLogStats() / the harness's end-of-run report.
@@ -54,6 +54,8 @@ int NpInJob(void);
  * Serial fallback (same function, one call with lane 0) when the pool is off, busy (called from a
  * job or concurrently from another thread) or the job is too small. Returns the number of lanes used. */
 uint32_t NpParallelFor(size_t count, size_t minPerLane, NpRangeFn fn, void* ctx);
+/* lane24 FIX-20: as NpParallelFor, but workers on the cores in avoidCores (bit n = core n; the caller's core 0 is always avoided when the mask is not 0) are not woken. 0 = NpParallelFor. */
+uint32_t NpParallelForAvoid(size_t count, size_t minPerLane, NpRangeFn fn, void* ctx, uint32_t avoidCores);
 /* The same, with the verifier (MSC_JOBS_VERIFY=1) around it; `name` appears in the log. */
 uint32_t NpParallelForChecked(const char* name, size_t count, size_t minPerLane, NpRangeFn fn, void* ctx,
                               NpHashFn outputHash, void* hashCtx);
@@ -61,6 +63,7 @@ uint32_t NpParallelForChecked(const char* name, size_t count, size_t minPerLane,
 typedef struct NpJobsStats {
     uint64_t calls, parallelCalls, serialFallbacks, busyFallbacks;
     uint64_t verifyRuns, verifyMismatches;
+    uint64_t recheckRepairs;          /* MSC_JOBS_RECHECK_MS: timed wake-ups that found the flag already set (a lost wake-up repaired) */
     uint64_t lateStarts;              /* workers woken for a job that was already finished: not waited for */
     uint64_t laneItems[NP_JOBS_MAX_LANES];
     uint64_t laneBusyUs[NP_JOBS_MAX_LANES];

@@ -1,0 +1,15 @@
+# console-1.2 run cap-tour: 1.3 current with the fourth core asked for (CapUnlocker): tour
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group addon, route ctour, version payload 1.3, role ab
+# With CapUnlocker the log says `[vita] fourth core: usable` and sound, disc, log and frame send move there; without it `not available` and the run equals cur-tour*. Compare play p50 and the [lane] game column with cur-tour1..3.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/ctour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_VITA_CORE3=1
+MSC_VITA_CORE3_SEND=1
+MSC_VITA_CLOCK_POLICY=max

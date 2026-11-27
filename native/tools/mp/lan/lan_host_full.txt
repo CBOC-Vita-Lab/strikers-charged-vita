@@ -22,6 +22,24 @@ idle 10
 log STATE pointer on multiplayer
 idle 20
 press 100
+wait scene == 10 || scene == 24 2400
+if scene == 10
+# Explicit mode choices; MSC_NET_MODE host/join shortcuts already enter the lobby.
+log STATE multiplayer mode choice
+wait nbuttons >= 3 900
+idle 60
+mash 4 15 onctx == 1 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 900
+wait nbuttons >= 3 900
+idle 60
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+log chose local nearby
+endif
 wait scene == 24 2400
 log STATE lobby
 idle 120
@@ -598,7 +616,13 @@ hold 120 0 -40 -60
 press 400
 hold 120 100 70 0
 endif
+# (mp18) the blocks above are counted in frames: a console at another frame rate (LOCKED 60 against AUTO) runs out of them while the match is still on, then left at once and
+# the partner saw 'connection lost' before the match ended (lan-plan, 23 Nov). Play on with no input until the match really ends (gs 3 = end of game) or an error popup (a lost link).
+wait gs == 3 || ingame == 0 || scene == 10 || ovl == 10 54000
 log STATE match over
+# (mp18) the end of game (gs 3) comes while the match is still on screen (ingame 1): leave its end screens first, else the line below ends at once and the console at
+# 60 left during the partner's end-of-match exchange (on-plan, 23 Nov: one console without its end digest).
+mash 100 90 ingame == 0 || scene == 10 || ovl == 10 7200
 # Results and whatever follows: accept the highlighted choice, watch where the game goes.
 mash 100 90 scene == 24 || scene == 1 || scene == 50 || ingame == 1 7200
 log STATE after results

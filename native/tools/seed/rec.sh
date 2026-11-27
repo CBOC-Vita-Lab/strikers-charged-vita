@@ -3,8 +3,8 @@
 #   heavy.sh -t 300 tools/seed/rec.sh [-n name] [-s script] [-f maxframes] [-X exe] [-b buildroot] [-S savedir] [-k]  [VAR=value ...]
 # The run starts from a private data dir (no save file, or a copy of -S <dir>), virtual time, the exe's own output in rec/<name>.log.
 # Keys are produced by the front end, so the null back end is enough (default exe: the W5INT null build).
-OUT=${SEED_OUT:-/home/claude/msc/build/np/W5SEED}
-EXE=/home/claude/msc/build/np/W5INT/host32/np-host32-full-null
+OUT=${SEED_OUT:-${SEED_ROOT:-/work/msc/build/np/W5SEED}}
+EXE=/work/msc/build/np/W5INT/host32/np-host32-full-null
 NAME=run; SCRIPT=; FR=; SAVE=; KEEP=0; TMO=280
 while getopts "n:s:f:X:S:kt:" o; do case $o in n) NAME=$OPTARG;; s) SCRIPT=$OPTARG;; f) FR=$OPTARG;; X) EXE=$OPTARG;; S) SAVE=$OPTARG;; k) KEEP=1;; t) TMO=$OPTARG;; *) exit 2;; esac; done
 shift $((OPTIND-1))
@@ -15,7 +15,7 @@ mkdir -p $D
 [ -n "$SAVE" ] && [ ! -e $D/NAND ] && cp -a $SAVE/. $D/
 SCRIPT=$(realpath $SCRIPT)
 LOG=$OUT/rec/$NAME.log
-export NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$SCRIPT MSC_VIRTUAL_TIME=1 MSC_WATCH=1 MSC_WATCH_EVERY=${WATCH_EVERY:-600} MSC_FRAME_LOG=100000
+export NP_DISC_DIR=${NP_DISC_DIR:-/work/msc/game} NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$SCRIPT MSC_VIRTUAL_TIME=1 MSC_WATCH=1 MSC_WATCH_EVERY=${WATCH_EVERY:-600} MSC_FRAME_LOG=100000
 export MSC_VGX_SHADERLIST=$OUT/rec/$NAME.shl
 [ -n "$FR" ] && export MSC_MAX_FRAMES=$FR
 for kv in "$@"; do export "$kv"; done

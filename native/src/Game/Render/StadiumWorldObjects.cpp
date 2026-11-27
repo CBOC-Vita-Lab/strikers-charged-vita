@@ -292,9 +292,7 @@ bool StadiumWorldDrawable::IsVisibleInFrustum(const nlVector4* planes) const
 {
     if (m_pAnimController != 0)
         return WorldDrawable::IsVisibleInFrustum(planes);
-    return ClassifyBoxInFrustum(
-               planes, &m_boundsMin, &m_boundsMax, 0)
-        != 0;
+    return IsBoxVisibleInFrustum(planes, &m_boundsMin, &m_boundsMax);
 }
 
 /**

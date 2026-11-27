@@ -6,6 +6,10 @@
 #include <revolution/mtx/mtx.h>
 
 #include "Game/GameObjectLighting.h"
+#ifdef NP_NATIVE
+#include <string.h>
+#include "np/cpu22.h"
+#endif
 #include "Game/Render/StadiumWorldObjects.h"
 #include "Game/Render/ImpostorModel.h"
 
@@ -575,6 +579,36 @@ static const u32 sGameObjectLightMasks[6] = {
 static const GXLightID sSpecularLightIDs[2] = { GX_LIGHT6, GX_LIGHT7 };
 
 nlMatrix4 gShadowInverseViewMatrix;
+#ifdef NP_NATIVE
+// MSC_CPU22_INVLAZY (include/np/cpu22.h): every material program's Activate sets the view matrix (about 30 a picture, one per view the characters are drawn into), and
+// each call inverted it; the inverse is only read by ApplyGameObjectShadowLighting for a skinned draw without a shadow level. The matrix is copied here (the call's
+// own input bits) and inverted at the first read: the same function on the same bits, so the same gShadowInverseViewMatrix, only later and not at all when no draw reads it.
+static nlMatrix4 sShadowViewCopy;
+static bool sShadowInvPending;
+static void NpShadowVerify()
+{
+    nlMatrix4 view = sShadowViewCopy;
+    nlMatrix4 lazy;
+    if (NpCpu22Break() == 1)
+        view.e2[0][1] += 1.0e-6f;   // proof mutant
+    nlInvertMatrix(lazy, view);
+    if (memcmp(&lazy, &gShadowInverseViewMatrix, sizeof lazy) != 0)
+        NpCpu22Note(NP_C22_INVLAZY, 2);
+}
+static inline void NpShadowInverseNeeded()
+{
+    if (sShadowInvPending)
+    {
+        nlMatrix4 view = sShadowViewCopy;
+        if (NpCpu22Break() == 1)
+            view.e2[0][1] += 1.0e-6f;   // proof mutant
+        nlInvertMatrix(gShadowInverseViewMatrix, view);
+        sShadowInvPending = false;
+        NpCpu22Note(NP_C22_INVLAZY, 1);
+    }
+}
+#endif
+
 
 unsigned long GetGameObjectLightTexture()
 {
@@ -621,7 +655,7 @@ void LoadGameObjectLights(int count, GLView* pView, bool character)
 
 void LoadGameObjectLight(int lightId, const GameObjectLight* pLight, const nlMatrix4& mview)
 {
-    GXLightObj light;
+    GXLightObj light = {}; // zeroed: GXInitLightDir is never called here and GXLoadLightObjImm sends all 64 bytes (an unset direction was stack garbage in the GX stream)
     nlVector3 rotated;
     nlVector3 direction;
     nlVector3 initialDirection;
@@ -755,7 +789,7 @@ void LoadGameObjectSpecularLight(int index, GameObjectLight* lightData, float ex
     if (index < 0 || index >= 2)
         return;
 
-    GXLightObj light;
+    GXLightObj light = {}; // zeroed: GXInitLightDir is never called here and GXLoadLightObjImm sends all 64 bytes (an unset direction was stack garbage in the GX stream)
     nlVector3 rotated;
     nlVector3 direction;
     nlVector3 initialDirection;
@@ -938,6 +972,19 @@ void ApplyGameObjectShadowLighting(int skinned, unsigned long shadowLevel)
 
         if (skinned && gShadowLookupSkinnedUsesInverseView)
         {
+#ifdef NP_NATIVE
+            if (sShadowInvPending)
+            {
+                if (NpCpu22Mode(NP_C22_INVLAZY) == 2)
+                {
+                    NpShadowVerify();
+                    NpCpu22Note(NP_C22_INVLAZY, 1);
+                    sShadowInvPending = false;
+                }
+                else
+                    NpShadowInverseNeeded();
+            }
+#endif
             Mtx inverse;
             glxCopyMatrix(inverse, gShadowInverseViewMatrix);
             if (gShadowLookupInverseViewPostMultiply)
@@ -985,6 +1032,26 @@ void SetGameObjectShadowModelMatrix(unsigned long matrix)
 
 void SetGameObjectShadowViewMatrix(const nlMatrix4* matrix)
 {
+#ifdef NP_NATIVE
+    if (const int mode = NpCpu22Mode(NP_C22_INVLAZY))
+    {
+        if (IsShadowLookupActive())
+        {
+            NpCpu22Note(NP_C22_INVLAZY, 0);
+            if (mode == 2)
+            {
+                // verify: the original eager inverse is the one in use; the lazy one (from the copy kept at the last call) is made into a scratch matrix and compared, when it is first
+                // read and also when this call replaces a copy nobody read (gShadowInverseViewMatrix is that copy's eager inverse until the line below)
+                if (sShadowInvPending)
+                    NpShadowVerify();
+                nlInvertMatrix(gShadowInverseViewMatrix, *matrix);
+            }
+            sShadowViewCopy = *matrix;
+            sShadowInvPending = true;
+        }
+        return;
+    }
+#endif
     if (IsShadowLookupActive())
         nlInvertMatrix(gShadowInverseViewMatrix, *matrix);
 }

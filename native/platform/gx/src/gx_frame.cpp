@@ -53,6 +53,7 @@ void GXSetCopyClear(GXColor color, u32 z) {
 // The vertical filter: the picture is drawn into the renderer's own frame buffer without a scaling pass, so the
 // scale only has to come out the way the SDK computes it (the game reads the XFB height it implies).
 static u32 NumXfbLines(u32 efbHt, u32 iScale) {
+    if (iScale == 0) iScale = 256;   // (the SDK's own bit field cannot hold 0 either: a scale of 512 or more wraps to it; 0 divided to 0 on the console and crashed the host)
     u32 realHt = ((efbHt - 1) * 0x100) / iScale + 1;
     u32 iScaleD = iScale;
     if (iScaleD > 0x80 && iScaleD < 0x100) {
@@ -97,7 +98,7 @@ void GXAdjustForOverscan(GXRenderModeObj* in, GXRenderModeObj* out, u16 horiz, u
     const u32 viTVMode = in->viTVmode & 3;
     out->fbWidth = static_cast<u16>(in->fbWidth - hor2);
     const u32 verf = in->efbHeight;
-    out->efbHeight = static_cast<u16>(verf - ((ver2 * verf) / in->xfbHeight));
+    out->efbHeight = static_cast<u16>(verf - (in->xfbHeight ? (ver2 * verf) / in->xfbHeight : 0u));
     if (in->xfbMode == VI_XFB_MODE_SF && viTVMode == 0) out->xfbHeight = static_cast<u16>(in->xfbHeight - (ver2 / 2));
     else out->xfbHeight = static_cast<u16>(in->xfbHeight - ver2);
     out->viWidth = static_cast<u16>(in->viWidth - hor2);

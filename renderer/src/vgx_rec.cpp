@@ -2,6 +2,10 @@
 #include "vgx_rec.h"
 #include "vgx_guestmem.h"
 #include "vgx_hle.h"
+#include "vgx_workload.h"
+#include <ctime>
+#include <cstdio>
+#include <cstdlib>
 
 #include <atomic>
 #include <chrono>
@@ -16,6 +20,8 @@
 #include <unistd.h>
 #endif
 
+extern "C" void NpGsWaitBegin(void) __attribute__((weak));   // (native/platform/compat/np_gsplit.cpp: absent in other builds)
+extern "C" void NpGsWaitEnd(void) __attribute__((weak));
 namespace vgx::rec {
 
 Producer g_prod;
@@ -32,34 +38,77 @@ constexpr uint32_t kChunkWords = 1u << 16; // 256 KiB
 std::mutex g_freeMtx;
 std::vector<Chunk*> g_free; // standard-size chunks handed back by the consumer
 
+std::atomic<uint32_t> g_chunkSerial{0};
+// 1.3: a chunk the C heap cannot give is waited for, not written through (1.1 and 1.2 wrote through the null: C2-12828-1 with no word about memory). The player
+// hands standard chunks back (RecycleChunk) as it reads them and a pending frame frees its own memory, so for up to ~3 s the producer looks again for a spare
+// standard chunk, frees the spares it holds for a large request, and asks malloc again; only then does it end the program, with a line saying why.
+extern "C" void NpHostHeapExhausted(size_t) __attribute__((weak));   // nlMemory.cpp (native builds)
 Chunk* NewChunk(uint32_t cap) {
-    if (cap == kChunkWords) {
-        std::lock_guard<std::mutex> lk(g_freeMtx);
-        if (!g_free.empty()) {
-            Chunk* c = g_free.back();
-            g_free.pop_back();
-            c->next.store(nullptr, std::memory_order_relaxed);
-            c->committed.store(0, std::memory_order_relaxed);
-            return c;
+    const size_t bytes = sizeof(Chunk) + static_cast<size_t>(cap) * 4;
+    Chunk* c = nullptr;
+    for (int attempt = 0;; ++attempt) {
+        if (cap == kChunkWords) {
+            std::lock_guard<std::mutex> lk(g_freeMtx);
+            if (!g_free.empty()) {
+                c = g_free.back();
+                g_free.pop_back();
+                c->next.store(nullptr, std::memory_order_relaxed);
+                c->committed.store(0, std::memory_order_relaxed);
+                c->serial.store(g_chunkSerial.fetch_add(1, std::memory_order_relaxed) + 1u, std::memory_order_relaxed);
+                c->state.store(0, std::memory_order_relaxed);
+                return c;
+            }
         }
+        c = static_cast<Chunk*>(std::malloc(bytes));
+        if (c) break;
+        if (attempt == 0) std::fprintf(stderr, "[vgx] record chunk of %lu KiB: the C heap has no room; waiting for the player to hand chunks back\n", static_cast<unsigned long>(bytes >> 10));
+        if (attempt >= 1500) {
+            if (NpHostHeapExhausted) NpHostHeapExhausted(bytes);
+            std::fprintf(stderr, "FATAL: host heap exhausted: a record chunk of %lu KiB found no room\n", static_cast<unsigned long>(bytes >> 10));
+            std::abort();
+        }
+        if (cap != kChunkWords) { // (a large chunk cannot use a spare: give the spares back to the heap)
+            std::lock_guard<std::mutex> lk(g_freeMtx);
+            while (!g_free.empty()) { std::free(g_free.back()); g_free.pop_back(); }
+        }
+        struct timespec ts = {0, 2000000};
+        nanosleep(&ts, nullptr);
     }
-    Chunk* c = static_cast<Chunk*>(std::malloc(sizeof(Chunk) + static_cast<size_t>(cap) * 4));
     new (c) Chunk();
     c->cap = cap;
+    c->serial.store(g_chunkSerial.fetch_add(1, std::memory_order_relaxed) + 1u, std::memory_order_relaxed);
     return c;
 }
 
 uint64_t (*g_probe)(const void*, size_t) = nullptr;
 } // namespace
 
+// MSC_VGX_POISON=1 (diagnostic, default off): a chunk handed back is filled with 0xA5 bytes (op 165, not a record), so that a reader that still looks at it
+// (the player, or a by-value array binding) fails at once instead of reading whatever the next frame wrote.
+static bool PoisonOn() {
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_POISON", 0) != 0));
+    return on;
+}
 // Called by the consumer when it leaves a chunk.
 void RecycleChunk(Chunk* c) {
     if (c->cap == kChunkWords) {
         std::lock_guard<std::mutex> lk(g_freeMtx);
-        if (g_free.size() < 8) { g_free.push_back(c); return; }
+        if (g_free.size() < 8) {
+            c->state.store(1, std::memory_order_relaxed);
+            if (PoisonOn()) std::memset(c->data, 0xA5, static_cast<size_t>(c->cap) * 4);
+            g_free.push_back(c);
+            return;
+        }
     }
     c->~Chunk();
     std::free(c);
+}
+// Abort diagnostics: is `c` in the free list right now?
+bool ChunkInFreeList(const Chunk* c) {
+    std::lock_guard<std::mutex> lk(g_freeMtx);
+    for (const Chunk* f : g_free)
+        if (f == c) return true;
+    return false;
 }
 // The chunk the stream starts with. Whichever side needs it first makes it, under a mutex,
 // and only the producer ever writes g_prod.
@@ -120,7 +169,7 @@ std::mutex g_syncMtx;
 std::condition_variable g_syncCv;   // player -> game thread: frame decoded / executed
 std::atomic<uint64_t> g_presented{0};
 uint64_t g_decoded = 0, g_executed = 0; // under g_syncMtx
-std::atomic<uint32_t> g_wakeSeq{0};  // bumped (and signalled) at present
+alignas(64) std::atomic<uint32_t> g_wakeSeq{0};  // bumped (and signalled) at present
 
 // The idle player sleeps for at most a millisecond of *real* time. This must
 // not go through the C library's clock: under the navigation harness's
@@ -134,6 +183,30 @@ void IdleWait(uint32_t seen) {
     syscall(SYS_futex, reinterpret_cast<uint32_t*>(&g_wakeSeq), FUTEX_WAIT_PRIVATE, seen, &ts, nullptr, 0);
 }
 void IdleWake() { syscall(SYS_futex, reinterpret_cast<uint32_t*>(&g_wakeSeq), FUTEX_WAKE_PRIVATE, 1, nullptr, nullptr, 0); }
+#elif defined(__vita__)
+// int29/int31: direct Vita kernel binary semaphore (maxCount=1) replaces pthread-embedded mutex/cond on IdleWait/IdleWake (zero g_syncMtx contention on Core 0/2), initialized in InitMode() rather than static init.
+std::atomic<SceUID> g_idleSem{-1};
+void InitIdleSem() {
+    if (g_idleSem.load(std::memory_order_acquire) >= 0) return;
+    static std::mutex initMtx;
+    std::lock_guard<std::mutex> lk(initMtx);
+    if (g_idleSem.load(std::memory_order_relaxed) < 0)
+        g_idleSem.store(sceKernelCreateSema("vgx_rec_idle", 0, 0, 1, nullptr), std::memory_order_release);
+}
+void IdleWait(uint32_t seen) {
+    if (g_wakeSeq.load(std::memory_order_seq_cst) != seen) return;
+    const SceUID sem = g_idleSem.load(std::memory_order_acquire);
+    if (sem >= 0) {
+        SceUInt us = 1000;
+        sceKernelWaitSema(sem, 1, &us);
+    } else {
+        sceKernelDelayThread(500);
+    }
+}
+void IdleWake() {
+    const SceUID sem = g_idleSem.load(std::memory_order_acquire);
+    if (sem >= 0) sceKernelSignalSema(sem, 1);
+}
 #else
 std::condition_variable g_dataCv;
 void IdleWait(uint32_t seen) {
@@ -158,6 +231,29 @@ void IdleWake() { g_dataCv.notify_one(); }
 // back end). TakePlayerIdleMs() is read by the profile print and resets the sum.
 static std::atomic<uint64_t> g_idleNs{0};
 double TakePlayerIdleMs() { return static_cast<double>(g_idleNs.exchange(0, std::memory_order_relaxed)) / 1e6; }
+// MSC_VGX_WAITSTAT=1 (1.2 audit): how often the idle player goes to sleep, and how many of those sleeps ended by the 1 ms time-out (the player polls for
+// the game thread's records between presents; a sleep ended by a present counts as woken). One line every 600 presents.
+static std::atomic<uint64_t> g_idleSleeps{0}, g_idleTimeouts{0};
+static inline bool WaitStat() {
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_WAITSTAT", 0) != 0));
+    return on;
+}
+bool PlayerHasPending();
+alignas(64) std::atomic<bool> g_playerIdle{false};
+bool g_wakeCheckArmed = true;
+uint32_t g_commitSinceWake = 0;
+void WakePlayerOnce() {
+    if (!g_playerIdle.load(std::memory_order_seq_cst)) return;
+    if (!g_playerIdle.exchange(false, std::memory_order_seq_cst)) return;
+#if defined(__linux__) || defined(__vita__)
+    g_wakeSeq.fetch_add(1, std::memory_order_seq_cst);
+    IdleWake();
+#else
+    std::lock_guard<std::mutex> lk(g_syncMtx);
+    g_wakeSeq.fetch_add(1, std::memory_order_release);
+    IdleWake();
+#endif
+}
 void PlayerWaitForData() {
     const uint32_t seen = g_wakeSeq.load(std::memory_order_acquire);
     {
@@ -165,13 +261,25 @@ void PlayerWaitForData() {
         std::lock_guard<std::mutex> lk(g_syncMtx);
         if (g_presented.load(std::memory_order_relaxed) > g_decoded) return;
     }
-    static const bool prof = EnvInt("MSC_VGX_PROF", 0) != 0;
+    g_playerIdle.store(true, std::memory_order_seq_cst);
+    // int28 (Carbon M1): Dekker seq_cst recheck of both wakeSeq AND pending chunk words prevents StoreLoad lost wake.
+    if (g_wakeSeq.load(std::memory_order_seq_cst) != seen || PlayerHasPending()) {
+        g_playerIdle.store(false, std::memory_order_relaxed);
+        return;
+    }
+    const bool prof = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_PROF", 0) != 0));
     if (!prof) {
         IdleWait(seen);
+        g_playerIdle.store(false, std::memory_order_relaxed);
+        if (WaitStat()) {
+            g_idleSleeps.fetch_add(1, std::memory_order_relaxed);
+            if (g_wakeSeq.load(std::memory_order_relaxed) == seen) g_idleTimeouts.fetch_add(1, std::memory_order_relaxed);
+        }
         return;
     }
     const auto t0 = std::chrono::steady_clock::now();
     IdleWait(seen);
+    g_playerIdle.store(false, std::memory_order_relaxed);
     g_idleNs.fetch_add(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count()),
                        std::memory_order_relaxed);
 }
@@ -180,7 +288,7 @@ void PlayerWaitForData() {
 // cannot be lost (a signal between the predicate test and the block can: VRS, 16 Oct), a surplus post only costs one more round. MSC_VGX_SYNC=cv: the old wait.
 namespace {
 inline bool SemaSync() {
-    static const bool on = [] { const char* e = std::getenv("MSC_VGX_SYNC"); return !(e != nullptr && e[0] == 'c'); }();
+    const bool on = static_cast<bool>(VGX_KNOB([] { const char* e = std::getenv("MSC_VGX_SYNC"); return !(e != nullptr && e[0] == 'c'); }()));
     return on;
 }
 #if defined(__vita__)
@@ -221,6 +329,7 @@ void AsyncDump(const char* tag, uint32_t playerStage, uint32_t backStage, uint32
 
 void AfterCommitSlow() { PlayPending(); } // immediate mode only
 bool g_publishEach = true; // until InitMode has read the mode
+bool g_prefetchRec = false; // MSC_PREFETCH bit 4
 void PublishSlow() {
     g_prod.cur->committed.store(Wpos(), std::memory_order_release);
     if (g_mode == MODE_IMMEDIATE) AfterCommitSlow();
@@ -236,6 +345,10 @@ void InitMode() {
     else if (m && !std::strcmp(m, "frame")) g_mode = MODE_FRAME;
     else g_mode = MODE_THREAD;
     g_publishEach = g_mode == MODE_IMMEDIATE || EnvInt("MSC_VGX_LAZYPUB", 1) == 0;
+    g_prefetchRec = (EnvInt("MSC_PREFETCH", 0) & 4) != 0;
+#if defined(__vita__)
+    InitIdleSem();
+#endif
 }
 
 // MSC_VGX_RECSTAT=1: every 600 presents one line with the size of the record stream the game
@@ -255,6 +368,7 @@ static void RecordStreamStat() {
 }
 
 void Present(bool waitExecuted, uint64_t latencyTag) {
+    workload::ProducerTick(); // (MSC_VGX_WORKLOAD_PROBE: the send column)
     if(latencyTag){
         uint32_t* r = Reserve(3);
         r[0] = Hdr(R_PRESENT,1);
@@ -262,16 +376,33 @@ void Present(bool waitExecuted, uint64_t latencyTag) {
         r[2] = static_cast<uint32_t>(latencyTag >> 32);
         Commit(3);
     }else Emit0(R_PRESENT);
-    static const bool recStat = EnvInt("MSC_VGX_RECSTAT", 0) != 0;
+    const bool recStat = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_RECSTAT", 0) != 0));
     if (recStat) RecordStreamStat();
+    if (WaitStat()) {
+        static uint64_t presents = 0, lastSleeps = 0, lastTimeouts = 0;
+        if (++presents % 600 == 0) {
+            const uint64_t sl = g_idleSleeps.load(std::memory_order_relaxed), to = g_idleTimeouts.load(std::memory_order_relaxed);
+            std::fprintf(stderr, "[vgx] player sleeps, last 600 presents: %.1f per present, %.1f of them ended by the time-out (polls for records)\n",
+                         static_cast<double>(sl - lastSleeps) / 600.0, static_cast<double>(to - lastTimeouts) / 600.0);
+            lastSleeps = sl;
+            lastTimeouts = to;
+        }
+    }
     if (g_mode != MODE_THREAD) {
         if (g_mode == MODE_FRAME) PlayPending();
         return; // FrontPresent handed the buffer to the render thread synchronously
     }
     std::unique_lock<std::mutex> lk(g_syncMtx);
     const uint64_t n = g_presented.fetch_add(1, std::memory_order_relaxed) + 1;
+#if defined(__vita__)
+    g_wakeSeq.fetch_add(1, std::memory_order_seq_cst);
+    if (g_playerIdle.load(std::memory_order_seq_cst) && g_playerIdle.exchange(false, std::memory_order_seq_cst))
+        IdleWake();
+#else
     g_wakeSeq.fetch_add(1, std::memory_order_release);
     IdleWake();
+#endif
+    struct GsWait { GsWait() { if (NpGsWaitBegin) NpGsWaitBegin(); } ~GsWait() { if (NpGsWaitEnd) NpGsWaitEnd(); } } gsWait;   // (MSC_GSPLIT: the hand-over wait below is blocked time, not CPU)
     if (waitExecuted) {
         g_syncCv.wait(lk, [n] { return g_executed >= n; });
     } else {
@@ -282,11 +413,15 @@ void Present(bool waitExecuted, uint64_t latencyTag) {
                 g_semDecoded.Wait();
                 lk.lock();
             }
+            g_wakeCheckArmed = true;
+            g_commitSinceWake = 0;
             return;
         }
 #endif
         g_syncCv.wait(lk, [n] { return g_decoded >= n; });
     }
+    g_wakeCheckArmed = true;
+    g_commitSinceWake = 0;
 }
 
 // ---------------------------------------------------------------- shadow
@@ -323,10 +458,20 @@ static void ShadowReset() {
 // The front end's register file starts in the same state without a record.
 static const struct ShadowInit { ShadowInit() { ShadowReset(); } } g_shadowInit;
 
+bool g_recFast = true;
+int g_recBreak = 0;
+uint64_t g_recCnt[4] = {0, 0, 0, 0};
+static void RecFastStats() { std::fprintf(stderr, "[recfast] BPSlow calls %llu, (unused) %llu, fog memo hits %llu, fog computed %llu\n", (unsigned long long)g_recCnt[0], (unsigned long long)g_recCnt[1], (unsigned long long)g_recCnt[2], (unsigned long long)g_recCnt[3]); }
+
 void Reset() {
+    g_recFast = EnvInt("MSC_REC_FAST", 1) != 0;
+    g_recBreak = EnvInt("MSC_REC_FAST_BREAK", 0);
+    if (EnvInt("MSC_REC_FAST_STATS", 0)) std::atexit(RecFastStats);
     GxdInit();
     ShadowReset();
     g_vtxSent.valid = false;
+    g_wakeCheckArmed = true;
+    g_commitSinceWake = 0;
     Emit0(R_RESET);
 }
 
@@ -342,7 +487,7 @@ struct RawOpen { uint32_t* rec = nullptr; uint8_t* base = nullptr; uint32_t vsiz
 }
 
 bool Enabled() {
-    static const bool on = EnvInt("MSC_VGX_FAST", 1) != 0;
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_FAST", 1) != 0));
     return on;
 }
 
@@ -400,7 +545,7 @@ bool BeginRaw(uint8_t prim, int fmt, uint32_t count, uint32_t vertexBytes) {
 
 void FinishRaw() {
     if (!g_raw.open) return;
-    const uint32_t count = static_cast<uint32_t>(g_rawCur.ptr - g_raw.base) / g_raw.vsize;
+    const uint32_t count = g_raw.vsize ? static_cast<uint32_t>(g_rawCur.ptr - g_raw.base) / g_raw.vsize : 0u;
     g_raw.open = false;
     g_immOpen = false;
     RefreshLimit();
@@ -451,7 +596,8 @@ void LoadNrmMtxBE(uint32_t addr, const void* be) {
 
 namespace vgx::rec {
 
-void BP(uint32_t rv) {
+void BPSlow(uint32_t rv) {
+    ++g_recCnt[0];
     const uint8_t reg = static_cast<uint8_t>(rv >> 24);
     const uint32_t val = rv & 0x00FFFFFFu;
     if (reg == 0xFE) { // mask for the next write only
@@ -486,7 +632,7 @@ void BP(uint32_t rv) {
     Emit1State(R_BP, 0, (static_cast<uint32_t>(reg) << 24) | nv);
 }
 
-void BPField(uint8_t reg, int shift, int count, uint32_t value) {
+void BPFieldSlow(uint8_t reg, int shift, int count, uint32_t value) {
     const uint32_t mask = ((1u << count) - 1u) << shift;
     const uint32_t nv = ((gs.bp[reg] & ~mask) | ((value << shift) & mask)) & 0x00FFFFFFu;
     gs.bp[reg] = nv;
@@ -625,9 +771,13 @@ void DrawRaw(uint8_t prim, int fmt, const uint8_t* data, uint32_t count, uint32_
 
 static inline uint32_t Pack16(int a, int b) { return (static_cast<uint32_t>(a) & 0xFFFFu) | (static_cast<uint32_t>(b) << 16); }
 
+static bool g_nextCopyClearOnly = false;
+void NextCopyClearOnly() { g_nextCopyClearOnly = true; }
 void CopyTex(const void* dest, bool clear) {
     uint32_t* r = Reserve(7);
-    r[0] = Hdr(R_COPY_TEX, (clear ? 1u : 0u) | (gs.texCopyHalf ? 2u : 0u));
+    const bool clearOnly = g_nextCopyClearOnly && clear;   // (nxr4b: only a copy that has a clear can be "clear only")
+    g_nextCopyClearOnly = false;
+    r[0] = Hdr(R_COPY_TEX, (clear ? 1u : 0u) | (gs.texCopyHalf ? 2u : 0u) | (clearOnly ? 4u : 0u));
     r[1] = gs.texCopyFmt;
     r[2] = Pack16(gs.texCopySrc.x, gs.texCopySrc.y);
     r[3] = Pack16(gs.texCopySrc.w, gs.texCopySrc.h);

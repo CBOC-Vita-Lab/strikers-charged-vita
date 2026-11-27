@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 20:00:00 -0500
+Subject: [PATCH] nxr4a (collector timers): vglGetGcJobStats reads how long a garbage collector job takes, how long its sceGxmDestroyRenderTarget calls take and how long the render thread waited in gc_enqueue for a credit (counters only, always on, no behaviour change)
+
+---
+diff --git a/source/gxm.c b/source/gxm.c
+index b41ce1be4..373628f75 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -176,6 +176,14 @@ int frame_rt_purge_idx = 0; // Index for currently populatable purge list render
+ static int frame_purge_clean_idx = 1;
+ SceUID gc_mutex[2] = {-1, -1};
+ #include <psp2/kernel/error.h>
++// 0064 (collector timers, always on, two clock reads per collector job and one per swap): how long a collector job takes, how long its sceGxmDestroyRenderTarget calls take, and how long the render thread
++// waited in gc_enqueue for a credit (the collector is behind by FRAME_PURGE_FREQ jobs). The maxima are per read (vglGetGcJobStats takes and clears them); each has one writer thread.
++static uint32_t vgl_gcj_jobs = 0, vgl_gcj_destroys = 0, vgl_gcj_destroy_total_us = 0, vgl_gcj_wait_total_us = 0;
++static uint32_t vgl_gcj_job_max_us = 0, vgl_gcj_destroy_max_us = 0, vgl_gcj_wait_max_us = 0;
++static inline void vgl_gcj_max(uint32_t *slot, uint32_t us) {
++	if (us > __atomic_load_n(slot, __ATOMIC_RELAXED))
++		__atomic_store_n(slot, us, __ATOMIC_RELAXED);
++}
+ #include "utils/gc_recovery.h"
+ static int gc_thread_priority = 0x10000100;
+ static int gc_thread_affinity = 0;
+@@ -495,6 +503,18 @@ void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *ke
+ 	if (kib_now) *kib_now = vgl_rtp_stat[5];
+ }
+ 
++// 0064: the collector's figures since the last call (the three maxima are of the time since the last call and are cleared): jobs and destroys so far, the longest job, the longest single
++// sceGxmDestroyRenderTarget, the longest wait of the render thread for a collector credit, and the totals of the destroys' and of the waits' time (microseconds, wrapping at 2^32).
++void vglGetGcJobStats(uint32_t *jobs, uint32_t *destroys, uint32_t *job_max_us, uint32_t *destroy_max_us, uint32_t *wait_max_us, uint32_t *destroy_total_us, uint32_t *wait_total_us) {
++	if (jobs) *jobs = __atomic_load_n(&vgl_gcj_jobs, __ATOMIC_RELAXED);
++	if (destroys) *destroys = __atomic_load_n(&vgl_gcj_destroys, __ATOMIC_RELAXED);
++	if (job_max_us) *job_max_us = __atomic_exchange_n(&vgl_gcj_job_max_us, 0, __ATOMIC_RELAXED);
++	if (destroy_max_us) *destroy_max_us = __atomic_exchange_n(&vgl_gcj_destroy_max_us, 0, __ATOMIC_RELAXED);
++	if (wait_max_us) *wait_max_us = __atomic_exchange_n(&vgl_gcj_wait_max_us, 0, __ATOMIC_RELAXED);
++	if (destroy_total_us) *destroy_total_us = __atomic_load_n(&vgl_gcj_destroy_total_us, __ATOMIC_RELAXED);
++	if (wait_total_us) *wait_total_us = __atomic_load_n(&vgl_gcj_wait_total_us, __ATOMIC_RELAXED);
++}
++
+ // a framebuffer object's render target: a kept one of the same shape, else a new one (tracked so that the collector can keep it when it is let go)
+ static int setup_fbo_render_target_ms(SceGxmRenderTarget **rt, int w, int h, int refs, SceGxmMultisampleMode mode) {
+ 	if (!vgl_rtp_max_count)
+@@ -565,7 +585,14 @@ static void vgl_rtp_release(SceGxmRenderTarget *rt) {
+ 		}
+ 		VGL_RTP_UNLOCK();
+ 	}
++	const uint32_t gcj_t0 = sceKernelGetProcessTimeLow(); // 0064
+ 	sceGxmDestroyRenderTarget(rt);
++	{
++		const uint32_t gcj_us = sceKernelGetProcessTimeLow() - gcj_t0;
++		__atomic_add_fetch(&vgl_gcj_destroys, 1, __ATOMIC_RELAXED);
++		__atomic_add_fetch(&vgl_gcj_destroy_total_us, gcj_us, __ATOMIC_RELAXED);
++		vgl_gcj_max(&vgl_gcj_destroy_max_us, gcj_us);
++	}
+ }
+ 
+ #ifdef HAVE_SHARED_RENDERTARGETS
+@@ -710,6 +737,7 @@ int garbage_collector(unsigned int args, void *arg) {
+ 			break;
+ 		}
+ #endif
++		const uint32_t gcj_t0 = sceKernelGetProcessTimeLow(); // 0064
+ 		// Purging all elements marked for deletion
+ 		for (int i = 0; i < FRAME_PURGE_LIST_SIZE; i++) {
+ 			if (frame_purge_list[frame_purge_clean_idx][i]) {
+@@ -729,6 +757,11 @@ int garbage_collector(unsigned int args, void *arg) {
+ 		frame_purge_idx = (frame_purge_idx + 1) % FRAME_PURGE_FREQ;
+ 		frame_elem_purge_idx = 0;
+ 		frame_rt_purge_idx = 0;
++		{ // 0064
++			const uint32_t gcj_us = sceKernelGetProcessTimeLow() - gcj_t0;
++			__atomic_add_fetch(&vgl_gcj_jobs, 1, __ATOMIC_RELAXED);
++			vgl_gcj_max(&vgl_gcj_job_max_us, gcj_us);
++		}
+ #ifndef HAVE_SINGLE_THREADED_GC
+ 		gc_publish_completion();
+ 	}
+diff --git a/source/utils/gc_recovery.h b/source/utils/gc_recovery.h
+index 3be70cdb7..f55d17d26 100644
+--- a/source/utils/gc_recovery.h
++++ b/source/utils/gc_recovery.h
+@@ -36,6 +36,7 @@ static int gc_return_credit(void) {
+ 
+ static int gc_enqueue(uint32_t *ticket) {
+ 	int res;
++	const uint32_t gcj_t0 = sceKernelGetProcessTimeLow(); // 0064
+ 	for (;;) {
+ 		if (vgl_gc_failed()) return 0;
+ 		unsigned int timeout = 100000;
+@@ -46,6 +47,11 @@ static int gc_enqueue(uint32_t *ticket) {
+ 		gc_failure("take credit", res);
+ 		return 0;
+ 	}
++	{ // 0064: the time the render thread waited for a credit
++		const uint32_t gcj_us = sceKernelGetProcessTimeLow() - gcj_t0;
++		__atomic_add_fetch(&vgl_gcj_wait_total_us, gcj_us, __ATOMIC_RELAXED);
++		vgl_gcj_max(&vgl_gcj_wait_max_us, gcj_us);
++	}
+ 	if (vgl_gc_failed()) {
+ 		gc_return_credit();
+ 		return 0;
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 2e38af8b6..852dfaadf 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1434,6 +1434,7 @@ void vglSetFramebufferDetachKeep(GLboolean on);
+ GLboolean vglGetFramebufferDetachKeep(void);
+ void vglSetRenderTargetPool(uint32_t count, uint32_t kib); // 0039: keep up to `count` framebuffer render targets (and `kib` KiB of driver memory, 0: no cap) for the next object of the same shape; 0: off (gxm.c)
+ void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now); // 0039: reused, newly made, kept by the collector, let go, kept now, KiB kept now
++void vglGetGcJobStats(uint32_t *jobs, uint32_t *destroys, uint32_t *job_max_us, uint32_t *destroy_max_us, uint32_t *wait_max_us, uint32_t *destroy_total_us, uint32_t *wait_total_us); // 0064: collector jobs and render target destroys so far; the longest job, the longest destroy and the longest credit wait of the render thread since the last call (cleared by it); the totals of the destroys' and the waits' microseconds
+ void vglBackendTimingTake(uint32_t *calls, uint64_t *us, uint32_t *max_us); // 0040: [0] shader registrations, [1] glLinkProgram calls, [2] first vglDrawElementsDirect draws of linked programs: count, total and longest microseconds since the last call (arrays of 3), then reset (gxm.c)
+ int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
+ 

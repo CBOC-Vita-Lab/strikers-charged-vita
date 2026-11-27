@@ -3,6 +3,12 @@
 #include "NL/nlDLListContainer.inl"
 #include "Game/AI/Scripts/ScriptQuestions.h"
 #include "Game/AI/Fielder.h"
+#include "np/gamefixes.h"
+#include "np/gsplit.h"   // MSC_GSPLIT
+#ifdef NP_NATIVE
+#include <stdio.h>
+#include <stdlib.h>
+#endif
 #include "Game/AI/FuzzyAIRuntime.h"
 #include "NL/nlFunction.inl"
 #include "Game/AI/Fielder.inl"
@@ -1406,6 +1412,26 @@ bool cFielder::CanGetElectrocuted(
     return false;
 }
 
+// NP: the "No Mega Strikes" rule option (MSC_RULE_NOMEGA, np/gamefixes.h). Off unless chosen. The Strikers 101 tutorial and the challenges are
+// built on Mega Strikes and keep them; a ranked online match always plays the standard rules.
+static bool NpNoMegaStrikes()
+{
+    if (!NpRuleNoMegaChosen())
+    {
+        return false;
+    }
+    GameInfoManager* info = GameInfoManager::Instance();
+    if (info->mIsInStrikers101Mode || info->mCurrentMode == GameInfoManager::GM_CHALLENGE)
+    {
+        return false;
+    }
+    if (info->mIsOnlineMode && info->mOnlineRankedMatch)
+    {
+        return false;
+    }
+    return true;
+}
+
 bool cFielder::CanDoCaptainShootToScore()
 {
     if (GameInfoManager::Instance()->IsRule0x8Equal4())
@@ -1439,6 +1465,29 @@ bool cFielder::CanDoCaptainShootToScore()
         {
             if (CanShootFromPosition(this, false))
             {
+                if (NpNoMegaStrikes())
+                {
+                    // NP: the rule option takes the Mega Strike away here, where the game would have started one (the shot goes on as an ordinary one)
+#ifdef NP_NATIVE
+                    static int suppressed = 0;
+                    if (++suppressed <= 20 || suppressed % 100 == 0)
+                    {
+                        fprintf(stderr, "[rules] no Mega Strikes: captain of side %d takes an ordinary shot instead (#%d)\n", (int)m_pTeam->m_nSide, suppressed);
+                    }
+#endif
+                    return false;
+                }
+#ifdef NP_NATIVE
+                {
+                    // (with MSC_RULE_NOMEGA=0 in the settings the same line names the Mega Strikes that do start: the A/B of the rule)
+                    static const bool noteStarts = getenv("MSC_RULE_NOMEGA") != 0;
+                    static int started = 0;
+                    if (noteStarts && ++started <= 20)
+                    {
+                        fprintf(stderr, "[rules] Mega Strike starts: captain of side %d (#%d)\n", (int)m_pTeam->m_nSide, started);
+                    }
+                }
+#endif
                 return true;
             }
         }
@@ -4334,6 +4383,10 @@ void cFielder::BeginDekeIntangibility()
 void cFielder::EmitMegaStrikeWindup()
 {
     KillWindups();
+    if (IsCaptain() && NpNoMegaStrikes())
+    {
+        return; // NP: no Mega Strike to announce
+    }
     switch (m_DetChar.m_eCharacterClass)
     {
     case MARIO:
@@ -5421,15 +5474,20 @@ void cFielder::PrePhysicsUpdate()
 
 void cFielder::Update(float fDeltaT)
 {
+    NP_GS(NPGS_AI_F_SELF);
+    NP_GSC(NPGC_AI_FIELDERS, 1);
     SetPlayerAudioController(this);
     UpdateTimers(fDeltaT);
     cPlayer::Update(fDeltaT);
-    m_pAIContext->Update(true, fDeltaT);
+    {
+        NP_GS(NPGS_AI_F_SCRIPT);
+        m_pAIContext->Update(true, fDeltaT);
+    }
 
     if (!m_DetPlayer.m_bSkipActionUpdate)
     {
-        UpdateActionState(fDeltaT);
-        UpdateHeadTracking(fDeltaT);
+        { NP_GS(NPGS_AI_F_ACTION); UpdateActionState(fDeltaT); }
+        { NP_GS(NPGS_AI_F_HEAD); UpdateHeadTracking(fDeltaT); }
     }
     else
     {
@@ -5438,6 +5496,7 @@ void cFielder::Update(float fDeltaT)
 
     if (!m_DetPlayer.m_bSkipAnimUpdate)
     {
+        NP_GS(NPGS_AI_F_ANIM);
         cCharacter::Update(fDeltaT);
     }
     else if (m_DetPlayer.m_bForceFeatherUpdate && fn_800976C4())
@@ -5452,7 +5511,10 @@ void cFielder::Update(float fDeltaT)
     {
         mWaluigiWallState.mWallManager->Update(fDeltaT);
     }
-    UpdateController(fDeltaT);
+    {
+        NP_GS(NPGS_AI_F_CTRL);
+        UpdateController(fDeltaT);
+    }
     m_bHasBeenUpdated = true;
 }
 

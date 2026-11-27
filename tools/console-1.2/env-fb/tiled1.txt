@@ -1,0 +1,14 @@
+# console-1.2 run tiled1: Tiled colour surfaces for pass targets and EFB copies, The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route worstgpu, version payload 1.3, role ab
+# tile24 item 1 (vitaGL 0057 vglTexMakeTiledTarget, default off, console-only: the host does not model tiling). Pass targets and EFB-copy textures (RGBA8, 32+ texels each way) become SCE_GXM_COLOR_SURFACE_TILED with tiled textures; the EFB and the display stay linear. PASS if the picture is unchanged (any garbage, shear or black pass is a layout rule broken: stop and report which scene) and the [vgx] line says N tiled render-target textures; the gain is [lane] gpu ms in held scenes (walk-out, celebration, replay: about 15 scenes a picture) and in play. A crash at the first pass is also a result.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_TILED_RT=1

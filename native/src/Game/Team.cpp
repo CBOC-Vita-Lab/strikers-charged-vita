@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include "Game/Team.h"
+#include "np/gsplit.h"   // MSC_GSPLIT
 
 #include "Game/AI/Fielder.h"
 #include "Game/AI/SkillTweaks.h"
@@ -1320,7 +1321,8 @@ void cTeam::StopGameplayEffectsAndSounds()
 void cTeam::Update(float fDeltaT)
 {
     g_pCurrentlyUpdatingTeam = this;
-    UpdateTeamTimers(this, fDeltaT);
+    { NP_GS(NPGS_AI_TEAMTIMERS); UpdateTeamTimers(this, fDeltaT); }
+    NpGsSeq gsInt(NPGS_AI_INTERCEPT);
     CalculateNewBallInterceptTimes();
 
     if (mpBestBallInterceptor == NULL)
@@ -1337,7 +1339,9 @@ void cTeam::Update(float fDeltaT)
         }
     }
 
+    gsInt.Next(NPGS_AI_TEAMAI);
     UpdateTeamAI(fDeltaT);
+    gsInt.Next(NPGS_AI_TEAMREST);
     UpdateShotScore();
     UpdateTeamCaptainChant(this);
 }

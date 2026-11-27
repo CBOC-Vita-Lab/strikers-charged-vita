@@ -35,6 +35,10 @@
 #define vgl_fast_memcpy sceClibMemcpy
 #endif
 
+// 0045 (MSC_VITA_WRCOPY): a copy into the uncached pools (stream buffers, uniform ring), see utils/wrcopy.c
+void vgl_wr_copy(void *dst, const void *src, uint32_t n);
+void vgl_tex_copy(void *dst, const void *src, uint32_t n); // 0051 (MSC_VITA_TEXCOPY): a texture level-0 copy, by the DMA engine when vglSetTextureCopyDma asks
+
 extern vglMemType VGL_MEM_MAIN; // Flag for VRAM usage for allocations
 
 // Support for older vitasdk versions for CI based on ancient builds
@@ -60,6 +64,17 @@ extern int frame_rt_purge_idx; // Index for currently populatable purge list ren
 #else
 #define mark_as_dirty(x) frame_purge_list[frame_purge_idx][frame_elem_purge_idx++] = x
 #endif
+// 0022 (upstream fbb190f): a depth/stencil surface goes to the collector with its stencil, which was leaked (0.5 MiB at 960x544, one sample; 2 MiB at 4x) each time a framebuffer object with one was deleted or re-attached
+void vgl_depth_release(void *p); // 0044: a depth surface block that framebuffer objects share is freed with its last user
+#define mark_depth_stencil_as_dirty(s) \
+	do { \
+		if ((s)->depthData) { /* 0038: a nodepth surface has no memory */ \
+			vgl_depth_release((s)->depthData); /* 0044: a shared block goes with its last user */ \
+		} \
+		if ((s)->stencilData) { \
+			mark_as_dirty((s)->stencilData); \
+		} \
+	} while (0)
 #ifdef HAVE_SHARED_RENDERTARGETS
 typedef struct {
 	SceGxmRenderTarget *rt;
@@ -113,11 +128,12 @@ void vgl_free(void *ptr);
 // Helper function for fastest memory copy on uncached mem
 static inline __attribute__((always_inline)) void vgl_memcpy(void *dst, const void *src, size_t size) {
 #ifndef DISABLE_DMAC
-	if (size >= 0x2000 && (uint32_t)src < 0x81000000 && (uint32_t)dst < 0x81000000)
-		sceDmacMemcpy(dst, src, size);
-	else
+	if (size >= 0x2000 && size <= 0x81000000u && (uint32_t)src <= 0x81000000u - size && (uint32_t)dst <= 0x81000000u - size) {
+		if (sceDmacMemcpy(dst, src, size) >= 0)
+			return;
+	}
 #endif
-		vgl_fast_memcpy(dst, src, size);
+	vgl_fast_memcpy(dst, src, size);
 }
 
 #endif

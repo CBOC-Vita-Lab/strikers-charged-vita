@@ -14,6 +14,8 @@
 #include "Game/Ball.h"
 #include "Game/Field.h"
 #include "Game/SharedStaticStorage.h"
+#include "np/aiavoid.h"   // MSC_AI_AVOID
+#include "np/ai27.h"       // MSC_AI27_AVOID
 
 
 static const nlVector2 v2Zero = { 0.0f, 0.0f };
@@ -296,12 +298,50 @@ void AvoidanceRemovalCollector::Collect(
     }
 }
 
-static inline bool CanAddAvoidance(AvoidController& controller,
-    AvoidableObject* pSelf, AvoidableObject* pObject, bool alreadyTracked)
+// MSC_AI27_AVOID: IsAvoiding(kind) reads m_ThingsToAvoid and the fielder's state (Incapacitated, super grow, invincibility), none of which the
+// update's loop changes, so it is worked out once per kind (a single flag, 1..64) for the whole update. =2 verify: the plain call runs as well.
+struct Ai27AvoidMemo
 {
+    unsigned char known;
+    unsigned char val;
+};
+
+static inline __attribute__((always_inline)) bool Ai27Avoiding(AvoidController& controller, Ai27AvoidMemo& memo, int things, int mode)
+{
+    if (mode && things > 0 && things <= 64 && (things & (things - 1)) == 0)
+    {
+        const unsigned char bit = (unsigned char)things;
+        if (memo.known & bit)
+        {
+            const bool r = (memo.val & bit) != 0;
+            NPAI27_COUNT(NPAI27_AVOID, 1, 1);
+            if (mode == 2)
+            {
+                const bool plain = controller.IsAvoiding(things);
+                NPAI27_COUNT(NPAI27_AVOID, 2, 1);
+                if (plain != r)
+                    NPAI27_COUNT(NPAI27_AVOID, 3, 1);
+                return plain;
+            }
+            return r;
+        }
+        const bool r = controller.IsAvoiding(things);
+        memo.known |= bit;
+        if (r)
+            memo.val |= bit;
+        return r;
+    }
+    return controller.IsAvoiding(things);
+}
+
+static inline bool CanAddAvoidance(AvoidController& controller,
+    AvoidableObject* pSelf, AvoidableObject* pObject, bool alreadyTracked,
+    Ai27AvoidMemo& memo, int ai27)
+{
+    NPAI27_COUNT(NPAI27_AVOID, 0, ai27 ? 1 : 0);
     bool bCanAvoid = !alreadyTracked;
     if (bCanAvoid)
-        bCanAvoid = controller.IsAvoiding(pObject->mType);
+        bCanAvoid = Ai27Avoiding(controller, memo, pObject->mType, ai27);
     if (bCanAvoid)
         bCanAvoid = pSelf != pObject;
     if (bCanAvoid)
@@ -342,15 +382,64 @@ void AvoidController::Update(float fDeltaT)
     m_Avoidances.Walk(&callback,
         &RepulsionAccumulator::Accumulate);
 
+    const int ai27 = NpAi27(NPAI27_AVOID);
+    static Ai27AvoidMemo sAi27BreakMemo;   // MSC_AI27_BREAK=3: one memo for every update (the proof mutant)
+    Ai27AvoidMemo ai27Memo = { 0, 0 };
+    Ai27AvoidMemo& memo = (ai27 && NpAi27Break() == 3) ? sAi27BreakMemo : ai27Memo;
+
     AvoidableObject* pSelf = m_pFielder->m_pAvoidableObject;
     ObstacleAvoidance* value;
+    const int avoidMode = NpAiAvoidMode();
+    const bool aiBreak2 = ai27 && NpAiAvoidBreak() == 2;
+    int aiTests = 0, aiAvoided = 0;
     for (AvoidableObject* pObject = gAvoidableObjects.m_pStart;
          pObject != 0 && m_NumAvoidances < 99; pObject = pObject->next)
     {
-        if (CanAddAvoidance(*this, pSelf, pObject,
-                m_Avoidances.FindGet((u32)pObject->mId, &value)))
+        bool bAdd;
+        if (ai27 && (avoidMode & 1))
         {
-            if (!IsAvoiding(AVOID_SIDELINES)
+            // MSC_AI27_AVOID with MSC_AI_AVOID bit 1: the same tests, each at most once. "not myself" and "this kind is avoided" (memo) decide first; CanAddAvoidance's
+            // conjunction then continues with !tracked, weight, range (the pure tests were already true), in the old order. The counters of MSC_AI_AVOID are added
+            // up in locals and handed over once after the loop (same totals).
+            ++aiTests;
+            bAdd = pSelf != pObject && Ai27Avoiding(*this, memo, pObject->mType, ai27);
+            if (bAdd)
+            {
+                bool tracked = m_Avoidances.FindGet((u32)pObject->mId, &value);
+                if (aiBreak2)
+                    tracked = false;   // MSC_AI_AVOID_BREAK=2 (as below)
+                bAdd = !tracked;
+                if (bAdd)
+                    bAdd = pSelf->GetAvoidanceWeight(pObject) > 0.0f;
+                if (bAdd)
+                    bAdd = pSelf->IsWithinRange(pObject, -1.0f);
+            }
+            else
+                ++aiAvoided;
+        }
+        else if (avoidMode & 1)
+        {
+            // MSC_AI_AVOID bit 1: the pure tests first, the AVL lookup only for an object that passed them (CanAddAvoidance's conjunction, same order for the rest)
+            NpAiAvoidCount(0, 1);
+            bAdd = pSelf != pObject && Ai27Avoiding(*this, memo, pObject->mType, ai27);
+            if (bAdd)
+            {
+                bool tracked = m_Avoidances.FindGet((u32)pObject->mId, &value);
+                if (NpAiAvoidBreak() == 2)
+                    tracked = false;   // MSC_AI_AVOID_BREAK=2: proof mutant for bit 1 (an object that is already tracked is added again)
+                bAdd = CanAddAvoidance(*this, pSelf, pObject, tracked, memo, ai27);
+            }
+            else
+                NpAiAvoidCount(1, 1);
+        }
+        else
+        {
+            bAdd = CanAddAvoidance(*this, pSelf, pObject,
+                m_Avoidances.FindGet((u32)pObject->mId, &value), memo, ai27);
+        }
+        if (bAdd)
+        {
+            if (!Ai27Avoiding(*this, memo, AVOID_SIDELINES, ai27)
                 && pObject->mType == AVOID_POLYGONS
                 && ((AvoidablePolygon*)pObject)->mPolygonType == AVOID_POLYGON_FIELD_BOUNDARY)
                 continue;
@@ -372,6 +461,13 @@ void AvoidController::Update(float fDeltaT)
                 ++nCounts[index];
             }
         }
+    }
+
+    if (aiTests)
+    {
+        NpAiAvoidCount(0, aiTests);
+        if (aiAvoided)
+            NpAiAvoidCount(1, aiAvoided);
     }
 
     ObstacleAvoidance* entry = list.m_pStart;

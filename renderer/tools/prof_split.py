@@ -12,7 +12,7 @@ in the vgx objects (or in namespace vgx) is "vgx". Symbolisation follows tools/p
 """
 import bisect, collections, glob, os, re, subprocess, sys
 
-MSC = '/home/claude/msc'
+MSC = '/work/msc'
 RUNS = MSC + '/build/host-gl-arm/runs'
 a = sys.argv[1:]
 if len(a) <= 3 and not os.path.exists(a[0]):

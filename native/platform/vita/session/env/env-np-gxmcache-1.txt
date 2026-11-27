@@ -1,0 +1,5 @@
+# 1.2 A/B of vitaGL's sceGxm state cache (patch 0013): needs the library built with -DGXM_STATE_CACHE (variants gsc / gsco, see dependencies/Makefile.vitadeps).
+# MSC_VGX_GXMCACHE=1  (all groups on; a mask such as 0x07 turns single groups on)
+# MSC_VITA_VGL_SKIP (programs, streams, fragment textures) stays at the player's default (on). MSC_VGX_PROF=3 prints '[vgx] vitaGL gxm state cache' every 100 frames: sceGxm calls issued / skipped per frame.
+MSC_VGX_GXMCACHE=1
+MSC_VGX_PROF=3

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs a package of the native port in the Vita3K emulator of this container, in a PRIVATE profile
-# (/home/claude/msc/build/np/NPV/v3k: its own ux0 and ur0, the emulator's firmware-less modules
+# (/work/msc/build/np/NPV/v3k: its own ux0 and ur0, the emulator's firmware-less modules
 # shared read-only with workstream V's profile), without kubridge unless KUBRIDGE=1.
 #   tools/heavy.sh -t 600 platform/vita/tools/v3k_run.sh <vpk> <title id> <seconds> [UNTIL pattern]
 # e.g. ... v3k_run.sh build/np/NPV/vita/np/np-smoke.vpk MSCN00002 120 "===== done"
@@ -20,10 +20,10 @@ set -u
 VPK=${1:?vpk}; TID=${2:?title id}; SECS=${3:-120}; UNTIL=${4:-}
 # NPV3: the heavy queue is deep (an hour between two turns); a run that is already queued can still be given more or less time (the wrapper's limit
 # is the job's own -t): echo <seconds> > <build root>/secs.override (read once at the start of this script, then renamed to .used).
-OV=$(dirname "${PROFILE_DIR:-/home/claude/msc/build/np/NPV3/v3k}")/secs.override
+OV=$(dirname "${PROFILE_DIR:-/work/msc/build/np/NPV3/v3k}")/secs.override
 [ -f "$OV" ] && { SECS=$(cat "$OV"); mv "$OV" "$OV.used"; echo "== SECS overridden to $SECS"; }
-V=/home/claude/msc/v3k
-P=${PROFILE_DIR:-/home/claude/msc/build/np/NPV3/v3k}
+V=/work/msc/v3k
+P=${PROFILE_DIR:-/work/msc/build/np/NPV3/v3k}
 mkdir -p "$P"
 if [ ! -d "$P/xdg" ]; then
   cp -a $V/xdg "$P/xdg"
@@ -45,7 +45,7 @@ rm -rf "$P/pref/ux0/app/$TID"; mkdir -p "$P/pref/ux0/app/$TID" "$P/pref/ux0/data
 if [ "${KEEPDATA:-0}" != 1 ]; then
   find "$P/pref/ux0/data/mscharged" -mindepth 1 -maxdepth 1 ! -name game ! -name nand -exec rm -rf {} + 2>/dev/null
 fi
-if [ "${GAME:-0}" = 1 ]; then ln -sfn /home/claude/msc/game "$P/pref/ux0/data/mscharged/game"; else rm -f "$P/pref/ux0/data/mscharged/game"; fi
+if [ "${GAME:-0}" = 1 ]; then ln -sfn /work/msc/game "$P/pref/ux0/data/mscharged/game"; else rm -f "$P/pref/ux0/data/mscharged/game"; fi
 for f in ${FILES:-}; do cp "$f" "$P/pref/ux0/data/mscharged/"; done
 unzip -q -o "$VPK" -d "$P/pref/ux0/app/$TID"
 rm -f "$P/pref/ux0/data/mscharged/log.txt" "$P/pref/ux0/data/mscharged/lab.txt"
@@ -83,7 +83,7 @@ phase() {
   echo "done after ${t}s; game log: $P/log.txt ($(wc -l < "$P/log.txt" 2>/dev/null) lines)"
 }
 phase "$SECS" "$UNTIL"
-# A second phase in the same turn of the lock (the queue is the bottleneck): /home/claude/msc/build/np/NPV3/phase2.conf, a shell file with
+# A second phase in the same turn of the lock (the queue is the bottleneck): /work/msc/build/np/NPV3/phase2.conf, a shell file with
 # ENV2=<env file> UNTIL2=<pattern> SECS2=<seconds> FILES2="<files to copy into ux0:data/mscharged>"; consumed (renamed to .done) when used.
 # The first phase's results are kept in $P/phase1/ (log, shots, the game's own pictures); the final $P/log.txt etc. are the second phase's.
 CONF2=$(dirname "$P")/phase2.conf

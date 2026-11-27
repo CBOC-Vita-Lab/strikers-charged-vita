@@ -36,6 +36,7 @@ bool glplatSendFrameForked();
 const class nlVector3& glxCameraPosition();   // the camera position as of the fork on the worker, else the live camera's   // the frame send as a job on a second core (false: not forked, send it the plain way)
 #endif
 void glplatAbortFrame();
+void glplatAbortFrameFast();   /* MSC_DISCARD_FAST: as glplatAbortFrame, without the wait for the retrace */
 void glplatFinish();
 void glx_ClearXFB(void* framebuffer);
 

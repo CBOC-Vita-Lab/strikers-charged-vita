@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "np/gamefixes.h"
+#include "platform/sdk/net/online/np_app_version.h"
 #include "platform/sdk/net/vlink.h"
 
 #if !defined(NP_TARGET_VITA)
@@ -27,12 +28,17 @@
 
 #define SO_LOG(...) fprintf(stderr, "[so-net] " __VA_ARGS__)
 
+// Weak: the link tests build this file without the online screens (np_online_flow.cpp) or the online session (vlink_online.cpp).
+bool NpOnlineFlowActive() __attribute__((weak));        // np_online_flow.h: between entering the game's online screens and the main menu
+extern "C" int NpNetActive(void) __attribute__((weak));   // np_online.h: an online session was started and is not off
+
 namespace {
 
-// Compatibility fingerprint of this console's LAN protocol: link frames, whole 16-byte input records (the
-// np/patches/mp patches), LAN-mode rules. A recompiled-port console has a different one (it does not simulate
-// bit-identically) and is ignored. MSC_LINK_FINGERPRINT=<hex> overrides it in desktop test runs only.
-const char kProtocol[] = "MSCLAN/2 R4QE01 native full-records";
+// Compatibility fingerprint of this console's LAN protocol and build (NpLanFingerprint below): link frames, whole 16-byte input records (the
+// np/patches/mp patches), the extended lockstep checksum (np_lan.cpp NpLanExtendedChecksum: score, owner, clock, items ...), LAN-mode rules.
+// A recompiled-port console, or a Strikers release before 1.2 ("MSCLAN/2"), has a different one and is ignored: they do not simulate
+// bit-identically or do not check the same state. MSC_LINK_FINGERPRINT=<hex> overrides it in desktop test runs only.
+const char kProtocol[] = "MSCLAN/4 R4QE01 native full-records";   // /4 (delay19): the agreed input delay is the congestion multiplier start and floor; a /3 console would step another delay
 
 uint32_t Fnv1a(const void* data, size_t len) {
     uint32_t h = 2166136261u;
@@ -43,6 +49,15 @@ uint32_t Fnv1a(const void* data, size_t len) {
 
 bool g_initialized = false;
 bool g_started = false;
+#if !defined(NP_TARGET_VITA)
+// tests: SOStartup behaves as on the console, no UDP backend of its own. NpSoTestConsoleLinkRules(1) in the link tests; a host game built with
+// -DNP_SO_CONSOLE_LINK_RULES=1 runs the online screens that way (LAN play needs a radio then, which a host does not have).
+#if defined(NP_SO_CONSOLE_LINK_RULES)
+bool g_consoleLinkRules = true;
+#else
+bool g_consoleLinkRules = false;
+#endif
+#endif
 int g_fcntlFlags[VLink::kMaxSockets + 1];  // per handle: SO_O_NONBLOCK as set (receives never block either way)
 
 uint32_t NetToVip(u32 networkOrder) {  // bytes a.b.c.d in memory -> host-order a<<24|b<<16|c<<8|d
@@ -66,20 +81,64 @@ bool IsLittleEndian() {
 
 VLink::Link& L() { return VLink::Default(); }
 
-// The settings that change what a match computes belong in the fingerprint: two consoles that disagree on them would simulate different
-// matches. Today that is the NK-bug fix of MSC_GAME_FIXES (np/gamefixes.h: "in a LAN match every console must use the same setting"; the
-// lobby does not compare it): a console with it on and one with it off ignore each other (the lobby does not list the game) instead of starting
-// a match that desyncs. The other options (pacing, Performance Mode, the picture, the other two fixes) only change what is drawn. The default
-// settings give the plain protocol string, i.e. the same fingerprint as before.
-uint32_t ComputeFingerprint() {
-    char text[96];
-    snprintf(text, sizeof text, "%s%s", kProtocol, NpGameFix(NP_FIX_NK_BUG) ? " nk-fix" : "");
+// RULES: the settings that change what a match computes belong in the fingerprint (and in the rule byte of the frame header): two consoles
+// that disagree on them would simulate different matches. Today that is the NK/Boo bug fix of MSC_GAME_FIXES (np/gamefixes.h: "in a LAN
+// match every console must use the same setting"; STR-107). The other game-fix bits (goal-net redraw, electrocution texture), pacing,
+// Performance Mode, dynamic resolution, MSAA, the HD textures, the controls layout, touch options, the camera zoom (the host's on-screen
+// flags are what every console simulates with) and the transport toggles (send-now, ticks per packet, redundancy, keep-alive) only change what
+// is drawn or when a datagram leaves, never what the lockstep computes: they stay out, so that a Vita on Performance Mode plays one on Quality.
+//
+// A NEW SETTING THAT CHANGES THE SIMULATION (a rule option such as "No Mega Strikes", a gameplay fix, a balance change) MUST BE ADDED HERE:
+// give it a bit in kRule*, set the bit in NpLanRules(), and the fingerprint, the header byte and the lobby guidance follow. tools/net/net_test.cpp
+// (TestFingerprintRules) fails if a render-only mask changes the fingerprint or a rule bit does not.
+const uint8_t kRuleNkFix = 1;     // MSC_GAME_FIXES nk
+const uint8_t kRuleNoMega = 2;    // MSC_RULE_NOMEGA (No Mega Strikes)
+// 4, 8 ...: reserved for the next rule options.
+
+}  // namespace
+
+extern "C" uint8_t NpLanRules() {
+    uint8_t rules = 0;
+    if (NpGameFix(NP_FIX_NK_BUG)) rules |= kRuleNkFix;
+    if (NpRuleNoMegaChosen()) rules |= kRuleNoMega;
+    return rules;
+}
+
+extern "C" const char* NpLanRulesText(uint8_t rules, char* out, size_t size) {
+    snprintf(out, size, "%s", rules ? "" : "standard rules");
+    if (rules & kRuleNkFix) snprintf(out + strlen(out), size - strlen(out), "%sNK/Boo fix on", out[0] ? ", " : "");
+    if (rules & kRuleNoMega) snprintf(out + strlen(out), size - strlen(out), "%sNo Mega Strikes", out[0] ? ", " : "");
+    return out;
+}
+
+// The build in the fingerprint (1.3). Lockstep needs every console to compute the same thing, and two builds can differ in that without any protocol or rule change:
+// a compiler or flag change can round a float differently. kProtocol alone let a 1.3 console pair with a 1.2 one, which then ended in a sync error at some moment of the
+// match. The build's identity is -DNP_BUILD_ID="..." (the release's source hash) when the build passes one, else the game version. MSC_LAN_EXACT_BUILD=0 leaves it out
+// (mixed-build A/B runs; both consoles need it); the fingerprint is then the 1.2 one.
+static const char* FingerprintBuild() {
+    const char* off = getenv("MSC_LAN_EXACT_BUILD");
+    if (off && off[0] == '0') return 0;
+#ifdef NP_BUILD_ID
+    return NP_BUILD_ID;
+#else
+    return NpNet::BuiltAppVersion();
+#endif
+}
+
+extern "C" uint32_t NpLanFingerprint() {
+    char text[160];
+    const char* build = FingerprintBuild();
+    if (build) snprintf(text, sizeof text, "%s build=%s rules=%02x", kProtocol, build, (unsigned)NpLanRules());
+    else snprintf(text, sizeof text, "%s rules=%02x", kProtocol, (unsigned)NpLanRules());
     uint32_t fingerprint = Fnv1a(text, strlen(text));
 #if !defined(NP_TARGET_VITA)
     if (const char* v = getenv("MSC_LINK_FINGERPRINT")) fingerprint = uint32_t(strtoul(v, 0, 16));
 #endif
     return fingerprint;
 }
+
+namespace {
+uint32_t ComputeFingerprint() { return NpLanFingerprint(); }
 
 #if !defined(NP_TARGET_VITA)
 // Desktop test impairment (MSC_LINK_DELAY_MS / _JITTER_MS): a delayed frame used to leave only when its console next touched the link (its
@@ -114,6 +173,10 @@ void StartDelayClock() {
 }
 #endif
 
+// wave 14 (wake14): the default of MSC_NET_KEEPAWAKE_MS in milliseconds (0 = off). See docs/TECHNICAL.md.
+const int kKeepAwakeDefaultMs = 0;
+extern "C" const char* NpLanGapPhase(void) __attribute__((weak));   // np_lan.cpp (the link tests build without it)
+
 struct FingerprintInit {
     FingerprintInit() {
         uint32_t fingerprint = ComputeFingerprint();
@@ -130,12 +193,77 @@ struct FingerprintInit {
         if ((imp.delayMs || imp.jitterMs) && !(clock && clock[0] == '0')) StartDelayClock();
 #endif
         L().SetFingerprint(fingerprint);
+        L().SetRules(NpLanRules());
+        // wave 14 (wake14): the Wi-Fi keep-awake filler (MSC_NET_KEEPAWAKE_MS, see vlink.h) and the quiet-gap diagnostic (MSC_LINK_GAPLOG=<ms>). Both read once, here.
+        {
+            const char* ka = getenv("MSC_NET_KEEPAWAKE_MS");
+            int gap = kKeepAwakeDefaultMs;
+            if (ka && *ka) gap = atoi(ka);
+            if (gap < 0) gap = 0;
+            if (gap > 0 && gap < 10) gap = 10;     // (a filler every few milliseconds would be a flood, not a keep-awake)
+            if (gap > 5000) gap = 5000;
+            L().SetKeepAwake(uint32_t(gap));
+            if (const char* gl = getenv("MSC_LINK_GAPLOG")) if (atoi(gl) > 0) L().SetGapLog(uint32_t(atoi(gl)), NpLanGapPhase ? NpLanGapPhase : nullptr);
+        }
     }
 } g_fingerprintInit;
+
+// ---- Online Central before a session exists (1.3) --------------------------------------------------------------------------------------
+// The game's login scene (SHOnlineLogin) starts the socket layer first and signs in only when that worked; the sign-in, the hub, the rankings
+// and the match search are HTTPS requests of their own (platform/sdk/dwc) and never touch a link socket. A link backend exists on the console
+// only once a radio is up (Same Wi-Fi / Nearby: NpLanRadioPoll) or an online session was started (NpNetHost / NpNetJoin), which for a ranked
+// match is after the search found an opponent. So in the online screens SOStartup had nothing to start on, and the login ended in the game's
+// network error before any request was made (the desktop never showed it: it installs its UDP test backend).
+// This backend stands in until the session's own backend replaces it (vlink_online.cpp InstallAndStart): it has an address and carries
+// nothing. It gives an address only while the online screens are open, so a Same Wi-Fi / Nearby start can never come up on it, and
+// SOCleanup puts back whatever it replaced.
+const uint32_t kPendingOnlineVip = 0x0AFF0001u;   // 10.255.0.1: an address for the socket layer only, no frame ever carries it
+
+bool OnlineScreensOpen() { return NpOnlineFlowActive && NpOnlineFlowActive(); }
+
+uint32_t PendingVip(void*) { return OnlineScreensOpen() ? kPendingOnlineVip : 0; }
+int PendingSend(void*, const VLink::PeerAddr*, bool, const void*, size_t) { return -1; }   // nobody is there: a send fails, as on a closed radio
+int PendingRecv(void*, VLink::PeerAddr*, void*, size_t) { return 0; }
+void PendingClose(void*) {}
+const VLink::Backend kPendingOnline = {"online (no session yet)", 0, PendingVip, PendingSend, PendingRecv, PendingClose, 0};
+
+const VLink::Backend* g_replacedByPending = 0;
+bool g_pendingInstalled = false;
+
+bool ConsoleLinkRules() {
+#if defined(NP_TARGET_VITA)
+    return true;
+#else
+    return g_consoleLinkRules;
+#endif
+}
+
+// SOStartup, console rules, online screens open: the stand-in goes in unless a live online session's backend is already there.
+void InstallPendingOnline() {
+    const VLink::Backend* now = L().GetBackend();
+    if (now == &kPendingOnline) return;
+    if (now && NpNetActive && NpNetActive()) return;   // an online session exists (its backend is installed with it): it has the address
+    g_replacedByPending = now;
+    g_pendingInstalled = true;
+    L().SetBackend(&kPendingOnline);
+    SO_LOG("online screens: socket layer starts without a session (link backend \"%s\" set aside until a match starts one)\n", now ? now->name : "none");
+}
+
+// SOCleanup: the stand-in never outlives the socket layer. A session backend that replaced it meanwhile stays, as before.
+void RemovePendingOnline() {
+    if (!g_pendingInstalled) return;
+    g_pendingInstalled = false;
+    if (L().GetBackend() == &kPendingOnline) L().SetBackend(g_replacedByPending);
+    g_replacedByPending = 0;
+}
 
 }  // namespace
 
 extern "C" {
+
+#if !defined(NP_TARGET_VITA)
+void NpSoTestConsoleLinkRules(int on) { g_consoleLinkRules = on != 0; }
+#endif
 
 // ---- byte order ---------------------------------------------------------------------------------------------
 u32 SOHtoNl(u32 v) { return IsLittleEndian() ? __builtin_bswap32(v) : v; }
@@ -153,12 +281,17 @@ int SOInit(SOLibraryConfig*) {
 int SOStartup(void) {
     if (!g_initialized) return SO_EINVAL;
     if (g_started) return SO_SUCCESS;
+    if (ConsoleLinkRules()) {
+        if (OnlineScreensOpen()) InstallPendingOnline();
+    }
 #if !defined(NP_TARGET_VITA)
     // Desktop tests: no radio to bring up, the UDP backend comes from MSC_LINK_* when nothing was installed.
-    if (!L().GetBackend()) L().SetBackend(VLink::CreateUdpBackendFromEnvironment());
+    else if (!L().GetBackend()) L().SetBackend(VLink::CreateUdpBackendFromEnvironment());
 #endif
     L().SetFingerprint(ComputeFingerprint());   // the game's settings may have been decided since the static initialisers ran
+    L().SetRules(NpLanRules());
     if (!L().Start()) {
+        RemovePendingOnline();
         SO_LOG("SOStartup: no usable link (is the radio up?)\n");
         return SO_ENETDOWN;
     }
@@ -171,6 +304,7 @@ int SOStartupEx(int) { return SOStartup(); }
 
 int SOCleanup(void) {
     if (g_started) L().Stop();
+    RemovePendingOnline();
     g_started = false;
     return SO_SUCCESS;
 }

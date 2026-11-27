@@ -2,7 +2,7 @@
 """sdata2check.py <source.cpp> <start> <end> [doublewords...]: floats/doubles of the retail .sdata2 range of the TU (MWCC pools one copy per distinct constant)
 against the numeric literals of the source.  Prints retail constants never seen in the source and source literals not in the retail pool."""
 import re, struct, sys
-img = open('/home/claude/msc/npw/NPG-tools/dol.flat', 'rb').read(); B = 0x80004000
+img = open('/work/msc/npw/NPG-tools/dol.flat', 'rb').read(); B = 0x80004000
 src = open(sys.argv[1]).read()
 a, b = int(sys.argv[2], 16), int(sys.argv[3], 16)
 # strip comments, strings, data label initialisers handled separately (they live in .sdata)

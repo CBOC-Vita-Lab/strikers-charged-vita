@@ -1,0 +1,13 @@
+# console-1.2 run wakegap-off: Wi-Fi gaps measured (MSC_LINK_GAPLOG=50), keep-awake off (MANUAL: LAN pair with the PC partner)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route onconn, version payload 1.3, role manual
+# wake14.md: which phases go quiet: play lobby, draft, load, kick-off, one goal, one Mega Strike, one replay, results, rematch; read the `[vlink] gap table` lines on the Vita and on the PC partner (the partner's rx gaps are the Vita's real tx cadence). NEEDS A PC PARTNER.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/on-conn.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LINK_GAPLOG=50

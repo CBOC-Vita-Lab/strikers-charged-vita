@@ -1,0 +1,68 @@
+# Strikers Charged Vita online service.
+# Nothing here is tied to an account: no account_id, no secrets. `wrangler deploy` picks the account
+# from the logged-in user (or CLOUDFLARE_ACCOUNT_ID in the environment). See README.md for the deployment steps.
+
+name = "msc-online-example"       # placeholder: pick a neutral name; the public URL becomes <name>.<subdomain>.workers.dev
+main = "src/worker.js"
+compatibility_date = "2025-10-01"
+workers_dev = true                 # the old <name>.<subdomain>.workers.dev address stays on (builds from before the custom domain use it, and the new builds fall back to it)
+# Preview URLs (<version>-<name>.<subdomain>.workers.dev) would be a second public way to reach each uploaded version, outside the custom domain's rules: OFF (wave 14, from the Galaxy service).
+preview_urls = false
+
+# NO `routes` / `route` / custom_domain / zone_name / account_id / zone_id in this file (test/core/deploy-guard.test.js fails if one appears).
+# Without a terminal (output piped, CI) Wrangler 4.x defaults its confirmation prompts to "yes" and a `wrangler deploy` would publish routes and
+# custom domains from here with replace_state=true, overriding existing DNS records on the shared zone psvita.dev. The custom domain
+# strikers.psvita.dev is attached and managed by hand in the dashboard (Workers & Pages -> msc-online -> Settings -> Domains & Routes); deploys never touch it.
+
+# Workers Logs on (public beta: the owner reads the service's own lines in the Cloudflare dashboard: budget tiers, one summary line per stored report).
+# invocation_logs = false: no automatic line per request. The service writes no address, token, profile id or report text to the log; reports are read with
+# GET /v1/admin/reports (ADMIN_TOKEN).
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+# Daily cron (core/reports.js, the summary of yesterday's problem reports): one Worker request and one Durable Object request a day, 00:13 UTC. No route, no secret.
+[triggers]
+crons = ["13 0 * * *"]
+
+[[durable_objects.bindings]]
+name = "GAME"
+class_name = "GameServer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameServer"]
+
+# Problem reports (core/reports.js): 3 a player a day, 48 KiB each, kept 30 days, at most 2,000 and 64 MiB; the kill switch `report` turns them off.
+# Plain (non-secret) settings. Everything is optional; see README.md for the full list.
+[vars]
+KILL_SWITCH = ""                   # comma list: all, register, rooms, ranked, ranking, turn, friends, report
+MAINTENANCE_MESSAGE = ""
+REQUIRE_APP_VERSION = "1"          # production: every request must carry X-Msc-App (version gating fails closed). Tests set "0" explicitly.
+MIN_APP_VERSION = "2.0.0"          # production: refuse pre-2.0 clients at the Worker edge with 426 update_required
+LATEST_APP_VERSION = "2.0.0"       # echoed as latestVersion in every error (clients show "Different version: please update the game to 2.0.0.")
+RANK_PUT_POLICY = "credit"         # credit | delta | open (open = no server-side score check)
+TURN_PROVIDER = "cloudflare"       # cloudflare | stub | "" (off)
+TURN_TTL_SEC = "3600"
+TURN_MAX_CREDS_PER_DAY = "300"
+TURN_MAX_CREDS_PER_PLAYER_DAY = "6"
+TURN_MONTHLY_BUDGET_MB = "100000"
+# The measured hard stop (core/turn_usage.js; needs the two secrets below): this service's SHARE of the account's 1,000 GB a month of free TURN egress, shared with Galaxy and
+# VitAdhoc. The three shares must add up to at most about 900 (README "TURN hard stop"). 0 = the measured guard is off; TURN_USAGE_GUARD = "0" is its kill switch.
+TURN_REAL_BUDGET_GB = "300"
+# Daily request budget of THIS service: the free plan's 100,000 requests a day belong to the whole account and are shared with the other
+# online service, so each takes half (45,000 here; keep the two sums at most about 90,000). 0 = guard off. See README "Free-tier budget".
+DAILY_REQUEST_BUDGET = "45000"
+# Friends (wave 10) use the defaults in src/core/config.js: FRIENDS_MAX 64, FRIEND_ADDS_PER_DAY 40, FRIEND_INVITE_SEC 600. FRIENDS_MAX = "0" turns the friend routes off.
+HOLD_MAX_SEC = "55"                # held polls; 0 = every poll answered at once (rollback lever)
+
+# Secrets (set with `wrangler secret put NAME`, never in this file):
+#   RANK_HMAC_KEY_HEX        64 hex chars; the ranking digest key from the game (scripts/extract-hmac-key.mjs prints it)
+#   ADMIN_TOKEN              long random string for /v1/admin/*
+#   TURN_KEY_ID              Cloudflare Realtime TURN key id
+#   TURN_KEY_API_TOKEN       Cloudflare Realtime TURN key API token
+#   TURN_USAGE_API_TOKEN     a SEPARATE read-only API token (permission "Account Analytics: Read" only) for the measured TURN hard stop (core/turn_usage.js)
+#   TURN_USAGE_ACCOUNT_ID    the Cloudflare account tag the usage is read from (32 hex characters); both are optional: without them the estimate guard alone runs

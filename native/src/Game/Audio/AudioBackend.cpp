@@ -23,6 +23,13 @@
 static bool sDoubleMixUpdate = true;
 
 AudioSource* g_pLastCreatedAudioSource;
+#if defined(NP_NATIVE)
+// NP (MSC_MEGA_CUTLOG): sources made so far, streamed ones and sample ones, for the renderer's [mega-cut] lines. Counting only.
+extern "C" {
+volatile unsigned int np_stat_audio_streams = 0;
+volatile unsigned int np_stat_audio_samples = 0;
+}
+#endif
 u32 gAudioMemorySize;
 void* g_pAudioSilenceBuffer;
 
@@ -220,6 +227,9 @@ AudioSource* AudioBackend::CreateSource(AudioSourceInfo* info, XSoundOwner*)
     AudioSource* source = 0;
     if (info->m_BankLoader->m_Chunk23200->m_IsStream != 0)
     {
+#if defined(NP_NATIVE)
+        __atomic_fetch_add(&np_stat_audio_streams, 1u, __ATOMIC_RELAXED);
+#endif
         if (info->m_ChannelCount == 1)
             source = new AudioMonoStreamSource;
         else if (info->m_ChannelCount == 2)
@@ -227,6 +237,9 @@ AudioSource* AudioBackend::CreateSource(AudioSourceInfo* info, XSoundOwner*)
     }
     else
     {
+#if defined(NP_NATIVE)
+        __atomic_fetch_add(&np_stat_audio_samples, 1u, __ATOMIC_RELAXED);
+#endif
         source = new AudioSampleSource;
     }
     source->Initialize(info);

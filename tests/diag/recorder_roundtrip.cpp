@@ -8,6 +8,12 @@
 #include <thread>
 #include <chrono>
 
+// The standalone fixture does not link the SDK platform clock used outside Linux.
+extern "C" uint64_t np_time_real_ns(void) {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 static void sleep_ms(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
 int main() {

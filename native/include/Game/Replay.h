@@ -212,6 +212,10 @@ public:
 
     Frame* Next(Frame* frame, int reelIdx) const;
     float TimeOfLastOccurence(unsigned int events) const;
+#ifdef NP_NATIVE
+    // MSC_CPU22_REPLAY: TimeOfLastOccurence(a) and TimeOfLastOccurence(b) from one walk of the ring (the same frames in the same order)
+    void TimeOfLastOccurence2(unsigned int eventsA, unsigned int eventsB, float* timeA, float* timeB) const;
+#endif
     void NewFrame();
     bool DidOccurInLastNumSeconds(
         unsigned int events, float seconds) const;

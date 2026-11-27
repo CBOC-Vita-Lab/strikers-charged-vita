@@ -29,7 +29,7 @@ int NpUnlockStadiumsDecide(void)
     if (e && *e) on = (*e != '0') ? 1 : 0;
     g_npUnlockStadiums = on;
     if (on)
-        fprintf(stderr, "[unlock] stadiums Lava Pit, Crystal Canyon and Stormship are selectable without the cup wins (%s); the save's cup "
+        fprintf(stderr, "[unlock] all 6 locked stadiums (Lava Pit, Crystal Canyon, Stormship, The Wastelands, The Dump and Galactic Stadium) are selectable without the cup wins (%s); the save's cup "
                         "trophies and captains are not changed\n",
                 e && *e ? "MSC_UNLOCK_STADIUMS" : "the build's default");
     return on;

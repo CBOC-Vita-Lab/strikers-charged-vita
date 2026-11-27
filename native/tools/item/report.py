@@ -157,7 +157,7 @@ def phase_text(ph):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--runs', default='/home/claude/msc/build/np/W5ITEM/runs')
+    ap.add_argument('--runs', default='/work/msc/build/np/W5ITEM/runs')
     ap.add_argument('--md', action='store_true')
     ap.add_argument('--frames', default='')
     ap.add_argument('--cfg', default='A')

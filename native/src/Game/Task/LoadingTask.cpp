@@ -9,6 +9,10 @@
 #include "types.h"
 #include "Game/Task/FrontEndTask.h"
 #include "Game/main.h"
+#ifdef NP_NATIVE
+#include "np/fx.h"
+#include "np/stall.h"   // MSC_STALL_TIMERS (stall10)
+#endif
 
 void LoadingTask::Start()
 {
@@ -25,7 +29,24 @@ void LoadingTask::Run(float dt)
     g_pPadManager->Update(dt);
     FlickDetection::Update();
 
+#ifdef NP_NATIVE
+    // (MSC_TEX_PRETOUCH) this scene is where the match's textures are shown to the renderer (GameRenderTask does not run in it): see NpTexPretouchStep
+    if (nlTaskManager::m_pInstance->mCurrentState & (TASK_FE_TO_GAME | TASK_BOOT_TO_GAME))
+    {
+        NP_STALL("LoadingTask: pretouch step");
+        NpTexPretouchStep(1, nlTaskManager::m_pInstance->mCurrentState);
+    }
+#endif
+#ifdef NP_NATIVE
+    u32 stallLoadResult;
+    {
+        NP_STALL("LoadingTask: async loading step");
+        stallLoadResult = fn_80118B7C(AsyncLoadingManager::Instance());
+    }
+    switch (stallLoadResult)
+#else
     switch (fn_80118B7C(AsyncLoadingManager::Instance()))
+#endif
     {
     case ASYNC_LOADING_FE_READY:
         nlTaskManager::SetNextState(TASK_CLEAN_BOOT);
@@ -34,9 +55,12 @@ void LoadingTask::Run(float dt)
         nlTaskManager::SetNextState(TASK_FRONTEND);
         break;
     case ASYNC_LOADING_GAME_READY:
-        nlTaskManager::SetNextState(TASK_GAMEPLAY);
-        break;
     case ASYNC_LOADING_STADIUM_OR_GAME_READY:
+#ifdef NP_NATIVE
+        // (MSC_TEX_PRETOUCH) the walk-out starts with the match's textures already shown to the renderer: the loading scene waits for them, 3 s at most
+        if (NpTexPretouchHold() != 0) break;
+        np::stall::Sum("loading ready, going to play");
+#endif
         nlTaskManager::SetNextState(TASK_GAMEPLAY);
         break;
     case ASYNC_LOADING_RETURN_TO_FE:

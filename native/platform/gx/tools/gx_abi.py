@@ -14,8 +14,8 @@ Needs only clang. Writes <out>/abi_functions.tsv, abi_enums.txt, abi_structs.txt
 import argparse, json, os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RVL = '/home/claude/research/decomp/mscharged-decomp/libs/RVL_SDK/include'
-AUR = '/home/claude/msc/one/port/aurora-main/include'
+RVL = '/work/research/decomp/mscharged-decomp/libs/RVL_SDK/include'
+AUR = '/work/msc/one/port/aurora-main/include'
 
 RVL_PROBE = '#include <revolution/gx.h>\n#include <revolution/vi.h>\n#include <revolution/tpl.h>\n'
 AUR_PROBE = 'typedef int BOOL;\n#include <dolphin/gx.h>\n#include <dolphin/gx/GXAurora.h>\n#include <dolphin/gx/GXExtra.h>\n#include <dolphin/vi.h>\n'

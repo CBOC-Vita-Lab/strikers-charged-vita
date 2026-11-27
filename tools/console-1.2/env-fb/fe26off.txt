@@ -1,0 +1,17 @@
+# console-1.2 run fe26off: State-resolution cuts off (MSC_VGX_TEXSAME=0 MSC_VGX_MTXSPLIT=0; plan default 1 since fe26), the lane lines at Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group exact, route tour, version payload 1.3, role ab
+# fe26 (exact on the host: per-picture back-end hashes, frame hashes and det trace identical off / on / verify at the tour, The Dump and Vice goal + replay + walk-out; mutants caught), ON in the plan: a repeated texture bind leaves the bindings clean and the matrix blocks are rebuilt from the rows written, so more draws take ResolveState's early exit. This is its off side: resolve-state= and list-hit= of the [lane-fe] line in play windows against the on side (any tour run with MSC_VGX_FE_SPLIT=1), alternating on/off pairs. Expected: resolve-state 0.2-0.4 ms lower (estimate: x86 callgrind -8.5 % of ResolveState); keep it on unless the on side is slower, faults, or a texture or a model looks wrong.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_TEXSAME=0
+MSC_VGX_MTXSPLIT=0
+MSC_VGX_FE_SPLIT=1
+MSC_HEAD_STAT=1

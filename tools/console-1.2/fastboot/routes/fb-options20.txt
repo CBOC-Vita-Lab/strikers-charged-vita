@@ -1,0 +1,50 @@
+# fast boot (test only, front20): main menu -> OPTIONS -> VITA SETTINGS -> CROWD changed (a live row) -> DONE: the popup SAVE / DON'T SAVE / KEEP EDITING -> Circle (KEEP EDITING: the screen stays) -> DONE -> DON'T SAVE -> back on OPTIONS, nothing written.
+# Log: '[vitaset] popup 2 shown (front end) after N frame(s)' (N small), '[vitaset] front-end popup ready', '[vitaset] front-end popup closed by Circle (KEEP EDITING)', STATE lines to 'options20 done'. The settings file must be unchanged.
+# Run: emu.sh <tag> <vpk> env/fb-options20.txt <seconds> <this file>.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 120
+touch 398 455 4 30
+wait scene == 13 900
+log STATE options scene
+idle 150
+log STATE corner button
+touch 480 497 4 30
+wait scene == 88 900
+idle 250
+touch 480 321 4 40
+idle 30
+log STATE crowd changed (a live row)
+touch 480 418 4 30
+idle 120
+log STATE leave popup (SAVE / DON'T SAVE / KEEP EDITING)
+vpress circle 3 60
+idle 120
+if scene == 88
+log STATE KEEP EDITING kept the screen
+endif
+touch 480 418 4 30
+idle 120
+vpress down 3 30
+idle 20
+vpress cross 3 60
+wait scene == 13 900
+idle 150
+log STATE DONT SAVE left to OPTIONS (nothing written)
+touch 117 497 4 30
+wait scene == 1 900
+idle 100
+log STATE options20 done
+exit

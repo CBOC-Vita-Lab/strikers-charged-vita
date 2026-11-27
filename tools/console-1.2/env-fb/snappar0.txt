@@ -1,0 +1,16 @@
+# console-1.2 run snappar0: Snapshot and crowd views back on the game thread
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_SNAP_PAR and MSC_CROWD_POS_PAR are on by default from wave 9: the ten characters' snapshot grab (every simulation step), their blend and the 150 power-up blends, and the crowd sprites' view matrices run on the job pool's three lanes (this parallel snapshot code came with 1.2 but was never compiled into the console build). Host proof: frame hashes and the det trace identical over 30000 pictures at Vice and The Dump's whole route, proof mutants caught. This run is the A/B: both off, with the split lines. Against gsplit1 (same route, defaults, split lines): [gsplit] blend and crowd-pos ms, game-thread ms in [lane], [jobs] parallel/busy/caller-waited, [snappar] lines in gsplit1. Keep on only if the game thread is lighter and nothing in the owner's acceptance line gets worse.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_SNAP_PAR=0
+MSC_CROWD_POS_PAR=0
+MSC_GSPLIT=1

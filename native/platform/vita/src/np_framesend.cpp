@@ -11,7 +11,11 @@
 // thread), off (the job runs inside NpFsFork). All three go through the same gates, the same bookkeeping and the same marks, so
 // the equality of their outputs separates "the program was reordered" from "two threads ran it".
 #include "np_framesend.h"
+#include "../../../include/np/gsplit.h"
+#include "../../../include/np/lockwait.h"
+#include "../../../include/np/stall.h"   // MSC_STALL_TIMERS (stall10)
 #include "np_time.h"
+#include "np_fasttls.h"   // NpTlsSlot89 (MSC_TLS_FAST)
 #include "../../../include/np/touch_diag.h"
 #pragma weak NpDiagActive
 #pragma weak NpDiagNow
@@ -29,6 +33,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <pthread.h>
+#include <sched.h>
 
 #if defined(__vita__)
 #include "np_vita_internal.h"
@@ -39,6 +44,7 @@
 #include <unistd.h>
 #endif
 
+extern "C" unsigned long long NpMemHeapLockSlow(void) __attribute__((weak));   // NL/nlMemory.cpp
 extern "C" {
 volatile int NpFsBusy = 0;
 volatile int NpFsPipeOn = 0;
@@ -57,10 +63,13 @@ extern "C" __attribute__((weak)) void vgxn_set_producer_hook(void (*fn)(void)); 
 extern "C" char __executable_start, etext;
 #endif
 
+extern "C" int NpSimtOnSimThread(void) __attribute__((weak));   // NpSimRun17.cpp: stack-address test, 1 on np_sim
+
 namespace {
 void CensusInstall();
 void CensusReport();
 void FlushCalls();
+void LaneLogStats(const char* when);
 
 constexpr int kWinSlots = 32768;           // window set slots (a power of two); at most kWinSlots / 2 inserts per window, the rest is "unknown" (its free is deferred)
 constexpr int kMaxDeferred = 16384;
@@ -69,11 +78,16 @@ constexpr int kMaxWrites = 512;
 constexpr int kCallBytes = 32768;          // NpFsDeferCall: room for the deferred GX calls of one window
 constexpr int kMaxGates = 16;
 
+std::atomic<uint64_t> g_semOverflows{0};   // posts a bounded semaphore dropped (host emulation of the Vita's SEMA_OVF; the lane counts the real ones too)
+
 struct Sem {
 #if defined(__vita__)
     SceUID id = -1;
-    void Init(const char* name) { id = sceKernelCreateSema(name, 0, 0, 1, nullptr); }
-    void Post() { sceKernelSignalSema(id, 1); }
+    // `maxCount` is the kernel's limit: sceKernelSignalSema on a semaphore that holds maxCount fails with SCE_KERNEL_ERROR_SEMA_OVF and the signal is LOST.
+    // The frame-send hand-off posts once and waits once, strictly alternating, so its semaphores are created with 1; anything that can post twice before
+    // the first wait must not rely on the count (the helper lane below uses only the binary "a wake-up is wanted" protocol with these).
+    void Init(const char* name, int maxCount = 1) { id = sceKernelCreateSema(name, 0, 0, maxCount, nullptr); }
+    bool Post() { return sceKernelSignalSema(id, 1) >= 0; }
     // seconds < 0: wait for ever; returns true when the semaphore was taken
     bool Wait(double seconds) {
         if (seconds < 0) return sceKernelWaitSema(id, 1, nullptr) >= 0;
@@ -86,11 +100,34 @@ struct Sem {
     }
 #else
     sem_t s;
-    void Init(const char*) { sem_init(&s, 0, 0); }
-    void Post() { sem_post(&s); }
-    bool Wait(double) {   // (no timed wait: the harness' virtual clock is interposed under libc's sem_timedwait)
-        while (sem_wait(&s) != 0 && errno == EINTR) {}
+    int cap = 0;   // MSC_SEM_MAX=<n> (host tests only): behave like the Vita's kernel semaphore of that maximum, a post to a full one is dropped
+    void Init(const char*, int maxCount = 1) {
+        sem_init(&s, 0, 0);
+        static const int emu = [] { const char* e = std::getenv("MSC_SEM_MAX1"); return (e && *e && *e != '0') ? 1 : 0; }();
+        cap = emu ? maxCount : 0;
+    }
+    bool Post() {
+        if (cap > 0) {
+            int v = 0;
+            sem_getvalue(&s, &v);
+            if (v >= cap) { ++g_semOverflows; return false; }   // SCE_KERNEL_ERROR_SEMA_OVF: the signal is lost
+        }
+        sem_post(&s);
         return true;
+    }
+    // seconds < 0: block. seconds >= 0: poll (the harness' virtual clock is interposed under libc's sem_timedwait, so there is no timed wait; the real
+    // clock NpRealSeconds is read and the polling thread sleeps 100 us at a time)
+    bool Wait(double seconds) {
+        if (seconds < 0) {
+            while (sem_wait(&s) != 0 && errno == EINTR) {}
+            return true;
+        }
+        const double end = NpRealSeconds() + seconds;
+        for (;;) {
+            if (sem_trywait(&s) == 0) return true;
+            if (NpRealSeconds() >= end) return false;
+            usleep(100);
+        }
     }
     bool TryWait() {   // MSC_FS_NOTRY=1: always take the blocking wait (valgrind's helgrind does not know sem_trywait: the happens-before edge of the job's end would be lost)
         static const bool noTry = std::getenv("MSC_FS_NOTRY") != nullptr;
@@ -106,6 +143,8 @@ struct State {
     int freeGate = 1;
     int taskMask = 0;
     bool pipe = false;               // W5 PIPE: two-stage pipeline (MSC_FS_PIPE=1)
+    int held = 0;                    // rep27 (MSC_FS_HELD): 1 replays, 2 replays and cut-scenes are sent on the game thread
+    int heldBits = 0;                // the task-state bits MSC_FS_HELD took out of `states`
     int maxDeferred = kMaxDeferred;
     bool marks = false;
     size_t stackBytes = 0;
@@ -159,6 +198,92 @@ struct State {
 State g;
 thread_local int t_onWorker = 0;
 
+// overlap18 (MSC_SIMT=2, np/simrun17.h): while the game thread draws the window, the simulation step runs on np_sim, a SECOND thread that allocates and frees from the game heap
+// while a send may be pending. g_ovl is set by NpSimtRun for the length of the kick (cleared after the join). While it is set: (1) the window set and the deferred-free list are
+// touched under g_hookLock by both threads (and by the join's tail); (2) np_sim never joins (only the game thread does): its gates wait until the send job has FINISHED
+// (g_jobFinished, set by the worker; the join's bookkeeping stays the game thread's), and its frees of blocks the job may read go to the deferred list (drained at the join).
+// With g_ovl clear nothing here changes anything.
+std::atomic<int> g_ovl{0};
+std::atomic<int> g_jobFinished{1};
+std::atomic_flag g_hookLock = ATOMIC_FLAG_INIT;
+std::atomic<uint64_t> g_simAllocs{0}, g_simFreesDeferred{0}, g_simFreesOwn{0}, g_simGateWaits{0}, g_simWaitUs{0}, g_simWaitMaxUs{0};   // (statistics: relaxed, read by the stats line from any thread)
+inline bool OvlOn() { return g_ovl.load(std::memory_order_acquire) != 0; }
+unsigned g_hookLockSlow = 0;   // acquisitions that ran out of spins (np/lockwait.h)
+inline void HookLock() { int n = 0; while (g_hookLock.test_and_set(std::memory_order_acquire)) NpLockBackoff(n, &g_hookLockSlow); }
+inline void HookUnlock() { g_hookLock.clear(std::memory_order_release); }
+struct HookGuard {   // takes the lock only while a second game-heap thread exists
+    bool on;
+    HookGuard() : on(OvlOn()) { if (on) HookLock(); }
+    ~HookGuard() { if (on) HookUnlock(); }
+};
+
+// MSC_FS_TLSFAST (default 1; 0 = every read goes through t_onWorker as before; 1.3 armcpu9). On the Vita a thread_local is emulated TLS (clang
+// -femulated-tls): each read is a call to __emutls_get_address -> pthread_getspecific -> pte_osTlsGetValue -> __getreent_for_thread -> sceKernelGetTLSAddr,
+// about 90 instructions, seven calls and a `dmb ish`. The game asks "am I on the worker?" some 3000 times a picture (glplatFrameAlloc, the heap hooks, the
+// shadow-light lookups): host callgrind, The Dump. The same answer without the emulation: a thread knows itself by a token (the address of its TLS slot,
+// one cheap call; on Linux the address of a native __thread variable) and the table below holds the answer for the threads that ever ran a job (the worker,
+// and the game thread in serial / inline mode). A thread that is not in the table has never set t_onWorker: the answer is 0. Each thread reads and writes
+// only its own entry; the entry's token is written before its value is set and never changes (the worker lives to the end of the process), so no ordering
+// is needed. MSC_FS_TLSVERIFY=1 compares every answer with t_onWorker and counts the differences ([fs] tlsfast line at exit of the first mismatch).
+#if defined(__vita__)
+inline void* ThreadToken() { return NpTlsSlot89(); }   // the slot newlib's reent uses: one per thread, no system call (MSC_TLS_FAST: TPIDRURO + the proved offset, two instructions; else sceKernelGetTLSAddr(0x89))
+#else
+__thread char t_tokenAnchor;
+inline void* ThreadToken() { return &t_tokenAnchor; }
+#endif
+struct WorkerSlot { void* token; int value; };
+constexpr int kWorkerSlots = 8;
+WorkerSlot g_slots[kWorkerSlots];
+volatile int g_nSlots = 0;           // entries in use (appended under g_slotLock; read without it)
+volatile int g_slotsFull = 0;        // more threads than slots: every read takes t_onWorker (never happens with one worker)
+int g_tlsFast = 1;                   // MSC_FS_TLSFAST
+int g_tlsVerify = 0;                 // MSC_FS_TLSVERIFY
+volatile int g_tlsMismatch = 0;
+pthread_mutex_t g_slotLock = PTHREAD_MUTEX_INITIALIZER;
+
+inline int FastOnWorker() {
+#if defined(NP_FS_TLSBREAK)   // (test mutant: the answer is always 0; MSC_FS_TLSVERIFY=1 must report it)
+    return 0;
+#endif
+    void* const me = ThreadToken();
+    const int n = g_nSlots;
+    for (int i = 0; i < n; ++i)
+        if (g_slots[i].token == me) return g_slots[i].value;
+    return 0;
+}
+inline int OnWorker() {
+    int v;
+    if (g_tlsFast && !g_slotsFull) {
+        v = FastOnWorker();
+        if (__builtin_expect(g_tlsVerify != 0, 0) && v != t_onWorker) {
+            if (!g_tlsMismatch) std::fprintf(stderr, "[fs] tlsfast MISMATCH: table %d, t_onWorker %d\n", v, t_onWorker);
+            g_tlsMismatch = g_tlsMismatch + 1;
+        }
+    } else {
+        v = t_onWorker;
+    }
+    return v;
+}
+void SetOnWorker(int v) {
+    t_onWorker = v;
+    void* const me = ThreadToken();
+    const int n = g_nSlots;
+    for (int i = 0; i < n; ++i)
+        if (g_slots[i].token == me) { g_slots[i].value = v; return; }
+    if (!v) return;   // never set: the table answers 0 for it
+    pthread_mutex_lock(&g_slotLock);
+    const int m = g_nSlots;
+    if (m < kWorkerSlots) {
+        g_slots[m].value = v;
+        g_slots[m].token = me;
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        g_nSlots = m + 1;
+    } else {
+        g_slotsFull = 1;
+    }
+    pthread_mutex_unlock(&g_slotLock);
+}
+
 void Mark(long v) {
 #if defined(__linux__)
     if (g.marks) syscall(0x7f00, v);
@@ -186,6 +311,8 @@ void Decide() {
     else if (m && !std::strcmp(m, "inline")) g.mode = NP_FS_INLINE;
     else if (m && *m) g.mode = NP_FS_OFF;     // (MSC_FRAMESEND set to anything else: off)
     else g.mode = NP_FS_DEFAULT_MODE;       // not set: the build's default (off unless built with -DNP_FS_DEFAULT_MODE=1 for thread)
+    g_tlsFast = EnvFlag("MSC_FS_TLSFAST", true);
+    g_tlsVerify = EnvFlag("MSC_FS_TLSVERIFY", false) ? 1 : 0;
     if (const char* s = std::getenv("MSC_FS_STATES")) g.states = static_cast<int>(std::strtoul(s, nullptr, 0));
     g.freeGate = 2;   // frees of old blocks wait for the join (a6/a7 proof runs: equal; 1 = join at the free costs two thirds of the overlap)
     if (const char* f = std::getenv("MSC_FS_FREEGATE")) g.freeGate = static_cast<int>(std::strtol(f, nullptr, 0));
@@ -204,6 +331,20 @@ void Decide() {
         NpFsPipeOn = 1;
     }
     if (const char* t = std::getenv("MSC_FS_TASKS")) mask = static_cast<uint32_t>(std::strtoul(t, nullptr, 0));
+    // rep27 (MSC_FS_HELD=0|1|2, code default 0, 1 in the Vita plan C): in a scene that never steps the simulation the game thread has room and the
+    // send worker's core (core 1, shared with the render thread's front end) has none: console 18 Nov, replays: game thread p50 37-40 ms a picture of
+    // which most is the send join (the next send waits for the last one), core 1 at 86 % of a 47 ms picture. Such a frame is sent the plain way, on the
+    // game thread (the path the loading task's frames already take): the same GX stream, in the same order; nothing the simulation reads.
+    // 1: replays (TASK_REPLAY 0x8, debug replay 0x20000); 2: also cut-scenes and the walk-out (TASK_NIS 0x10). Thread and serial modes (serial: the host proof), an explicit
+    // MSC_FS_STATES wins (it names the forked states itself).
+    if ((g.mode == NP_FS_THREAD || g.mode == NP_FS_SERIAL) && !std::getenv("MSC_FS_STATES")) {
+        const char* h = std::getenv("MSC_FS_HELD");
+        g.held = (h && *h) ? static_cast<int>(std::strtol(h, nullptr, 0)) : 0;
+        if (g.held < 0 || g.held > 2) g.held = 0;
+        const int bits = g.held >= 1 ? (0x8 | 0x20000 | (g.held >= 2 ? 0x10 : 0)) : 0;
+        g.heldBits = g.states & bits;
+        g.states &= ~bits;
+    }
     g.taskMask = static_cast<int>(mask);
     if (g.mode != NP_FS_OFF) CensusInstall();
     g.marks = EnvFlag("MSC_FS_MARKS", false) || std::getenv("MSC_QEMU_MARK");
@@ -214,8 +355,13 @@ void Decide() {
 #endif
     if (const char* k = std::getenv("MSC_FS_STACK_KB")) g.stackBytes = static_cast<size_t>(std::strtoul(k, nullptr, 0)) * 1024;
     if (g.mode != NP_FS_OFF)
-        std::fprintf(stderr, "[fs] frame send: mode=%s%s states=0x%X freegate=%d task-mask=0x%X stack=%lu KiB\n", ModeName(g.mode), g.pipe ? " (two-stage pipeline)" : "",
-                     g.states, g.freeGate, static_cast<unsigned>(g.taskMask), static_cast<unsigned long>(g.stackBytes / 1024));
+    {
+        std::fprintf(stderr, "[fs] frame send: mode=%s%s states=0x%X freegate=%d task-mask=0x%X stack=%lu KiB tlsfast=%d%s\n", ModeName(g.mode), g.pipe ? " (two-stage pipeline)" : "",
+                     static_cast<unsigned>(g.states), g.freeGate, static_cast<unsigned>(g.taskMask), static_cast<unsigned long>(g.stackBytes / 1024), g_tlsFast, g_tlsVerify ? " (verify)" : "");
+        if (g.held > 0)
+            std::fprintf(stderr, "[fs] MSC_FS_HELD=%d: frames of task states 0x%X (%s) are sent on the game thread, not forked to the send worker\n", g.held, static_cast<unsigned>(g.heldBits),
+                         g.held >= 2 ? "replays, cut-scenes, walk-out" : "replays");
+    }
 }
 
 // The floating-point control register (rounding mode, flush-to-zero, default NaN) of the thread that forks: the job runs under the same
@@ -239,15 +385,15 @@ void RunJob(NpFsJobFn fn, void* arg) {
     const bool diag=NpDiagActive&&NpDiagActive();
     const uint64_t diagStart=diag?NpDiagNow():0;
     const uint64_t diagFrame=diag?NpDiagFrame()-1:0;
-    const int was = t_onWorker;
-    t_onWorker = 1;
+    const int was = OnWorker();
+    SetOnWorker(1);
     if (was) WriteFpscr(g_forkFpscr);   // (thread mode: only the worker thread has t_onWorker set before a job starts)   // a job runs under the worker's rules wherever it runs (the gates do not join, the heap hooks count)
     Mark(0x30000003);
     const double t0 = NpRealSeconds();
     fn(arg);
     g.workerBusySeconds += NpRealSeconds() - t0;
     Mark(0x30000004);
-    t_onWorker = was;
+    SetOnWorker(was);
     if(diag)NpDiagEvent(NPD_FRAME_SEND,g.mode,diagFrame,diagStart,NpDiagNow(),0,0,0);
 }
 
@@ -270,7 +416,7 @@ void PaintStack() {
 #endif
 
 void* WorkerMain(void*) {
-    t_onWorker = 1;
+    SetOnWorker(1);
 #if defined(__vita__)
     VitaThreads::PinCurrentThread(VitaThreads::kFrameSend);
     int prio = 0x100000F0;   // above the render thread and the mixer (159), below the audio output (128): split/NOTES.md FOR LAB
@@ -283,6 +429,7 @@ void* WorkerMain(void*) {
     for (;;) {
         g.ready.Wait(-1);
         RunJob(g.job, g.arg);
+        g_jobFinished.store(1, std::memory_order_release);
         g.done.Post();
     }
     return nullptr;
@@ -390,7 +537,7 @@ bool CodeAddr(uintptr_t v, uintptr_t* ret) {
 }
 
 void CensusHook() {
-    if (!g.pending || t_onWorker || !g.haveGameThread || !pthread_equal(pthread_self(), g.gameThread)) return;
+    if (!g.pending || OnWorker() || !g.haveGameThread || !pthread_equal(pthread_self(), g.gameThread)) return;
     ++g_censusTotal;
     CensusSite site;
     std::memset(&site, 0, sizeof site);
@@ -461,9 +608,10 @@ extern "C" {
 
 int NpFsMode(void) { Decide(); return g.mode; }
 int NpFsStates(void) { Decide(); return g.states; }
+int NpFsHeldStates(void) { Decide(); return g.heldBits; }
 int NpFsFreeGate(void) { Decide(); return g.freeGate; }
 int NpFsTaskMask(void) { Decide(); return g.taskMask; }
-int NpFsOnWorker(void) { return t_onWorker; }
+int NpFsOnWorker(void) { return OnWorker(); }
 void NpFsAfterJoin(void (*fn)(void)) { g.afterJoin = fn; }
 
 void NpFsFork(NpFsJobFn fn, void* arg) {
@@ -482,14 +630,20 @@ void NpFsFork(NpFsJobFn fn, void* arg) {
     g.job = fn;
     g.arg = arg;
     g_forkFpscr = ReadFpscr();
-    g.pending = true;
-    WinReset();
+    {   // (under the hook lock with MSC_SIMT=2: np_sim's heap events must see the new window as a whole)
+        HookGuard hg;
+        g_jobFinished.store(0, std::memory_order_release);
+        g.pending = true;
+        WinReset();
+    }
     __atomic_store_n(&NpFsBusy, 1, __ATOMIC_RELEASE);
     if (g.mode == NP_FS_THREAD) g.ready.Post();
 }
 
+static int s_npGsJoinPhase = NPGS_WAIT_JOIN;   // gt27: NPGS_WAIT_GATE while a gate joins (game thread only)
 void NpFsJoin(void) {
     if (!g.pending) return;
+    NpGsSeqW gsq(s_npGsJoinPhase);   // (gt27: the wait only; the work after it is e-joinwork. This file is built without NP_NATIVE: the old NP_GS here was a no-op on the Vita, so join waits were never booked)
     const bool diag=NpDiagActive&&NpDiagActive();
     const uint64_t diagStart=diag?NpDiagNow():0;
     if (g.mode == NP_FS_THREAD) {
@@ -510,8 +664,16 @@ void NpFsJoin(void) {
     } else {
         RunJob(g.job, g.arg);   // serial mode: the job runs here
     }
-    g.pending = false;
-    if(diag)NpDiagEvent(NPD_FRAME_JOIN,g.mode,NpDiagFrame(),diagStart,NpDiagNow(),g.nDeferred,g.nCalls,g.nWrites);
+    gsq.Next(NPGS_E_JOINWORK);
+    g_jobFinished.store(1, std::memory_order_release);   // (serial mode: the job ran just now; thread mode: already set by the worker)
+    int nDeferredAtJoin;
+    {   // (overlap18: np_sim may be pushing deferred frees: the list is closed under the lock; once pending is false nobody pushes)
+        HookGuard hg;
+        g.pending = false;
+        nDeferredAtJoin = g.nDeferred;
+        g.nDeferred = 0;
+    }
+    if(diag)NpDiagEvent(NPD_FRAME_JOIN,g.mode,NpDiagFrame(),diagStart,NpDiagNow(),nDeferredAtJoin,g.nCalls,g.nWrites);
     __atomic_store_n(&NpFsBusy, 0, __ATOMIC_RELEASE);
     ++g.joins;
     Mark(0x30000002);
@@ -522,15 +684,13 @@ void NpFsJoin(void) {
     }
     if (g.nCalls > 0) FlushCalls();   // the GX calls the game thread made while the job ran, now that the recorder is its own again
     if (g.afterJoin) g.afterJoin();
-    if (g.nDeferred > 0) {   // the frees the game thread made while the job ran (in their order), now that nothing reads the memory
-        const int n = g.nDeferred;
-        g.nDeferred = 0;
-        for (int i = 0; i < n; ++i) g.freeFn(g.deferred[i]);
+    if (nDeferredAtJoin > 0) {   // the frees the game thread (and, with MSC_SIMT=2, np_sim) made while the job ran (in their order), now that nothing reads the memory
+        for (int i = 0; i < nDeferredAtJoin; ++i) g.freeFn(g.deferred[i]);
     }
 }
 
 int NpFsDeferCall(void (*fn)(const void*), const void* data, unsigned size) {
-    if (!g.pending || t_onWorker || !pthread_equal(pthread_self(), g.gameThread)) return 0;
+    if (!g.pending || OnWorker() || !pthread_equal(pthread_self(), g.gameThread)) return 0;
     const int need = static_cast<int>(sizeof(CallHead) + ((size + 7u) & ~7u));
     if (g.callUsed + need > kCallBytes) { ++g.callOverflows; NpFsGateSlow("callfull"); return 0; }   // (the join flushes the earlier calls first: the order holds)
     CallHead* h = reinterpret_cast<CallHead*>(g.callBuf + g.callUsed);
@@ -544,46 +704,89 @@ int NpFsDeferCall(void (*fn)(const void*), const void* data, unsigned size) {
     return 1;
 }
 
-void NpFsGateSlow(const char* why) {
-    // (other threads - the disc and NAND workers, the mixer - reach the gates through shared SDK paths: they do not join, only the game thread does)
-    if (t_onWorker || !g.pending || !pthread_equal(pthread_self(), g.gameThread)) return;
-    if (why && !std::strcmp(why, "task")) ++g.joinsTask;
-    else CountGate(why ? why : "?");
-    NpFsJoin();
+// np_sim (MSC_SIMT=2) has no join of its own: a gate it reaches waits until the job has finished (the memory is then safe to touch); the game thread joins later.
+static void SimWaitJob() {
+    if (g.mode != NP_FS_THREAD) return;   // (MSC_SIMT=2 is refused in the other modes: the job would only run at the game thread's join)
+    if (g_jobFinished.load(std::memory_order_acquire) != 0) return;
+    const double t0 = NpRealSeconds();
+    int n = 0;
+    while (g_jobFinished.load(std::memory_order_acquire) == 0) {
+        if (++n > 200) {
+#if defined(__vita__)
+            sceKernelDelayThread(50);
+#else
+            sched_yield();
+#endif
+        } else {
+#if defined(__arm__)
+            __asm__ __volatile__("yield" ::: "memory");
+#endif
+        }
+    }
+    const double us = (NpRealSeconds() - t0) * 1e6;
+    const uint64_t u = us > 0 ? static_cast<uint64_t>(us) : 0;
+    g_simWaitUs.fetch_add(u, std::memory_order_relaxed);
+    if (u > g_simWaitMaxUs.load(std::memory_order_relaxed)) g_simWaitMaxUs.store(u, std::memory_order_relaxed);
 }
 
-void NpFsHeapAlloc(void* ptr) {   // the game thread only (nlMemory.cpp); in serial / inline mode the job runs here and its calls are counted instead
-    if (t_onWorker) { NpFsWorkerHeapCall(); return; }
+void NpFsGateSlow(const char* why) {
+    if (OvlOn() && NpSimtOnSimThread && NpSimtOnSimThread()) {   // overlap18: np_sim (the only thread that runs this branch)
+        if (g_jobFinished.load(std::memory_order_acquire) == 0) { g_simGateWaits.fetch_add(1, std::memory_order_relaxed); SimWaitJob(); }   // (no read of g.pending: the game thread's join writes it)
+        return;
+    }
+    // (other threads - the disc and NAND workers, the mixer - reach the gates through shared SDK paths: they do not join, only the game thread does)
+    if (OnWorker() || !g.pending || !pthread_equal(pthread_self(), g.gameThread)) return;
+    if (why && !std::strcmp(why, "task")) ++g.joinsTask;
+    else CountGate(why ? why : "?");
+    NP_STALL_CM("frame-send join (gate)", 0, &why);   // (MSC_STALL_TIMERS: the game thread waits for the frame-send worker; `why` names the gate)
+    s_npGsJoinPhase = NPGS_WAIT_GATE;
+    NpFsJoin();
+    s_npGsJoinPhase = NPGS_WAIT_JOIN;
+}
+
+void NpFsHeapAlloc(void* ptr) {   // the game thread (nlMemory.cpp), and np_sim with MSC_SIMT=2; in serial / inline mode the job runs here and its calls are counted instead
+    if (OnWorker()) { NpFsWorkerHeapCall(); return; }
+    HookGuard hg;   // (overlap18: both game-heap threads reach the window set)
     if (!g.pending) return;
     ++g.heapAllocsInWindow;
+    if (hg.on && NpSimtOnSimThread && NpSimtOnSimThread()) g_simAllocs.fetch_add(1, std::memory_order_relaxed);
     WinInsert(ptr);
 }
 
 int NpFsHeapFree(void* ptr) {
-    if (t_onWorker) { NpFsWorkerHeapCall(); return 0; }
-    if (!g.pending || !ptr) return 0;
-    ++g.heapFreesInWindow;
-    if (WinErase(ptr)) {   // allocated inside the window: the job cannot refer to it
-        ++g.freesOfWindowBlocks;
-        return 0;
-    }
-    if (g.freeGate == 2 && g.freeFn && g.deferred && g.nDeferred < g.maxDeferred) {   // the job may read the block: it is freed after the join
-        g.deferred[g.nDeferred++] = ptr;
-        ++g.deferredTotal;
-        if (static_cast<uint64_t>(g.nDeferred) > g.deferredMax) g.deferredMax = static_cast<uint64_t>(g.nDeferred);
-        return 1;
-    }
-    if (g.freeGate == 2) ++g.deferOverflow;
+    if (OnWorker()) { NpFsWorkerHeapCall(); return 0; }
+    {
+        HookGuard hg;
+        if (!g.pending || !ptr) return 0;
+        const bool sim = hg.on && NpSimtOnSimThread && NpSimtOnSimThread();
+        ++g.heapFreesInWindow;
+        if (WinErase(ptr)) {   // allocated inside the window: the job cannot refer to it
+            ++g.freesOfWindowBlocks;
+            if (sim) g_simFreesOwn.fetch_add(1, std::memory_order_relaxed);
+            return 0;
+        }
+        if (g.freeGate == 2 && g.freeFn && g.deferred && g.nDeferred < g.maxDeferred) {   // the job may read the block: it is freed after the join
+            g.deferred[g.nDeferred++] = ptr;
+            ++g.deferredTotal;
+            if (sim) g_simFreesDeferred.fetch_add(1, std::memory_order_relaxed);
+            if (static_cast<uint64_t>(g.nDeferred) > g.deferredMax) g.deferredMax = static_cast<uint64_t>(g.nDeferred);
+            return 1;
+        }
+        if (g.freeGate == 2) ++g.deferOverflow;
+    }   // (the lock is released before a gate: the game thread's join takes it)
     if (g.freeGate != 0) NpFsGateSlow("free");
     return 0;
 }
+
+// overlap18: NpSimtRun brackets the kick..join of a MSC_SIMT=2 picture with this (game thread).
+void NpFsSetOverlap(int on) { g_ovl.store(on ? 1 : 0, std::memory_order_release); }
 
 void NpFsSetFreeFn(void (*fn)(void*)) { g.freeFn = fn; }
 
 // Pointer-sized stores into tables the job reads (glTextureManager::mTextures: texture animations advance in GLInventory::Update, early in the next
 // frame), kept until the job is done and made then in their order. Only with the pipeline: without it the "invupd" gate joined before the update.
 int NpFsDeferWrite(void** slot, void* value) {
-    if (!g.pending || !g.pipe || t_onWorker || !pthread_equal(pthread_self(), g.gameThread)) return 0;
+    if (!g.pending || !g.pipe || OnWorker() || !pthread_equal(pthread_self(), g.gameThread)) return 0;
     if (g.nWrites >= kMaxWrites) {
         ++g.writeOverflows;
         NpFsGateSlow("texwrites");
@@ -618,6 +821,7 @@ void NpFsWorkerHeapCall(void) {
 }
 
 void NpFsLogStats(const char* when) {
+    LaneLogStats(when);
     if (!g.decided || (g.mode == NP_FS_OFF && g.forks == 0)) return;
     std::fprintf(stderr, "[fs] %s: mode=%s forks=%llu joins=%llu (task boundary %llu", when ? when : "stats", ModeName(g.mode),
                  (unsigned long long)g.forks, (unsigned long long)g.joins, (unsigned long long)g.joinsTask);
@@ -636,6 +840,11 @@ void NpFsLogStats(const char* when) {
     if (g.freeGate == 2)
         std::fprintf(stderr, "[fs]   frees deferred to the join: %llu (up to %llu in one window, %llu did not fit and joined)\n", (unsigned long long)g.deferredTotal,
                      (unsigned long long)g.deferredMax, (unsigned long long)g.deferOverflow);
+    if (g_simAllocs.load() || g_simFreesDeferred.load() || g_simFreesOwn.load() || g_simGateWaits.load())
+        std::fprintf(stderr, "[fs]   np_sim (MSC_SIMT=2): allocs in a window %llu, frees of window blocks %llu, frees deferred to the join %llu, gates that waited for the job %llu (%.3f ms, max %.1f ms)\n",
+                     (unsigned long long)g_simAllocs.load(), (unsigned long long)g_simFreesOwn.load(), (unsigned long long)g_simFreesDeferred.load(), (unsigned long long)g_simGateWaits.load(), g_simWaitUs.load() * 1e-3, g_simWaitMaxUs.load() * 1e-3);
+    std::fprintf(stderr, "[fs]   lock slow paths (spin budget used up; Vita: then a 20 us sleep, host: sched_yield): game heap %llu, frame-send hook %llu\n",
+                 NpMemHeapLockSlow ? NpMemHeapLockSlow() : 0ull, (unsigned long long)__atomic_load_n(&g_hookLockSlow, __ATOMIC_RELAXED));
     std::fprintf(stderr, "[fs]   window: up to %d blocks allocated in one window, %llu windows overflowed the set\n", g.maxWinInserted, (unsigned long long)g.winOverflows);
 #if defined(__linux__) && !defined(__vita__)
     if (g.stackLow && g.stackSize) {
@@ -646,33 +855,130 @@ void NpFsLogStats(const char* when) {
 #endif
 }
 
+
+// (block17, MSC_SIMT=1) The step loop runs on np_sim while the game thread blocks: for that time np_sim is the thread that gates and joins (the gates above act only for the
+// game thread). Returns the previous owner; nothing changes before the first fork has named one.
+pthread_t NpFsSwapGameThread(pthread_t t) {
+    const pthread_t old = g.gameThread;
+    if (g.haveGameThread) g.gameThread = t;
+    return old;
+}
+
 } // extern "C"
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // The helper lane (np_framesend.h): one more thread, FIFO, for the game thread's data-parallel work.
+//
+// Hand-off design (1.2). The first version counted jobs in two kernel semaphores (one post per job to wake the lane, one post per finished job for
+// the game thread's wait). On the Vita those semaphores have a maximum of 1 (Sem::Init above): a second post before the first was taken fails with
+// SCE_KERNEL_ERROR_SEMA_OVF and is LOST. A cut-scene queues dozens of jobs at once, so the lane ran fewer jobs than were queued and the game thread
+// then waited, for ever, for completion posts that had been dropped: no frame was handed on, and the render thread sat in "vgx slot full" (the 1.1
+// console hang at the start of a match). The host's POSIX semaphores have no maximum, so no host run could show it (MSC_SEM_MAX1=1 emulates it).
+//
+// Now the counts are plain atomics and the semaphores are only a binary "somebody sleeps, wake it" signal, which a drop cannot harm:
+//   tail      jobs published (game thread)      next      jobs taken      finished  jobs completed (strictly in order: one executor at a time)
+//   busy      1 while an executor runs a job (the lane thread; the game thread only when the lane thread has stalled, see NpLaneWait)
+//   sleeping  the lane thread is about to block on `wake`   waiting  the game thread is about to block on `done`
+// A sleeper announces itself, then looks at the counter once more; the other side changes the counter, then looks at the announcement (both seq_cst):
+// one of the two always sees the other, so a wake-up cannot be missed, and a surplus post is a spurious wake-up that the loop re-checks.
+// The game thread never waits for ever: it waits in slices; if no job has finished for kLaneStallSlices slices and the lane thread is not inside a job
+// (not scheduled, or not started), it runs the queued jobs itself, in order. A full queue is refused (NpLaneTrySubmit returns 0): the caller does the
+// work itself instead of waiting for room.
 namespace {
-constexpr int kLaneQueue = 256;
+constexpr uint32_t kLaneQueue = 256;   // a power of two
+constexpr double kLaneSliceSeconds = 0.004;
+constexpr int kLaneStallSlices = 3;
 struct Lane {
     int enabled = -1;                  // -1 undecided, 0 off, 1 on
+    bool forced = false;               // gt27 (NpLaneForce): the lane runs for an explicit user (MSC_BLEND_ASYNC) without turning the skinning onto it
     bool started = false;
     pthread_t thread;
     Sem wake, done;
     struct Item { NpFsJobFn fn; void* arg; } q[kLaneQueue];
-    int head = 0;                      // next slot the lane takes (lane thread; reset by the game thread while the lane is idle)
-    int tail = 0;                      // next slot the game thread fills
-    int owed = 0;                      // done tokens the game thread has yet to take
+    alignas(64) std::atomic<uint32_t> tail{0};
+    alignas(64) std::atomic<uint32_t> next{0};
+    alignas(64) std::atomic<uint32_t> finished{0};
+    alignas(64) std::atomic<int> busy{0};
+    alignas(64) std::atomic<int> sleeping{0};
+    alignas(64) std::atomic<int> waiting{0};
+    std::atomic<uint32_t> waitTarget{0};
+    // statistics (game thread, except where atomic)
+    uint64_t submitted = 0, refusedFull = 0, waits = 0, waitsBlocked = 0, stalls = 0, longWaits = 0, takeovers = 0, takeoverCalls = 0;   // takeovers (lane24): jobs the game thread ran at once because the lane thread had not started them
+    std::atomic<uint64_t> ranOnLane{0}, ranOnGame{0}, postDrops{0};
+    double waitSeconds = 0, maxWait = 0;
 };
 Lane lane;
 
+void LaneDelayUs(unsigned us) {
+#if defined(__vita__)
+    sceKernelDelayThread(us);
+#else
+    usleep(us);
+#endif
+}
+
+// Runs the next queued job if there is one and nobody else is running one. 1: ran a job; 0: the queue is empty; -1: another executor is inside a job.
+int LaneStep(bool onGameThread) {
+    if (lane.next.load(std::memory_order_relaxed) == lane.tail.load(std::memory_order_acquire)) return 0;
+    int expect = 0;
+    if (!lane.busy.compare_exchange_strong(expect, 1, std::memory_order_acq_rel)) return -1;
+    const uint32_t h = lane.next.load(std::memory_order_relaxed);
+    if (h == lane.tail.load(std::memory_order_acquire)) { lane.busy.store(0, std::memory_order_release); return 0; }
+    const Lane::Item it = lane.q[h & (kLaneQueue - 1)];   // (copied before `next` moves on: the producer may then reuse the slot)
+    lane.next.store(h + 1, std::memory_order_release);   // (release: the copy of the slot above is done before the producer may reuse it)
+    it.fn(it.arg);
+    (onGameThread ? lane.ranOnGame : lane.ranOnLane).fetch_add(1, std::memory_order_relaxed);
+    lane.finished.store(h + 1, std::memory_order_seq_cst);
+    lane.busy.store(0, std::memory_order_release);
+    if (lane.waiting.load(std::memory_order_seq_cst) != 0 && lane.finished.load(std::memory_order_seq_cst) == lane.waitTarget.load(std::memory_order_seq_cst)) {
+        if (lane.waiting.exchange(0, std::memory_order_seq_cst) != 0 && !lane.done.Post()) lane.postDrops.fetch_add(1, std::memory_order_relaxed);
+    }
+    return 1;
+}
+
 void* LaneMain(void*) {
 #if defined(__vita__)
-    VitaThreads::PinCurrentThread(VitaThreads::kHelper, false);
+    // (lane24 FIX-07, MSC_LANE_CORE3=1, default off) the lane's work is short bursts that never spin (the blend: ~1.5 ms a picture), the kind of load core 3's job lane already takes: with the proven fourth core
+    // and no online session it runs there, away from the front-end record player on core 2; the online guard moves it off while a session is up (Core3Register), and a refused / unproven core is core 2 as before.
+    VitaThreads::PinCurrentThread(VitaThreads::kHelper, false);   // (registers the thread for the memory report and the probe; core 2's mask first, then core 3 if asked)
+    bool onCore3 = false;
+    if (const char* c3 = std::getenv("MSC_LANE_CORE3")) {
+        if (*c3 && *c3 != '0') {
+            if (VitaThreads::Core3Proven && VitaThreads::Core3Proven() && !VitaThreads::g_core3HeldNow()) {
+                const SceUID self = sceKernelGetThreadId();
+                const int r = sceKernelChangeThreadCpuAffinityMask(self, 0x00080000);
+                if (r >= 0) {
+                    VitaThreads::Core3Register(self, 0x10000100 + 4);
+                    if (VitaThreads::g_core3HeldNow() || VitaThreads::g_core3LostNow()) {
+                        sceKernelChangeThreadCpuAffinityMask(self, 0x00010000 << 2);
+                    } else {
+                        onCore3 = true;
+                    }
+                }
+                std::fprintf(stderr, "[lane] MSC_LANE_CORE3=1: helper lane thread on core 3 (%s)\n", onCore3 ? "ok" : "REFUSED/held, core 2");
+            } else {
+                std::fprintf(stderr, "[lane] MSC_LANE_CORE3=1: the fourth core is not proven / an online session is up: the lane stays on core 2\n");
+            }
+        }
+    }
+    if (onCore3) {
+        if (const char* p = std::getenv("MSC_VITA_PRIO_LANE")) {   // (only elevate priority when actually placed on Core 3 so stock 3-core Vitas never suffer Core 2 priority inversion)
+            const int prio = static_cast<int>(std::strtoul(p, nullptr, 0));
+            const int r = sceKernelChangeThreadPriority(sceKernelGetThreadId(), prio);
+            std::fprintf(stderr, "[lane] thread priority 0x%X (%s)\n", static_cast<unsigned>(prio), r >= 0 ? "ok" : "REFUSED");
+        }
+    }
+#else
+    if (const char* f = std::getenv("MSC_LANE_FREEZE_MS")) usleep(static_cast<unsigned>(std::strtoul(f, nullptr, 0)) * 1000u);   // (host test: a lane thread that is not scheduled)
 #endif
     for (;;) {
+        const int r = LaneStep(false);
+        if (r > 0) continue;
+        if (r < 0) { LaneDelayUs(50); continue; }   // the game thread is running the queue itself
+        lane.sleeping.store(1, std::memory_order_seq_cst);
+        if (lane.next.load(std::memory_order_seq_cst) != lane.tail.load(std::memory_order_seq_cst)) { lane.sleeping.store(0, std::memory_order_seq_cst); continue; }
         lane.wake.Wait(-1);
-        const Lane::Item it = lane.q[lane.head++];
-        it.fn(it.arg);
-        lane.done.Post();
+        lane.sleeping.store(0, std::memory_order_seq_cst);
     }
     return nullptr;
 }
@@ -695,6 +1001,16 @@ bool LaneStart() {
     lane.started = true;
     return true;
 }
+
+void LaneLogStats(const char* when) {
+    if (!lane.started) return;
+    std::fprintf(stderr, "[lane] %s: %llu jobs queued (%llu run on the lane thread, %llu on the game thread after a stall), %llu refused because the queue was full; "
+                 "%llu waits (%llu blocked, %.3f s, max %.1f ms), %llu stalls, %llu waits over 1 s, %llu wake posts dropped by the kernel semaphore; %llu jobs run by the game thread at the join before the lane thread had started them (%llu takeover calls)\n",
+                 when ? when : "stats", (unsigned long long)lane.submitted, (unsigned long long)lane.ranOnLane.load(), (unsigned long long)lane.ranOnGame.load(),
+                 (unsigned long long)lane.refusedFull, (unsigned long long)lane.waits, (unsigned long long)lane.waitsBlocked, lane.waitSeconds, lane.maxWait * 1000.0,
+                 (unsigned long long)lane.stalls, (unsigned long long)lane.longWaits, (unsigned long long)(lane.postDrops.load() + g_semOverflows.load()),
+                 (unsigned long long)lane.takeovers, (unsigned long long)lane.takeoverCalls);
+}
 } // namespace
 
 extern "C" {
@@ -708,19 +1024,96 @@ int NpLaneEnabled(void) {
     return lane.enabled;
 }
 
+int NpLaneForce(void) {   // gt27: start the lane for a caller of its own; NpLaneEnabled() (the skinning's switch, MSC_SKIN_LANE) is unchanged
+    if (!lane.forced) {
+        lane.forced = true;
+        if (!LaneStart()) { lane.forced = false; return 0; }
+        std::fprintf(stderr, "[lane] helper lane started for the asynchronous snapshot blend (MSC_BLEND_ASYNC); the skinning lane stays %s\n", NpLaneEnabled() ? "on" : "off");
+    }
+    return lane.started ? 1 : 0;
+}
+
+int NpLaneTrySubmit(NpFsJobFn fn, void* arg) {
+    if ((!NpLaneEnabled() && !lane.forced) || !LaneStart()) return 0;
+    const uint32_t t = lane.tail.load(std::memory_order_relaxed);
+    if (t - lane.next.load(std::memory_order_acquire) >= kLaneQueue) { ++lane.refusedFull; return 0; }
+    lane.q[t & (kLaneQueue - 1)] = {fn, arg};
+    ++lane.submitted;
+    lane.tail.store(t + 1, std::memory_order_seq_cst);
+    if (lane.sleeping.exchange(0, std::memory_order_seq_cst) != 0 && !lane.wake.Post()) lane.postDrops.fetch_add(1, std::memory_order_relaxed);
+    return 1;
+}
+
+double NpFsJoinWaitedSeconds(void) { return g.waitSeconds; }   // pace24: cumulative wall time the game thread spent blocked in NpFsJoin (the frame-send job not finished)
+double NpLaneWaitedSeconds(void) { return lane.waitSeconds; }   // cumulative wall time the game thread spent in NpLaneWait (MSC_SKIN_PROF)
+
 void NpLaneSubmit(NpFsJobFn fn, void* arg) {
-    if (!NpLaneEnabled() || !LaneStart()) { fn(arg); return; }
-    if (lane.tail == kLaneQueue) NpLaneWait();   // full: drain first (jobs of one submitter must not overtake each other), then queue again
-    lane.q[lane.tail++] = {fn, arg};
-    ++lane.owed;
-    lane.wake.Post();
+    if (NpLaneTrySubmit(fn, arg)) return;
+    if (!lane.started || (lane.enabled <= 0 && !lane.forced)) { fn(arg); return; }
+    NpLaneWait();   // full: drain first (jobs of one submitter must not overtake each other), then queue again
+    if (!NpLaneTrySubmit(fn, arg)) fn(arg);
+}
+
+// lane24 FIX-07: the lane thread has been woken but not scheduled (on core 2 the front-end record player runs at the lane's priority and a woken thread waits for the player's slice: 10-14 ms): the jobs
+// still in the queue, none of them taken yet, are run here, in order, at once. Exact: it is the very job function with the very argument, and LaneStep's `busy` / `next` hand-over lets only one executor
+// at a time have a job (the lane thread that wakes later finds the queue empty). A job the lane thread is inside is not touched (-1: the caller then waits for it). Returns jobs run. Before this the game
+// thread waited kLaneStallSlices * kLaneSliceSeconds (12 ms) for a thread that had not started before it ran the queue itself: the 12.4-12.9 ms maximum waits of console s52.
+int NpLaneTakeUnstarted(void) {
+    if (!lane.started) return 0;
+    int n = 0;
+    while (lane.next.load(std::memory_order_relaxed) != lane.tail.load(std::memory_order_acquire)) {
+#ifdef NP_LANE_TAKE_BREAK   // (host test mutant: the busy hand-over is ignored, a job the lane thread is inside is joined by a second executor)
+        lane.busy.store(0, std::memory_order_release);
+#endif
+        if (LaneStep(true) <= 0) break;
+        ++n;
+    }
+    ++lane.takeoverCalls;
+    lane.takeovers += static_cast<uint64_t>(n);
+    return n;
 }
 
 void NpLaneWait(void) {
     if (!lane.started) return;
-    while (lane.owed > 0) { lane.done.Wait(-1); --lane.owed; }
-    lane.head = 0;   // the lane is idle: it is blocked in wake.Wait, and the next post orders these writes before its next read
-    lane.tail = 0;
+    const uint32_t target = lane.tail.load(std::memory_order_relaxed);   // (the game thread is the only submitter)
+    if (lane.finished.load(std::memory_order_acquire) == target) return;
+    ++lane.waits;
+    const double t0 = NpRealSeconds();
+    uint32_t last = lane.finished.load(std::memory_order_seq_cst);
+    int still = 0;
+    double nextLog = 1.0;
+    bool blocked = false;
+    for (;;) {
+        if (lane.finished.load(std::memory_order_seq_cst) == target) break;
+        lane.waitTarget.store(target, std::memory_order_seq_cst);
+        lane.waiting.store(1, std::memory_order_seq_cst);
+        if (lane.finished.load(std::memory_order_seq_cst) == target) { lane.waiting.store(0, std::memory_order_seq_cst); break; }
+        blocked = true;
+        lane.done.Wait(kLaneSliceSeconds);
+        lane.waiting.store(0, std::memory_order_seq_cst);
+        const uint32_t f = lane.finished.load(std::memory_order_seq_cst);
+        if (f == target) break;
+        if (f != last) { last = f; still = 0; continue; }
+        if (++still >= kLaneStallSlices && lane.busy.load(std::memory_order_acquire) == 0) {
+            // The lane thread has not started a job for kLaneStallSlices * 4 ms (it is not scheduled, or it never started): run the queue here, in order.
+            if (++lane.stalls <= 3) std::fprintf(stderr, "[lane] the lane thread made no progress for %.0f ms (%u of %u jobs done): the game thread runs the queue\n",
+                                                  kLaneStallSlices * kLaneSliceSeconds * 1000.0, static_cast<unsigned>(f), static_cast<unsigned>(target));
+            while (LaneStep(true) > 0) {}
+            still = 0;
+            last = lane.finished.load(std::memory_order_seq_cst);
+        }
+        const double waited = NpRealSeconds() - t0;
+        if (waited >= nextLog) {   // inside a job that has not returned: nothing can be done but say so
+            ++lane.longWaits;
+            if (lane.longWaits <= 10) std::fprintf(stderr, "[lane] still waiting for the lane thread after %.0f s (%u of %u jobs done, busy %d)\n", waited,
+                                                    static_cast<unsigned>(lane.finished.load()), static_cast<unsigned>(target), lane.busy.load());
+            nextLog += 1.0;
+        }
+    }
+    const double w = NpRealSeconds() - t0;
+    if (blocked) ++lane.waitsBlocked;
+    lane.waitSeconds += w;
+    if (w > lane.maxWait) lane.maxWait = w;
 }
 
 } // extern "C"

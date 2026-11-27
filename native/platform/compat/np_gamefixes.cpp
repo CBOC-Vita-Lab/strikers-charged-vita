@@ -34,4 +34,15 @@ int NpGameFixesDecide(void)
     g_npGameFixes = mask;
     return mask;
 }
+
+int g_npRuleNoMega = -1;
+
+int NpRuleNoMegaDecide(void)
+{
+    const char* e = getenv("MSC_RULE_NOMEGA");
+    int on = (e && *e && strcmp(e, "0") != 0 && strcmp(e, "off") != 0 && strcmp(e, "none") != 0) ? 1 : 0;
+    if (e && *e) fprintf(stderr, "[rules] MSC_RULE_NOMEGA=%s: no Mega Strikes %s\n", e, on ? "ON (rule option; every console of a match must use it)" : "off");
+    g_npRuleNoMega = on;
+    return on;
+}
 }

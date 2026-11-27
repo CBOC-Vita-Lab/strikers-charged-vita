@@ -1,0 +1,13 @@
+# console-1.2 run floors0: Picture floors off: the old ladders down to 704x400 and 448x320
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# holdgpu24 (owner 17 Nov: nothing below 864x488 in Quality, 800x456 in Smooth 60). Against d1 only for the cost of the floors: fps and [hold] sizes at The Dump (a diagnostic of the OLD ladder, below the floor: not for play).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_FLOORS=0

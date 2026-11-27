@@ -1,0 +1,14 @@
+# console-1.2 run betweenmeasured: Free-run gate judges the cost measured at 30 (wave 9 rule)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group pacing, route tour, version payload 1.3, role ab
+# MSC_FPS_BETWEEN_COST=measured (default since pacing11: free). The gate compares the busiest stage's cost at the FREE-RUN rate (per-picture part + one step of 5 ms) with its 20 ms limit; measured at a held 30 a picture carries 1.67 steps and Vice in PERFORMANCE mode read 21.7 ms against 18.4 free: the gate never opened (r9: locked 30 instead of 50-53 pictures a second). Against the default at Vice: `[fps] between:` lines (the cost it judged and how), pictures a second, the `[pace] display` hold mix (one-refresh share must stay near 85-90 % free; under about 70 % the clean 30 is the better picture), `[lat]` press to picture.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FPS_BETWEEN_COST=measured

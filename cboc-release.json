@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "releaseId": "strikers-v1.1",
+  "releaseId": "strikers-v2.0",
   "titleId": "MSCN00003",
   "displayName": "Mario Strikers Charged",
-  "version": "1.1",
+  "version": "2.0",
   "minInstallerVersion": "0.1.0",
   "visibility": "public",
   "releaseState": "ready",
   "recipeId": "strikers",
   "package": {
     "path": "Strikers-Charged-Vita.vpk",
-    "sha256": "1854ef4b163aace32b10b70a86a289c5e137802cf34b71569ac83a1b9595218f",
-    "runtimeSha256": "8d58eea7fa849a1220902efe6732e300446c5c6b859e353c1f0c70fdc44d599d"
+    "sha256": "4d7793aa583f38a30c09c4278e0f48c1a5a393c669add18239e257c1fbfc743f",
+    "runtimeSha256": "d7bcec2fbab91f232586e453c45462bce27bf1b24c8cdc19562f6d138fe280f7"
   },
   "requiredInputs": [
     {
@@ -46,6 +46,7 @@
     "99bb7b11f47fd164137c0c89331740711f756deb15f209d750c694963cbd0606",
     "3cf5cd8e9ab4db512f44a7f1383eabcbfeb069c3605599cd088974b3a87cadb9",
     "b1bb632f4103a34fbcad06e8eaa2d3d5d53119f3042f7a0e5877d0f99b1387fd",
-    "0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4"
+    "0243f69693d1fc72b0629558c68d6eac990ca7a39d29f2c84c6f3d56ce7143a4",
+    "8d58eea7fa849a1220902efe6732e300446c5c6b859e353c1f0c70fdc44d599d"
   ]
 }

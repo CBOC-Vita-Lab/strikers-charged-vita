@@ -1,0 +1,13 @@
+# console-1.2 run pxscissor0: Scissor changed for every draw again
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group draw, route tour, version payload 1.3, role ab
+# MSC_VGX_PX_SCISSOR (on): scissor changes that cannot cut anything are not made (each costs vitaGL a full-target mask draw). Compare GPU ms with d1, and check the picture: any difference (geometry past its viewport) means the console does not clip to the viewport and the switch must go off.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_PX_SCISSOR=0

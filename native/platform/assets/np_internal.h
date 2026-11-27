@@ -36,8 +36,8 @@ typedef struct NpaChunk
 
 #define NPA_IS_CONTAINER(id) (((id) & 0x80000000u) != 0)
 
-void npa_err(NpaCtx* c, int status, const char* fmt, ...);
-void npa_warn(NpaCtx* c, const char* fmt, ...);
+void npa_err(NpaCtx* c, int status, const char* fmt, ...) __attribute__((format(printf, 3, 4)));
+void npa_warn(NpaCtx* c, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
 /* Read the chunk header at p (limit = end of the enclosing range). be=1: header still big-endian
  * (the header-swap pass), be=0: header already host-order. Returns 0 on success. */

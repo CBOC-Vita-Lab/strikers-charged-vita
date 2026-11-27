@@ -146,7 +146,8 @@ static inline void CopyDraftMachineInfo(NetworkDraftPlayer& player, const Networ
 
 void NetworkDraft::BeginTeamDraft(NetMessageDraft* message)
 {
-    NpLanBeginTeamDraft(message);  // multiplayer: the LAN launch never chose the sides (np/patches/mp)
+    if (!NpLanBeginTeamDraft(message))  // multiplayer: the LAN launch never chose the sides (np/patches/mp); false = an invalid roster, the session ends
+        return;
     gNetworkMessageRegistry->RegisterReceiver(NETMSG_DRAFT_PICKED_CAPTAIN, this);
     gNetworkMessageRegistry->RegisterReceiver(NETMSG_DRAFT_PICKED_SIDEKICKS, this);
     mDraftMessage = *message;

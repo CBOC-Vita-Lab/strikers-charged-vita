@@ -1,0 +1,14 @@
+# console-1.2 run worstgpu1: 1.3 defaults, The Dump (worst stadium for GPU in the host census)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group stadium, route worstgpu, version payload 1.3, role ab
+# The host census (w8 stadiums, budget model, estimates) ranks The Dump worst for the GPU: celebration 31.9 ms and open play 15.7 ms at 960x544 against 25.7 and 9.9 for the match60 stadium (Vice). Five goals with celebration and replay in one run. Compare with tour (Vice): frame time and GPU time in open play and in the celebration.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HITCH_LINES=1500

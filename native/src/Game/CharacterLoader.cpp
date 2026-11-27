@@ -1,3 +1,9 @@
+#ifdef NP_NATIVE
+#include <cstdlib>
+#include <stdio.h>
+#include <stdlib.h>
+#include "np/lod.h"
+#endif
 #include "NL/nlDLListContainer.inl"
 #include "Game/AI/Fielder.h"
 #include "Game/Player.h"
@@ -12,6 +18,7 @@
 #include "Game/DB/CharacterInfo.inl"
 #include "Game/Effects/EmissionManager.h"
 #include "Game/GameInfo.h"
+#include "Game/NisPlayer.h"
 #include "Game/Goalie.h"
 #include "Game/Inventory.h"
 #include "Game/Physics/CharacterPhysicsElement.h"
@@ -72,6 +79,8 @@ CharacterLoader::~CharacterLoader()
 {
 }
 
+extern unsigned int gNetworkRandomSeed;   // (NpDet.cpp; the proof-only MSC_WARM_BREAK below)
+
 void CharacterLoader::BuildCharacterList()
 {
     mCaptain[0] = (eCharacterClass)ConvertToCharacterClass((eTeamID)GameInfoManager::Instance()->GetTeam(0));
@@ -82,6 +91,15 @@ void CharacterLoader::BuildCharacterList()
         mSidekick[1][i] = (eCharacterClass)ConvertToCharacterClass((eSidekickID)GameInfoManager::Instance()->GetSidekick(1, i));
     }
 
+#ifdef NP_NATIVE
+    // MSC_WARM_BREAK=1 (proof only, w8/warm10.md): a deliberate change of the simulation's seed at this call, so that the NP_DET_TRACE comparison must catch it
+    { const char* e = std::getenv("MSC_WARM_BREAK"); if (e != 0 && e[0] == '1') gNetworkRandomSeed += 1; }   // only =1: a stray MSC_WARM_BREAK=0 must not move the seed
+    // the line-ups are known and the match is loading (a loading screen is up): the cut-scene files of the two teams are asked for now, not at the walk-out (MSC_NIS_PREFETCH)
+    if (NisPlayer* nis = NisPlayer::InstanceIfAny())
+    {
+        nis->PrefetchMatchFiles();
+    }
+#endif
     mGoalie[0] = (eCharacterClass)GetGoalieCharacterIndex(GetCharacterInfo(mCaptain[0]));
     mGoalie[1] = (eCharacterClass)GetGoalieCharacterIndex(GetCharacterInfo(mCaptain[1]));
 
@@ -531,6 +549,12 @@ bool CharacterLoader::FinalizeLoadingCharacterModel(int nModel)
     nlFree(mModelData[nModel]);
     mModelData[nModel] = 0;
     mTemplate->nCharacterModelID[nModel] = pModel->id;
+#ifdef NP_NATIVE
+    if (nModel == 0 || nModel == 2)
+        NpLodBuild(pModel, nModel, mTemplateInfo->szLowPolyModelFilename != 0);   // MSC_LOD_SIZE=2: the simplified levels (np/lod.h)
+    if (getenv("MSC_LOD_INV") != 0)
+        fprintf(stderr, "[lod-inv] character slot %d file %s model %08lx\n", nModel, szFilename, (unsigned long)pModel->id);
+#endif
     return true;
 }
 

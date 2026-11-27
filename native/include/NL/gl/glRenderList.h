@@ -61,9 +61,24 @@ class GLPacketTree
 {
 };
 
+#ifdef NP_NATIVE
+/* MSC_PKT_SORT (glRenderList.cpp): a sorter's packets as a list in the frame arena, sorted when the send walks it, in place of a balanced-tree
+ * insert per attach on the game thread. The same packets in the same order as the tree (the keys hold the packet's address). */
+struct NpPktSortEnt
+{
+    GLPacketSortKey key;
+    unsigned long seq;   /* attach order (the sort is stable: of two equal keys the tree keeps the first insert, the copy the first entry) */
+    const glModelPacket* value;
+};
+struct NpPktChunk;
+#endif
+
 class GLTreePacketSorter : public GLPacketSorter
 {
 public:
+#ifdef NP_NATIVE
+    GLTreePacketSorter();
+#endif
     virtual const glModelPacket* First();
     virtual const glModelPacket* Next();
     virtual void AttachPacket(GLView*, const glModelPacket*);
@@ -73,6 +88,16 @@ public:
     nlAVLTreeIterator<GLPacketSortKey, const glModelPacket*,
         DefaultKeyCompare<GLPacketSortKey> >
         m_Iterator;
+#ifdef NP_NATIVE
+    NpPktChunk* m_NpHead;       /* MSC_PKT_SORT: the attached packets, in attach order */
+    NpPktChunk* m_NpTail;
+    unsigned long m_NpCount;    /* entries in the chunks (attach order numbers them) */
+    unsigned long m_NpPos;      /* the walk, in the sorted copy */
+    bool m_NpFlat;              /* the list is in use (the switch on, and the frame arena had room every time) */
+    void* m_NpScratch;          /* the walking thread's sorted copy (glRenderList.cpp NpPktScratch), found without thread-local access */
+    void NpToTree();
+    bool NpSortedCopy();
+#endif
 };
 
 class GLTexturePacketSorter : public GLTreePacketSorter

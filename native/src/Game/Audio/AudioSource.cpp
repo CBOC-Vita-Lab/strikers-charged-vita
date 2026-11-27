@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "revolution/types.h"
 #include "Game/Audio/AudioEffect.h"
 #include "NL/nlDLListContainer.inl"
@@ -637,6 +638,7 @@ bool AudioReadState::Play(unsigned int value)
 
 void AudioReadState::Stop()
 {
+    m_Keep.Reset();
     switch (m_InternalState)
     {
     case AUDIO_SOURCE_PLAYING:
@@ -742,6 +744,12 @@ static inline bool NeedsStreamRead(AudioStreamChannel* first)
     return playPos - readPos > blockSize;
 }
 
+static bool AudioStreamKeepOn()
+{
+    static const bool on = [] { const char* e = getenv("MSC_AUDIO_STREAM_KEEP"); return !(e && e[0] == '0'); }();
+    return on;
+}
+
 void AudioReadState::Update()
 {
     switch (m_InternalState)
@@ -751,6 +759,25 @@ void AudioReadState::Update()
         break;
     case AUDIO_SOURCE_PLAYING:
     {
+        if (m_Keep.starved)
+        {
+            const AudioStreamKeep::Act act = m_Keep.Tick(m_PendingReadCount);
+            if (act == AudioStreamKeep::kResume)
+            {
+                AudioStreamChannel* channel = GetChannelIterator();
+                while ((channel = GetNextChannel(channel)) != 0)
+                {
+                    AXSetVoiceCurrentAddr(channel->m_Voice, channel->m_PauseAddress);
+                    AXSetVoiceState(channel->m_Voice, AX_VOICE_RUN);
+                }
+            }
+            else if (act == AudioStreamKeep::kGiveUp)
+            {
+                ++gAudioStreamStarveCount;
+                Stop();
+            }
+            break;
+        }
         AXVPB* voice = GetFirstChannel()->m_Voice;
         if (GetVoiceCurrentAddress(voice) > GetVoiceEndAddress(voice))
             Stop();
@@ -787,6 +814,16 @@ void AudioReadState::Update()
         {
             nlPrintf("\t\t\t\t\t\t******* STARVE *******\n");
             ++gAudioStreamStarveCount;
+            if (m_Keep.Starve(AudioStreamKeepOn()) == AudioStreamKeep::kPause)
+            {
+                AudioStreamChannel* channel = GetChannelIterator();
+                while ((channel = GetNextChannel(channel)) != 0)
+                {
+                    channel->m_PauseAddress = (channel->m_Voice->pb.addr.currentAddressHi << 16) | channel->m_Voice->pb.addr.currentAddressLo;
+                    AXSetVoiceState(channel->m_Voice, AX_VOICE_STOP);
+                }
+                break;
+            }
             Stop();
             break;
         }
@@ -834,6 +871,7 @@ bool AudioReadState::Pause()
 {
     if (m_InternalState != AUDIO_SOURCE_PLAYING)
         return false;
+    m_Keep.Reset();
     AudioStreamChannel* channel = GetChannelIterator();
     while ((channel = GetNextChannel(channel)) != 0)
     {

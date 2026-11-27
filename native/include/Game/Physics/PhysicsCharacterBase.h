@@ -80,6 +80,9 @@ public:
     virtual int GetObjectType() const;
     virtual void SyncLog(void*, DebugWriteCache*);
     virtual void UpdatePose(cPoseAccumulator*, float, bool);
+    void NpSim26Precompute(cPoseAccumulator* pose, int slot);   // MSC_SIM26_BONES (PhysicsCharacterBase.cpp): lane side
+    bool NpSim26Apply(cPoseAccumulator* pose);                  // pass 3 side, in place of UpdatePose(pose, h, false)
+    int NpSim26BoneCount() const;                               // MSC_SIM26_POSEORDER: the number of bone volumes
     virtual PhysicsBoneID ResolvePhysicsBoneIDFromName(const char*) = 0;
 
     class PhysicsSphereBone : public PhysicsSphere

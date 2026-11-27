@@ -35,6 +35,7 @@
 
 #include "platform/sdk/input/np_game_input.h"
 #include "platform/sdk/input/np_controls.h"
+#include "platform/sdk/input/np_feel.h"
 #include "np/touch_diag.h"
 
 extern float gMegaBallPointerXScale;
@@ -489,7 +490,13 @@ bool ConsumeShake(const DetInput* det) {
 bool SelectSavePointerAxes(int chan, float rightX, float rightY, float* x, float* y) {
     if (chan != 0) return false;
     if (query_gate(0).mode != Mode::Save) return false;
-    if (isfinite(rightX) && isfinite(rightY) && (fabsf(rightX) >= 0.2f || fabsf(rightY) >= 0.2f)) {
+    // Wave 6 (np_feel.h): with the hand's own curve the right stick drives the hand from its first unit of deflection, not from 0.2 (below that the
+    // left stick took over and a light push of the right one did nothing); scripts keep the old threshold.
+    // (the right stick takes the hand only past the hand's own dead zone, so a thumb resting just off centre does not take it from the left stick)
+    const float kFineTake = NpFeel::ConfiguredMegaCurve().dead > 0.05f ? NpFeel::ConfiguredMegaCurve().dead : 0.05f;
+    const bool fine = NpControls::PhysicalMegaControlsAllowed() && !NpFeel::MegaLegacy(NpFeel::ConfiguredMegaCurve());
+    if (isfinite(rightX) && isfinite(rightY) &&
+        (fine ? (rightX * rightX + rightY * rightY > kFineTake * kFineTake) : (fabsf(rightX) >= 0.2f || fabsf(rightY) >= 0.2f))) {
         *x = rightX;
         *y = rightY;
     }

@@ -4,9 +4,18 @@
 #include "NL/gl/glView.h"
 
 #include <math.h>
+#include <string.h>
+#include <stdio.h>
 
 #include "Game/MathHelpers.h"
 #include "Game/Render/ImpostorManager.h"
+#include "Game/Render/ImpostorSprite.h"
+#include "np/crowdcut.h"
+#include "Game/Render/MegastrikeBackgroundOverlay.h"
+#include "Game/Task/GameTaskState.h"
+#include "Game/Game.h"
+
+#include <stdlib.h>
 #include "Game/SharedStaticStorage.h"
 #include "Game/TweakConfig.h"
 #include "Game/TweakValue.h"
@@ -29,6 +38,26 @@ static TweakValueFloat sfImpostorHeight(
     "sfImpostorHeight", "/Render/Crowd", 1.5f);
 
 static bool sCrowdRegistrationDisabled;
+
+#ifdef NP_NATIVE
+// MSC_CROWD_OCC_CENSUS=1 (gpu24, counters only, default 0: nothing below changes a draw of a random number or a placed figure): at every stadium load, how many of the points the
+// layout offers the retail occlusion test (every volume tested against the LAST volume's inverse matrix, mInverseMatrices[0]) removes, and how many a per-volume test would, and how
+// they overlap. Printed once per GenerateCrowd: `[crowdocc] ...`. No effect on the simulation, replays or the network: reads matrices, writes only these counters.
+static bool NpOccCensusOn()
+{
+    static int on = -1;
+    if (on < 0)
+    {
+        const char* e = getenv("MSC_CROWD_OCC_CENSUS");
+        on = (e && e[0] == '1') ? 1 : 0;
+    }
+    return on == 1;
+}
+enum { kOccAllMax = 32 };
+static nlMatrix4 sOccAll[kOccAllMax];
+static int sOccAllN;
+static unsigned sOccSeats, sOccBuggy, sOccFixed, sOccBoth, sOccOnlyBuggy, sOccOnlyFixed;
+#endif
 static int sNumGeneratedCrowdPoints;
 static int sNumCrowdImpostorsInSelectedLayouts;
 
@@ -123,6 +152,10 @@ void CrowdImpostorManager::GenerateCrowd(int reload)
     mInverseMatrices
         = new (8, false) nlMatrix4[mOcclusionObjectCount];
 
+#ifdef NP_NATIVE
+    sOccAllN = 0;
+    sOccSeats = sOccBuggy = sOccFixed = sOccBoth = sOccOnlyBuggy = sOccOnlyFixed = 0;
+#endif
     nlDLListIterator<CrowdLayoutObject*> occlusionIt;
     occlusionIt = mOcclusionObjects.Begin();
     while (occlusionIt.m_Curr != 0)
@@ -131,6 +164,10 @@ void CrowdImpostorManager::GenerateCrowd(int reload)
             = occlusionIt.m_Curr->entry;
         nlInvertMatrix(*mInverseMatrices,
             *object->GetWorldMatrix());
+#ifdef NP_NATIVE
+        if (NpOccCensusOn() && sOccAllN < kOccAllMax)
+            nlInvertMatrix(sOccAll[sOccAllN++], *object->GetWorldMatrix());
+#endif
         occlusionIt.Step();
     }
 
@@ -147,10 +184,17 @@ void CrowdImpostorManager::GenerateCrowd(int reload)
             sfDistanceBetweenCrowdMembers);
         objectIt.Step();
     }
+#ifdef NP_NATIVE
+    if (NpOccCensusOn())
+        fprintf(stderr, "[crowdocc] occlusion volumes %d (primary layouts %d): seats offered %u, removed by the retail test (last volume's matrix for all) %u, by a per-volume test %u, both %u, only retail %u, only per-volume %u; "
+                        "impostors made as retail %u, with a per-volume test %u\n",
+                mOcclusionObjectCount, mPrimaryObjectCount, sOccSeats, sOccBuggy, sOccFixed, sOccBoth, sOccOnlyBuggy, sOccOnlyFixed, sOccSeats - sOccBuggy, sOccSeats - sOccFixed);
+#endif
 }
 
 void CrowdImpostorManager::Clear()
 {
+    ++gNpCrowdStructGen;
     BasicSlotPool<DLListEntry<CrowdLayoutObject*> >* objectPool;
 
     mPrimaryObjects.Clear();
@@ -254,11 +298,168 @@ static bool IsCrowdImpostorVisible(CrowdImpostorManager* manager, Impostor* impo
     return true;
 }
 
-void CrowdImpostorManager::UpdateCrowdVisibility(GLView* view)
+namespace {
+
+// MSC_CROWD_VISFAST: for every layout, the slots of its figures by sprite, in figure order. "all": every figure that has a sprite and is not skipped; "pos": those of them
+// that the filter's position tests show whatever the camera is. A pass appends one or the other, which is what the plain loop's Release calls add, in the same order.
+// (plain arrays: the game's own operator new and <vector> do not meet in this unit)
+struct VisEntry
+{
+    ImpostorSprite* sprite;
+    int* slots;
+    int count, cap;
+};
+struct VisList
+{
+    VisEntry* entry;
+    int count, cap;
+};
+struct VisLayout
+{
+    VisList all, pos;
+};
+struct VisCache
+{
+    bool valid;
+    unsigned gen;
+    int layouts, used;
+    float key[3];
+    VisLayout* layout;
+};
+VisCache sVis;
+
+void VisFree(VisList& list)
+{
+    for (int i = 0; i < list.count; ++i) free(list.entry[i].slots);
+    free(list.entry);
+    list.entry = 0;
+    list.count = list.cap = 0;
+}
+
+void VisFreeAll()
+{
+    for (int i = 0; i < sVis.layouts; ++i)
+    {
+        VisFree(sVis.layout[i].all);
+        VisFree(sVis.layout[i].pos);
+    }
+    free(sVis.layout);
+    sVis.layout = 0;
+    sVis.layouts = 0;
+    sVis.valid = false;
+}
+
+void VisAdd(VisList& list, ImpostorSprite* sprite, int slot)
+{
+    VisEntry* e = 0;
+    for (int i = 0; i < list.count; ++i)
+    {
+        if (list.entry[i].sprite == sprite)
+        {
+            e = &list.entry[i];
+            break;
+        }
+    }
+    if (e == 0)
+    {
+        if (list.count == list.cap)
+        {
+            list.cap = list.cap ? list.cap * 2 : 16;
+            list.entry = (VisEntry*)realloc(list.entry, (size_t)list.cap * sizeof(VisEntry));
+        }
+        e = &list.entry[list.count++];
+        e->sprite = sprite;
+        e->slots = 0;
+        e->count = e->cap = 0;
+    }
+    if (e->count == e->cap)
+    {
+        e->cap = e->cap ? e->cap * 2 : 32;
+        e->slots = (int*)realloc(e->slots, (size_t)e->cap * sizeof(int));
+    }
+    e->slots[e->count++] = slot;
+}
+
+// MSC_CROWD_THIN=n (nxvis25, VISIBLE, default 0 = off; 2, 3 or 4): in live play (TASK_GAMEPLAY, no Mega overlay) only every n-th seat of each list is drawn (the seat's number in its list,
+// no random number): the stands look n times thinner, the figures' poses and the sprite passes are as before. Render only: nothing here is read by the simulation.
+static int NpCrowdThinN()
+{
+    static const int n = [] { const char* e = getenv("MSC_CROWD_THIN"); int v = e && *e ? atoi(e) : 0; return v < 2 ? 0 : (v > 4 ? 4 : v); }();
+    return n;
+}
+static int NpCrowdThinNow()
+{
+    const int n = NpCrowdThinN();
+    if (n == 0 || nlTaskManager::m_pInstance == 0 || nlTaskManager::m_pInstance->mCurrentState != TASK_GAMEPLAY || gMegastrikeBackgroundOverlay.mActive) return 0;
+    return n;
+}
+
+void VisAppend(const VisList& list)
+{
+    const int thin = NpCrowdThinNow();
+    for (int i = 0; i < list.count; ++i)
+    {
+        ImpostorSprite* sprite = list.entry[i].sprite;
+        int room = sprite->mCapacity - sprite->mNumRenderSlots;
+        int n = list.entry[i].count;
+        if (room <= 0) continue;
+        if (thin != 0)
+        {
+            // the seat's own slot number decides (the same test as UpdateCrowdVisibilityPlain): the ratio is exact and a seat does not change when the camera pans
+            int* dst = sprite->mRenderSlots + sprite->mNumRenderSlots;
+            int kept = 0;
+            for (int j = 0; j < n && kept < room; ++j)
+                if (list.entry[i].slots[j] % thin == 0) dst[kept++] = list.entry[i].slots[j];
+            sprite->mNumRenderSlots += kept;
+            continue;
+        }
+        if (n > room) n = room;
+        if (n > 0)
+        {
+            memcpy(sprite->mRenderSlots + sprite->mNumRenderSlots, list.entry[i].slots, (size_t)n * sizeof(int));
+            sprite->mNumRenderSlots += n;
+        }
+    }
+}
+
+// all sprites' slot lists into a malloc'd array (count first, then the slots), for the comparison of MSC_CROWD_VISFAST=2
+int* VisSnapshot(int* outCount)
+{
+    int total = 0;
+    int cap = 4096;
+    int* out = (int*)malloc((size_t)cap * sizeof(int));
+    nlDLListIterator<ImpostorCharacter*> it;
+    it = ImpostorManager::GetInstance()->mCharacters.Begin();
+    while (it.hasNext())
+    {
+        nlDLListIterator<ImpostorSprite*> sprites;
+        sprites = (*it)->mSprites.Begin();
+        while (sprites.hasNext())
+        {
+            ImpostorSprite* sprite = *sprites;
+            if (total + sprite->mNumRenderSlots + 1 > cap)
+            {
+                cap = (total + sprite->mNumRenderSlots + 1) * 2;
+                out = (int*)realloc(out, (size_t)cap * sizeof(int));
+            }
+            out[total++] = sprite->mNumRenderSlots;
+            for (int i = 0; i < sprite->mNumRenderSlots; ++i) out[total++] = sprite->mRenderSlots[i];
+            sprites.Step();
+        }
+        it.Step();
+    }
+    *outCount = total;
+    return out;
+}
+
+} // namespace
+
+void CrowdImpostorManager::UpdateCrowdVisibilityPlain(GLView* view)
 {
     Impostor* impostors = ImpostorManager::GetInstance()->mImpostors;
     ImpostorManager::GetInstance()->ResetSpriteSlots();
     sNumCrowdImpostorsInSelectedLayouts = 0;
+    const int thin = NpCrowdThinNow();
 
     for (int layoutIndex = 0; layoutIndex < mNumLayouts;
         ++layoutIndex)
@@ -280,10 +481,77 @@ void CrowdImpostorManager::UpdateCrowdVisibility(GLView* view)
             if (impostor->mSkipCrowdVisibilityPass)
                 continue;
 
-            if (IsCrowdImpostorVisible(this, impostor))
+            if (IsCrowdImpostorVisible(this, impostor) && (thin == 0 || impostor->mSlot % thin == 0))   // (MSC_CROWD_THIN: as VisAppend)
                 impostor->Release();
         }
         sNumCrowdImpostorsInSelectedLayouts += layout.mNumImpostors;
+    }
+}
+
+void CrowdImpostorManager::UpdateCrowdVisibility(GLView* view)
+{
+    const int mode = NpCrowdVisFast();
+    if (mode == 0 || mNumVisibilityFilters != 1 || !CrowdSidelineFilterIs(mVisibilityFilters[0]))
+    {
+        UpdateCrowdVisibilityPlain(view);
+        return;
+    }
+
+    CrowdSidelineFilter* filter = mVisibilityFilters[0];
+    Impostor* impostors = ImpostorManager::GetInstance()->mImpostors;
+    float key[3];
+    filter->PositionKey(key);
+    const int used = ImpostorManager::GetInstance()->mNumUsed;
+    if (!sVis.valid || sVis.gen != gNpCrowdStructGen || sVis.layouts != mNumLayouts || sVis.used != used || memcmp(sVis.key, key, sizeof(key)) != 0)
+    {
+        VisFreeAll();
+        sVis.layout = (VisLayout*)calloc((size_t)(mNumLayouts > 0 ? mNumLayouts : 1), sizeof(VisLayout));
+        sVis.layouts = mNumLayouts;
+        for (int layoutIndex = 0; layoutIndex < mNumLayouts; ++layoutIndex)
+        {
+            const CrowdLayoutRecord& layout = mLayouts[layoutIndex];
+            VisLayout& built = sVis.layout[layoutIndex];
+            for (int i = 0; i < layout.mNumImpostors; ++i)
+            {
+                Impostor* impostor = &impostors[i + layout.mFirstImpostor];
+                if (impostor->mSkipCrowdVisibilityPass || impostor->mpSprite == 0)
+                    continue;
+                VisAdd(built.all, impostor->mpSprite, impostor->mSlot);
+                if (filter->PositionVisible(impostor))
+                    VisAdd(built.pos, impostor->mpSprite, impostor->mSlot);
+            }
+        }
+        sVis.gen = gNpCrowdStructGen;
+        sVis.used = used;
+        memcpy(sVis.key, key, sizeof(key));
+        sVis.valid = true;
+    }
+
+    ImpostorManager::GetInstance()->ResetSpriteSlots();
+    sNumCrowdImpostorsInSelectedLayouts = 0;
+    const bool all = CrowdSidelineFilter::CameraShowsAll();
+    const nlVector4* visibilityView = view->m_Interface->GetShadowMatrix();
+    for (int layoutIndex = 0; layoutIndex < mNumLayouts; ++layoutIndex)
+    {
+        CrowdLayoutRecord& layout = mLayouts[layoutIndex];
+        if (!ClassifyBoxInFrustum(visibilityView, &layout.mBoundsMin, &layout.mBoundsMax, 0))
+        {
+            continue;
+        }
+        const VisLayout& built = sVis.layout[layoutIndex];
+        VisAppend(all ? built.all : built.pos);
+        sNumCrowdImpostorsInSelectedLayouts += layout.mNumImpostors;
+    }
+
+    if (mode == 2)
+    {
+        int nFast = 0, nPlain = 0;
+        int* fast = VisSnapshot(&nFast);
+        UpdateCrowdVisibilityPlain(view);
+        int* plain = VisSnapshot(&nPlain);
+        NpCrowdCountVis(nFast != nPlain || memcmp(fast, plain, (size_t)nFast * sizeof(int)) != 0);
+        free(fast);
+        free(plain);
     }
 }
 
@@ -411,6 +679,34 @@ void CrowdPointCallback::Place(
         worldPoint, localPoint, *mObject->GetWorldMatrix());
 
     nlVector4 occlusionPoint;
+#ifdef NP_NATIVE
+    if (NpOccCensusOn())
+    {
+        // (counters only: the retail test below is made as before)
+        bool fixedOcc = false;
+        nlVector4 lp;
+        nlDLListIterator<CrowdLayoutObject*> vIt;
+        vIt = GetCrowdImpostorManager()->mOcclusionObjects.Begin();
+        for (int v = 0; vIt.hasNext() && v < sOccAllN; ++v)
+        {
+            nlMultVectorMatrix(lp, worldPoint, sOccAll[v]);
+            if ((*vIt)->ContainsLocalPoint((nlVector3*)&lp))
+            {
+                fixedOcc = true;
+                break;
+            }
+            vIt.Step();
+        }
+        nlVector4 tmp;
+        const bool buggyOcc = GetCrowdImpostorManager()->IsPointOccluded(worldPoint, tmp);
+        ++sOccSeats;
+        sOccBuggy += buggyOcc ? 1 : 0;
+        sOccFixed += fixedOcc ? 1 : 0;
+        sOccBoth += (buggyOcc && fixedOcc) ? 1 : 0;
+        sOccOnlyBuggy += (buggyOcc && !fixedOcc) ? 1 : 0;
+        sOccOnlyFixed += (!buggyOcc && fixedOcc) ? 1 : 0;
+    }
+#endif
     if (GetCrowdImpostorManager()->IsPointOccluded(worldPoint, occlusionPoint))
         return;
 
@@ -436,6 +732,7 @@ void CrowdPointCallback::Place(
 
     if (GetCrowdImpostorManager()->IsObjectEnabled(mObject))
         impostor->mSkipCrowdVisibilityPass = true;
+    ++gNpCrowdStructGen;   // MSC_CROWD_VISFAST
 
     if (mFirst)
     {

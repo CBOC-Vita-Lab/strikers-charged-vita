@@ -6,6 +6,7 @@
 #include "Game/Character.h"
 #include "Game/Drawable/DrawableCharacter.h"
 #include "Game/Effects/EmissionController.h"
+#include "Game/Effects/ParticleSystem.h"
 #include "Game/Game.h"
 #include "Game/Player.h"
 #include "Game/PoseAccumulator.h"
@@ -20,21 +21,26 @@ static const nlVector3 sZeroVelocity = { 0.0f, 0.0f, 0.0f };
 
 DrawableCharacter* GetReplayDrawableCharacter(cCharacter* character)
 {
+    int index;
     if (character->m_eClassType == FIELDER)
     {
         cPlayer* player = (cPlayer*)character;
-        int characterIndex
-            = player->m_DetPlayer.m_ID + 4 * player->m_pTeam->m_nSide;
-        return &ReplayManager::Instance()
-                    ->mRender->mCharacters[characterIndex];
+        index = player->m_DetPlayer.m_ID + 4 * player->m_pTeam->m_nSide;
     }
     else
     {
         cPlayer* player = (cPlayer*)character;
-        int teamSide = player->m_pTeam->m_nSide;
-        return &ReplayManager::Instance()
-                    ->mRender->mCharacters[teamSide + 8];
+        index = player->m_pTeam->m_nSide + 8;
     }
+    ReplayManager* manager = ReplayManager::Instance();
+    DrawableCharacter* drawable = &manager->mRender->mCharacters[index];
+#ifdef NP_NATIVE
+    if (drawable->poseCulled)   // (MSC_POSE_CULL=2) its blended pose is old: the tick's own pose, at most a tick ahead of the blended one, for a player off the screen
+    {
+        return &manager->mCurrent->mCharacters[index];
+    }
+#endif
+    return drawable;
 }
 
 void UpdateEmitterFromCharacterUnculled(EmissionController& controller)
@@ -154,6 +160,30 @@ void UpdateEmitterFromBallTrail(EmissionController& controller)
         {
             controller.SetPosition(trail->position);
             controller.SetVelocity(trail->velocity);
+#ifdef NP_NATIVE
+            // MSC_FX_ATTACH (draw side only): the emitter is placed at the live trail's simulated position (the emission, its counts and rolls, are unchanged); the trail's model is
+            // drawn from the blended snapshot (DrawableBall::Blend). The particles are drawn offset by the difference, newest particles fully (ParticleSystem::UpdateParticle).
+            nlVec3Set(controller.m_vDrawOffset, 0.0f, 0.0f, 0.0f);
+            if (NpFxAttachOn())
+            {
+                const unsigned int count = GetNumBallTrails();
+                const DrawableBall& drawn = ReplayManager::Instance()->mRender->mBall;
+                for (unsigned int i = 0; i < count && i < drawn.mTrailCount && i < 10; ++i)
+                {
+                    if (GetBallTrail(i) != trail)
+                        continue;
+                    if (drawn.mTrail[i].visible)
+                    {
+                        const float dx = drawn.mTrail[i].position.x - trail->position.x;
+                        const float dy = drawn.mTrail[i].position.y - trail->position.y;
+                        const float dz = drawn.mTrail[i].position.z - trail->position.z;
+                        if (dx * dx + dy * dy + dz * dz < 2.25f)   // (a jump of 1.5 m or more is a reset or a teleport, not a blend: no streak)
+                            nlVec3Set(controller.m_vDrawOffset, dx, dy, dz);
+                    }
+                    break;
+                }
+            }
+#endif
         }
         else
         {

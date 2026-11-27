@@ -27,6 +27,8 @@ static inline bool IsInAllocator(const MemoryAllocator& allocator, const void* p
 #include <string.h>
 #include <sched.h>
 #include "np/framesend.h"
+#include "np/gsplit.h"   // gt27 (MSC_GSPLIT): game-heap calls on the game thread are the 'mem' phase
+#include "np/lockwait.h"
 // NP: host32 runs under valgrind (tools/det/vg.sh): every game-heap allocation is announced as undefined memory, so memcheck reports
 // the reads of memory that no one initialised (fresh or recycled; the arenas are mmap'ed, which memcheck would call defined).
 #if defined(NP_TARGET_HOST32) && defined(__has_include)
@@ -36,17 +38,19 @@ static inline bool IsInAllocator(const MemoryAllocator& allocator, const void* p
 #endif
 #endif
 static __thread unsigned char tNpGameThread;
+extern "C" volatile int gNpSimtCensus __attribute__((weak));   // block17 (src/Game/NpSimRun17.cpp)
+extern "C" void NpSimtNoteHostAlloc(void);
+extern "C" void NpSimtNoteGameAlloc(void);
 static volatile int sNpHeapLock;
+static unsigned sNpHeapLockSlow;   // acquisitions that ran out of spins (np/lockwait.h; 0 while one thread uses the heap)
+extern "C" unsigned long long NpMemHeapLockSlow(void) { return (unsigned long long)__atomic_load_n(&sNpHeapLockSlow, __ATOMIC_RELAXED); }
 static const unsigned kNpHostMagic = 0x4E504831u; // 'NPH1'
 static inline void NpHeapLock()
 {
     int spins = 0;
     while (__atomic_exchange_n(&sNpHeapLock, 1, __ATOMIC_ACQUIRE))
     {
-        if (++spins > 64)
-        {
-            sched_yield();
-        }
+        NpLockBackoff(spins, &sNpHeapLockSlow);
     }
 }
 static inline void NpHeapUnlock() { __atomic_store_n(&sNpHeapLock, 0, __ATOMIC_RELEASE); }
@@ -98,6 +102,8 @@ static inline void FreeMemory(void* ptr)
     {
         return;
     }
+    NpGsScope npGsMem(NPGS_MEM);
+    if (__builtin_expect(npGsMem.p >= 0, 0)) ++g_npGsCnt[NPGC_MEM_FREE];
     // (frame-send worker: before the lock, a join may have to wait for the job; or the free is kept until the join: NpFsHeapFree returns 1)
     if (&NpFsBusy != 0 && NpFsBusy != 0)
     {
@@ -163,6 +169,8 @@ static inline void* AllocateMemory(unsigned long size, unsigned int alignment, b
         nlInitMemory();
     }
 #ifdef NP_NATIVE
+    NpGsScope npGsMem(NPGS_MEM);
+    if (__builtin_expect(npGsMem.p >= 0, 0)) { ++g_npGsCnt[NPGC_MEM_ALLOC]; g_npGsCnt[NPGC_MEM_BYTES] += (unsigned)size; }
     // NP_HEAP_FLIP=1 (determinism tests, NPB3): every allocation is taken from the other end of its heap, which reverses the address order of almost
     // all objects; a simulation that depends on the order of heap addresses (pointer-keyed trees, sorts by address) changes with it.
     static int sFlip = -2;
@@ -263,12 +271,237 @@ static inline void NpOperatorDelete(void* ptr)
         FreeMemory(ptr);
     }
 }
+// 1.2: a request the host heap (malloc) cannot meet. operator new does not throw in the native build; it used to return null, and the caller
+// (a std::vector of the renderer's frame arenas, a std::string) then wrote through it: a crash that said nothing about memory. The platform
+// writes one FATAL line with the heap's state to the player's basic log and flushes it (Vita: NpPlatformHostAllocFailed); then the program ends.
+extern "C" void NpPlatformHostAllocFailed(size_t size) __attribute__((weak));
+static void NpHostAllocFailed(size_t size)
+{
+    if (NpPlatformHostAllocFailed)
+    {
+        NpPlatformHostAllocFailed(size);
+    }
+    else
+    {
+        fprintf(stderr, "FATAL: host heap exhausted: a request for %lu KiB found no room\n", (unsigned long)(size / 1024u));
+        fflush(stderr);
+    }
+    abort();
+}
+// 1.3 (renderer vgx_arena.h, MSC_VGX_ARENA_SOFT): a host-heap block that may be refused. Same header as every host block, so operator delete takes it
+// from any thread; null when malloc has no room, with nothing logged and nothing ended: the caller degrades.
+extern "C" void* NpHostTryNew(size_t size)
+{
+    return NpHostNew(size);
+}
+extern "C" void NpHostTryDelete(void* ptr)
+{
+    NpOperatorDelete(ptr);
+}
+
+extern "C" void NpHostHeapExhausted(size_t size)
+{
+    NpHostAllocFailed(size);
+    abort();
+}
+
+// ---- MSC_HEAP_GUARD (np/host_alloc.h; the Galaxy port's GXV_HEAP_GUARD). 0 (default): nothing. 1: the port's registered long-lived
+// storage is checked at every stadium destroy and any of it inside a game arena is logged. 2: also, in host builds that have
+// <execinfo.h>, a census of every game-thread operator new by call stack (static tables, no allocation), printed at exit as
+// "[heapcensus]" lines for tools/heapguard/census.py. Neither touches the game's heaps.
+static int sNpHeapGuard = -1;   // (a plain word: read once, then the same value; no guarded static on operator new's path)
+extern "C" int NpHeapGuardMode(void)
+{
+    if (sNpHeapGuard < 0)
+    {
+        const char* e = getenv("MSC_HEAP_GUARD");
+        sNpHeapGuard = (e != 0 && *e != 0) ? (int)strtol(e, 0, 0) : 0;
+    }
+    return sNpHeapGuard;
+}
+extern "C" int NpHeapGuardInGameHeap(const void* p)
+{
+    return p != 0 && (IsInAllocator(StandardAllocator, p) || IsInAllocator(VirtualAllocator, p)) ? 1 : 0;
+}
+struct NpHeapGuardEnt
+{
+    const char* name;
+    const void* (*data)(const void*);
+    const void* obj;
+};
+static NpHeapGuardEnt sNpHeapGuardEnt[64];
+static int sNpHeapGuardCount;
+extern "C" void NpHeapGuardRegister(const char* name, const void* (*data)(const void* obj), const void* obj)
+{
+    if (NpHeapGuardMode() == 0)
+    {
+        return;
+    }
+    NpHeapLock();
+    bool known = false;
+    for (int i = 0; i < sNpHeapGuardCount; ++i)
+    {
+        known = known || sNpHeapGuardEnt[i].obj == obj;
+    }
+    if (!known && sNpHeapGuardCount < (int)(sizeof(sNpHeapGuardEnt) / sizeof(sNpHeapGuardEnt[0])))
+    {
+        NpHeapGuardEnt& g = sNpHeapGuardEnt[sNpHeapGuardCount++];
+        g.name = name;
+        g.data = data;
+        g.obj = obj;
+    }
+    NpHeapUnlock();
+}
+extern "C" int NpHeapGuardCheck(const char* when)
+{
+    if (NpHeapGuardMode() == 0)
+    {
+        return 0;
+    }
+    int bad = 0;
+    const int n = sNpHeapGuardCount;
+    for (int i = 0; i < n; ++i)
+    {
+        const void* p = sNpHeapGuardEnt[i].data(sNpHeapGuardEnt[i].obj);
+        if (NpHeapGuardInGameHeap(p))
+        {
+            ++bad;
+            fprintf(stderr, "[heapguard] %s: %s has its storage at %p, inside a game heap\n", when, sNpHeapGuardEnt[i].name, p);
+        }
+    }
+    fprintf(stderr, "[heapguard] %s: %d registered, %d in a game heap\n", when, n, bad);
+    return bad;
+}
+
+#if defined(__has_include) && !defined(NP_TARGET_VITA)
+#if __has_include(<execinfo.h>) && __has_include(<dlfcn.h>)
+#include <execinfo.h>
+#include <dlfcn.h>
+#define NP_HEAP_CENSUS 1
+#endif
+#endif
+#ifdef NP_HEAP_CENSUS
+enum { kNpCensusSlots = 8192, kNpCensusDepth = 10 };
+struct NpCensusEnt
+{
+    unsigned hash, count, n;
+    unsigned long long bytes;
+    void* pc[kNpCensusDepth];
+};
+static NpCensusEnt sNpCensus[kNpCensusSlots];
+static unsigned sNpCensusUsed, sNpCensusLost;
+static __thread int tNpCensusBusy;
+static void NpCensusReport()
+{
+    Dl_info info;
+    const unsigned long base = dladdr((void*)&NpHeapGuardMode, &info) != 0 ? (unsigned long)info.dli_fbase : 0;
+    unsigned long long total = 0, calls = 0;
+    for (unsigned i = 0; i < kNpCensusSlots; ++i)
+    {
+        const NpCensusEnt& e = sNpCensus[i];
+        if (e.count == 0)
+        {
+            continue;
+        }
+        calls += e.count;
+        total += e.bytes;
+        fprintf(stderr, "[heapcensus] %u %llu", e.count, e.bytes);
+        for (unsigned k = 0; k < e.n; ++k)
+        {
+            fprintf(stderr, " %lx", (unsigned long)e.pc[k] - base);
+        }
+        fprintf(stderr, "\n");
+    }
+    fprintf(stderr, "[heapcensus] total: %llu game-thread operator new calls, %llu bytes, %u stacks, %u not kept (table full)\n", calls, total,
+        sNpCensusUsed, sNpCensusLost);
+    fflush(stderr);
+}
+static void NpCensusNote(size_t size)
+{
+    if (tNpCensusBusy)
+    {
+        return;
+    }
+    tNpCensusBusy = 1;
+    static bool sHooked;
+    if (!sHooked)
+    {
+        sHooked = true;
+        if (NpHarnessAtExit != 0)
+        {
+            NpHarnessAtExit(NpCensusReport);
+        }
+        else
+        {
+            atexit(NpCensusReport);
+        }
+    }
+    void* pc[kNpCensusDepth + 2];
+    const int got = backtrace(pc, kNpCensusDepth + 2);   // [0] this function, [1] operator new: the callers follow
+    const int n = got > 2 ? got - 2 : 0;
+    unsigned h = 2166136261u;
+    for (int k = 0; k < n; ++k)
+    {
+        h = (h ^ (unsigned)(unsigned long)pc[k + 2]) * 16777619u;
+    }
+    h |= 1u;
+    for (unsigned probe = 0; probe < kNpCensusSlots; ++probe)
+    {
+        NpCensusEnt& e = sNpCensus[(h + probe) & (kNpCensusSlots - 1)];
+        if (e.hash == 0)
+        {
+            e.hash = h;
+            e.n = (unsigned)n;
+            for (int k = 0; k < n; ++k)
+            {
+                e.pc[k] = pc[k + 2];
+            }
+            ++sNpCensusUsed;
+        }
+        else if (e.hash != h)
+        {
+            continue;
+        }
+        ++e.count;
+        e.bytes += size;
+        tNpCensusBusy = 0;
+        return;
+    }
+    ++sNpCensusLost;
+    tNpCensusBusy = 0;
+}
+#endif
+
+// NpHostAllocScope (np/host_alloc.h): while this thread's count is above 0 its operator new takes the host heap even on the game thread. Only the
+// allocation changes: frees keep the game thread's rules (the frame-send deferral of NpFsHeapFree above), so a game-heap block freed inside a scope
+// is still kept until the join when a send is running.
+static __thread int tNpHostScope;
+extern "C" int NpMemHostScope(int delta)
+{
+    const int was = tNpHostScope;
+    tNpHostScope += delta;
+    return was;
+}
+
 static inline void* NpOperatorNew(size_t size)
 {
-    if (!tNpGameThread)
+    if (!tNpGameThread || tNpHostScope > 0)
     {
-        return NpHostNew(size);
+        if (&gNpSimtCensus != 0 && gNpSimtCensus != 0) NpSimtNoteHostAlloc();   // block17 (MSC_SIMT=1): counted when np_sim asks for the host heap (it must not)
+        void* p = NpHostNew(size);
+        if (p == 0)
+        {
+            NpHostAllocFailed(size);
+        }
+        return p;
     }
+#ifdef NP_HEAP_CENSUS
+    if (__builtin_expect(sNpHeapGuard != 0, 0) && NpHeapGuardMode() >= 2)
+    {
+        NpCensusNote(size);
+    }
+#endif
+    if (&gNpSimtCensus != 0 && gNpSimtCensus != 0) NpSimtNoteGameAlloc();   // block17 (MSC_SIMT=1): game-heap requests made on np_sim (a count, for the log line)
     return AllocateMemory(size, 8, false);
 }
 void operator delete(void* ptr) { NpOperatorDelete(ptr); }

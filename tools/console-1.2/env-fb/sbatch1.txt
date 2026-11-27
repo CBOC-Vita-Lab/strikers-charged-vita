@@ -1,0 +1,15 @@
+# console-1.2 run sbatch1: Static stadium batches (props of one material in one draw)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group draw, route tour, version payload 1.3, role ab
+# Rigid stadium draws of one material that differ only in their matrices are drawn from a batch buffer (each member checked against its own matrices every frame; no shader change, pack 15 serves it). [sbatch] lines give the records saved, buffer MB and kept MB; compare [lane] backend ms, GPU ms, p50 and the C heap peak with d1. By eye: props, goals, nets and moving machinery in place, nothing missing.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_SBATCH=1
+MSC_VGX_SBATCH_STATS=1

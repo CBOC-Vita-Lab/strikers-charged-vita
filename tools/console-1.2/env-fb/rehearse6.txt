@@ -1,0 +1,15 @@
+# console-1.2 run rehearse6: Walk-out wait frames sent hidden (on side)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group smooth, route worstgpu, version payload 1.3, role ab
+# MSC_DISCARD_REHEARSE=6 (default 0): every 6th discarded GameBegin frame is executed hidden under the loading picture. Against the default: the [discard] lines (sent hidden), the [hidden] lines and the [hitch] gap at the first walk-out picture (shaders, targets, uploads).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_DISCARD_REHEARSE=6
+MSC_HITCH_LINES=1500

@@ -1,7 +1,18 @@
-diff -ru a/source/custom_shaders.c b/source/custom_shaders.c
---- a/source/custom_shaders.c	2026-10-17 14:08:27.787897171 -0400
-+++ b/source/custom_shaders.c	2026-10-17 14:08:42.125066827 -0400
-@@ -39,6 +39,13 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 08:41:11 -0400
+Subject: [PATCH] Boot shader pack: in-memory index of the package's compiled shaders
+
+---
+ source/custom_shaders.c | 33 +++++++++++++++++++++++++++++----
+ source/vitaGL.h         |  1 +
+ 2 files changed, 30 insertions(+), 4 deletions(-)
+
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 2403c2b..e48c0b8 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -39,6 +39,13 @@ char vgl_shader_cache_path[256];
  // W5 SEED: a second, READ-ONLY cache folder (the package's seed: app0:shadercache/<key>/v<magic>), tried when the writable cache has no file for a shader.
  // With it a package can carry every compiled shader without copying them to the memory card at the first start (about 75 ms per file or folder there).
  char vgl_shader_seed_path[256];
@@ -15,10 +26,10 @@ diff -ru a/source/custom_shaders.c b/source/custom_shaders.c
  static SceUID vgl_open_seed(const char *kind, uint8_t subdir_hash, uint64_t hash) {
  	if (!vgl_shader_seed_path[0])
  		return -1;
-@@ -2020,6 +2027,16 @@
+@@ -2032,6 +2039,16 @@ void glCompileShader(GLuint handle) {
  	uint64_t hash = XXH3_64bits(s->source, s->size);
  	uint8_t subdir_hash = hash >> 56;
- 	sprintf(fname, "%s/%s/%02X/%llX.gxp", vgl_shader_cache_path, s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
+ 	int fname_len = sprintf(fname, "%s/%s/%02X/%016llX.gxp", vgl_shader_cache_path, s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
 +	if (vgl_shader_pack_lookup) {
 +		uint32_t psz = 0;
 +		const void *pb = vgl_shader_pack_lookup(s->type == GL_FRAGMENT_SHADER, hash, &psz);
@@ -32,10 +43,10 @@ diff -ru a/source/custom_shaders.c b/source/custom_shaders.c
  	SceUID f = sceIoOpen(fname, SCE_O_RDONLY, 0777);
  	if (f < 0)
  		f = vgl_open_seed(s->type == GL_VERTEX_SHADER ? "v" : "f", subdir_hash, hash);
-@@ -2423,8 +2440,12 @@
+@@ -2436,8 +2453,12 @@ void glLinkProgram(GLuint progr) {
  			uint64_t hash = XXH3_64bits(p->vshader->source, p->vshader->size);
  			uint8_t subdir_hash = hash >> 56;
- 			sprintf(vert_fname, "%s/v/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+ 			fname_len = sprintf(vert_fname, "%s/v/%02X/%016llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
 -			SceUID f = sceIoOpen(vert_fname, SCE_O_RDONLY, 0777);
 -			if (f < 0)
 +			uint32_t psz = 0;
@@ -47,10 +58,10 @@ diff -ru a/source/custom_shaders.c b/source/custom_shaders.c
  				f = vgl_open_seed("v", subdir_hash, hash);
  			if (f >= 0) {
  				size_t sz = sceIoLseek(f, 0, SCE_SEEK_END);
-@@ -2440,8 +2461,12 @@
+@@ -2453,8 +2474,12 @@ void glLinkProgram(GLuint progr) {
  			uint64_t hash = XXH3_64bits(p->fshader->source, p->fshader->size);
  			uint8_t subdir_hash = hash >> 56;
- 			sprintf(frag_fname, "%s/f/%02X/%llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
+ 			fname_len = sprintf(frag_fname, "%s/f/%02X/%016llX.gxp", vgl_shader_cache_path, subdir_hash, hash);
 -			SceUID f = sceIoOpen(frag_fname, SCE_O_RDONLY, 0777);
 -			if (f < 0)
 +			uint32_t psz = 0;
@@ -62,14 +73,15 @@ diff -ru a/source/custom_shaders.c b/source/custom_shaders.c
  				f = vgl_open_seed("f", subdir_hash, hash);
  			if (f >= 0) {
  				size_t sz = sceIoLseek(f, 0, SCE_SEEK_END);
-diff -ru a/source/vitaGL.h b/source/vitaGL.h
---- a/source/vitaGL.h	2026-10-17 14:08:27.793265052 -0400
-+++ b/source/vitaGL.h	2026-10-17 14:08:42.125335267 -0400
-@@ -1258,6 +1258,7 @@
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 52185af..2359078 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1277,6 +1277,7 @@ void vglSetShaderAssociationPath(const char *path);
  
  // Overloads the shader cache path when HAVE_SHADER_CACHE=1 is used. Must be called before vglInit*. Default value: ux0:data/shader_cache.
  void vglSetShaderCachePath(const char *path);
 +void vglSetShaderPackLookup(const void *(*fn)(int fragment, uint64_t hash, uint32_t *size)); // W5 BOOT: in-memory compiled shaders, asked first (NULL = none)
  void vglSetShaderSeedPath(const char *path); // W5 SEED: read-only second shader cache folder (<path>/{v,f}/HH/hash.gxp), tried when the first has no file
  
- // Change the lifetime for a texture to be considered cacheable. Requires HAVE_TEXTURE_CACHE.
+ // Overloads the default vitaGL boot splashscreen with a custom one. Not compatible with NO_SPLASHSCREEN=1.

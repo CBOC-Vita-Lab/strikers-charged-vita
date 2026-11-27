@@ -1,5 +1,5 @@
 #!/bin/bash
-# The W5 FPS proof turn, as ONE heavy.sh turn:  /home/claude/msc/tools/heavy.sh -t 4800 tools/fps/jobs/h32.sh
+# The W5 FPS proof turn, as ONE heavy.sh turn:  /work/msc/tools/heavy.sh -t 4800 tools/fps/jobs/h32.sh
 #   (then, as a second turn, tools/fps/jobs/jobD.sh -t 3600 for the Vita lab package + Vita3K runs).
 # Environment: NP (the worktree to build, default the W5FPS one), GX_VGX (the vgx tree), R (build/output root, default build/np/W5FPS).
 # A = host32 null build + virtual-clock proof runs (value order; BUDGET s incl. the build), C = LAN pairs at different rates, B = regression suite (only if time is left).

@@ -30,6 +30,7 @@ static int sceIoRead(int f, void* b, unsigned n) { ++g_ops[4]; return f < 0 ? -1
 static int sceIoWrite(int f, const void* b, unsigned n) { ++g_ops[5]; return f < 0 ? -1 : (int)write(f, b, n); }
 static int sceIoMkdir(const char* p, int) { int r = mkdir(Map(p).c_str(), 0777); ++g_ops[r == 0 ? 1 : 2]; return r == 0 ? 0 : -1; }
 static int sceIoRemove(const char* p) { ++g_ops[7]; return unlink(Map(p).c_str()); }
+static int sceIoRename(const char* a, const char* b) { return rename(Map(a).c_str(), Map(b).c_str()); }
 static int sceIoGetstat(const char* p, SceIoStat* st) { ++g_ops[3]; struct stat s; if (stat(Map(p).c_str(), &s) != 0) return -1; st->st_mode = s.st_mode; st->st_size = s.st_size; struct tm t; time_t mt = s.st_mtim.tv_sec; gmtime_r(&mt, &t); st->st_mtime = {t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec}; return 0; }
 static std::vector<DIR*> g_dirs; static std::vector<std::string> g_dirPaths;
 static int sceIoDopen(const char* p) { ++g_ops[6]; DIR* d = opendir(Map(p).c_str()); if (!d) return -1; g_dirs.push_back(d); g_dirPaths.push_back(Map(p)); return (int)g_dirs.size() - 1; }

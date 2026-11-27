@@ -1,0 +1,142 @@
+# Online joiner through the game's own menus: MULTIPLAYER, JOIN WITH A CODE (the code from the host's invite file via the test keyboard), Join Game.
+mash 100 20 scene == 0
+log STATE title screen
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+log first run: no save file, accepting 'create save data'
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+log STATE main menu
+idle 30
+# The main menu is a ring picked by stick/D-pad angle; Multiplayer (ctx 1) is up-left.
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+log STATE pointer on multiplayer
+idle 20
+press 100
+wait scene == 10 1200
+log STATE multiplayer mode choice
+wait nbuttons >= 3 900
+idle 60
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+log chose online
+wait scene == 1 900
+wait scene == 10 1200
+log STATE choice popup
+wait nbuttons >= 3 900
+idle 20
+press 4
+idle 60
+press 100
+log chose join
+wait scene == 24 7200
+log STATE lobby
+idle 400
+press 4
+idle 30
+press 100
+log joining
+wait peers >= 2 7200
+log STATE joined
+wait scene != 24 7200
+log STATE launched
+# Fix the rendered fixture through real menu input, not the draft timer's random fallback.
+wait scene == 2 3600
+wait nbuttons >= 10
+wait onoff == 0x920
+idle 30
+press 100
+idle 60
+# Native grid button 2 is Donkey Kong, team 3.
+mash 4 30 onoff == 0x218 300
+idle 20
+press 100
+idle 40
+mash 4 30 onoff == 0xBF0 300
+idle 20
+press 100
+log STATE captain 3 confirmed
+wait scene == 3 1200
+wait nbuttons >= 10
+# Keep the fresh account's fixed sidekick defaults; never press RANDOM.
+idle 20
+mash 4 30 onoff == 0x11C8 300
+idle 20
+press 100
+log STATE default sidekicks confirmed
+mash 100 45 ingame == 1 12000
+log STATE in match
+wait gs == 5 6000
+log STATE open play
+stopwhen clock >= 20
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+hold 120 0 -60 30
+press 400
+hold 120 0 40 60
+press 100
+hold 120 200 -70 0
+log STATE played
+exit

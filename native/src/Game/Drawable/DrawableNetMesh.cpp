@@ -23,6 +23,53 @@
 
 #include <string.h>
 #include "Game/SharedStaticStorage.h"
+#ifdef NP_NATIVE
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+extern unsigned gNpNetStaticEpoch;   // MSC_SIM26_NETGRAB (Render/NetMesh.cpp): also bumped when this file (re)makes or frees the shared buffers
+extern unsigned gNpNetDirtyGen[2];   // int28: bumped by NetMesh::Reset() / active updates so NP_FIX_NET_REDRAW only rebuilds on real state changes
+static unsigned sNetBuiltGen[2] = { 0, 0 };
+static bool sNetBuiltAtRest[2] = { false, false };
+static float sNetBuiltDarkness[2] = { -1.0f, -1.0f };
+static u32 sNetBuiltTex[2] = { 0, 0 };
+static const DrawableNetMesh* sNetBlendDst[2] = { 0, 0 };
+static unsigned sNetBlendGen[2] = { 0, 0 };
+static bool sNetBlendAtRest[2] = { false, false };
+// MSC_NETCENSUS=1 (diagnostic, changes nothing): every 600 Render calls (the two nets, so 300 frames) a line with the mean vertices rebuilt per call, the share of
+// calls that rebuilt the mesh and the mean microseconds of a rebuild (the write loop and End(); the host's clock, a console's cost is a few times that).
+namespace {
+struct NetCensus { unsigned calls, rebuilds; unsigned long long verts, ns; };
+NetCensus gNetCensus;
+bool NetCensusOn()
+{
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("MSC_NETCENSUS"); on = e && atoi(e) ? 1 : 0; }
+    return on != 0;
+}
+unsigned long long NetCensusNow()
+{
+    timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (unsigned long long)t.tv_sec * 1000000000ull + (unsigned long long)t.tv_nsec;
+}
+void NetCensusNote(unsigned verts, unsigned long long ns)
+{
+    NetCensus& c = gNetCensus;
+    ++c.rebuilds;
+    c.verts += verts;
+    c.ns += ns;
+}
+void NetCensusCall()
+{
+    NetCensus& c = gNetCensus;
+    if (++c.calls < 600) return;
+    fprintf(stderr, "[netcensus] calls=%u rebuilds=%u verts/rebuild=%.0f us/rebuild=%.1f\n", c.calls, c.rebuilds, c.rebuilds ? (double)c.verts / c.rebuilds : 0.0,
+            c.rebuilds ? (double)c.ns / 1000.0 / c.rebuilds : 0.0);
+    c = NetCensus();
+}
+}
+#endif
 
 DECL_WEAK char LightTextureName[] = "global/lightramp";
 DECL_WEAK char BlackTextureName[] = "global/black";
@@ -147,6 +194,11 @@ void DrawableNetMesh::Render() const
         return;
     }
 
+#ifdef NP_NATIVE
+    const bool netCensus = NetCensusOn();
+    if (netCensus) NetCensusCall();
+    unsigned long long netT0 = 0;
+#endif
     MeshWriter writer;
     nlVector3* sourcePositions = mPositions;
     shortVector2* sourceTexcoords = spTexcoord[mNetIndex];
@@ -169,8 +221,18 @@ void DrawableNetMesh::Render() const
     glSetCurrentTexture(texture, (eGLTextureType)0);
 
     u16* indices = spTriIndices[mNetIndex];
-    // MSP game fix "net" (np/gamefixes.h, issue #19): a resting net is rebuilt too (NetMesh::Reset does not invalidate the mesh).
-    if ((!sbNetModelValid[mNetIndex] || mVisible == true || NpGameFix(NP_FIX_NET_REDRAW))
+    // MSP game fix "net" (np/gamefixes.h, issue #19) + int28 exact dirty-tracking (Carbon C3 fix):
+    // rebuild when invalid, active, interpolated across snapshots (mSnapGen==0), or any input changed (Reset/Update/WorldDarkening/texture).
+    const float curDarkness = 1.0f - WorldDarkening::Instance().mPos;
+    const bool atRest = !mVisible && mSnapGen != 0u;
+    const bool fixDirty = NpGameFix(NP_FIX_NET_REDRAW)
+        && ((unsigned)mNetIndex < 2u)
+        && (!atRest
+            || sNetBuiltGen[mNetIndex] != mSnapGen
+            || !sNetBuiltAtRest[mNetIndex]
+            || sNetBuiltDarkness[mNetIndex] != curDarkness
+            || sNetBuiltTex[mNetIndex] != texture);
+    if ((!sbNetModelValid[mNetIndex] || mVisible == true || fixDirty)
         && writer.Begin(mNumTriIndices, 1, gNetMeshResourcePools[mNetIndex][siResourcePoolIndex[mNetIndex]]))
     {
         if (!sbResourcePoolSelected[mNetIndex])
@@ -209,6 +271,9 @@ void DrawableNetMesh::Render() const
             gNetMeshResourceMarkers[(unsigned int)index][siResourcePoolIndex[(unsigned int)index]] = handle;
         }
 
+#ifdef NP_NATIVE
+        if (netCensus) netT0 = NetCensusNow();
+#endif
         float darkness = 1.0f - WorldDarkening::Instance().mPos;
         float colour[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
         colour[0] = darkness;
@@ -243,6 +308,14 @@ void DrawableNetMesh::Render() const
 
         MarkMeshUploaded(writer.GetModel(), true, this);
 #ifdef NP_NATIVE
+        if ((unsigned)mNetIndex < 2u)
+        {
+            sNetBuiltGen[mNetIndex] = mSnapGen;
+            sNetBuiltAtRest[mNetIndex] = atRest;
+            sNetBuiltDarkness[mNetIndex] = darkness;
+            sNetBuiltTex[mNetIndex] = texture;
+        }
+        if (netCensus) NetCensusNote((unsigned)mNumTriIndices, NetCensusNow() - netT0);
         // NP (two-stage pipeline): the net is rebuilt in the same pool every frame; the send of the last frame still reads that pool. The
         // second pool is there (the Wii's GPU lagged the CPU as well): take it for the next rebuild.
         if (NpFsPipe())
@@ -270,6 +343,7 @@ void DrawableNetMesh::Initialize(int numVertices, int numTriIndices)
 
     if (!sbStaticInitialized[mNetIndex])
     {
+        gNpNetStaticEpoch++;
         spTriIndices[mNetIndex] = (u16*)nlMalloc(numTriIndices * sizeof(u16), 8, false);
 
         int allocationSize = numVertices * 4;
@@ -306,6 +380,7 @@ void DrawableNetMesh::Destroy()
 
     if (sbStaticInitialized[mNetIndex])
     {
+        gNpNetStaticEpoch++;
         operator delete[](spTexcoord[mNetIndex]);
         operator delete[](spTriIndices[mNetIndex]);
         operator delete[](spColour[mNetIndex]);
@@ -322,8 +397,64 @@ void DrawableNetMesh::Destroy()
         sbResourcePoolSelected[mNetIndex] = false;
     }
 
+#ifdef NP_NATIVE
+    mSnapGen = 0u;
+    if ((unsigned)mNetIndex < 2u)
+    {
+        sNetBlendDst[mNetIndex] = 0;
+        sNetBlendGen[mNetIndex] = 0;
+        sNetBlendAtRest[mNetIndex] = false;
+        sNetBuiltGen[mNetIndex] = 0;
+        sNetBuiltAtRest[mNetIndex] = false;
+        sNetBuiltDarkness[mNetIndex] = -1.0f;
+        sNetBuiltTex[mNetIndex] = 0;
+    }
+#endif
+
     mInitialized = false;
 }
+
+namespace
+{
+struct NpNetStaticKey
+{
+    unsigned epoch;
+    const NetMesh* mesh;
+    const u16* srcIdx;
+    const shortVector2* srcTex;
+    int numIdx;
+    int numTex;
+    u16* dstIdx;
+    shortVector2* dstTex;
+};
+NpNetStaticKey sNpNetKey[2];
+bool sNpNetKeyValid[2];
+unsigned long long sNpNetCopied, sNpNetSkipped, sNpNetChecked, sNpNetWrong;
+bool NpNetKeyEqual(const NpNetStaticKey& a, const NpNetStaticKey& b)
+{
+    return a.epoch == b.epoch && a.mesh == b.mesh && a.srcIdx == b.srcIdx && a.srcTex == b.srcTex && a.numIdx == b.numIdx && a.numTex == b.numTex && a.dstIdx == b.dstIdx && a.dstTex == b.dstTex;
+}
+int NpSim26NetGrabBreak()
+{
+    static int brk = -1;
+    if (brk < 0)
+    {
+        const char* e = getenv("MSC_SIM26_NETGRAB_BREAK");
+        brk = (e && e[0] == '1') ? 1 : 0;
+    }
+    return brk;
+}
+int NpSim26NetGrabMode()
+{
+    static int mode = -1;   // first read on the game thread (RenderSnapshot::Grab runs the nets there)
+    if (mode < 0)
+    {
+        const char* e = getenv("MSC_SIM26_NETGRAB");
+        mode = (e && (e[0] == '1' || e[0] == '2')) ? e[0] - '0' : 0;
+    }
+    return mode;
+}
+} // namespace
 
 void DrawableNetMesh::Grab(NetMesh& netMesh)
 {
@@ -348,6 +479,32 @@ void DrawableNetMesh::Grab(NetMesh& netMesh)
 
     shortVector2* texcoords = spTexcoord[mNetIndex];
     u16* triIndices = spTriIndices[mNetIndex];
+    // MSC_SIM26_NETGRAB=1 (sim26): the tri-strip indices and texture coordinates go to buffers shared by every snapshot of this net, and their source is
+    // written only while a net loads (gNpNetStaticEpoch counts those writes); the copy is skipped when the same source was already copied into the same
+    // buffers since the last such write (same contents: same bits in the buffers). The positions are still copied every step. =2 verify: the buffers are
+    // compared with the source first ([sim26net] counts, wrong must be 0), then copied as before.
+    const int netMode = NpSim26NetGrabMode();
+    NpNetStaticKey key = { gNpNetStaticEpoch, &netMesh, netMesh.m_TriStripIndices, netMesh.m_v2TextureCoords, netMesh.m_NumTriStripIndices, netMesh.m_NumParticles, triIndices, texcoords };
+    const bool same = netMode != 0 && (unsigned)mNetIndex < 2u && sNpNetKeyValid[mNetIndex] && NpNetKeyEqual(sNpNetKey[mNetIndex], key);
+    if (same && netMode == 2)
+    {
+        sNpNetChecked++;
+        if (memcmp(triIndices, netMesh.m_TriStripIndices, netMesh.m_NumTriStripIndices * sizeof(u16)) != 0
+            || memcmp(texcoords, netMesh.m_v2TextureCoords, netMesh.m_NumParticles * sizeof(shortVector2)) != 0)
+            sNpNetWrong++;
+    }
+    if (same && netMode == 1)
+    {
+        sNpNetSkipped++;
+        if (NpSim26NetGrabBreak() && netMesh.m_NumParticles > 0)
+            texcoords[0].x ^= 0x40;   // proof mutant (MSC_SIM26_NETGRAB_BREAK=1): the skipped buffer is spoiled, the pictures must change
+        for (int i = 0; i < netMesh.m_NumParticles; ++i)
+        {
+            mPositions[i] = netMesh.m_v3Position[i];
+        }
+    }
+    else
+    {
     for (int i = 0; i < netMesh.m_NumTriStripIndices; ++i)
     {
         *triIndices++ = netMesh.m_TriStripIndices[i];
@@ -358,8 +515,32 @@ void DrawableNetMesh::Grab(NetMesh& netMesh)
         mPositions[i] = netMesh.m_v3Position[i];
         *texcoords++ = netMesh.m_v2TextureCoords[i];
     }
+    if (netMode != 0 && (unsigned)mNetIndex < 2u)
+    {
+        sNpNetKey[mNetIndex] = key;
+        sNpNetKeyValid[mNetIndex] = true;
+        sNpNetCopied++;
+    }
+    }
+    if (netMode != 0 && ((sNpNetSkipped + sNpNetCopied + sNpNetChecked) % 3000) == 1)
+    {
+        printf("[sim26net] mode=%d grabs copied %llu, index/texcoord copies skipped %llu, verify %llu wrong %llu\n", netMode, sNpNetCopied, sNpNetSkipped, sNpNetChecked, sNpNetWrong);
+        fflush(stdout);
+    }
 
     mVisible = netMesh.mbIsActive;
+#ifdef NP_NATIVE
+    if ((unsigned)mNetIndex < 2u)
+    {
+        if (mVisible || mSnapGen == 0u)
+            ++gNpNetDirtyGen[mNetIndex];
+        mSnapGen = gNpNetDirtyGen[mNetIndex];
+    }
+    else
+    {
+        mSnapGen = 0u;
+    }
+#endif
 }
 
 void DrawableNetMesh::Blend(
@@ -379,8 +560,47 @@ void DrawableNetMesh::Blend(
         Initialize(numVertices, numTriIndices);
         mInitialized = true;
         mJoltCache = 0.0f;
+#ifdef NP_NATIVE
+        if ((unsigned)mNetIndex < 2u)
+        {
+            sNetBlendAtRest[mNetIndex] = false;
+            sNetBuiltAtRest[mNetIndex] = false;
+        }
+#endif
     }
 
+#ifdef NP_NATIVE
+    const bool bothAtRest = !lhs.mVisible && !rhs.mVisible;
+    const bool sameStatic = bothAtRest && lhs.mSnapGen == rhs.mSnapGen && lhs.mSnapGen != 0u;
+    if (NpGameFix(NP_FIX_NET_REDRAW) && sameStatic && (unsigned)mNetIndex < 2u
+        && sNetBlendDst[mNetIndex] == this
+        && sNetBlendAtRest[mNetIndex]
+        && sNetBlendGen[mNetIndex] == lhs.mSnapGen)
+    {
+        mSnapGen = lhs.mSnapGen;
+        mVisible = false;
+        return;
+    }
+    const float oneMinusBlend = 1.0f - blendFactor;
+    nlVector3* const dst = mPositions;
+    const nlVector3* const srcL = lhs.mPositions;
+    const nlVector3* const srcR = rhs.mPositions;
+    for (int i = 0; i < mNumVertices; ++i)
+    {
+        nlVector3 tmp;
+        nlVec3Scale(tmp, srcL[i], oneMinusBlend);
+        nlVec3ScaleAdd(dst[i], blendFactor, srcR[i], tmp);
+    }
+    mSnapGen = sameStatic ? lhs.mSnapGen : 0u;
+    if ((unsigned)mNetIndex < 2u)
+    {
+        sNetBlendDst[mNetIndex] = this;
+        sNetBlendGen[mNetIndex] = lhs.mSnapGen;
+        sNetBlendAtRest[mNetIndex] = sameStatic;
+        if (!sameStatic)
+            sNetBuiltAtRest[mNetIndex] = false;
+    }
+#else
     nlVector3* destination;
     nlVector3* source;
     float oneMinusBlend = 1.0f - blendFactor;
@@ -400,6 +620,7 @@ void DrawableNetMesh::Blend(
         source = (nlVector3*)&((const volatile DrawableNetMesh*)&rhs)->mPositions[i];
         nlVec3ScaleAdd(*destination, blendFactor, *source, *destination);
     }
+#endif
 
     mVisible = lhs.mVisible;
 }
@@ -425,6 +646,15 @@ void DrawableNetMesh::Replay(LoadFrame& frame)
         sbNetModelValid[mNetIndex] = false;
         mVisible = visible;
     }
+#ifdef NP_NATIVE
+    mSnapGen = 0u;
+    if ((unsigned)mNetIndex < 2u)
+    {
+        ++gNpNetDirtyGen[mNetIndex];
+        sNetBlendAtRest[mNetIndex] = false;
+        sNetBuiltAtRest[mNetIndex] = false;
+    }
+#endif
 }
 
 void DrawableNetMesh::Replay(SaveFrame& frame)

@@ -1,0 +1,282 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 12:00:00 -0500
+Subject: [PATCH] shared depth blocks (MSC_VGX_LADDER_ALIAS, default 0): vglFramebufferDepthShare(fb, cw, ch) makes a framebuffer object's depth surface a window onto one block per (multisample mode, capacity), freed with its last user; the effects pass reads the shared rows with the capacity's stride (A1); the identity of the last user is dropped at every join and leave (A2); bookkeeping in depth_share_core.h (host-tested)
+
+---
+
+diff --git a/source/framebuffers.c b/source/framebuffers.c
+index caffd760..5c10f8b3 100644
+--- a/source/framebuffers.c
++++ b/source/framebuffers.c
+@@ -219,6 +219,8 @@ inline __attribute__((always_inline)) void glGenFramebuffers(GLsizei n, GLuint *
+ 			framebuffers[i].tex = NULL;
+ 			framebuffers[i].msaa = msaa_mode;
+ 			framebuffers[i].nodepth = 0;
++			framebuffers[i].depth_share_w = framebuffers[i].depth_share_h = 0; // 0044
++			framebuffers[i].depth_row_w = 0;
+ 		}
+ 		if (j >= n)
+ 			break;
+@@ -979,7 +981,8 @@ int vglStrikersBindFramebufferDepth(GLuint fb_id) {
+ 	texture *tex = &texture_slots[tex_unit->tex_id[0]];
+ 	if (tex->data)
+ 		return 0; // (a texture with storage of its own is never repointed)
+-	const int row = VGL_ALIGN(fb->width, SCE_GXM_TILE_SIZEX);
++	// 0044 (A1): rows are laid out for the width the surface was made for: the shared block's capacity when it lives in one (a smaller picture is a window onto it), else the object's width
++	const int row = VGL_ALIGN(fb->depth_row_w > 0 ? fb->depth_row_w : fb->width, SCE_GXM_TILE_SIZEX);
+ 	// (no store-mode change here: it would alter a surface whose scene may still be open; the caller's scene hints store the depth)
+ 	if (sceGxmTextureInitLinear(&tex->gxm_tex, fb->depthbuffer_ptr->depthData, SCE_GXM_TEXTURE_FORMAT_DF32M, row, fb->height, 0) < 0)
+ 		return 0;
+@@ -1100,3 +1103,22 @@ void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t
+ 	if (objs_without) *objs_without = wo;
+ 	if (nodepth_scenes) *nodepth_scenes = vgl_nodepth_scenes;
+ }
++
++/* 0044 (MSC_VGX_LADDER_ALIAS): the depth surface of this framebuffer object is a window onto one block shared by every object of the same multisample mode that asks for the same
++ * capacity (cw x ch pixels, the largest picture size of the ladder): its surface is the same memory with the same stride (cw), used for a smaller picture. Only one picture size
++ * is drawn at a time and the GPU runs scenes in order; the caller clears the depth at every size change (nothing reads a depth surface across a size change). The block is made at
++ * the first scene of the first user, at capacity size, and freed with its last user. A depth surface that exists is not touched (call before the object's first scene, or after
++ * vglFramebufferMultisample); cw = 0 turns it off for this object. An object that does not fit the capacity, or one that wants a stencil, keeps its own surface.
++ * Returns GL_FALSE for an unknown object. */
++GLboolean vglFramebufferDepthShare(GLuint fb_id, GLint cw, GLint ch) {
++	THREAD_SAFE()
++
++	framebuffer *fb = (framebuffer *)fb_id;
++	if (!fb || !fb->active)
++		return GL_FALSE;
++	if (cw < 0 || ch < 0)
++		cw = ch = 0;
++	fb->depth_share_w = cw;
++	fb->depth_share_h = ch;
++	return GL_TRUE;
++}
+diff --git a/source/gxm.c b/source/gxm.c
+index 16da5f62..c51bef3b 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -1087,7 +1087,12 @@ GLboolean scene_reset(void) {
+ 				active_write_fb->depthbuffer_ptr = &active_write_fb->depthbuffer;
+ 				active_write_fb->depthbuffer_state |= DEPTHBUFFER_READY;
+ 			} else if (!(active_write_fb->depthbuffer_state & DEPTHBUFFER_READY)) {
+-				if (!init_depth_stencil_buffer_ms(active_write_fb->width, active_write_fb->height, &active_write_fb->depthbuffer, active_write_fb->depthbuffer_state == DEPTHBUFFER_WANTS_STENCIL, FB_MSAA(active_write_fb)) && vgl_robust_scenes) {
++				// 0044: a depth surface in the shared block (vglFramebufferDepthShare), when the object fits it and wants no stencil; otherwise its own
++				GLboolean depth_shared = GL_FALSE;
++				if (active_write_fb->depth_share_w && active_write_fb->depthbuffer_state != DEPTHBUFFER_WANTS_STENCIL && active_write_fb->width <= active_write_fb->depth_share_w && active_write_fb->height <= active_write_fb->depth_share_h)
++					depth_shared = vgl_depth_share_get(active_write_fb->depth_share_w, active_write_fb->depth_share_h, FB_MSAA(active_write_fb), &active_write_fb->depthbuffer, active_write_fb);
++				active_write_fb->depth_row_w = depth_shared ? active_write_fb->depth_share_w : active_write_fb->width;
++				if (!depth_shared && !init_depth_stencil_buffer_ms(active_write_fb->width, active_write_fb->height, &active_write_fb->depthbuffer, active_write_fb->depthbuffer_state == DEPTHBUFFER_WANTS_STENCIL, FB_MSAA(active_write_fb)) && vgl_robust_scenes) {
+ 					vgl_log("%s:%d Scene reset failed: no depth/stencil surface for framebuffer 0x%08X (%dx%d).\n", __FILE__, __LINE__, active_write_fb, active_write_fb->width, active_write_fb->height);
+ 					return scene_reset_failed();
+ 				}
+@@ -1124,6 +1129,8 @@ GLboolean scene_reset(void) {
+ 				vgl_log("%s:%d Scene reset failed: no render target for framebuffer 0x%08X (%dx%d).\n", __FILE__, __LINE__, active_write_fb, active_write_fb->width, active_write_fb->height);
+ 				return scene_reset_failed();
+ 			}
++			if (active_write_fb->depth_share_w && active_write_fb->depthbuffer_ptr && active_write_fb->depthbuffer_ptr->depthData)
++				vgl_depth_share_scene(active_write_fb->depthbuffer_ptr->depthData, active_write_fb); // 0044
+ 			rt_applied = vgl_rt_scene_begin(active_write_fb->depthbuffer_ptr, active_write_fb->width, active_write_fb->height);
+ 			scn_begin(active_write_fb->target, 0);
+ 			if (vgl_fg_on && active_write_fb->tex)
+diff --git a/source/shared.h b/source/shared.h
+index 002ab8ee..fb9178ef 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -667,6 +667,8 @@ typedef struct {
+ 	void *data;
+ 	texture *tex;
+ 	SceGxmMultisampleMode msaa; // this framebuffer's own multisampling (vglFramebufferMultisample), msaa_mode for a new one
++	int depth_share_w, depth_share_h; // 0044 (vglFramebufferDepthShare): the capacity of the shared depth block this object's depth surface may live in (0: its own)
++	int depth_row_w; // 0044: the width the depth surface's rows were laid out for: the shared block's capacity, or the object's own width (0: no surface yet); the effects pass reads rows of VGL_ALIGN(this, 32)
+ 	uint8_t nodepth; // 0038 (vglFramebufferNoDepth): its scenes run with a depth/stencil surface that has no memory (tile memory only), never loaded or stored
+ } framebuffer;
+ extern uint32_t vgl_nodepth_scenes; // 0038: scenes begun on a framebuffer with nodepth set (rt.c)
+@@ -1326,6 +1328,8 @@ GLboolean change_stencil_func_config(SceGxmStencilFunc *cfg, GLenum new_cfg); //
+ void update_alpha_test_settings(void); // Changes current in use alpha test operation value
+ void update_scissor_test(void); // Changes current in use scissor test region
+ void vgl_mk_scene_begin(SceGxmDepthStencilSurface *ds); // 1.3 MASK_KEEP (patch 0026): a scene began on `ds` (NULL: none)
++GLboolean vgl_depth_share_get(int cw, int ch, SceGxmMultisampleMode mode, SceGxmDepthStencilSurface *out, const void *fb); // 0044 (mem_utils.c)
++void vgl_depth_share_scene(const void *mem, const void *fb); // 0044
+ void vgl_mk_forget(const void *surface); // 1.3 MASK_KEEP: new depth/stencil memory at `surface`
+ void vgl_mk_touch(void); // 1.3 MASK_KEEP: the open scene's mask may have changed outside update_scissor_test
+ void vgl_mb_scene_begin(SceGxmDepthStencilSurface *ds, uint32_t rt_applied); // 1.3 MASK_BG (patch 0029): called before sceGxmBeginScene with the surface and the RT hint's decision
+diff --git a/source/utils/depth_share_core.h b/source/utils/depth_share_core.h
+new file mode 100644
+index 00000000..3576d82c
+--- /dev/null
++++ b/source/utils/depth_share_core.h
+@@ -0,0 +1,83 @@
++/* 0044 (MSC_VGX_LADDER_ALIAS): the bookkeeping of the shared depth blocks, with no GXM and no allocator in it so that a host test (renderer/tests/depthshare.cpp)
++ * runs the very code the console runs. mem_utils.c holds the table, the memory and the surface copies.
++ *
++ * A block is made for a (multisample mode, capacity w x h) the first time an object asks for it and is freed with its last user. refs counts the users;
++ * last_fb is the user whose scene began last, to see a change of user: it is the identity of the drawing context and is valid only between two changes of
++ * the users (A2: framebuffer objects are slots of a static array, a deleted object's slot is reused by a new one of another size, and an object that is
++ * resized gives up its depth and joins again; "the same address as last time" must not be read as "the same context"). So every join and every leave clears it. */
++#ifndef VGL_DEPTH_SHARE_CORE_H
++#define VGL_DEPTH_SHARE_CORE_H
++
++#define VGL_DSHARE_MAX 8
++
++typedef struct {
++	void *mem; /* the block (NULL: free slot) */
++	int refs; /* objects whose depth surface lives in it */
++	const void *last_fb; /* the object whose scene began last (NULL: none since the last join or leave) */
++	int mode; /* the multisample mode, as the caller numbers it */
++	int cw, ch; /* the capacity: the stride is cw samples, ch rows */
++} vgl_dshare_rec;
++
++typedef struct {
++	vgl_dshare_rec rec[VGL_DSHARE_MAX];
++	unsigned made, joined, failed;
++} vgl_dshare_tbl;
++
++static inline int vgl_ds_find(const vgl_dshare_tbl *t, int mode, int cw, int ch) {
++	for (int i = 0; i < VGL_DSHARE_MAX; i++)
++		if (t->rec[i].mem && t->rec[i].mode == mode && t->rec[i].cw == cw && t->rec[i].ch == ch)
++			return i;
++	return -1;
++}
++static inline int vgl_ds_free_slot(const vgl_dshare_tbl *t) {
++	for (int i = 0; i < VGL_DSHARE_MAX; i++)
++		if (!t->rec[i].mem)
++			return i;
++	return -1;
++}
++/* a new block in slot i (no users yet) */
++static inline void vgl_ds_add(vgl_dshare_tbl *t, int i, void *mem, int mode, int cw, int ch) {
++	t->rec[i].mem = mem;
++	t->rec[i].refs = 0;
++	t->rec[i].last_fb = 0;
++	t->rec[i].mode = mode;
++	t->rec[i].cw = cw;
++	t->rec[i].ch = ch;
++	t->made++;
++}
++/* an object joins the block of slot i */
++static inline void vgl_ds_join(vgl_dshare_tbl *t, int i) {
++	t->rec[i].refs++;
++	t->rec[i].last_fb = 0; /* A2 */
++	t->joined++;
++}
++/* a depth surface at `mem` is released. 1: it was the last user of a shared block (the slot is free again; the caller frees the memory); 0: other users remain;
++ * -1: not a shared block (the caller frees it as before) */
++static inline int vgl_ds_release(vgl_dshare_tbl *t, const void *mem) {
++	for (int i = 0; i < VGL_DSHARE_MAX; i++) {
++		if (t->rec[i].mem && t->rec[i].mem == mem) {
++			t->rec[i].last_fb = 0; /* A2 */
++			if (--t->rec[i].refs > 0)
++				return 0;
++			t->rec[i].mem = 0;
++			t->rec[i].refs = 0;
++			return 1;
++		}
++	}
++	return -1;
++}
++/* a scene of object `fb` begins on `mem`. 1: another context drew in the block last (or none is known): what is recorded about the content (the mask-keep record) is not the new
++ * scene's; 0: the same context as last time, or not a shared block */
++static inline int vgl_ds_scene(vgl_dshare_tbl *t, const void *mem, const void *fb) {
++	for (int i = 0; i < VGL_DSHARE_MAX; i++) {
++		if (t->rec[i].mem && t->rec[i].mem == mem) {
++			if (t->rec[i].last_fb != fb) {
++				t->rec[i].last_fb = fb;
++				return 1;
++			}
++			return 0;
++		}
++	}
++	return 0;
++}
++#endif
+diff --git a/source/utils/mem_utils.c b/source/utils/mem_utils.c
+index 83177548..3a0f9794 100644
+--- a/source/utils/mem_utils.c
++++ b/source/utils/mem_utils.c
+@@ -1351,3 +1351,56 @@ void *vgl_realloc(void *ptr, size_t size) {
+ 	return res;
+ }
+ /* MEMSITES END */
++
++/* 0044: depth surface blocks shared by framebuffer objects (vglFramebufferDepthShare). The bookkeeping is depth_share_core.h (host-tested); here are the memory and the surface
++ * copies. vgl_depth_release is what mark_depth_stencil_as_dirty calls for every depth block: a shared block goes to the collector with its last user. */
++#include "depth_share_core.h"
++static vgl_dshare_tbl vgl_dshare;
++static SceGxmDepthStencilSurface vgl_dshare_surf[VGL_DSHARE_MAX];
++
++void vgl_depth_release(void *p) {
++	if (vgl_ds_release(&vgl_dshare, p) == 0)
++		return; // other users remain
++	mark_as_dirty(p);
++}
++
++GLboolean vgl_depth_share_get(int cw, int ch, SceGxmMultisampleMode mode, SceGxmDepthStencilSurface *out, const void *fb) {
++	int i = vgl_ds_find(&vgl_dshare, (int)mode, cw, ch);
++	if (i < 0) {
++		i = vgl_ds_free_slot(&vgl_dshare);
++		if (i < 0) {
++			vgl_dshare.failed++;
++			return GL_FALSE;
++		}
++		SceGxmDepthStencilSurface s;
++		vgl_memset(&s, 0, sizeof(s));
++		if (!init_depth_stencil_buffer_ms(cw, ch, &s, GL_FALSE, mode) || !s.depthData) {
++			vgl_dshare.failed++;
++			return GL_FALSE;
++		}
++		vgl_ds_add(&vgl_dshare, i, s.depthData, (int)mode, cw, ch);
++		vgl_dshare_surf[i] = s;
++		vgl_log("%s:%d 0044 depth block %dx%d (mode %d) made\n", __FILE__, __LINE__, cw, ch, (int)mode);
++	}
++	*out = vgl_dshare_surf[i];
++	vgl_ds_join(&vgl_dshare, i);
++	return GL_TRUE;
++}
++
++// A scene begins on a shared block: if another object drew in it last, what the mask-keep record knows of its content is not the new picture's (the memory is the same, the size is not)
++void vgl_depth_share_scene(const void *mem, const void *fb) {
++	if (vgl_ds_scene(&vgl_dshare, mem, fb))
++		vgl_mk_forget(mem);
++}
++
++// Counters for the front end: blocks made, objects joined, joins refused (no slot or no memory), blocks live now
++void vglDepthShareStats(uint32_t *out4) {
++	uint32_t live = 0;
++	for (int i = 0; i < VGL_DSHARE_MAX; i++)
++		if (vgl_dshare.rec[i].mem)
++			live++;
++	out4[0] = vgl_dshare.made;
++	out4[1] = vgl_dshare.joined;
++	out4[2] = vgl_dshare.failed;
++	out4[3] = live;
++}
+diff --git a/source/utils/mem_utils.h b/source/utils/mem_utils.h
+index b0f69d88..0bb97eec 100644
+--- a/source/utils/mem_utils.h
++++ b/source/utils/mem_utils.h
+@@ -61,10 +61,11 @@ extern int frame_rt_purge_idx; // Index for currently populatable purge list ren
+ #define mark_as_dirty(x) frame_purge_list[frame_purge_idx][frame_elem_purge_idx++] = x
+ #endif
+ // 0022 (upstream fbb190f): a depth/stencil surface goes to the collector with its stencil, which was leaked (0.5 MiB at 960x544, one sample; 2 MiB at 4x) each time a framebuffer object with one was deleted or re-attached
++void vgl_depth_release(void *p); // 0044: a depth surface block that framebuffer objects share is freed with its last user
+ #define mark_depth_stencil_as_dirty(s) \
+ 	do { \
+ 		if ((s)->depthData) { /* 0038: a nodepth surface has no memory */ \
+-			mark_as_dirty((s)->depthData); \
++			vgl_depth_release((s)->depthData); /* 0044: a shared block goes with its last user */ \
+ 		} \
+ 		if ((s)->stencilData) { \
+ 			mark_as_dirty((s)->stencilData); \
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index d2ee05b8..6dcf834f 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1405,6 +1405,8 @@ GLboolean vglSwapResolution(int width, int height);
+ 
+ // Loads the depth buffer of the currently bound renderbuffer into the currently bound GL texture.
+ void vglTexImageDepthBuffer(GLenum target);
++GLboolean vglFramebufferDepthShare(GLuint fb_id, GLint cw, GLint ch); // 0044: this object's depth surface is a window onto a block shared at cw x ch (framebuffers.c); 0 turns it off
++void vglDepthShareStats(uint32_t *out4); // 0044: depth blocks made, objects joined, joins refused, blocks live (mem_utils.c)
+ GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples); // 1, 2 or 4 samples a pixel for this framebuffer object alone (framebuffers.c)
+ GLboolean vglFramebufferNoDepth(GLuint fb_id, GLint on); // 0038: 1: this framebuffer object's scenes get no depth/stencil memory (tile memory only: nothing loaded or stored; for objects whose scenes never test or write depth). 0: as before. GL_FALSE for an unknown object
+ void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes); // 0038: depth/stencil memory (KiB) of the live framebuffer objects that have a surface, how many have one, how many run without (nodepth), scenes begun without

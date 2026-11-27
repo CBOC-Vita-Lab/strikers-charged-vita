@@ -1,0 +1,14 @@
+# console-1.2 run cmpra2: CMPR cut-outs as DXT5 within a stated colour error
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group hardware, route pipe, version payload 1.3, role ab
+# Against pipefix. Like cmpra, but a texture whose middle colour would move by more than 12 of 255 stays RGBA8; the statistics line says how many did.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/pipe.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_CMPRA=2
+MSC_DYNRES=0

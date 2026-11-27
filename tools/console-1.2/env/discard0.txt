@@ -1,0 +1,13 @@
+# console-1.2 run discard0: Discarded frames paced at one retrace each
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group smooth, route worstgpu, version payload 1.3, role ab
+# MSC_DISCARD_FAST=0 (default 1: the frames the game throws away at the end of loading and in the walk-out's wait are not paced at one retrace each). Against the default: the [discard] lines (frames, ms a frame, not paced) and the [hitch] gaps after [nav] match state -1 -> 0 (about 1.9 s and 1.2 s on r11).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_DISCARD_FAST=0

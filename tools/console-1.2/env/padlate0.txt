@@ -1,0 +1,13 @@
+# console-1.2 run padlate0: No late pad and touch read
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group pacing, route mega, version payload 1.3, role ab
+# MSC_PAD_LATE=0 (the Vita plan sets 1 since wave 10: under a held 30 the pad and the touch screen are read up to 12 ms later, in the slack the picture waited for its refresh). Against the default in a Mega Save and in a held 30 scene: the `[fps] late latch` lines (steps delayed, mean and max delay, late pictures), the `[pace] display` line's frame start to shown and estimated press to picture, the `[lat]` press-to-picture p50/p95 (measured), and the hold mix (it must not move). By hand: aim a Mega Save with the touch screen and time a shot or tackle: does it feel quicker, does anything feel late?
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/mega.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PAD_LATE=0

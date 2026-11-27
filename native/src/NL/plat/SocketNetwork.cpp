@@ -3,6 +3,8 @@
 #include "Game/Sys/debug.h"
 #include <revolution/so.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "Game/TweakValue.h"
 #include "Game/SharedStaticStorage.h"
@@ -43,10 +45,17 @@ static inline void PopAllocator()
     CurrentAllocator = AllocatorStack[AllocatorStackDepth - 1];
 }
 
+bool NpNetPoolsAtBoot()
+{
+    static const bool on = [] { const char* e = getenv("MSC_NET_POOLS_AT_BOOT"); return e && e[0] == '1'; }();
+    return on;
+}
+
 static inline void InitializeSocketAllocatorImpl()
 {
     if (!sSocketMemoryInitialized)
     {
+        fprintf(stderr, "[netpool] socket pool made (%d bytes) %s\n", 0x30D40, NpNetPoolsAtBoot() ? "at boot (MSC_NET_POOLS_AT_BOOT=1)" : "at its first use");
         PushAllocator(&VirtualAllocator);
         sSocketMemoryPool = nlMalloc(0x30D40, 8, false);
         sSocketAllocator.Initialize(sSocketMemoryPool, 0x30D40);
@@ -57,28 +66,32 @@ static inline void InitializeSocketAllocatorImpl()
 
 void* SocketAlloc(u32, s32 size)
 {
+    InitializeSocketAllocatorImpl();   // (1.3) made at the first request, not at boot: the port's SOInit ignores the allocator, so single player no longer holds 200 KB for it
     return sSocketAllocator.Allocate(size, 32, false);
 }
 
 void SocketFree(u32, void* memory, s32)
 {
+    if (!sSocketMemoryInitialized)
+    {
+        return;
+    }
     sSocketAllocator.Free(memory);
 }
 
 void SocketNetworkInitializeMemory()
 {
-    InitializeSocketAllocatorImpl();
+    // (1.3) nothing at boot unless MSC_NET_POOLS_AT_BOOT=1: see SocketAlloc
+    if (NpNetPoolsAtBoot())
+    {
+        InitializeSocketAllocatorImpl();
+    }
 }
 
 void SocketNetworkStartup()
 {
     if (!sSocketNetworkStarted)
     {
-        if (!sSocketMemoryInitialized)
-        {
-            InitializeSocketAllocatorImpl();
-        }
-
         SOLibraryConfig config;
         memset(&config, 0, sizeof(config));
         config.alloc = SocketAlloc;

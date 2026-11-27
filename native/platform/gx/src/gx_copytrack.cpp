@@ -45,7 +45,7 @@ struct MallocAllocator {
 std::mutex g_mtx;
 std::map<uintptr_t, uint32_t, std::less<uintptr_t>, MallocAllocator<std::pair<const uintptr_t, uint32_t> > > g_copies;   // destination -> bytes
 uint32_t g_largest = 0;                   // largest destination ever remembered
-std::vector<uintptr_t> g_retired;         // destinations to destroy on the game thread
+std::vector<uintptr_t, MallocAllocator<uintptr_t> > g_retired;   // destinations to destroy on the game thread (1.3: malloc too: grown on the game thread by np_gx_notify_write, the census of MSC_HEAP_GUARD=2)
 std::atomic<uint32_t> g_retiredCount{0};
 std::atomic<std::thread::id> g_gameThread{};
 
@@ -91,7 +91,7 @@ void RememberCopy(void* dest, unsigned int size) {
 
 void DrainRetiredCopies() {
     if (g_retiredCount.load(std::memory_order_acquire) == 0) return;
-    std::vector<uintptr_t> list;
+    std::vector<uintptr_t, MallocAllocator<uintptr_t> > list;
     {
         std::lock_guard<std::mutex> lk(g_mtx);
         list.swap(g_retired);

@@ -6,6 +6,9 @@
 // the ones it had to reproduce bit for bit; the port needs the same results to the last bit only
 // where a replay is compared, which the native build is not).
 #include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <revolution/mtx.h>
 
 typedef Mtx44 NpMtx44;
@@ -428,9 +431,39 @@ void C_MTXFrustum(Mtx44 m, f32 t, f32 b, f32 l, f32 r, f32 n, f32 f) {
     m[3][3] = 0.0f;
 }
 
+// 1.3 armcpu9: tan() here is the double-precision libm function (newlib: several hundred cycles on the Cortex-A9's VFP), called 60-70 times a picture
+// with a handful of distinct angles (the camera, the shadow and reflection views). The float result of tan for one angle is always the same, so a small
+// direct-mapped cache keeps (angle bits, result bits) pairs in one 64-bit word each (relaxed 64-bit atomics: a pair is never torn between threads;
+// the game thread and the frame-send worker both call here). Same bits as the plain call by construction; MSC_PERSP_TAN=0 reads the library every time.
+#define NP_TANC_N 16
+static uint64_t np_tan_cache[NP_TANC_N];   // 0 = empty (an entry for angle bits 0 holds the result of tan(0) = 0: also 0 bits, so it is never mistaken)
+static int np_tan_on = -1;
+static f32 np_tanf_cached(f32 angle) {
+    if (__builtin_expect(np_tan_on < 0, 0)) {
+        const char* e = getenv("MSC_PERSP_TAN");
+        np_tan_on = (e && e[0] == '0') ? 0 : 1;
+    }
+    if (!np_tan_on) return (f32)tan(angle);
+    uint32_t kb;
+    memcpy(&kb, &angle, 4);
+    const unsigned slot = (kb * 2654435761u) >> 28;   // 16 slots
+    const uint64_t e = __atomic_load_n(&np_tan_cache[slot], __ATOMIC_RELAXED);
+    if ((uint32_t)(e >> 32) == kb && e != 0) {
+        uint32_t rb = (uint32_t)e;
+        f32 r;
+        memcpy(&r, &rb, 4);
+        return r;
+    }
+    const f32 r = (f32)tan(angle);
+    uint32_t rb;
+    memcpy(&rb, &r, 4);
+    __atomic_store_n(&np_tan_cache[slot], ((uint64_t)kb << 32) | rb, __ATOMIC_RELAXED);
+    return r;
+}
+
 void C_MTXPerspective(Mtx44 m, f32 fovY, f32 aspect, f32 n, f32 f) {
     f32 angle = MTXDegToRad(fovY * 0.5f);
-    f32 cot = 1.0f / (f32)tan(angle);
+    f32 cot = 1.0f / np_tanf_cached(angle);
     f32 tmp;
     m[0][0] = cot / aspect;
     m[0][1] = 0.0f;

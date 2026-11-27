@@ -260,6 +260,7 @@ static CrowdSidelineFilter* sCrowdSidelineFilter;
 static signed char sCrowdViewBudgetConfigured;
 static bool sCrowdImpostorsExcited;
 static ImpostorCluster* sCrowdCluster;
+static int sCrowdClusterReaders;   // packets of this stadium that sample the cluster's picture (MSC_CROWD_CLUSTER_LAZY)
 static bool sLockCrowdImpostorAnimation;
 CrowdModelCollection gCrowdModelCollection;
 
@@ -389,6 +390,7 @@ void InitializeCrowdImpostors(bool alternateView)
     unsigned long clusterTexture;
     u32 firstHash = nlStringLowerHash(sViceCrowdModelName);
     clusterTexture = sCrowdCluster->GetTexture();
+    sCrowdClusterReaders = 0;
     SetCrowdModelTexture(firstHash, clusterTexture);
     SetCrowdModelTexture(nlStringLowerHash(sViceNightCrowdModelName), clusterTexture);
     SetCrowdModelTexture(nlStringLowerHash(sUndergroundCrowdModelName), clusterTexture);
@@ -487,10 +489,16 @@ void SetCrowdModelTexture(u32 textureHash, unsigned long texture)
                     glSetMaterialTextureParameter(pPacket, gDiffuseTextureSemantic, texture);
                     unsigned long resolvedTexture = textureIndex;
                     glSetMaterialTextureIndexParameter(pPacket, gDiffuseTextureSemantic, &resolvedTexture);
+                    ++sCrowdClusterReaders;
                 }
             }
         }
     }
+}
+
+int CrowdClusterReaders()
+{
+    return sCrowdClusterReaders;
 }
 
 void SetCrowdImpostorsExcited()
@@ -533,16 +541,9 @@ void UpdateCrowdImpostorAnimation(float value)
     }
 }
 
-bool CrowdSidelineFilter::IsVisible(const Impostor* impostor)
+bool CrowdSidelineFilter::PositionVisible(const Impostor* impostor)
 {
-    if (cCameraManager::PeekCamera()->GetType() != eCameraType_Gameplay
-        && cCameraManager::PeekCamera()->GetType() != eCameraType_Gameplay
-        && (cCameraManager::PeekCamera()->GetType() != eCameraType_Debug
-            || !sCullCrowdInDebugCamera))
-    {
-        return true;
-    }
-
+    // Every test here is a pure read and the result is their OR: the position tests go first, so the many impostors they settle skip the camera's virtual calls.
     if (impostor->mPosition.y > sCrowdZero)
         return true;
 
@@ -552,6 +553,35 @@ bool CrowdSidelineFilter::IsVisible(const Impostor* impostor)
     float sideline = cField::GetSidelineY(1U);
     sideline += (float)mSidelineCullingDistance;
     return -impostor->mPosition.y > sideline;
+}
+
+void CrowdSidelineFilter::PositionKey(float* out3)
+{
+    out3[0] = cField::GetGoalLineX(1U);
+    out3[1] = cField::GetSidelineY(1U) + (float)mSidelineCullingDistance;
+    out3[2] = sCrowdZero;
+}
+
+// simfix20 (fable-verify10 P2): MSC_SIMT=2 draws the crowd window on the game thread while the step on np_sim may push or delete cameras. NpSimOrder17 stores the type of the top
+// camera at arm time (what order B reads) in gNpCrowdCamType for the length of the window (>= 0 there, -1 otherwise) and nothing else here reads the stack then.
+extern "C" volatile int gNpCrowdCamType = -1;
+
+bool CrowdSidelineFilter::CameraShowsAll()
+{
+    const int stored = gNpCrowdCamType;
+    const int type = stored >= 0 ? stored : (int)cCameraManager::PeekCamera()->GetType();
+    return type != eCameraType_Gameplay && (type != eCameraType_Debug || !sCullCrowdInDebugCamera);
+}
+
+bool CrowdSidelineFilter::IsVisible(const Impostor* impostor)
+{
+    return PositionVisible(impostor) || CameraShowsAll();
+}
+
+// MSC_CROWD_VISFAST (CrowdImpostorManager.cpp): the one filter the crowd has, when it is the sideline filter
+bool CrowdSidelineFilterIs(const CrowdSidelineFilter* filter)
+{
+    return filter != 0 && filter == sCrowdSidelineFilter;
 }
 
 CrowdImpostorCharacter::~CrowdImpostorCharacter()

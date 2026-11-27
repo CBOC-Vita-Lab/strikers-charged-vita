@@ -5,15 +5,15 @@
 # no draw from nlDefaultSeed in CheckScriptTimeBudget).  Then compare the simulation traces.
 #   tools/heavy.sh -t 900 tools/msp/job_pace5.sh        (needs runs/pace3/mB.trace, mC.trace of job_pace3.sh)
 NP=$(cd "$(dirname "$0")/../.." && pwd); cd $NP || exit 1
-B=${BUILD_ROOT:-/home/claude/msc/build/np/MSP}
+B=${BUILD_ROOT:-/work/msc/build/np/MSP}
 EXE=${EXE:-$B/host32/np-host32-full-null}
 OUT=$B/runs/pace5; mkdir -p $OUT
-SAVEDIR=${SAVEDIR:-/home/claude/msc/build/np/B3/rundata-save}
-M=/home/claude/msc/tools/scripts/nav_match60.txt
+SAVEDIR=${SAVEDIR:-/work/msc/build/np/B3/rundata-save}
+M=/work/msc/tools/scripts/nav_match60.txt
 run() {  # run <name> <budget> <frames> [env...]
   local n=$1 nb=$2 f=$3; shift 3
   local D=$OUT/data-$n-$$ T0=$(date +%s); rm -rf $D; mkdir -p $D; cp -a $SAVEDIR/. $D/
-  ( cd $D; env NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$M MSC_MAX_FRAMES=$f MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 \
+  ( cd $D; env NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=$M MSC_MAX_FRAMES=$f MSC_VIRTUAL_TIME=1 MSC_FRAME_LOG=100000 \
       MSC_WATCH=1 MSC_WATCH_EVERY=100000 NP_WIDESCREEN=0 MSC_VIRTUAL_FRAME_US=33000 NP_DET_TRACE=$OUT/$n.trace "$@" \
       timeout -k 3 ${RUNT:-300} gdb -q -batch -ex "set \$nb = $nb" -x $NP/tools/msp/budget.gdb $EXE > $OUT/$n.log 2>&1 )
   rm -rf $D

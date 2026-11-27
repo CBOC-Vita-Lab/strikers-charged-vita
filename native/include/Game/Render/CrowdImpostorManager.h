@@ -49,9 +49,15 @@ class CrowdSidelineFilter
 public:
     CrowdSidelineFilter();
     virtual bool IsVisible(const Impostor* impostor);
+    // IsVisible is PositionVisible(impostor) || CameraShowsAll(); the two halves are separate so that MSC_CROWD_VISFAST can keep the first as a list and test the second once
+    bool PositionVisible(const Impostor* impostor);
+    static bool CameraShowsAll();
+    void PositionKey(float* out3);   // the three numbers PositionVisible reads besides the figure's place
 
     /* 0x04 */ TweakFloatBinding mSidelineCullingDistance;
 }; // size: 0x14
+
+bool CrowdSidelineFilterIs(const CrowdSidelineFilter* filter);   // MSC_CROWD_VISFAST: the crowd's own sideline filter
 
 struct CrowdLayoutRecord
 {
@@ -74,6 +80,7 @@ public:
     void Clear();
     void AddVisibilityFilter(CrowdSidelineFilter* filter);
     void UpdateCrowdVisibility(GLView* view);
+    void UpdateCrowdVisibilityPlain(GLView* view);      // MSC_CROWD_VISFAST: the game's loop
     void ReleaseCrowdImpostors();
     bool IsObjectEnabled(CrowdLayoutObject* object);
     bool IsPointOccluded(const nlVector4& worldPoint, nlVector4& localPoint);

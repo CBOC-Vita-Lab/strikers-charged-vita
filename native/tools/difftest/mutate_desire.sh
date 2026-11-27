@@ -3,8 +3,8 @@
 # compile it to a private object, relink dt_b_mut and compare the Desire tests (200 seeds) with out_da.txt. The real source is never touched.
 DT=$(cd "$(dirname "$0")" && pwd)
 START=${1:-1}; COUNT=${2:-100}
-if [ -f "$DT/../../src/Game/AI/Desire.cpp" ]; then cd "$DT/../.."; else cd /home/claude/msc/npw/NPG; fi
-BR=${BUILD_ROOT:-/home/claude/msc/build/np/NPG}
+if [ -f "$DT/../../src/Game/AI/Desire.cpp" ]; then cd "$DT/../.."; else cd /work/msc/npw/NPG; fi
+BR=${BUILD_ROOT:-/work/msc/build/np/NPG}
 MUT=$BR/dt/mut; mkdir -p $MUT
 O=$BR/host32/obj/src
 cmd=$(make -n TARGET=host32 BUILD_ROOT=/tmp/claude-0/xx /tmp/claude-0/xx/host32/obj/src/Game/AI/Desire.cpp.o 2>&1 | grep -o "clang++ .*Desire.cpp" | head -1 | sed 's/ -MMD.*//; s| [^ ]*Desire.cpp$||')

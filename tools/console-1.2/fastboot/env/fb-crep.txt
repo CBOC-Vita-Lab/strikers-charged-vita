@@ -1,0 +1,10 @@
+# fast boot (test only): Vice, two minutes of a match of goals, each with its celebration and replay (the core session's crep route)
+# Run: emu.sh <tag> <vpk> <this file> <seconds> <routes/fb-crep.txt>   (the route is the console-1.2 route crep.txt, from its `wait ingame == 1` line on)
+# ---- the fast boot is switched on by the route's first line (`bootmatch 13:3:6 ...`): in the emulator the Vita build's env file did not deliver MSC_BOOT_MATCH ----
+# ---- route and logging: as the console-1.2 reference runs ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_RENDER=320x224

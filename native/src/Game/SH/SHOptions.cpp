@@ -17,16 +17,42 @@
 #include "NL/nlBind.h"
 #include "NL/nlString.h"
 #include "Game/FE/feDPD.h"
+#include "Game/FE/feHelpFuncs_decl.h"
+#include "Game/FE/tlTextInstance.h"
+#include "Game/SH/SHVitaSettings.h"
+#include "platform/sdk/include/np/np_text.h"
+#include "platform/sdk/net/np_pause_settings.h"
 
 void BaseSceneHandler::SceneCreated()
 {
 }
+
+namespace {
+// the corner button's label: the game keeps the pointer it is given, so it lives here
+unsigned short g_doneLabel[32];
+
+// the navigation overlay's DONE button has the text "done" in its three states (SHNavigation::SetDoneButtonText); SetButtons/ResetButtons of the next screen put DONE back
+void RelabelDoneButton(TLComponentInstance* done)
+{
+    NpText::ToUtf16(NpText::Tr("VITA SETTINGS"), g_doneLabel, 31);
+    static const char* const kStates[3] = {"off", "over", "down"};
+    for (int i = 0; i < 3; ++i)
+    {
+        TLTextInstance* text = FEFinder<TLTextInstance, 3>::FindOrDefault(done, kStates[i], "Group", "done");
+        if (text != 0)
+            text->SetString(g_doneLabel);
+    }
+}
+} // namespace
 
 OptionsScene::OptionsScene()
     : mBackButton()
     , mPointerButtonsInitialized(false)
     , mScenePhase(PHASE_ENTERING)
     , mNextScene(SCENE_INVALID)
+    , mDoneButton()
+    , mDoneInstance(0)
+    , mDoneOffered(false)
 {
     mOptionButtons[0].mContext = (void*)0;
     mOptionButtons[1].mContext = (void*)1;
@@ -57,6 +83,11 @@ void OptionsScene::SceneCreated()
     }
     mBackButton.SetButtonInstance(screen);
     mBackButton.SetPushBackScene(false);
+    mDoneOffered = NpOptionsSettingsOffer();
+    if (object != 0 && mDoneOffered)
+        mDoneInstance = object->GetButton(NAVIGATION_BUTTON_DONE);
+    if (mDoneInstance == 0)
+        mDoneOffered = false;
 
     for (int i = 0; i < 4; ++i)
     {
@@ -86,12 +117,16 @@ void OptionsScene::Update(float fDeltaT)
             SHNavigation* object = GetNavigationScene();
             if (object != 0)
             {
-                object->SetButtons(NAVIGATION_BUTTON_BACK, true);
+                object->SetButtons(mDoneOffered ? (NAVIGATION_BUTTON_BACK | NAVIGATION_BUTTON_DONE) : NAVIGATION_BUTTON_BACK, true);
+                if (mDoneOffered)
+                    RelabelDoneButton(mDoneInstance);
             }
             mScenePhase = PHASE_CHOOSING;
         }
         else if (mScenePhase == PHASE_EXITING_TO_OPTION)
         {
+            if (mNextScene == SCENE_PAUSE_VITA_SETTINGS)
+                VitaSettingsScene::sFrontEndNext = true;   // the settings panel is made for the front end this time (SHVitaSettings.h)
             GameSceneManager::Instance()->Push(mNextScene, SCREEN_NOTHING, true);
             return;
         }
@@ -144,6 +179,8 @@ void OptionsScene::Update(float fDeltaT)
         {
             mOptionButtons[j].HandlePointerEvent(&event);
         }
+        if (mDoneOffered)
+            mDoneButton.HandlePointerEvent(&event);
     }
 }
 
@@ -153,6 +190,8 @@ void OptionsScene::OnButtonPointerPress(int, void* context)
     {
         mOptionButtons[i].Disable();
     }
+    if (mDoneOffered)
+        mDoneButton.Disable();
 
     for (int i = 0; i < 4; ++i)
     {
@@ -209,6 +248,56 @@ void OptionsScene::OnButtonPointerLeave(int index, void* context)
     }
 }
 
+void OptionsScene::OnDonePointerPress(int, void*)
+{
+    if (!NpOptionsSettingsPress())
+        return;
+    for (int i = 0; i < 3; ++i)
+    {
+        mOptionButtons[i].Disable();
+    }
+    mDoneButton.Disable();
+
+    for (int i = 0; i < 4; ++i)
+    {
+        GetPointerInstance(i)->SetActiveSlide("waiting", true, false);
+    }
+
+    mDoneInstance->SetActiveSlide("down", true, false);
+    FEAudio::PlayAnimAudioEvent(0xF0AFD586, 0, 0, 1);
+    FEAudio::PlayAnimAudioEvent(0x304FDD1E, 0, 0, 1);
+    mNextScene = SCENE_PAUSE_VITA_SETTINGS;
+    mScenePhase = PHASE_EXITING_TO_OPTION;
+
+    SHNavigation* object = GetNavigationScene();
+    if (object != 0)
+    {
+        object->HideButtons();
+    }
+
+    mPresentation->SetActiveSlide("out", true);
+    mPresentation->Update(0.0f);
+}
+
+void OptionsScene::OnDonePointerEnter(int index, void*)
+{
+    mDoneButton.SetPointerState(POINTER_BUTTON_HOVER, index);
+    if (!mDoneButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        mDoneInstance->SetActiveSlide("over", true, false);
+        FEAudio::PlayAnimAudioEvent(0xAA73EF33, 0, 0, 1);
+    }
+}
+
+void OptionsScene::OnDonePointerLeave(int index, void*)
+{
+    mDoneButton.SetPointerState(POINTER_BUTTON_NORMAL, index);
+    if (!mDoneButton.HasOtherPointerState(POINTER_BUTTON_HOVER, index))
+    {
+        mDoneInstance->SetActiveSlide("off", true, false);
+    }
+}
+
 void OptionsScene::InitializePointerButtons()
 {
     typedef Detail::MemFunImpl<void, void (OptionsScene::*)(int, void*)> PointerMethod;
@@ -231,5 +320,19 @@ void OptionsScene::InitializePointerButtons()
         mOptionButtons[i].SetPointerEnterCallback(over);
         mOptionButtons[i].SetPointerLeaveCallback(off);
         mOptionButtons[i].SetPointerPressCallback(select);
+    }
+
+    if (mDoneOffered)
+    {
+        FEPointerListener::Callback doneOver(
+            PointerBinding(MemFun(&OptionsScene::OnDonePointerEnter), this, Placeholder<0>(), Placeholder<1>()));
+        FEPointerListener::Callback doneOff(
+            PointerBinding(MemFun(&OptionsScene::OnDonePointerLeave), this, Placeholder<0>(), Placeholder<1>()));
+        FEPointerListener::Callback donePress(
+            PointerBinding(MemFun(&OptionsScene::OnDonePointerPress), this, Placeholder<0>(), Placeholder<1>()));
+        SetDoneButtonBounds(&mDoneButton, mDoneInstance, 0);
+        mDoneButton.SetPointerEnterCallback(doneOver);
+        mDoneButton.SetPointerLeaveCallback(doneOff);
+        mDoneButton.SetPointerPressCallback(donePress);
     }
 }

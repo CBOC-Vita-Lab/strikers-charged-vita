@@ -5,6 +5,8 @@
 // back end would have to (so the cost of *reading* a frame's buffer shows up
 // on the render thread in profiles).
 #include "vgx_cmd.h"
+#include "vgx_drawcensus.h"
+#include "vgx_hsrcensus.h"
 
 namespace vgx {
 
@@ -21,6 +23,7 @@ uint64_t g_walkSum = 0;
 }
 
 bool Init(int, int) { return true; }
+int PrewarmPicturePrograms(int) { return 0; }
 
 // The same answers as the GL back end's (vgx_backend_gl.cpp), so that a run on this back
 // end hands over exactly what a run on that one would be handed.
@@ -32,6 +35,9 @@ const Caps& GetCaps() {
         c.mipGen = EnvInt("MSC_VGX_MIPGEN", vita) != 0;
         c.mipClamp = EnvInt("MSC_VGX_MIPCLAMP", vita) != 0;
         c.la88 = EnvInt("MSC_VGX_LA88", 0) != 0;
+        c.laMips = EnvInt("MSC_VGX_LA88", 0) >= 3;
+        c.i8 = EnvInt("MSC_VGX_LA88", 0) >= 2;   // 1.3: I4 and I8 as one byte a texel
+        c.i8churn = EnvInt("MSC_VGX_I8CHURN", 0) != 0;   // walk15: churning I8 textures (movie planes) as one byte a texel
         return c;
     }();
     return caps;
@@ -42,8 +48,10 @@ void ExecuteEx(const CmdBuf& buf, const ExecOpts& opts) {
 }
 
 void Execute(const CmdBuf& buf) {
-    static const bool walk = EnvInt("MSC_VGX_NULL_WALK", 0) != 0;
+    const bool walk = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_NULL_WALK", 0) != 0));
     g_stats.drawCallsThisFrame = 0;
+    drawcensus::Note(buf); // (MSC_VGX_DRAWCENSUS, diagnostics)
+    hsrcensus::Note(buf);  // (MSC_VGX_HSRCENSUS, diagnostics)
     for (const Cmd& c : buf.cmds) {
         switch (c.type) {
         case CMD_DRAW: ++g_stats.drawCallsThisFrame; break;
@@ -72,6 +80,8 @@ const std::vector<uint8_t>& LastDisplayCopy(int& width, int& height) {
 }
 void RequestCapture(bool) {}
 void SetPresentHook(PresentHook) {}
+void SetPresentSplit(PresentSplitHook, PresentFinishHook) {}
+void SetRenderShape(int, int) {}
 void SetSceneHintHook(SceneHintHook) {}
 void SetGpuTimeSource(GpuTimeFn) {}
 float RenderScale() { return 1.0f; }

@@ -27,7 +27,7 @@ int npa_cvt_bytecode(NpaCtx* c, uint8_t* p, size_t size)
     uint32_t count;
     if (size < BC_HEADER_SIZE)
     {
-        npa_err(c, NPA_ERR_FORMAT, "byte code of %zu bytes is smaller than its header", size);
+        npa_err(c, NPA_ERR_FORMAT, "byte code of %lu bytes is smaller than its header", (unsigned long)size);
         return NPA_ERR_FORMAT;
     }
     if (npa_hrd32(p) == BC_SIGNATURE && npa_rd32(p) != BC_SIGNATURE) return NPA_ALREADY;
@@ -53,8 +53,8 @@ int npa_cvt_bytecode(NpaCtx* c, uint8_t* p, size_t size)
     end = ss + stringSize;
     if (end > size || (globalSize & 3) || (dataSize & 3) || (codeSize & 1) || numVars < numGlobals)
     {
-        npa_err(c, NPA_ERR_BOUNDS, "byte code sections (%llu bytes, functions %u, tweaks %u, globals %u, data %u, code %u, strings %u) vs a %zu byte file",
-                (unsigned long long)end, nf, tweakSize, globalSize, dataSize, codeSize, stringSize, size);
+        npa_err(c, NPA_ERR_BOUNDS, "byte code sections (%llu bytes, functions %u, tweaks %u, globals %u, data %u, code %u, strings %u) vs a %lu byte file",
+                (unsigned long long)end, nf, tweakSize, globalSize, dataSize, codeSize, stringSize, (unsigned long)size);
         return NPA_ERR_BOUNDS;
     }
     /* header incl. the pointer slots the loader fills in */
@@ -148,7 +148,7 @@ int npa_convert_trg(void* data, size_t size, NpaResult* res)
     bco = npa_rd16(p + 8);
     if (bco < TRG_HEADER_SIZE + TRG_ANIM_SIZE * nanim || bco > size || (bco - TRG_HEADER_SIZE - TRG_ANIM_SIZE * nanim) % TRG_TRIGGER_SIZE)
     {
-        npa_err(&c, NPA_ERR_BOUNDS, "trg: %u animations and byte code at 0x%x do not fit a %zu byte file", nanim, bco, size);
+        npa_err(&c, NPA_ERR_BOUNDS, "trg: %u animations and byte code at 0x%x do not fit a %lu byte file", nanim, bco, (unsigned long)size);
         return res->status;
     }
     ntrig = (bco - TRG_HEADER_SIZE - TRG_ANIM_SIZE * nanim) / TRG_TRIGGER_SIZE;
@@ -199,13 +199,13 @@ int npa_convert_loc(void* data, size_t size, NpaResult* res)
     lookup_end = LOC_HEADER_SIZE + (size_t)count * 8;
     if (count > 100000 || lookup_end > size)
     {
-        npa_err(&c, NPA_ERR_BOUNDS, "loc: %u strings do not fit %zu bytes", count, size);
+        npa_err(&c, NPA_ERR_BOUNDS, "loc: %u strings do not fit %lu bytes", count, (unsigned long)size);
         return res->status;
     }
     if (npa_swap32_range(&c, p + 4, 4, p, p + size)) return res->status;           /* version .. flags */
     if (npa_swap32_range(&c, p + LOC_HEADER_SIZE, count * 2, p, p + size)) return res->status; /* hash, offset */
     tail = size - lookup_end;
-    NPA_EXPECT(&c, (tail & 1) == 0, "loc string area has an odd %zu bytes", tail);
+    NPA_EXPECT(&c, (tail & 1) == 0, "loc string area has an odd %lu bytes", (unsigned long)tail);
     if (npa_swap16_range(&c, p + lookup_end, tail / 2, p, p + size)) return res->status; /* UTF-16 */
     return npa_finish(&c, 0);
 }
@@ -271,7 +271,7 @@ int npa_convert_bundlefile(void* data, size_t size, NpaResult* res)
     p = c.base;
     if (size < 16)
     {
-        npa_err(&c, NPA_ERR_FORMAT, "bundle of %zu bytes", size);
+        npa_err(&c, NPA_ERR_FORMAT, "bundle of %lu bytes", (unsigned long)size);
         return res->status;
     }
     /* nSectorSize is 0x20 on every shipped file: a host-order 0x20 means converted */
@@ -282,7 +282,7 @@ int npa_convert_bundlefile(void* data, size_t size, NpaResult* res)
     dataoff = npa_rd32(p + 12);
     if (sector == 0 || sector > 65536 || n > BUNDLE_MAXFILES || (n && ((uint64_t)diroff * sector + 12ull * n > size || (uint64_t)dataoff * sector > size)))
     {
-        npa_err(&c, NPA_ERR_FORMAT, "bundle header: sector %u files %u directory@%u data@%u in %zu bytes", sector, n, diroff, dataoff, size);
+        npa_err(&c, NPA_ERR_FORMAT, "bundle header: sector %u files %u directory@%u data@%u in %lu bytes", sector, n, diroff, dataoff, (unsigned long)size);
         return res->status;
     }
     dir = p + (size_t)diroff * sector;

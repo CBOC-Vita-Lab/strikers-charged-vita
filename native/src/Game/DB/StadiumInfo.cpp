@@ -119,6 +119,11 @@ static StadiumInfo sStadiumInfo[NUM_STADIUMS] = {
         true, false, false, false },
 };
 
+int GetStadiumCount()
+{
+    return NUM_STADIUMS;
+}
+
 const char* GetStadiumName(int stadium)
 {
     return sStadiumInfo[stadium].mName;

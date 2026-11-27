@@ -304,6 +304,12 @@ void TransportMessage::Serialize(
             &mUnreliableCount, sizeof(mUnreliableCount));
         if (serializer->mDirection == 0)
         {
+            if (mUnreliableCount > 16)   // np (STR-144): the arrays hold 16 packets; a datagram that claims more is refused
+            {
+                serializer->mFailed = true;
+                mUnreliableCount = 0;
+                return;
+            }
             for (int i = 0; i < mUnreliableCount; ++i)
             {
                 TransportPacket* packet =
@@ -327,6 +333,12 @@ void TransportMessage::Serialize(
         sizeof(mReliableCount));
     if (serializer->mDirection == 0)
     {
+        if (mReliableCount > 16)
+        {
+            serializer->mFailed = true;
+            mReliableCount = 0;
+            return;
+        }
         for (int i = 0; i < mReliableCount; ++i)
         {
             TransportPacket* packet =
@@ -350,6 +362,12 @@ void TransportMessage::SerializeVoice(NetworkMessageSerializer* serializer)
     serializer->Transfer(&mVoiceCount, sizeof(mVoiceCount));
     if (serializer->mDirection == 0)
     {
+        if (mVoiceCount > 16)
+        {
+            serializer->mFailed = true;
+            mVoiceCount = 0;
+            return;
+        }
         for (int i = 0; i < mVoiceCount; ++i)
         {
             TransportPacket* packet =

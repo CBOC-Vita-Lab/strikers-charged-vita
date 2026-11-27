@@ -1,11 +1,11 @@
 #!/bin/bash
-# (copied into the repo from /home/claude/msc/npw/SKIN.v2.sh; run as one heavy.sh turn: tools/heavy.sh -t 1500 tools/skin/seed_v3k.sh, STEP=seed for the seed only)
+# (copied into the repo from /work/msc/npw/SKIN.v2.sh; run as one heavy.sh turn: tools/heavy.sh -t 1500 tools/skin/seed_v3k.sh, STEP=seed for the seed only)
 # SKIN v2 (ONE heavy turn, NOHEAVY inside): shader keys of the switches -> delta list -> Vita3K delta compile in my own profile (pre-filled with the W5SEED seed's
 # GXPs) -> seed-skin -> test packages (seed added, nothing rebuilt) -> Vita3K match60 in a FRESH profile with the seeded lab package and both switches on.
-#   heavy.sh -t 1500 /home/claude/msc/npw/SKIN.v2.sh            STEP=seed|match (default both)
-cd /home/claude/msc/npw/W5SKIN || exit 1
-R=/home/claude/msc/build/np/W5SKIN; S=$R/seed; U=$S/union; mkdir -p $U
-W=/home/claude/msc/build/np/W5SEED/seed-core/shadercache
+#   heavy.sh -t 1500 /work/msc/npw/SKIN.v2.sh            STEP=seed|match (default both)
+cd /work/msc/npw/W5SKIN || exit 1
+R=/work/msc/build/np/W5SKIN; S=$R/seed; U=$S/union; mkdir -p $U
+W=/work/msc/build/np/W5SEED/seed-core/shadercache
 LAB=$R/lto/vita/pkg/np/mscharged-np.vpk; PLAYER=$R/lto/vita/pkg-player/np/mscharged-np.vpk
 SC=$R/tools/seedcheck
 export NOHEAVY=1
@@ -50,5 +50,5 @@ if [ "${STEP:-match}" != seed ]; then
   echo "match: gxp in cache $(find $C -name '*.gxp' | wc -l); written after the seed copy (libshacccg compiles): $([ -n "$M" ] && find $C -name '*.gxp' -newer $M | wc -l || echo 'no seed marker')"
   grep -a "\[softinst\]\|GPU skinning\|FAILED\|STALL\|CRASH\|script end\|vitaGL:" $R/v3k-runs/m-on/log.txt | tail -12
 fi
-[ "${STEP:-x}" != seed ] && { echo "== qemu: final armhf exe with both switches off (the off path's cost) $(date +%T)"; /home/claude/msc/npw/W5SKIN/tools/skin/qsurvey.sh before2; }
+[ "${STEP:-x}" != seed ] && { echo "== qemu: final armhf exe with both switches off (the off path's cost) $(date +%T)"; /work/msc/npw/W5SKIN/tools/skin/qsurvey.sh before2; }
 echo "== SKIN.v2 done $(date +%T)"

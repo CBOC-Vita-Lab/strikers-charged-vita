@@ -1,0 +1,13 @@
+# console-1.2 run cellclear0: Atlas-cell clears back to one glClear each
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group gpu, route tour, version payload 1.3, role ab
+# MSC_VGX_CELLCLEAR is on by default in the player build (the clears of the crowd-impostor atlas cells, about 27 scissored glClear calls a frame in open play, are made as one quad draw per run of cells; colour 0 and depth 1 to the bit, pictures equal on the host). This run is the A/B: one glClear per cell. Compare the frame time and the GPU time of open play.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_CELLCLEAR=0

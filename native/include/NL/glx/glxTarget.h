@@ -34,7 +34,7 @@ public:
     virtual void ClearBuffers(bool clearColourBuffer, bool clearDepthBuffer, bool unknown);
     virtual void ReservedTargetHookB();
 
-    void CopyToTexture(bool flag0, bool flag1);
+    void CopyToTexture(bool flag0, bool flag1, bool clearOnly = false);
 
     /* 0x04 */ unsigned long mTextureHash;
     /* 0x08 */ void* mTextureData;
@@ -52,6 +52,6 @@ public:
 GLXTarget* glplatGetBackBufferTarget();
 void glxInitTargets();
 GLXTarget* glplatCreateTarget(const GLTargetInfo* targetInfo);
-void glplatCopyTargetToTexture(GLXTarget* target, bool flag0, bool flag1);
+void glplatCopyTargetToTexture(GLXTarget* target, bool flag0, bool flag1, bool clearOnly = false);
 
 #endif // NL_GLX_GLXTARGET_H

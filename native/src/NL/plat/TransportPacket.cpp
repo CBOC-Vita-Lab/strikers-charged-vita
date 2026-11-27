@@ -29,8 +29,7 @@ void TransportPacket::SerializeReliable(NetworkMessageSerializer* serializer)
     }
     else
     {
-        memcpy(&value, serializer->mPosition, sizeof(value));
-        serializer->mPosition += sizeof(value);
+        serializer->Transfer(&value, sizeof(value));   // np (STR-144): bounds-checked reads
         if ((mType = value) == 1)
         {
             mType = 0;
@@ -52,11 +51,16 @@ void TransportPacket::SerializeReliable(NetworkMessageSerializer* serializer)
     else
     {
         u8 size = 0;
-        memcpy(&size, serializer->mPosition, sizeof(size));
-        serializer->mPosition += sizeof(size);
+        serializer->Transfer(&size, sizeof(size));
         mSize = size;
     }
 
+    if (serializer->mDirection == 0 && mSize > sizeof(mPayload))   // np (STR-144): the payload buffer holds 0x202 bytes
+    {
+        serializer->mFailed = true;
+        mSize = 0;
+        return;
+    }
     serializer->Transfer(mPayload, mSize);
 }
 
@@ -74,6 +78,12 @@ int TransportPacket::GetReliableSize() const
 void TransportPacket::SerializeUnreliable(NetworkMessageSerializer* serializer)
 {
     serializer->Transfer(&mSize, sizeof(mSize));
+    if (serializer->mDirection == 0 && mSize > sizeof(mPayload))   // np (STR-144)
+    {
+        serializer->mFailed = true;
+        mSize = 0;
+        return;
+    }
     serializer->Transfer(mPayload, mSize);
 }
 

@@ -21,7 +21,9 @@ namespace vgx::hdtex {
 //   MSC_HDTEX_TRILINEAR=1  sample replaced textures with GL_LINEAR_MIPMAP_LINEAR (default 0:
 //                          GL_LINEAR_MIPMAP_NEAREST, the cost of the original bilinear fetch)
 //   MSC_HDTEX_LOG=<n>      log the first n replacements by name (default 48)
-void Install(void (*log)(const char* fmt, ...));
+//   MSC_HDTEX_FACES=1      replace the blink's eye frames too (<c>_eye0/1/2; default 0: the game's own, see Install)
+void Install(void (*log)(const char* fmt, ...) __attribute__((format(printf, 1, 2))));
+bool IsEyeFrameName(const char* names);   // (for the host test) the pack's name list of an entry names an eye frame
 
 struct Counters {
     uint64_t hashed = 0;    // uploads whose format and size occur in the pack (their texels were hashed)
@@ -34,5 +36,7 @@ struct Counters {
     uint32_t entries = 0;   // textures in the pack (0: no pack / off)
 };
 void GetCounters(Counters& c);
+int Requested();   // MSC_HDTEX as read: 0 off, 1 on, 2 dry run (the run header)
+int Mode();        // what is in force: 0 off or no usable pack, 1 replacing, 2 dry run
 
 } // namespace vgx::hdtex

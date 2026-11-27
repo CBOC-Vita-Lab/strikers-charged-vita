@@ -1,0 +1,14 @@
+# console-1.2 run bus166: Bus at 166 MHz instead of 222
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group hardware, route tour, version payload 1.3, role ab
+# Against gpufix. Growth of GPU time is the share waiting on main memory (shader code, vertices, uniforms); the CPU lanes will move too, so read [lane] gpu, not the frame rate.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VITA_BUS_MHZ=166
+MSC_DYNRES=0

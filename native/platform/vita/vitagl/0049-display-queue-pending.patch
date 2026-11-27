@@ -1,0 +1,91 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: display queue pending limit (vglSetDisplayQueuePending) and sceGxmDisplayQueueAddEntry timing (MSC_VITA_DQ_PENDING, MSC_VITA_DQ_TIMING)
+
+MH3 (Grarak/mh3-wii presentation.md) runs 3 display buffers with sceGxm displayQueueMaxPendingCount = 4; vitaGL sets buffers - 1. vglSetDisplayQueuePending(n) sets the limit (0 = vitaGL default, so nothing changes unless asked), vglSetDisplayQueueTiming times AddEntry (off: no clock read).
+
+diff --git a/source/gxm.c b/source/gxm.c
+index 2dc61ccf..51858557 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -65,6 +65,11 @@ static uint32_t vgl_disp_made = 0, vgl_disp_freed = 0, vgl_disp_failed = 0;
+ #define VGL_DISP_QUIET_SWAPS 90
+ // 0042: parameter buffer in main memory (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR) for a normal application: 0 not asked, 1 taken, -1 refused (fell back)
+ static GLboolean vgl_pb_lpddr_want = GL_FALSE;
++// 0049: display queue pending count (0 = vitaGL's own, buffers - 1) and the time sceGxmDisplayQueueAddEntry takes (off by default: no clock read)
++static uint32_t vgl_dq_pending_want = 0;
++static GLboolean vgl_dq_timing = GL_FALSE;
++static uint32_t vgl_dq_last_us = 0, vgl_dq_max_us = 0, vgl_dq_adds = 0, vgl_dq_slow = 0, vgl_dq_pending_used = 0;
++static uint64_t vgl_dq_total_us = 0;
+ int vgl_pb_lpddr_state = 0;
+ int vgl_pb_lpddr_rc = 0;
+ uint32_t vgl_pb_lpddr_shrink = 0;
+@@ -773,7 +778,8 @@ void init_gxm(void) {
+ 	if (system_app_mode) {
+ 		gxm_init_params.flags |= (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR | SCE_GXM_INITIALIZE_FLAG_SHARED_SYNC | SCE_GXM_INITIALIZE_FLAG_SHAREDPB_CREATE | SCE_GXM_INITIALIZE_FLAG_SHAREDPB_OPEN);
+ 	}
+-	gxm_init_params.displayQueueMaxPendingCount = gxm_display_buffer_count - 1;
++	gxm_init_params.displayQueueMaxPendingCount = vgl_dq_pending_want ? vgl_dq_pending_want : gxm_display_buffer_count - 1;
++	vgl_dq_pending_used = gxm_init_params.displayQueueMaxPendingCount;
+ 	gxm_init_params.displayQueueCallback = display_queue_callback;
+ 	gxm_init_params.displayQueueCallbackDataSize = sizeof(struct display_queue_callback_data);
+ 	gxm_init_params.parameterBufferSize = gxm_param_buf_size;
+@@ -1300,6 +1306,24 @@ void vglSetParamBufferSize(uint32_t size) {
+ 	gxm_param_buf_size = size;
+ }
+ 
++// 0049: sceGxm's display queue limit (displayQueueMaxPendingCount) in place of buffers - 1; 0 = vitaGL's own. Must be called before vglInit* (and after the buffer count is set).
++void vglSetDisplayQueuePending(GLint n) {
++	vgl_dq_pending_want = n > 0 ? (n > 8 ? 8 : (uint32_t)n) : 0;
++}
++
++// 0049: time sceGxmDisplayQueueAddEntry in vglSwapBuffers (when on). Stats: the last call, the longest, calls, calls of 2 ms or more, the limit given to sceGxm, the total us.
++void vglSetDisplayQueueTiming(GLint on) {
++	vgl_dq_timing = on ? GL_TRUE : GL_FALSE;
++}
++void vglDisplayQueueStats(uint32_t *last_us, uint32_t *max_us, uint32_t *adds, uint32_t *slow, uint32_t *pending, uint64_t *total_us) {
++	if (last_us) *last_us = vgl_dq_last_us;
++	if (max_us) *max_us = vgl_dq_max_us;
++	if (adds) *adds = vgl_dq_adds;
++	if (slow) *slow = vgl_dq_slow;
++	if (pending) *pending = vgl_dq_pending_used;
++	if (total_us) *total_us = vgl_dq_total_us;
++}
++
+ // 0042: ask for the parameter buffer in main memory (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR) in a normal application; before vglInit*. State: vglParamBufferLpddrState.
+ void vglSetParamBufferLpddr(GLint on) {
+ 	vgl_pb_lpddr_want = on ? GL_TRUE : GL_FALSE;
+@@ -1531,6 +1555,18 @@ void vglSwapBuffers(GLboolean has_commondialog) {
+ #ifdef HAVE_PROFILING
+ 		tick = sceKernelGetProcessTimeLow();
+ #endif
++		if (vgl_dq_timing) {
++			const uint32_t dq_t0 = sceKernelGetProcessTimeLow();
++			sceGxmDisplayQueueAddEntry(gxm_sync_objects[gxm_front_buffer_index], gxm_sync_objects[gxm_back_buffer_index], &queue_cb_data);
++			const uint32_t dq_us = sceKernelGetProcessTimeLow() - dq_t0;
++			vgl_dq_last_us = dq_us;
++			vgl_dq_total_us += dq_us;
++			vgl_dq_adds++;
++			if (dq_us > vgl_dq_max_us)
++				vgl_dq_max_us = dq_us;
++			if (dq_us >= 2000)
++				vgl_dq_slow++;
++		} else
+ 		sceGxmDisplayQueueAddEntry(gxm_sync_objects[gxm_front_buffer_index], gxm_sync_objects[gxm_back_buffer_index], &queue_cb_data);
+ #ifdef HAVE_PROFILING
+ 		gpu_stall_cnt += sceKernelGetProcessTimeLow() - tick;
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index b073f632..d3ff1c45 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1405,6 +1405,11 @@ void vglDisplayDepthStats(uint32_t *mode, uint32_t *real, uint32_t *made, uint32
+ void vglSetParamBufferLpddr(GLint on);
+ int vglParamBufferLpddrState(int *rc, uint32_t *shrink);
+ 
++// 0049: display queue pending limit (0 = buffers - 1, vitaGL's own) before vglInit*; timing of sceGxmDisplayQueueAddEntry.
++void vglSetDisplayQueuePending(GLint n);
++void vglSetDisplayQueueTiming(GLint on);
++void vglDisplayQueueStats(uint32_t *last_us, uint32_t *max_us, uint32_t *adds, uint32_t *slow, uint32_t *pending, uint64_t *total_us);
++
+ // Perform a display buffer swap. Equivalent of eglSwapBuffers but allows support with Common Dialog.
+ void vglSwapBuffers(GLboolean has_commondialog);
+ 

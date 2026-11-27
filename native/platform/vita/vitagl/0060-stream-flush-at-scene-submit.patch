@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 12:00:00 -0500
+Subject: [PATCH] cache25 (MSC_VITA_STREAM_CACHED): the cached stream arena is written back ONCE per scene submit (gxm.c scene_end, before sceGxmEndScene) instead of before every draw; vglSetStreamFlushAtScene(on) switches it (default off: the per-draw write-back of 0001/0054 stays); vglGlbStats version 5 adds stream_scene_flushes
+
+---
+diff --git a/source/gxm.c b/source/gxm.c
+index 20b9d5f4a..ed5de3926 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -1092,6 +1092,7 @@ void start_shader_patcher(void) {
+ static inline __attribute__((always_inline)) void scene_end(void) {
+ 	VGL_LC_SYNC(); // (LAZY_CLEAR: the state of the clear is restored inside the scene it belongs to)
+ 	// Ends current gxm scene
++	VGL_STREAM_SCENE_SUBMIT() // 0060: the cached stream arena is written back before the GPU can read the scene's data
+ 	query_fence.value++;
+ 	if (vgl_rt_flags & VGL_RT_GPU_TIMERS) // RT: the scene's own fragment notification for the GPU timer (rt.c)
+ 		vgl_rt_end_scene(gxm_context);
+diff --git a/source/shared.h b/source/shared.h
+index a9b6be5bd..65e88f3d7 100644
+--- a/source/shared.h
++++ b/source/shared.h
+@@ -112,16 +112,19 @@ extern GLboolean vgl_stream_wants_scratch;
+ // GLB: statistics, cached stream arena (vgl.c)
+ #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+ extern uint32_t vgl_glb_pool_overruns, vgl_glb_pool_overrun_bytes, vgl_glb_pool_frame_peak, vgl_glb_pool_peak, vgl_glb_pool_odd;
+-extern GLboolean vgl_stream_cached, vgl_stream_unflushed;
++extern GLboolean vgl_stream_cached, vgl_stream_unflushed, vgl_stream_scene_mode;
++extern uint32_t vgl_stream_scene_flushes;
+ uint8_t *vgl_reserve_stream_pool(uint32_t size);
+ void vgl_stream_flush(void);
+ void vgl_glb_frame_end(void);
+ void vgl_stream_next_slice(void);
+ void vgl_stream_init(int count);
+ void vgl_stream_touch(const void *addr);
+-#define VGL_STREAM_FLUSH_IF_NEEDED() if (vgl_stream_unflushed) vgl_stream_flush();
++#define VGL_STREAM_FLUSH_IF_NEEDED() if (vgl_stream_unflushed && !vgl_stream_scene_mode) vgl_stream_flush(); // 0060: scene mode writes back at the scene submit instead
++#define VGL_STREAM_SCENE_SUBMIT() if (vgl_stream_unflushed) { vgl_stream_scene_flushes++; vgl_stream_flush(); } // 0060: gxm.c scene_end, right before sceGxmEndScene
+ #else
+ #define VGL_STREAM_FLUSH_IF_NEEDED()
++#define VGL_STREAM_SCENE_SUBMIT()
+ #endif
+ void vgl_glb_count_tables(uint32_t *progs, uint32_t *shaders, uint32_t *progs_max, uint32_t *shaders_max); // custom_shaders.c
+ // RT: scene depth/stencil load and store, scene and GPU timers (rt.c)
+diff --git a/source/vgl.c b/source/vgl.c
+index 0fb4ef12c..156a9fdfb 100644
+--- a/source/vgl.c
++++ b/source/vgl.c
+@@ -802,6 +802,8 @@ void vglSetTextureCacheFrequency(GLuint freq) {
+ // ---- GLB: cached stream arena -------------------------------------------------------------------------------------------------------------------------
+ #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+ GLboolean vgl_stream_cached = GL_FALSE, vgl_stream_unflushed = GL_FALSE;
++GLboolean vgl_stream_scene_mode = GL_FALSE; // 0060: the write-back is made once at the scene submit (gxm.c scene_end), not before every draw
++uint32_t vgl_stream_scene_flushes = 0;
+ static uint32_t stream_slice_req = 0, stream_slice = 0;
+ static int stream_mem = 0; // vglStreamMem: 0 cached RAM + write-back, 1 CDRAM (write-combined, nothing to write back), 2 uncached RAM (diagnostic)
+ static vglCacheFlushFn stream_flush_fn = NULL;
+@@ -849,7 +851,8 @@ uint8_t *vgl_reserve_stream_pool(uint32_t size) {
+ 	return vgl_reserve_data_pool(size);
+ }
+ 
+-// Writes back what was reserved since the last flush. Called before a draw (VGL_STREAM_FLUSH_IF_NEEDED) and at the frame end.
++// Writes back what was reserved since the last flush. Called before a draw (VGL_STREAM_FLUSH_IF_NEEDED), in scene mode (0060) before sceGxmEndScene
++// (VGL_STREAM_SCENE_SUBMIT: the GPU reads the scene's vertex and index data after the submit, never before), and at the frame end.
+ void vgl_stream_flush(void) {
+ 	vgl_stream_unflushed = GL_FALSE;
+ 	uint8_t *from = stream_flushed[vgl_circular_idx], *to = stream_ptr[vgl_circular_idx];
+@@ -915,6 +918,13 @@ void vglSetupCachedStream(uint32_t slice_bytes, vglCacheFlushFn flush) {
+ 	vglSetupStreamArena(slice_bytes, VGL_STREAM_CACHED, flush);
+ }
+ 
++// 0060 (MSC_VITA_STREAM_CACHED): cached arena written back once per scene submit instead of before every draw. Only meaningful with a cached arena (VGL_STREAM_CACHED).
++void vglSetStreamFlushAtScene(GLboolean on) {
++#if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
++	vgl_stream_scene_mode = on ? GL_TRUE : GL_FALSE;
++#endif
++}
++
+ extern GLboolean vgl_glb_ring_cdram_req, vgl_glb_ring_cdram;
+ void vglSetUniformRingMem(int cdram) {
+ 	vgl_glb_ring_cdram_req = cdram ? GL_TRUE : GL_FALSE;
+@@ -932,7 +942,7 @@ void vglSetUniHistCap(uint32_t bytes) {
+ 
+ void vglGlbGetStats(vglGlbStats *s) {
+ 	vgl_memset(s, 0, sizeof(*s));
+-	s->version = 4;
++	s->version = 5;
+ 	{
+ 		extern uint32_t vgl_uni_stat[7];
+ 		s->uni_copies = vgl_uni_stat[0];
+@@ -975,6 +985,7 @@ void vglGlbGetStats(vglGlbStats *s) {
+ 	s->stream_overrun_bytes = stream_overrun_bytes;
+ 	s->stream_flushes = stream_flushes;
+ 	s->stream_flushed_bytes = stream_flushed_bytes;
++	s->stream_scene_flushes = vgl_stream_scene_flushes;
+ #endif
+ 	s->ring_bytes = vgl_glb_ring_size;
+ 	s->ring_cdram = vgl_glb_ring_cdram;
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 1b1085650..0d8c17ed8 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1468,6 +1468,8 @@ typedef void (*vglCacheFlushFn)(void *addr, uint32_t size);
+ typedef enum { VGL_STREAM_CACHED = 0, VGL_STREAM_CDRAM = 1, VGL_STREAM_UNCACHED = 2 } vglStreamMem;
+ void vglSetupStreamArena(uint32_t slice_bytes, int mem, vglCacheFlushFn flush);
+ void vglSetupCachedStream(uint32_t slice_bytes, vglCacheFlushFn flush); // = vglSetupStreamArena(slice_bytes, VGL_STREAM_CACHED, flush)
++// 0060 (MSC_VITA_STREAM_CACHED): with a cached arena, write it back once before sceGxmEndScene instead of before every draw (the GPU reads a scene's vertex and index data after the submit). Default off.
++void vglSetStreamFlushAtScene(GLboolean on);
+ 
+ // The uniform ring (8 MiB in our builds; every draw copies its uniform buffers into it, ~330 KB per open-play frame) in CDRAM (write-combined) instead of the
+ // uncached RAM of the CPU-visible pool. Default: off. Must be called before vglInit*; if the CDRAM block cannot be had the ring stays where it was.
+@@ -1523,6 +1525,8 @@ typedef struct {
+ 	// version 4 (be26): default uniform buffers (vertex and fragment together): copies made to the ring and their bytes; draws that named the last copy again (vglSetDrawCaches uni_reuse >= 1) and the bytes not copied; draws that named an older copy of the
+ 	// same scene (uni_reuse 2) and the bytes not copied
+ 	uint32_t uni_copies, uni_copy_bytes, uni_last_hits, uni_last_bytes, uni_hist_hits, uni_hist_bytes, uni_bad; // uni_bad: only in uni_reuse 3 (verify): reuses whose ring copy differed from the buffer at that draw (must be 0)
++	// version 5 (0060): flushes of the cached stream arena made at a scene submit (vglSetStreamFlushAtScene); stream_flushes counts all write-back calls, stream_flushed_bytes their bytes
++	uint32_t stream_scene_flushes;
+ } vglGlbStats;
+ // Fills *s (all counters are cumulative; the *_frame_peak ones are the last finished frame's).
+ void vglGlbGetStats(vglGlbStats *s);

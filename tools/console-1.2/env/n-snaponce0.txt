@@ -1,0 +1,14 @@
+# console-1.2 run n-snaponce0: Packet copy at the attach and at the fork, as 1.2
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group cpu, route ntour, version payload 1.3, role nab
+# MSC_FS_SNAPONCE is on in 1.3: exact, the same bytes for the send. This is its A/B: game thread ms and p50 against d1.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/ntour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_FS_SNAPONCE=0

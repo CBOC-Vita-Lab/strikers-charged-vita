@@ -17,6 +17,9 @@
 #include "Game/main.h"
 #include "Game/NetworkInput.h"
 #include "Game/NetworkSync.h"
+#ifdef NP_NATIVE
+#include "np/online_clock.h"
+#endif
 
 #include "NL/nlMemory.h"
 #include "types.h"
@@ -50,6 +53,18 @@ void NetworkUpdateTask::Initialize()
     }
 
     NetworkStatsManager::CreateInstance();
+#ifdef NP_NATIVE
+    // NP: the online service's season and daily windows are UTC; the retail shift moved the game's own season/day hours away from them
+    // (np/online_clock.h, MSC_ONLINE_RETAIL_TZ=1 keeps it)
+    if (GetRegion() == GAME_REGION_JAPAN)
+    {
+        g_nAddHoursTime = NpOnlineHourShift(9);
+    }
+    else if (GetRegion() == GAME_REGION_US)
+    {
+        g_nAddHoursTime = NpOnlineHourShift(-8);
+    }
+#else
     if (GetRegion() == GAME_REGION_JAPAN)
     {
         g_nAddHoursTime = 9;
@@ -58,6 +73,7 @@ void NetworkUpdateTask::Initialize()
     {
         g_nAddHoursTime = -8;
     }
+#endif
 
     lbl_806E1008 = 0;
     gInputManager->mEnabled = 1;

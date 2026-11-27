@@ -7,8 +7,11 @@
 // environment, so every hook registered here is in place before the game opens a device.
 #if defined(__vita__)
 
+#include "vita_sampler.h"
 #include "np_vita.h"
 #include "np_vita_internal.h"
+#include "np_startup_check.h"
+#include "vita_notice.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -17,7 +20,10 @@
 #include <atomic>
 
 #include <psp2/display.h>
+#include <psp2/io/stat.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/power.h>
 
 // ---- NPS (platform/sdk/include/np/np_sdk.h, np_plat.h): redeclared, so that this file needs neither
 // the SDK headers nor their force-included companions. A change there is caught by NpWireSelfCheck().
@@ -44,7 +50,6 @@ typedef void (*NpRumbleFn)(int pad, int on);
 void NpSdk_SetAudioSink(const NpAudioSink* sink) __attribute__((weak));
 void NpSdk_SetInputSource(NpInputSourceFn fn) __attribute__((weak));
 void NpSdk_SetQuitHook(void (*hook)(int reason)) __attribute__((weak));
-int NpSdk_QuitRequested(void) __attribute__((weak));
 void NpSdk_SetInputBlocked(int blocked) __attribute__((weak));   // NPS2: 1 = the platform owns the display (the controller reads neutral)
 
 enum NpRole { NP_ROLE_GAME = 0, NP_ROLE_OSTHREAD, NP_ROLE_AUDIO, NP_ROLE_IO, NP_ROLE_TIMER, NP_ROLE_HELPER, NP_ROLE_COUNT };
@@ -56,9 +61,11 @@ int OSRestoreInterrupts(int) __attribute__((weak));
 void np_time_pause(int paused) __attribute__((weak));
 void NpFsJoin(void) __attribute__((weak));
 int vgxn_vita_wait_idle(void) __attribute__((weak));
+int VgxShaderCompiling(void) __attribute__((weak));   // int33: renderer/src/vgx_backend_gl.cpp (keep-awake during shader compiles)
 
 // ---- NPR (platform/gx/include/np_gx.h and vgx native/vgx_native_vita.h)
 enum { VGXN_ROLE_COLLECTOR = 0, VGXN_ROLE_DISPLAY_QUEUE = 1, VGXN_ROLE_PLAYER = 2, VGXN_ROLE_RENDER = 3 };
+enum { VGXN_ROLE_PLAN = 0x100 };   // (1.3) or-ed into a role for core_mask: the plan's mask without the fourth core (where to go when the system refuses it)
 struct vgxn_vita_services {
     unsigned int size;
     void (*boot_stage)(const char* what);
@@ -73,6 +80,7 @@ struct vgxn_vita_services {
     void (*boot_progress)(int kind, unsigned done, unsigned total);
 };
 void vgxn_vita_set_services(const vgxn_vita_services* services) __attribute__((weak));
+int vgxn_vita_start_failure(void) __attribute__((weak));   // (1.3) renderer/native/vgx_native_vita.h: why the renderer did not start (VGXN_START_*, the numbers of NpStartupCheck::kCause*)
 // np_gx.h (the glue): the renderer is started here, with the surface the picture is shown on, instead of by GXInit with defaults.
 struct np_gx_config {
     unsigned int size;
@@ -87,15 +95,48 @@ int np_gx_start(const np_gx_config* config) __attribute__((weak));
 namespace {
 std::atomic<bool> g_settingsActive{false};
 std::atomic<uint32_t> g_settingsReleaseButtons{0};
+std::atomic<bool> g_harnessKeepAwake{false};
+std::atomic<bool> g_audioResumeOn{true};
 int g_settingsInterrupts = 0;
 SceDisplayFrameBuf g_settingsPreviousFrame;
+
+bool HasMaxFramesEnv() {
+    static const bool on = [] {
+        const char* mf = std::getenv("MSC_MAX_FRAMES");
+        return mf && *mf && std::strtoull(mf, nullptr, 10) > 0;
+    }();
+    return on;
+}
 
 // ---- audio -----------------------------------------------------------------------------------
 // The SDK's audio thread delivers a 3 ms block (96 frames at 32 kHz) per call and treats the call's
 // blocking as the audio clock. The platform ring (np_vita_audio.cpp) is a queue with room for ~120 ms
 // (elastic policy: NpAudioSpaceFrames says how many frames fit): wait here until the block fits, so that
 // the SDK's mixer runs at the pace the device drains the ring and nothing is dropped.
-int SinkOpen(uint32_t rate) { return NpAudioOpen(rate) ? 0 : -1; }
+uint32_t g_sinkRate = 32000;
+
+int SinkOpen(uint32_t rate) {
+    g_sinkRate = rate ? rate : 32000;
+    return NpAudioOpen(rate) ? 0 : -1;
+}
+
+// (1.3) MSC_AUDIO_NODEV=0 turns this off. When the output device is not open (the port could not be had at start: another BGM port, a full port table, the
+// output thread refused) the sink used to return at once, so the SDK's audio thread mixed block after block with no clock at all: a whole core flat out
+// (the game's AX callback, the mixer and its reverb every few microseconds, the game's voices and streams running ahead of real time) for nothing, and
+// the same core is shared with vitaGL's collector and the frame workers. Here the call keeps the 3 ms pace on the system clock instead, and every 2 s
+// the device is tried again, so the sound comes back by itself when the port becomes free.
+void SinkNoDevice(uint32_t frames) {
+    static uint64_t due = 0, retryAt = 0;
+    const uint64_t now = sceKernelGetSystemTimeWide();
+    if (due == 0 || now > due + 200000ull) due = now;           // (first call, or a stall: no catch-up burst)
+    due += static_cast<uint64_t>(frames) * 1000000ull / g_sinkRate;
+    if (due > now + 5000ull) sceKernelDelayThread(static_cast<SceUInt>(due - now - 5000ull));
+    if (now >= retryAt) {
+        const bool first = retryAt == 0;
+        retryAt = now + 2000000ull;
+        if (!first && NpAudioOpen(g_sinkRate)) std::fprintf(stderr, "[audio] the output device is open now: sound is back\n");
+    }
+}
 
 void SinkWrite(const int16_t* lr, uint32_t frames) {
     // Virtual time (MSC_VIRTUAL_TIME=1: emulator and harness runs): the game's audio clock is virtual, the device's is real. Waiting for ring
@@ -103,6 +144,8 @@ void SinkWrite(const int16_t* lr, uint32_t frames) {
     // that is not in real time: the block is dropped.
     if (NpVirtualTimeActive && NpVirtualTimeActive()) return;
     // (17 Oct: wait for the queue's pace level, not for room under its 320 ms limit: see vita_audio_queue.h PaceFrames)
+    static const bool noDev = [] { const char* e = std::getenv("MSC_AUDIO_NODEV"); return !(e && e[0] == '0'); }();
+    if (noDev && !NpAudioIsOpen()) { SinkNoDevice(frames); return; }
     for (int waited = 0; waited < 200; ++waited) {            // at most ~200 ms: a stalled device must not hang the game
         const int space = NpAudioPaceFrames();
         if (space < 0 || space >= static_cast<int>(frames)) break;
@@ -135,20 +178,24 @@ int InputSource(int pad, NpRawPad* out) {
     std::memset(out, 0, sizeof(*out));
     out->lx = out->ly = out->rx = out->ry = 128;
     out->rear_count = -1;
-    if (NpHarnessActive() && NpHarnessOwnsPad()) {   // a script plays; logging alone (MSC_WATCH, MSC_FRAME_TIMING) keeps the real pad
-        NpPadState st;
-        std::memset(&st, 0, sizeof(st));
-        if (NpHarnessFillPad(&st)) {
-            static const struct { uint16_t gc; uint32_t raw; } kMap[] = {
-                {0x0001, 0x0080}, {0x0002, 0x0020}, {0x0004, 0x0040}, {0x0008, 0x0010},   // left right down up
-                {0x0010, 0x0001}, {0x0020, 0x0200}, {0x0040, 0x0100}, {0x0100, 0x4000},   // Z=select R L A=cross
-                {0x0200, 0x8000}, {0x0400, 0x2000}, {0x0800, 0x1000}, {0x1000, 0x0008}};  // B=square X=circle Y=triangle START
-            for (const auto& m : kMap) if (st.buttons & m.gc) out->buttons |= m.raw;
-            ScriptStick(st.stickX, st.stickY, &out->lx, &out->ly);
-            ScriptStick(st.substickX, st.substickY, &out->rx, &out->ry);
-            return 1;
+    if (NpHarnessActive()) {
+        const bool ownsPad = NpHarnessOwnsPad() != 0;
+        g_harnessKeepAwake.store(ownsPad || HasMaxFramesEnv(), std::memory_order_relaxed);
+        if (ownsPad) {   // a script plays; logging alone (MSC_WATCH, MSC_FRAME_TIMING) keeps the real pad
+            NpPadState st;
+            std::memset(&st, 0, sizeof(st));
+            if (NpHarnessFillPad(&st)) {
+                static const struct { uint16_t gc; uint32_t raw; } kMap[] = {
+                    {0x0001, 0x0080}, {0x0002, 0x0020}, {0x0004, 0x0040}, {0x0008, 0x0010},   // left right down up
+                    {0x0010, 0x0001}, {0x0020, 0x0200}, {0x0040, 0x0100}, {0x0100, 0x4000},   // Z=select R L A=cross
+                    {0x0200, 0x8000}, {0x0400, 0x2000}, {0x0800, 0x1000}, {0x1000, 0x0008}};  // B=square X=circle Y=triangle START
+                for (const auto& m : kMap) if (st.buttons & m.gc) out->buttons |= m.raw;
+                ScriptStick(st.stickX, st.stickY, &out->lx, &out->ly);
+                ScriptStick(st.substickX, st.substickY, &out->rx, &out->ry);
+                return 1;
+            }
+            return 1;                                              // a script owns the pad: untouched controller between its commands
         }
-        return 1;                                              // a script owns the pad: untouched controller between its commands
     }
     NpVitaInput in;
     if (!NpVitaReadInput(&in)) { out->source = 3; return 1; } // NP_RAW_BLOCKED, SDK ABI declaration above
@@ -179,6 +226,7 @@ int InputSource(int pad, NpRawPad* out) {
 void QuitHook(int reason) {
     std::fprintf(stderr, "[vita] the game asked to leave (OS_SHUTDOWN reason %d)\n", reason);
     VitaPlan::Heartbeat(VitaPlatform::FrameCount() >= 120 ? 900 : 0);   // (a clean leave after 4 s of play counts as a start that worked)
+    VitaPlan::LaunchClean("the game's quit");   // stab13 MSC_LAUNCH_GUARD
     NpPlatformExit(0);
 }
 
@@ -198,7 +246,7 @@ VitaThreads::Role RoleOf(int vgxRole) {
 }
 void VgxBootStage(const char* what) { VitaPlatform::BootStage(what ? what : ""); }
 void VgxMemCheckpoint(const char* what) { if (VitaMem::Checkpoint) VitaMem::Checkpoint(what ? what : ""); }
-int VgxCoreMask(int role) { return VitaThreads::CoreMask(RoleOf(role)); }
+int VgxCoreMask(int role) { return (role & VGXN_ROLE_PLAN) ? VitaThreads::PlanMask(RoleOf(role & ~VGXN_ROLE_PLAN)) : VitaThreads::CoreMask(RoleOf(role)); }
 void VgxPin(int role) { VitaThreads::PinCurrentThread(RoleOf(role), true); }
 int VgxConsoleOwns() { return VitaConsole::OwnsDisplay() ? 1 : 0; }
 void VgxSetOwner(int console) {
@@ -223,17 +271,70 @@ int VgxButtons(unsigned int* buttons) {
 // 15 s and says what the game thread is waiting for; it never touches the game. MSC_VITA_STALLWATCH=0 turns it off.
 extern "C" uint32_t VIGetRetraceCount(void) __attribute__((weak));
 SceUID g_gameThread = 0;
+static std::atomic<uint32_t> g_wakeEpoch{0};   // counts the console's wake-ups (PowerCallback below)
+
+// 1.2 (MSC_VITA_STALL_NOTICE=<seconds>, default 20, 0 = off): when no picture was presented for that long, a plain message is written onto the picture the
+// display shows (the last one the game made, or the loading screen), so that a long load or a hang is not a silent frozen screen. It is only a message:
+// nothing is stopped, the game is not touched, and the message goes away by itself when the game presents its next picture (every picture fills the
+// buffer whole). A second, longer message at three times the delay says what to do. Not over the fatal-error report. Returns whether it was drawn.
+static bool ShowStallNotice(int level, int quiet) {
+    if (VitaConsole::FatalShown()) return false;
+    // int28 (owner live report): never draw the middle-screen popup box over the loading screen;
+    // boot messages stay cleanly under the loading bar (VitaBootScreen).
+    if (VitaBootScreen::Active()) return false;
+    SceDisplayFrameBuf fb;
+    std::memset(&fb, 0, sizeof(fb));
+    fb.size = sizeof(fb);
+    if (sceDisplayGetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME) < 0 || !fb.base) return false;
+    if (fb.pixelformat != SCE_DISPLAY_PIXELFORMAT_A8B8G8R8) return false;   // (the console's and vitaGL's format; anything else is not drawn on)
+    VitaNotice::Text text;
+    VitaNotice::Compose(level, quiet, text);
+    const char* lines[VitaNotice::kMaxLines] = {text.line[0], text.line[1], text.line[2]};
+    const int width = fb.width > 0 ? static_cast<int>(fb.width) : VitaConsole::kWidth;
+    const int height = fb.height > 0 ? static_cast<int>(fb.height) : VitaConsole::kHeight;
+    return VitaNotice::DrawBanner(static_cast<uint32_t*>(const_cast<void*>(fb.base)), static_cast<int>(fb.pitch), width, height, lines, text.count) > 0;
+}
+
+extern "C" void vgxvita_pin_library_threads(void) __attribute__((weak));   // vgx_host_vita.cpp
+
 int StallWatch(SceSize, void*) {
-    uint64_t lastFrames = ~0ull;
+    int noticeAfter = 20;
+    if (const char* e = std::getenv("MSC_VITA_STALL_NOTICE"); e && *e) noticeAfter = std::atoi(e);
+    // 1.3 MSC_VITA_STALL_GUARD=0|1 (default 1): vita_notice.h Quiet / NoticeDelay (a floor on the delay, no quiet time counted across a wake-up of the console)
+    const bool guard = !(std::getenv("MSC_VITA_STALL_GUARD") && std::atoi(std::getenv("MSC_VITA_STALL_GUARD")) == 0);
+    noticeAfter = VitaNotice::NoticeDelay(noticeAfter, guard);
+    VitaNotice::Quiet watch;
     int quiet = 0;
+    int noticeLevel = 0;
+    // 1.2 (MSC_VITA_MEMLOG=0 turns it off): every 30 s one line about memory in the player's log, so that a heap that fills slowly shows before it is full.
+    const bool memLog = !(std::getenv("MSC_VITA_MEMLOG") && std::atoi(std::getenv("MSC_VITA_MEMLOG")) == 0);
+    unsigned wakes = 0, sweepWakes = 0;
     for (;;) {
         sceKernelDelayThread(5 * 1000 * 1000);
         const uint64_t frames = VitaPlatform::FrameCount();
         VitaPlan::Heartbeat(frames);   // (the core plan's guard file: cleared once 300 frames were presented)
-        if (g_settingsActive.load(std::memory_order_acquire)) { lastFrames = frames; quiet = 0; continue; }
-        if (frames != lastFrames) { lastFrames = frames; quiet = 0; continue; }
-        quiet += 5;
+        // (vita_threads.cpp; every 30 s, not while the Settings screen has the game stopped: nothing new to find)
+        if (VitaThreads::SweepInBackground() && frames > 120 && ++sweepWakes % 6 == 0 && !g_settingsActive.load(std::memory_order_acquire)) {
+            VitaThreads::KeepCoreZeroForGame(false);
+            if (vgxvita_pin_library_threads) vgxvita_pin_library_threads();
+        }
+        if (memLog && ++wakes % 6 == 0 && !g_settingsActive.load(std::memory_order_acquire)) {
+            char figures[420];
+            VitaPlatform::MemoryLine(figures, sizeof(figures));
+            VitaLog::Memory(figures);
+        }
+        quiet = watch.Look(frames, g_wakeEpoch.load(std::memory_order_relaxed), g_settingsActive.load(std::memory_order_acquire), 5, guard);
+        if (watch.reset) noticeLevel = 0;
+        if (quiet == 0) { noticeLevel = 0; continue; }
         if (quiet == 30) VitaPlan::Failed("no frame for 30 s");
+        if (const int level = VitaNotice::Level(quiet, noticeAfter); level > 0) {
+            const bool drawn = ShowStallNotice(level, quiet);   // (again at every step: the buffer shown may have changed)
+            if (level != noticeLevel) {
+                noticeLevel = level;
+                std::fprintf(stderr, "[vita] stall notice level %d %s after %d s without a picture (frame %llu)\n", level, drawn ? "shown" : "NOT shown", quiet,
+                             static_cast<unsigned long long>(frames));
+            }
+        }
         if (!NP_LOGGING) continue; // The core-plan guard remains functional without stall reports.
         if (quiet != 15 && !(quiet > 15 && quiet % 30 == 0)) continue;
         SceKernelThreadInfo info;
@@ -246,6 +347,47 @@ int StallWatch(SceSize, void*) {
                      static_cast<unsigned>(info.waitType), static_cast<unsigned>(info.waitId), static_cast<unsigned long long>(info.runClocks),
                      VIGetRetraceCount ? VIGetRetraceCount() : 0u, VitaAudio::GetStats().queuedFrames);
         std::fflush(stderr);
+    }
+    return 0;
+}
+
+// ---- the console wakes up (1.2) and keep-awake during boot/compiles/harness (int33) --------------------------------------
+// After the system suspended the game (the Home menu, standby) the audio output port can be dead or silent; the output thread opens it again when told that
+// the console woke up (np_vita_audio.cpp: VitaAudio::NotifyResume; it also reopens on its own when sceAudioOutOutput fails). This thread owns the power
+// callback (the system runs it from sceKernelDelayThreadCB's wait) and also sends sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT) once a second ONLY while
+// the boot loading screen is up, before frame 2, while a Cg shader is actively compiling, or during an unattended harness run — preventing VitaOS's ~15 s
+// foreground auto-suspend without preventing normal OLED dimming/sleep during idle player sessions. MSC_AUDIO_RESUME=0 skips only the audio reopen.
+extern "C" unsigned np_vita_wake_epoch(void) { return g_wakeEpoch.load(std::memory_order_relaxed); }   // (wave 14: the disc layer's longer retry window after a resume, dvd_native.cpp)
+static int PowerCallback(int, int, int powerInfo, void*) {
+    if (powerInfo & (SCE_POWER_CB_APP_SUSPEND | SCE_POWER_CB_SYSTEM_SUSPEND | SCE_POWER_CB_THERMAL_SUSPEND | SCE_POWER_CB_LOW_BATTERY_SUSPEND)) {
+        std::fprintf(stderr, "[vita] power suspend (0x%08X)\n", static_cast<unsigned>(powerInfo));
+    }
+    if (powerInfo & (SCE_POWER_CB_APP_RESUME | SCE_POWER_CB_APP_RESUMING | SCE_POWER_CB_SYSTEM_RESUME | SCE_POWER_CB_SYSTEM_RESUMING | SCE_POWER_CB_AFTER_SYSTEM_RESUME)) {
+        g_wakeEpoch.fetch_add(1, std::memory_order_relaxed);   // (StallWatch: the quiet time of a console that slept is not a stall)
+        std::fprintf(stderr, "[vita] power resume (0x%08X)\n", static_cast<unsigned>(powerInfo));
+        if (g_audioResumeOn.load(std::memory_order_relaxed)) VitaAudio::NotifyResume();
+    }
+    return 0;
+}
+static bool KeepAwakeNow() {
+    if (VitaConsole::FatalShown()) return false;
+    if (g_settingsActive.load(std::memory_order_acquire)) return false;
+    if (g_harnessKeepAwake.load(std::memory_order_relaxed)) return true;
+    return VitaBootScreen::Active() ||
+           VitaPlatform::FrameCount() < 2 ||
+           (VgxShaderCompiling && VgxShaderCompiling() != 0);
+}
+static int PowerWatch(SceSize, void*) {
+    const SceUID cb = sceKernelCreateCallback("np_power_cb", 0, PowerCallback, nullptr);
+    const int r = cb >= 0 ? scePowerRegisterCallback(cb) : cb;
+    if (r < 0) {
+        if (cb >= 0) sceKernelDeleteCallback(cb);
+        std::fprintf(stderr, "[vita] the power callback was not registered (0x%08X): the audio port is reopened only when it reports an error\n", static_cast<unsigned>(r));
+    }
+    if (KeepAwakeNow()) sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+    for (;;) {
+        sceKernelDelayThreadCB(1000 * 1000);
+        if (KeepAwakeNow()) sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
     }
     return 0;
 }
@@ -307,6 +449,17 @@ int WireSdkAndRenderer() {
         vgxn_vita_set_services(&services);
         ++wired;
     }
+    // int33: start PowerWatch BEFORE np_gx_start so VitaOS cannot auto-suspend during shader warm-up or renderer init.
+    g_harnessKeepAwake.store(NpHarnessActive() && (NpHarnessOwnsPad() != 0 || HasMaxFramesEnv()), std::memory_order_relaxed);
+    if (const char* e = std::getenv("MSC_AUDIO_RESUME"); e && std::strcmp(e, "0") == 0)
+        g_audioResumeOn.store(false, std::memory_order_relaxed);
+    else
+        g_audioResumeOn.store(true, std::memory_order_relaxed);
+    {
+        const SceUID t = sceKernelCreateThread("np_powerwatch", PowerWatch, 0x10000100 + 30, 16 * 1024, 0, 0x40000, nullptr);   // core 2, priority 190
+        const int r = t >= 0 ? sceKernelStartThread(t, 0, nullptr) : t;
+        if (r < 0) std::fprintf(stderr, "[vita] the power watch thread did not start (0x%08X): the audio port is reopened only when it reports an error\n", static_cast<unsigned>(r));
+    }
     // The 960 x 544 surface (NPR2's request, docs/wave2-NPR2.md section 3): the glue's dynamic aspect widens the game's 16:9 3D projections to the
     // shape of the surface the picture is shown on (np_gx_surface_size), and vgx's Vita host takes "wider than 4:3" for the game's widescreen
     // mode: picture stretched over the whole screen. With the game in 4:3 (NP_WIDESCREEN=0) the surface is the 640 x 480 box (bars at the sides).
@@ -323,6 +476,14 @@ int WireSdkAndRenderer() {
         std::fprintf(stderr, "[vita] renderer start-up: surface %d x %d (the game's widescreen mode is %s)\n", cfg.surface_width, cfg.surface_height, wide ? "on" : "off");
         const int ok = np_gx_start(&cfg);
         std::fprintf(stderr, "[vita] renderer start-up %s\n", ok ? "done" : "FAILED");
+        if (!ok) {
+            // 1.3: say what is wrong instead of letting GXInit abort() into the system's crash screen (the renderer's own reason is in the log).
+            NpStartupCheck::Message problem;
+            NpStartupCheck::RendererFailed(NpStartupCheck::CompilerPresent([](const char* path) { SceIoStat st; return sceIoGetstat(path, &st) >= 0; }), problem,
+                                          vgxn_vita_start_failure ? vgxn_vita_start_failure() : 0);
+            ShowFatal(problem.category, problem.details);
+            sceKernelExitProcess(1);
+        }
         ++wired;
     }
     if (const char* e = std::getenv("MSC_VITA_STALLWATCH"); !e || std::strcmp(e, "0") != 0) {
@@ -333,6 +494,7 @@ int WireSdkAndRenderer() {
         const int r = t >= 0 ? sceKernelStartThread(t, 0, nullptr) : t;
         if (r < 0) std::fprintf(stderr, "[vita] the stall watch thread did not start (0x%08X): no stall report, and the core plan's guard is not cleared\n", static_cast<unsigned>(r));
     }
+    VitaSampler::Start();   // diag13: MSC_SAMPLER=1 (default off), the on-console pc sampler; this is the game thread
     std::fprintf(stderr, "[vita] wiring: SDK audio sink %s, input source %s, quit hook %s, renderer services %s\n",
                  NpSdk_SetAudioSink ? "set" : "(SDK layer not linked)", NpSdk_SetInputSource ? "set" : "-",
                  NpSdk_SetQuitHook ? "set" : "-", vgxn_vita_set_services ? "set" : "(renderer not linked)");

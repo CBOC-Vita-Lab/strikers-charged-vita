@@ -31,6 +31,8 @@ static_assert(sizeof(void*) == 4, "the game's structure offsets are the 32-bit o
 #include <unistd.h>
 #endif
 
+#include "../../../include/np/host_alloc.h"
+
 // ---- the game's globals (weak: absent = reads as unavailable) -------------------------------
 #define NP_WEAK_VAR(type, id, mangled) extern type id asm(mangled) __attribute__((weak))
 NP_WEAK_VAR(void*, np_sceneMgr, "_ZN11nlSingletonI16GameSceneManagerE11s_pInstanceE");
@@ -63,6 +65,12 @@ extern "C++" void np_PushLoadingScene(void* self, bool popFirst) asm("_ZN20BaseG
 extern "C++" void* np_PushScene(void* self, int scene, int movement, bool popFirst) asm("_ZN20BaseGameSceneManager4PushE9SceneList14ScreenMovementb") __attribute__((weak));
 extern "C++" void np_PopScene(void* self) asm("_ZN20BaseGameSceneManager3PopEv") __attribute__((weak));
 // W5-SEED, script command `setf`: the weather start chances of src/Game/Weather.cpp (percent per update; lightning 0.033, wind 0.01 by default, so a short match never meets them)
+// route command `score` (ScoreGoal below): the ball's own calls, and the refusals (LAN / online / recorded games)
+extern "C++" void np_BallSetPosition(void* self, const float* pos) asm("_ZN5cBall11SetPositionERK9nlVector3") __attribute__((weak));
+extern "C++" void np_BallSetVelocity(void* self, const float* vel, int spin, const float* ang) asm("_ZN5cBall11SetVelocityERK9nlVector39eSpinTypePS1_") __attribute__((weak));
+extern "C++" void np_PlayerReleaseBall(void* self, int state) asm("_ZN7cPlayer11ReleaseBallEi") __attribute__((weak));
+extern "C++" bool np_IsNetworkOrRecordedGame() asm("_Z23IsNetworkOrRecordedGamev") __attribute__((weak));
+extern "C++" bool np_LanActive() asm("_Z11NpLanActivev") __attribute__((weak));
 extern "C++" float gLightningStartChance __attribute__((weak));
 extern "C++" float gWindStartChance __attribute__((weak));
 extern "C++" float gLavaStartChance __attribute__((weak));
@@ -344,6 +352,7 @@ bool DeepDigest(uint32_t* chk, uint32_t* rng) {
 // GameInfoManager offsets (include/Game/GameInfo.h, the Wii's): mUserInfo 0x9C { mGameplayOptions +0x24 {SkillLevel +0, GameTime +8},
 // mCheatOptions +0x40 {mCustomPowerups, mEnvironmentCheat, mPlayerCheat} }.
 bool LaunchMatch(const LaunchSpec& l, std::string& msg) {
+    NpGameAllocScope gameScope;   // (1.3: the game makes its own objects here: back to the game heap inside the harness's host scope)
     void* gim = Opaque(&np_gameInfoMgr) ? np_gameInfoMgr : nullptr;
     void* scm = Opaque(&np_sceneMgr) ? np_sceneMgr : nullptr;
     if (!gim || !scm || !Opaque(&np_SetMode) || !Opaque(&np_SetStadium) || !Opaque(&np_SetTeam) || !Opaque(&np_SetSidekick) || !Opaque(&np_ResetPlayingSides) ||
@@ -369,12 +378,20 @@ bool LaunchMatch(const LaunchSpec& l, std::string& msg) {
     auto put = [&](size_t off, int v) { if (v >= 0) *reinterpret_cast<int32_t*>(g + off) = v; };
     put(0x9C + 0x40, l.powerup); put(0x9C + 0x40 + 4, l.env); put(0x9C + 0x40 + 8, l.player);
     put(0x9C + 0x24, l.skill); put(0x9C + 0x24 + 8, l.time);
+    if (l.pinSeed && Opaque(&np_netRandomSeed)) np_netRandomSeed = l.seed;
     if (l.push) np_PushLoadingScene(scm, true);
     msg = l.push ? "loading scene pushed" : "state set, nothing pushed";
     return true;
 }
 
+bool PinSimSeed(uint32_t seed) {
+    if (!Opaque(&np_netRandomSeed)) return false;
+    np_netRandomSeed = seed;
+    return true;
+}
+
 bool PushScene(int id, bool popFirst, std::string& msg) {
+    NpGameAllocScope gameScope;   // (1.3: the game makes its own objects here: back to the game heap inside the harness's host scope)
     void* scm = Opaque(&np_sceneMgr) ? np_sceneMgr : nullptr;
     if (!scm || !Opaque(&np_PushScene)) { msg = "BaseGameSceneManager::Push is not linked in"; return false; }
     if (id < 0 || id > 105) { msg = "scene id out of range"; return false; }
@@ -383,6 +400,7 @@ bool PushScene(int id, bool popFirst, std::string& msg) {
     return true;
 }
 bool PopScene(std::string& msg) {
+    NpGameAllocScope gameScope;   // (1.3: the game makes its own objects here: back to the game heap inside the harness's host scope)
     void* scm = Opaque(&np_sceneMgr) ? np_sceneMgr : nullptr;
     if (!scm || !Opaque(&np_PopScene)) { msg = "BaseGameSceneManager::Pop is not linked in"; return false; }
     np_PopScene(scm);
@@ -403,6 +421,36 @@ bool SetGlobalFloat(const char* name, float value, std::string& msg) {
     }
     msg = std::string("unknown global ") + name;
     return false;
+}
+
+bool ScoreGoal(int side, std::string& msg) {
+    // Test only, from a route file only (np_harness.cpp: the `score` command). The ball is placed a little in front of the net of the other team and kicked into it with the
+    // game's own calls, so the game's own goal path (CheckForGoal, post-goal, celebration, replay) runs. Refused in LAN, online and recorded games (the placement is not a
+    // networked input) and outside open play.
+    if (Opaque(&np_LanActive) && np_LanActive()) { msg = "refused: LAN or online session"; return false; }
+    if (!Opaque(&np_IsNetworkOrRecordedGame)) { msg = "refused: no session check in this build"; return false; }
+    if (!Opaque(&np_game) || !np_game || !Opaque(&np_ball) || !np_ball || !Opaque(&np_teams[0]) || !np_teams[0] || !np_teams[1]) { msg = "no match running"; return false; }
+    if (np_IsNetworkOrRecordedGame()) { msg = "refused: network or recorded game"; return false; }
+    if (!Opaque(&np_BallSetPosition) || !Opaque(&np_BallSetVelocity) || !Opaque(&np_PlayerReleaseBall)) { msg = "cBall calls not linked in"; return false; }
+    State st;
+    SampleState(st, nullptr, nullptr);
+    if (st.gameState != 5) { msg = "refused: not open play"; return false; }
+    if (side != 0 && side != 1) { msg = "side must be 0 or 1"; return false; }
+    const uintptr_t net = RP(reinterpret_cast<uintptr_t>(np_teams[1 - side]) + 0xE8);   // cTeam::m_pNet of the team that defends
+    if (!net) { msg = "no net"; return false; }
+    const float nx = RF(net + 0x08), ny = RF(net + 0x0C), nz = RF(net + 0x10);   // cNet::m_v3NetLocation
+    const float toward = nx > 0 ? 1.0f : -1.0f;
+    const float pos[3] = {nx + toward * 0.4f, ny + 0.5f, nz};   // just inside the net mouth, past the keeper (3 units out the keeper picked the ball up and dSpaceAdd crashed at The Dump and Lava Pit)
+    const float vel[3] = {toward * 28.0f, 0.0f, 0.0f};
+    // A carried ball sits inside its carrier's PhysicsTransform (disconnected from the ODE space). cBall::ClearOwner alone leaves it there, and the next pickup
+    // (the keeper's) then calls dSpaceAdd with a null space. The game's own release (cPlayer::ReleaseBall: ReleaseObject, ClearOwner, ball state LOOSE) does both.
+    if (const uintptr_t owner = RP(reinterpret_cast<uintptr_t>(np_ball) + 0xC8)) np_PlayerReleaseBall(reinterpret_cast<void*>(owner), 0 /* BALL_STATE_LOOSE */);   // cBall::m_pOwner
+    np_BallSetPosition(np_ball, pos);
+    np_BallSetVelocity(np_ball, vel, 0 /* SPINTYPE_NONE */, nullptr);
+    char b[160];
+    std::snprintf(b, sizeof b, "ball placed at %.2f,%.2f,%.2f toward net %.2f,%.2f,%.2f", pos[0], pos[1], pos[2], nx, ny, nz);
+    msg = b;
+    return true;
 }
 
 uint64_t SimDigest() {

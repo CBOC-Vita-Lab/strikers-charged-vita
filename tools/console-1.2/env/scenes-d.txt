@@ -1,0 +1,16 @@
+# console-1.2 run scenes-d: Dump GPU diagnostics: per-scene GPU ms, parameter-buffer estimate, texture layout (all four on), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group r17, route worstgpu, version payload 1.3, role ab
+# gpuscene20 (replaces dumpgpu20 S1): per-scene GPU ms (`MSC_VITA_RT_SCENES`), `[pb est]` parameter-buffer estimate, texture layout census. The emulator showed 47 guest faults with all the gpuscene20 diagnostics on (none with them off): a fault HERE is a diagnostic failure, not a game failure. Run LAST in its unit.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD_FORCE=10
+MSC_VITA_RT_SCENES=1
+MSC_VGX_PBEST=1
+MSC_VGX_TEXCENSUS20=1

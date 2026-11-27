@@ -1,0 +1,14 @@
+# console-1.2 run warm1: Other sample mode's program variants drawn at load (warm-up ON)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group smooth, route tour, version payload 1.3, role ab
+# MSC_FXAA_WARM=1 (default 0 until the shapes floor and warm10 are proven on a console; wave 10: the shader list's variants are drawn once into a small target of each other sample count after load; the r9 boot crash is fixed, the small target is kept). Needs a second session (the list is on the card). Against the default: the hitch at the first Mega Strike cut and the first replay or celebration at an auto stadium; the [fxaa] warm and variants lines; the [cuts] match line (variants).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FXAA_WARM=1

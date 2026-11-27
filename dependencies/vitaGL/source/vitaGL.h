@@ -1112,6 +1112,88 @@ void vglVertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean nor
 //Overloads a vertex attrib pointer with a pre-GPU mapped memory block with a copy-less action for legacy vgl* draw pipeline.
 void vglVertexAttribPointerMapped(GLuint index, const GLvoid *pointer);
 
+// Direct draw (from the Galaxy port): the current program's enabled attributes (a bit per attribute index in `enabled`) from one interleaved buffer object `vbo_name`
+// starting `base` bytes in, at the given offsets; the others read their glVertexAttrib* constants, which must have been set with four components (a patched
+// program is kept by `key`, so all of a key's draws must use the same count). 16-bit indices from the bound element array buffer at byte offset idx_offset.
+// `key` must identify everything in the layout but `base` (same key, same table). GL_TRIANGLES only. GL_FALSE: nothing was drawn, the
+// caller draws the ordinary way. GL_TRUE also when no scene could be started (as glDrawElements: nothing submitted, no error).
+#define VGL_HAS_DIRECT_DRAW 1
+enum { VGL_DIRECT_F32 = 0, VGL_DIRECT_U8N = 1, VGL_DIRECT_U8 = 2 };
+typedef struct {
+	uint32_t key;
+	uint32_t enabled;
+	uint16_t stride;
+	uint8_t size[16];
+	uint8_t type[16];
+	uint16_t offset[16];
+} vglDirectLayout;
+GLboolean vglDrawElementsDirect(GLenum mode, GLsizei count, uint32_t idx_offset, GLuint vbo_name, uint32_t base, const vglDirectLayout *layout);
+
+// 1.3 (from the Galaxy port's draw caches): frag_memo keeps per program what the shader patcher answered; uni_reuse lets a program whose uniforms did not change since its last
+// copy in this scene name that copy again. Neither changes what is drawn.
+#define VGL_HAS_DRAW_CACHES 1
+void vglSetDrawCaches(GLboolean frag_memo, GLboolean uni_reuse); // uni_reuse 2 (be26): also an older copy of the scene that holds the same bytes (VGL_UNI_HIST per program and stage)
+void vglSetUniHistCap(uint32_t bytes); // gem2b: the uni_reuse 2 history only for default uniform buffers of at most this many bytes (0: all)
+void vglSetViewportExact(GLboolean exact); // 1.3 glViewport halves as floats (patch 0025; default GL_TRUE)
+void vglSetMaskKeep(GLboolean on); // 1.3 MASK_KEEP (patch 0026; default GL_FALSE): a scissor mask rebuild the depth/stencil surface already holds is not drawn
+void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept); // 1.3 MASK_KEEP: mask rebuilds drawn and not drawn so far (counted with the switch off too)
+// 0033 scene census: scenes begun per render target in one picture against the target's scenesPerFrame (vglSetupRenderTargetScenesNum). Off until
+// vglSceneCensusSetup(1). The worst values since the last reset (reset != 0) and how many pictures had a target past its capacity.
+typedef struct {
+	uint32_t frames;                          // pictures counted
+	uint32_t worst_display, worst_fbo;        // most scenes begun on the display target, on any one framebuffer-object target, in one picture
+	uint32_t worst_fbo_targets;               // most distinct framebuffer-object targets in one picture
+	uint32_t cap_display, cap_fbo;            // scenesPerFrame the two kinds of target were created with
+	uint32_t over_display, over_fbo;          // counts (a target in a picture) past that capacity
+	uint32_t slots_full;                      // scenes on a 33rd target in one picture (not counted per target)
+} vglSceneCensus;
+void vglSceneCensusSetup(int on);
+void vglGetSceneCensus(vglSceneCensus *out, int reset);
+
+// 0034 free guard (lab): with vglSetFreeGuard(presents > 0) every glDeleteTextures / glDeleteFramebuffers is held back that many presents (vglSwapBuffers deletes it then), and a delete
+// of a texture that a scene drew into within the last FRAME_PURGE_FREQ presents (vitaGL frees such a block at once: only a texture that was SAMPLED recently is deferred) or of the colour
+// texture of the framebuffer that is bound is reported as an event (vglFreeGuardTake), once per call site (the return address of the delete) and kind. Off (0, the default) it changes nothing.
+typedef struct {
+	uint32_t deletes, postponed, referenced, ring_full, sites;
+	uint32_t recovery_flushed;   // 0050: held deletes done early by the allocation recovery
+	uint32_t purge_peak, rt_purge_peak;   // most elements one picture put on the collector's lists (capacity 16384 and 128: the lists have no bounds check, a longer one writes into the next picture's list)
+} vglFreeGuardStats;
+typedef struct {
+	uint32_t kind;     // 0 texture, 1 framebuffer
+	uint32_t id;
+	uint32_t reason;   // 1 a scene drew into it recently, 2 colour texture of the bound framebuffer, 3 both
+	uint32_t age;      // presents since the scene that drew into it (reason 1, 3)
+	uint32_t caller;   // return address of the delete call (arm-vita-eabi-addr2line on the image)
+	uint32_t frame;    // present count at the delete
+} vglFreeGuardEvent;
+void vglSetFreeGuard(int presents);
+void vglSetFreeGuardReferencedOnly(int on); // 0047: with the guard on, hold (and report) only the deletes of a block a scene drew into within the last FRAME_PURGE_FREQ presents or that is bound as a framebuffer's colour; all other deletes happen at once as without the guard. Default 0
+void vglGetFreeGuardStats(vglFreeGuardStats *out);
+int vglFreeGuardTake(vglFreeGuardEvent *out); // 1: an event was returned
+void vglSetMaskBackground(int mode); // 1.3 MASK_BG (patch 0029; default 0): a scene that does not load its depth/stencil surface and has the scissor test off begins with the background mask set, and the full-target quad that sets it is not drawn. Bit 0: framebuffer-object scenes, bit 1: the display's scene
+void vglGetMaskBackgroundStats(uint32_t *armed, uint32_t *kept); // 1.3 MASK_BG: scenes begun that way, quads left out
+void vglSetMaskClip(GLboolean on); // 1.3 MASK_CLIP (patch 0055; default GL_FALSE): the clear quad of a scissor mask rebuild is drawn over the region the mask holds now (tile region clip), not the whole target
+void vglGetMaskClipStats(uint32_t *narrowed, uint32_t *kpx_saved); // 1.3 MASK_CLIP: clears narrowed, kilopixels of whole-target fill left out
+// 1.3 MEMFREE (patch 0028): vglMemFree / vgl_mem_get_free_space without walking the heap. The allocator wrappers keep per pool the usable bytes and the count of live blocks;
+// a pool's free figure is then (free when empty) - (usable + overhead * count), O(1), where `overhead` is the allocator's per-block cost measured at start-up with probe blocks.
+// A pool whose probes do not show one constant overhead (or whose statistics call answers nothing: Vita3K) is never answered from the counters.
+// mode 0: walk the heap as before (the library default); 1: the counters; 2: the counters, and every answer is also checked against a walk (counted, logged).
+void vglSetMemFreeMode(int mode);
+// calls answered from the counters / by a walk; checks made, found different, skipped because another thread allocated or freed meanwhile; the largest difference seen (bytes);
+// pools whose counters are usable (bit per vglMemType). Any pointer may be NULL.
+void vglGetMemFreeStats(uint32_t *fast, uint32_t *walked, uint32_t *checks, uint32_t *mismatches, uint32_t *raced, int32_t *worst, uint32_t *pools);
+
+// 0036: the wait after a failed GPU allocation. Every pool refusing: the GPU is finished once, up to FRAME_PURGE_FREQ collector cycles run with a try after each, and only then
+// the thread waits up to ms (default 16; 0 = not at all; 1000 = about what patch 0005 did, 1 s per level) trying every 2 ms. vglGetGcRecoveryStats: recoveries entered,
+// resolved, failed (the caller got NULL), those that needed the timed wait, collector-not-running-yet waits, collector cycles forced, longest recovery (us, GPU finish and
+// waits included), total time (us), time in the timed wait (us), bytes asked.
+void vglSetGcPauseMs(int ms);
+void vglSetGcTestInject(int every, int fails); // test only: every `every`-th allocation of 64 KiB or more runs the recovery, whose first `fails` tries are refused too
+uint32_t vglGetGcTestInjectHits(void);
+void vglGetGcRecoveryStats(uint32_t *recoveries, uint32_t *resolved, uint32_t *failed, uint32_t *pauses, uint32_t *legacy, uint32_t *cycles, uint32_t *max_us, uint64_t *total_us, uint64_t *pause_us, uint64_t *bytes);
+GLboolean vglGetUniformShadow(GLuint prog, GLint location, void **vptr, void **fptr, uint32_t *bytes); // 1.3 vgx uniform shadows (patch 0024)
+void vglUniformShadowWritten(GLuint prog, uint32_t stages);
+
 // Get the compiled shader binary of a given GL shader.
 void vglGetShaderBinary(GLuint index, GLsizei bufSize, GLsizei *length, void *binary);
 
@@ -1141,6 +1223,16 @@ typedef enum {
 	VGL_MODE_POSTPONED // Moves shaders compilation into glLinkProgram. Best results since will always have correct shader couples for the translation for accurate semantic bindings resolution.
 } vglSemanticMode;
 
+typedef struct {
+	SceGxmContext *context; // Usable gxm context during a custom splashscreen rendering
+	SceGxmShaderPatcher *patcher; // Usable gxm shader patcher during a custom splashscreen rendering
+	float elapsed_seconds; // Elapsed time since splashscreen start in seconds
+	float delta_seconds; // Elapsed time since previous splahscreen frame in seconds
+	GLboolean must_stop; // Flag whether splashscreen is supposed to end
+} vglSplashDetails;
+
+typedef GLboolean (*vglSplashCallback)(const vglSplashDetails *details);
+
 // vgl*
 // Add a new global custom semantic binding for the GLSL translator.
 void vglAddSemanticBinding(const GLchar *const *varying, GLint index, GLenum type);
@@ -1161,7 +1253,10 @@ void vglBufferData(GLenum target, const GLvoid *data);
 void *vglCalloc(uint32_t nmember, uint32_t size);
 
 // Alloc memory from vitaGL internal memory pools. If the memory pools exhausted, vitaGL will attempt to free enough memory to not fail this allocation. Needs to be freed with vglFree.
-void *vglForceAlloc(uint32_t size);
+void *vglForceAlloc(uint32_t size, GLboolean for_gpu);
+
+// Alloc aligned memory from vitaGL internal memory pools. If the memory pools exhausted, vitaGL will attempt to free enough memory to not fail this allocation. Needs to be freed with vglFree.
+void *vglForceAllocAligned(uint32_t alignment, uint32_t size, GLboolean for_gpu);
 
 // Frees a previously allocated memory block in the vitaGL internal memory pools.
 void vglFree(void *addr);
@@ -1217,8 +1312,12 @@ size_t vglMemFree(vglMemType type);
 // Gets the total amount of free and used memory in a given internal memory pool.
 size_t vglMemTotal(vglMemType type);
 
+// Setups a GL texture with custom internal values.
+void vglSetupTexture(GLenum target, void *data, SceGxmTextureFormat format, SceGxmTextureType type, GLsizei width, GLsizei height, GLsizei mip_count);
+
 // Replaces original texture data pointer with a new one in a GL texture.
 void vglOverloadTexDataPointer(GLenum target, void *data);
+GLboolean vglSwizzleBoundTexture(void); // 0020: the bound linear texture and its mip levels go to the swizzled layout (MSC_VGX_TEXSWIZZLE)
 
 // Replaces original texture palette data pointer with a new one in a GL texture.
 void vglOverloadTexPaletteDataPointer(GLenum target, void *data);
@@ -1237,6 +1336,9 @@ void *vglRealloc(void *ptr, uint32_t size);
 
 // Change the total memory to use for internal circular pools to use in vitaGL. Disabled with NO_CIRCULAR_POOL. Default value: 32 * 1024 * 1024.
 void vglSetCircularPoolSize(uint32_t size);
+
+// Set color for the commit hash text during a custom splashscreen rendering
+void vglSetCustomSplashscreenHashColor(float r, float g, float b, float a);
 
 // Sets the number of buffers to use for the display swapchain. Default value: 3.
 void vglSetDisplayBufferCount(int count);
@@ -1260,6 +1362,12 @@ void vglSetShaderAssociationPath(const char *path);
 void vglSetShaderCachePath(const char *path);
 void vglSetShaderPackLookup(const void *(*fn)(int fragment, uint64_t hash, uint32_t *size)); // W5 BOOT: in-memory compiled shaders, asked first (NULL = none)
 void vglSetShaderSeedPath(const char *path); // W5 SEED: read-only second shader cache folder (<path>/{v,f}/HH/hash.gxp), tried when the first has no file
+int vglShaderCompilerLockInit(void); // 1.3 ASYNC_SHADERS (0027): creates the compiler lock every compile then holds (0 = ok)
+int vglShaderCacheProbe(GLenum type, const char *const *parts, int count); // 1.3 (0027): 1 = the pack / cache / seed has this text's compiled form
+int vglCompileShaderToCache(GLenum type, const char *const *parts, int count); // 1.3 (0027): compile into the cache, any thread (1 done, 2 cached, 0 failed, <0 no compiler)
+
+// Overloads the default vitaGL boot splashscreen with a custom one. Not compatible with NO_SPLASHSCREEN=1.
+void vglSetupCustomSplashscreen(vglSplashCallback init_callback, vglSplashCallback term_callback, vglSplashCallback main_callback, GLboolean clear_screen);
 
 // Change the lifetime for a texture to be considered cacheable. Requires HAVE_TEXTURE_CACHE.
 void vglSetTextureCacheFrequency(GLuint freq);
@@ -1294,6 +1402,19 @@ void vglSetupRuntimeShaderCompiler(shark_opt opt_level, int32_t use_fastmath, in
 // Load a precompiled gxp binary to a given shader handle
 void vglShaderGxpBinary(GLsizei count, const GLuint *handles, const void *binary, GLsizei length);
 
+// 0042: the display's depth/stencil surface without memory, a real one only while a common dialog is up. Must be called before vglInit*.
+void vglSetDisplayNoDepth(GLint on);
+void vglDisplayDepthStats(uint32_t *mode, uint32_t *real, uint32_t *made, uint32_t *freed, uint32_t *failed);
+
+// 0042: parameter buffer in main memory (SCE_GXM_INITIALIZE_FLAG_PB_LPDDR) in a normal application. Must be called before vglInit*.
+void vglSetParamBufferLpddr(GLint on);
+int vglParamBufferLpddrState(int *rc, uint32_t *shrink);
+
+// 0049: display queue pending limit (0 = buffers - 1, vitaGL's own) before vglInit*; timing of sceGxmDisplayQueueAddEntry.
+void vglSetDisplayQueuePending(GLint n);
+void vglSetDisplayQueueTiming(GLint on);
+void vglDisplayQueueStats(uint32_t *last_us, uint32_t *max_us, uint32_t *adds, uint32_t *slow, uint32_t *pending, uint64_t *total_us);
+
 // Perform a display buffer swap. Equivalent of eglSwapBuffers but allows support with Common Dialog.
 void vglSwapBuffers(GLboolean has_commondialog);
 
@@ -1302,6 +1423,21 @@ GLboolean vglSwapResolution(int width, int height);
 
 // Loads the depth buffer of the currently bound renderbuffer into the currently bound GL texture.
 void vglTexImageDepthBuffer(GLenum target);
+GLboolean vglFramebufferDepthShare(GLuint fb_id, GLint cw, GLint ch); // 0044: this object's depth surface is a window onto a block shared at cw x ch (framebuffers.c); 0 turns it off
+void vglDepthShareStats(uint32_t *out4); // 0044: depth blocks made, objects joined, joins refused, blocks live (mem_utils.c)
+GLboolean vglFramebufferMultisample(GLuint fb_id, GLint samples); // 1, 2 or 4 samples a pixel for this framebuffer object alone (framebuffers.c)
+GLboolean vglFramebufferNoDepth(GLuint fb_id, GLint on); // 0038: 1: this framebuffer object's scenes get no depth/stencil memory (tile memory only: nothing loaded or stored; for objects whose scenes never test or write depth). 0: as before. GL_FALSE for an unknown object
+void vglFramebufferDepthStats(uint32_t *kib_with, uint32_t *objs_with, uint32_t *objs_without, uint32_t *nodepth_scenes); // 0038: depth/stencil memory (KiB) of the live framebuffer objects that have a surface, how many have one, how many run without (nodepth), scenes begun without
+// 0062 (MSC_VITA_FBO_KEEP): glFramebufferTexture2D(GL_COLOR_ATTACHMENT0, texture 0) keeps the framebuffer object's width, height, render target and depth surface (default off: it dropped them, and read
+// the sizes of texture slot 0 into the object). A later attach of a texture of the same size takes them back, a different size makes them again. Dropped at glDeleteFramebuffers as always.
+void vglSetFramebufferDetachKeep(GLboolean on);
+GLboolean vglFramebufferDualRT(GLuint fb_id, GLint on); // 0063: 1: this object keeps a second render target (the scene slots only: the colour and depth surfaces are the same) and the pictures of odd frame number begin their scenes on it, so two pictures in flight never share the slots of one target; 0: one target as before. GL_FALSE for an unknown object
+void vglGetDualRTStats(uint32_t *made, uint32_t *kib, uint32_t *odd_scenes, uint32_t *failed); // 0063: second targets made, their driver memory in KiB (sceGxmGetRenderTargetMemSize), scenes begun on a second target, makes that failed
+GLboolean vglGetFramebufferDetachKeep(void);
+void vglSetRenderTargetPool(uint32_t count, uint32_t kib); // 0039: keep up to `count` framebuffer render targets (and `kib` KiB of driver memory, 0: no cap) for the next object of the same shape; 0: off (gxm.c)
+void vglGetRenderTargetPoolStats(uint32_t *hits, uint32_t *creates, uint32_t *kept, uint32_t *let_go, uint32_t *kept_now, uint32_t *kib_now); // 0039: reused, newly made, kept by the collector, let go, kept now, KiB kept now
+void vglGetGcJobStats(uint32_t *jobs, uint32_t *destroys, uint32_t *job_max_us, uint32_t *destroy_max_us, uint32_t *wait_max_us, uint32_t *destroy_total_us, uint32_t *wait_total_us); // 0064: collector jobs and render target destroys so far; the longest job, the longest destroy and the longest credit wait of the render thread since the last call (cleared by it); the totals of the destroys' and the waits' microseconds
+void vglBackendTimingTake(uint32_t *calls, uint64_t *us, uint32_t *max_us); // 0040: [0] shader registrations, [1] glLinkProgram calls, [2] first vglDrawElementsDirect draws of linked programs: count, total and longest microseconds since the last call (arrays of 3), then reset (gxm.c)
 int vglStrikersBindFramebufferDepth(GLuint fb_id); // Strikers 1.1: a framebuffer's depth buffer as the bound texture (returns its row width, 0: none yet)
 
 // Makes vitaGL use cached memory instead of uncached memory for its internal memory pools. Must be called before vglInit*.
@@ -1318,6 +1454,7 @@ void vglUseVramForUSSE(GLboolean usage);
 
 // Allows vitaGL to use newlib memory once all internal mempools are exhausted. Default value: GL_TRUE.
 void vglUseExtraMem(GLboolean usage);
+void vglSetOneStream(GLboolean enable); // glDrawElements: one hardware stream for an interleaved layout (DRAW_SPEEDHACK builds only; off by default)
 
 // Simplified function to enable or disable V-Sync. For more fine granularity on the swap interval use eglSwapInterval.
 void vglWaitVblankStart(GLboolean enable);
@@ -1338,14 +1475,47 @@ typedef void (*vglCacheFlushFn)(void *addr, uint32_t size);
 typedef enum { VGL_STREAM_CACHED = 0, VGL_STREAM_CDRAM = 1, VGL_STREAM_UNCACHED = 2 } vglStreamMem;
 void vglSetupStreamArena(uint32_t slice_bytes, int mem, vglCacheFlushFn flush);
 void vglSetupCachedStream(uint32_t slice_bytes, vglCacheFlushFn flush); // = vglSetupStreamArena(slice_bytes, VGL_STREAM_CACHED, flush)
+// 0060 (MSC_VITA_STREAM_CACHED): with a cached arena, write it back once before sceGxmEndScene instead of before every draw (the GPU reads a scene's vertex and index data after the submit). Default off.
+void vglSetStreamFlushAtScene(GLboolean on);
 
 // The uniform ring (8 MiB in our builds; every draw copies its uniform buffers into it, ~330 KB per open-play frame) in CDRAM (write-combined) instead of the
 // uncached RAM of the CPU-visible pool. Default: off. Must be called before vglInit*; if the CDRAM block cannot be had the ring stays where it was.
 void vglSetUniformRingMem(int cdram);
+// 0045 (MSC_VITA_WRCOPY): how data is copied INTO the uncached pools (stream buffers, uniform ring): 0 sceClibMemcpy (default), 1 two aligned 32 byte NEON stores per 64 bytes,
+// 2 one 16-register vstm per 128 bytes, 3 sceDmacMemcpy for 8 KiB and more. The same bytes either way. vglWriteCopyVariant makes one copy with a variant (benchmark and check); vglWriteCopyStats: NEON copies, bytes, other copies, bytes.
+void vglSetWriteCopy(int mode);
+int vglGetWriteCopy(void);
+void vglWriteCopyVariant(int mode, void *dst, const void *src, uint32_t n);
+void vglWriteCopyStats(uint32_t *out4);
+// 0061 (MSC_VITA_WRCOPY_FB): mode 3 gives a copy the DMA engine does not take (under 8 KiB, an address at or above 0x81000000, an error) to mode 1's NEON stores (1, default) or to sceClibMemcpy (0, as 0045).
+// vglWriteCopyStats8: the four above, then DMA copies, DMA bytes, 8 KiB+ copies not given to the DMA engine because of an address, DMA errors.
+void vglSetWriteCopyFallback(int on);
+int vglGetWriteCopyFallback(void);
+void vglWriteCopyStats8(uint32_t *out8);
+// 0051 (MSC_VITA_TEXCOPY): the copy of a texture's decoded level 0 into its video memory (glTexImage2D / glTexSubImage2D, one contiguous copy): 0 the library's own copy (default), 1 sceDmacMemcpy for 8 KiB and more
+// (upstream's vgl_memcpy does this for other copies; these two were left to the CPU), 2 as 1 and every DMA copy is compared with its source and made again by the CPU on a difference (counted).
+// vglTextureCopyStats: DMA copies, DMA bytes, DMA microseconds, copies left to the CPU, differences, refusals. The same bytes either way.
+void vglSetTextureCopyDma(int mode);
+void vglTextureCopyStats(uint32_t *out6);
 
 // Skip sceGxm calls that would set what the context already has (vertex program, fragment program, vertex streams, fragment textures); the cache is
 // forgotten at every sceGxmBeginScene / sceGxmEndScene and after calls that change state behind its back. Default: off.
 void vglSetSkipRedundantSets(GLboolean enable);
+
+// 1.2 (GXM_STATE_CACHE builds): the same for the state setters of the draw path and of GL's state calls (depth function and write mode, stencil function and
+// reference, polygon and cull mode, two-sided, depth bias, viewport, region clip, vertex textures, default uniform buffers and uniform buffer objects): a setter is
+// not forwarded when its arguments are those of its last forwarded call since the cache was forgotten (scene begin and end, precomputed draws, reserved uniform
+// buffers). mask: 0 off (default), else the groups: 0x01 depth, 0x02 stencil, 0x04 cull/polygon/two-sided/depth bias, 0x08 viewport/region clip, 0x10 vertex
+// textures, 0x20 uniform buffers (0x3F = all). Returns the mask in force (0 in a library built without GXM_STATE_CACHE). vglSetSkipRedundantSets stays the switch of
+// the program / stream / fragment texture part.
+#define VGL_GXS_KINDS 24
+uint32_t vglSetStateCache(uint32_t mask);
+
+// 1.2 (LAZY_CLEAR builds, patch 0015): glClear keeps the sceGxm state it set for its quad until something needs the GL state again (the next draw, scene change or
+// scene end, a setter of that state), and a clear that follows a clear sets only what differs. Same picture, far fewer state calls. Default: off (the classic glClear).
+// No effect in a library built without LAZY_CLEAR (vglGlbGetStats says which).
+#define VITAGL_LAZY_CLEAR 1
+void vglSetLazyClear(GLboolean on);
 
 typedef struct {
 	uint32_t version;
@@ -1356,6 +1526,19 @@ typedef struct {
 	uint32_t programs_live, shaders_live, programs_max, shaders_max; // custom program / shader tables
 	uint32_t patcher_host, patcher_buffer, patcher_vusse, patcher_fusse; // shader patcher memory in use (bytes)
 	uint32_t skip_calls[4], skip_skipped[4]; // vertex program, fragment program, vertex stream, fragment texture: calls seen / not forwarded
+	// version 2 (1.2):
+	uint32_t frame; // vglGetFrameNumber() when the statistics were taken
+	uint32_t state_mask; // the groups of vglSetStateCache in force
+	uint32_t state_built; // 1: the library has GXM_STATE_CACHE
+	uint32_t state_calls[VGL_GXS_KINDS], state_skipped[VGL_GXS_KINDS]; // per setter, in the order of gxm_cache.h's GXS_* (front/back depth func, ..., fragment UBO)
+	// version 3 (1.2, patch 0015):
+	uint32_t lazy_built, lazy_on; // the library has LAZY_CLEAR; vglSetLazyClear is on
+	uint32_t lazy_clears, lazy_restores, lazy_continued; // glClear calls made lazily; restores of the state a clear left; clears that found the previous clear's state still in place
+	// version 4 (be26): default uniform buffers (vertex and fragment together): copies made to the ring and their bytes; draws that named the last copy again (vglSetDrawCaches uni_reuse >= 1) and the bytes not copied; draws that named an older copy of the
+	// same scene (uni_reuse 2) and the bytes not copied
+	uint32_t uni_copies, uni_copy_bytes, uni_last_hits, uni_last_bytes, uni_hist_hits, uni_hist_bytes, uni_bad; // uni_bad: only in uni_reuse 3 (verify): reuses whose ring copy differed from the buffer at that draw (must be 0)
+	// version 5 (0060): flushes of the cached stream arena made at a scene submit (vglSetStreamFlushAtScene); stream_flushes counts all write-back calls, stream_flushed_bytes their bytes
+	uint32_t stream_scene_flushes;
 } vglGlbStats;
 // Fills *s (all counters are cumulative; the *_frame_peak ones are the last finished frame's).
 void vglGlbGetStats(vglGlbStats *s);
@@ -1382,7 +1565,17 @@ typedef struct {
 typedef struct {
 	uint32_t busy_us, span_us, tail_us; // see rt.c: GPU busy time, first submission to last completion, last submission to last completion
 	uint16_t scenes, timed;
+	uint32_t pixel_us, tiling_us; // 0021 vglRtSetSplit: the part of busy_us after each scene's tiling ended; tiling seen after submission (a lower bound: scenes overlap)
+	uint32_t display_us; // 0030: the part of busy_us spent in the display's scene (it includes the wait for a display buffer; subtract it, add back the blit)
 } vglRtGpuFrame;
+void vglRtSetSplit(uint32_t enabled);
+typedef struct { // 0043 vglRtSceneKinds: cumulative GPU time of the scenes of one kind (target size, display or not), microseconds as the watcher saw them
+	uint64_t busy_us, tiling_us, pixel_us;
+	uint32_t scenes;
+	uint16_t w, h;
+	uint8_t display, used, pad[2];
+} vglRtSceneKind;
+uint32_t vglRtSceneKinds(vglRtSceneKind *out, uint32_t max); // (needs vglRtSetSplit(1) and the GPU timers); 17 entries, the last is "other" (kinds beyond 16)
 typedef struct {
 	uint32_t version, flags;
 	uint32_t scenes, scenes_display, scenes_noload, scenes_noload_auto, scenes_nostore, hints_given, hints_used;
@@ -1395,11 +1588,28 @@ typedef struct {
 	uint32_t cpu_frame_head, gpu_frame_head; // frames written so far into the rings below (index = n % 128)
 	vglRtCpuFrame cpu_frames[128];
 	vglRtGpuFrame gpu_frames[128];
+	uint64_t begin_disp_us, begin_fbo_us; // 0065 (appended: the layout before it is unchanged): time of the sceGxmBeginScene calls alone on the display target and on framebuffer object targets, with VGL_RT_CPU_TIMERS
+	uint32_t begin_disp_max_us, begin_fbo_max_us;
 } vglRtStats;
 void vglRtGetStats(vglRtStats *s);
 uint32_t vglRtLastGpuFrame(vglRtGpuFrame *out);
+void vglRtSetRingGuard(uint32_t enabled); // 1.2: default 1; 0 = a full timer ring is overwritten as before. Call before vglRtSetup.
+uint32_t vglRtRingDrops(void);            // scenes that were submitted without a timer record because the watcher still held the oldest one
+// 1.2 (source/gxm.c): scene entry that fails (no memory for a framebuffer object's depth/stencil or render target, or sceGxmBeginScene refuses) leaves no
+// open scene and makes the draw, clear or blit that asked skip itself; the same framebuffer is tried again in the next frame at the earliest.
+void vglSetRobustScenes(uint32_t enabled); // default 1; 0 = the 1.1 behaviour (before any drawing)
+uint32_t vglRobustFailures(uint32_t *scene_begins, uint32_t *shader_patches); // scene entries refused / shader programs not made, so far (returns their sum)
+void vglPatchTimingTake(uint32_t *calls, uint64_t *us, uint32_t *max_us); // 1.3 wave 10 (0035): patcher vertex / fragment program creates and render target creates since the last call (3 entries each: counts, microseconds, longest), then reset
 void vglRtSceneProgress(uint32_t *submitted, uint32_t *done); // scenes ended / seen completed by the GPU watcher (GPU timers on; else 0 / 0)
+int vglRtWaitScenesDone(uint32_t target, uint32_t timeout_us); // 0022: blocks until done reaches target (0), timeout (1), or -1: poll vglRtSceneProgress instead
 void vglSetAnisotropicFilter(uint32_t sceFilter); // 0 off; 2 or 3: the minification filter of trilinear textures (see utils/gxm_utils.h) // the newest finished GPU frame; returns frames finished so far (0: none)
+void vglSetAnisotropicMinSize(uint32_t texels); // Strikers 1.3 (0031): textures whose larger side is below this keep trilinear when the anisotropic filter is on (0: none excluded)
+void vglTexAnisoOff(GLboolean off); // Strikers 1.3 wave 24 (0057): the texture on the active unit samples trilinear (GL_TRUE) or, again, with the anisotropic filter vglSetAnisotropicFilter chose (GL_FALSE); its descriptor's filter bits only
+void vglSetTiledTargets(GLint mode); // Strikers 1.3 wave 24 (0057): allow vglTexMakeTiledTarget: 0 off (default), 1 any size from 32 x 32, 2 only whole-tile sizes
+GLboolean vglTexMakeTiledTarget(void); // 0057: the fresh RGBA8 render-target texture on the active unit becomes a tiled one (32 x 32 tiles, zeroed); GL_FALSE: unchanged
+void vglTiledStats(uint32_t *made, uint32_t *refused); // 0057: tiled targets made, glReadPixels from one refused
+GLboolean vglTexIsTiled(void); // 0057: the texture on the active unit is tiled
+void vglFlushStreamArena(void); // 0066: flush cached stream arena before kicking TA mid-scene
 
 #ifdef __cplusplus
 }

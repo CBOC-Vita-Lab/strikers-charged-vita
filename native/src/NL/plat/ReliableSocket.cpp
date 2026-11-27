@@ -17,6 +17,7 @@
 #include "NL/nlMain.h"
 #include "NL/nlString.h"
 #include "NL/nlDebugViews.h"
+#include "platform/sdk/net/np_lan.h"  // np (STR-144)
 
 #include <stdarg.h>
 #include "Game/TweakValue.inl"
@@ -244,7 +245,7 @@ inline void TransportScreenPrinter::Draw()
     {
         if (mLines[i][0] != '\0')
         {
-            nlScreenPrintf(sScreenPrinterColumn, i + sScreenPrinterRow, true, 0, mLines[i]);
+            nlScreenPrintf(sScreenPrinterColumn, i + sScreenPrinterRow, true, 0, "%s", mLines[i]);
         }
     }
 }
@@ -459,9 +460,16 @@ void ReliableSocket::ReceiveDatagram(void* buffer, int size,
         TransportMessage message;
         NetworkMessageSerializer serializer(0, (u8*)buffer, size);
         message.Serialize(&serializer);
-        if (message.HasVoice())
+        if (!serializer.mFailed && message.HasVoice())
         {
             message.SerializeVoice(&serializer);
+        }
+        if (serializer.mFailed)
+        {
+            // np (STR-144): a truncated datagram, or counts and sizes beyond what a message can hold: nothing from it is used
+            NpLanLog("malformed transport datagram (%d bytes) discarded\n", size);
+            message.ReleasePackets();
+            return;
         }
         HandleMessage(&message, address, port);
     }

@@ -32,6 +32,7 @@
 #include "Game/AI/FuzzyRuntimeCall.h"
 #include "NL/nlLocalization.h"
 #include "NL/nlLocalization.inl"
+#include "NL/nlLocalizationLookup.h"
 #include "NL/nlMath.h"
 #include "NL/nlMath.inl"
 #include "NL/nlFormat.h"
@@ -54,6 +55,7 @@ NP_KEEP void np_keep_inline_functions()
     ((SHNavigation*)0)->SetTimerVisible(false);
     ((Variant*)0)->fn_800C2BD4();
     ((nlLocalization*)0)->GetCurrentLanguage();
+    ((nlLocalization*)0)->GetString("");   // inline in NL/nlLocalizationLookup.h; the SHOnline* scenes call it without including it (a profile-guided build stopped inlining it into the one TU that did)
     ((nlVector3*)0)->Set(0.0f, 0.0f, 0.0f);
     ((GameInfoManager*)0)->GetUserInfo();
     ((UserInfo*)0)->IsWidescreen();

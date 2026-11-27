@@ -32,13 +32,13 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertIsNone(vpk.testzip())
             names = set(vpk.namelist())
             self.assertEqual(sha(vpk.read("eboot.bin")), self.manifest["package"]["runtimeSha256"])
-            for required in ("sce_sys/param.sfo", "shadercache/bc447993.pack", "shadercache/vgx_shaderlist.bin"):
+            for required in ("sce_sys/param.sfo", "shadercache/874a13e0.pack", "shadercache/vgx_shaderlist.bin"):
                 self.assertIn(required, names)
             # personal artwork and the boot picture are never shipped
             self.assertNotIn("boot/loading.bin", names)
             self.assertNotIn("sce_sys/pic0.png", names)
             self.assertEqual(set(self.release["packageMembersFromPreviousRelease"]),
-                             {n for n in names if not n.startswith(("eboot.bin", "licenses/"))})
+                             {n for n in names if not n.startswith(("eboot.bin", "licenses/", "shadercache/"))})
 
     def test_previous_release_can_update(self):
         self.assertNotEqual(self.release["previousRelease"]["runtimeSha256"], self.manifest["package"]["runtimeSha256"])

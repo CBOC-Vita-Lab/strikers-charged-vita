@@ -1,7 +1,12 @@
 // Register file, command-stream parser and vertex decoding (front end).
 #include "vgx_state.h"
 #include "vgx_ext.h"
+#include "vgx_workload.h"
+#include "vgx_guestmem.h"
 
+#define XXH_INLINE_ALL
+#include <xxhash.h>
+#include <unordered_set>
 #include <cmath>
 
 namespace vgx {
@@ -9,9 +14,23 @@ namespace vgx {
 uint64_t g_coPlanarOn = 0; // times GX Z-freeze was switched on (genMode bit 19; MSC_VGX_ZFTRACE)
 
 State g;
+uint32_t g_extGen = 1;
+// MSC_VGX_BREAK=1 (mutant, for the verify runs: they must report a mismatch): writes no longer move g_extGen. Read by GxdInit (at every recorder reset).
+static bool g_extBreak = false;
+static inline void ExtBump() {
+    if (__builtin_expect(!g_extBreak, 1)) ++g_extGen;
+}
 
-uint32_t g_gxd = 0x3FFFFFFFu; // (GXD_VERIFY, bit 30, is a diagnostic: off unless asked for)
-void GxdInit() { g_gxd = static_cast<uint32_t>(EnvInt("MSC_VGX_GXD", 0x3FFFFFFF)); }
+extern "C" int VgxAbOn = 0;   // (1 while MSC_AB flips a key: the game's inline getters look at it before they call VgxAbOverride)
+extern "C" long VgxAbOverride(const char* key, long dflt) { return ::vgx::ab::Get(key, dflt); }   // (the game's own code asks through this weak symbol: MSC_AB, vgx_ab.h)
+uint32_t g_gxd = kGxdDefault; // (GXD_VERIFY, bit 30, is a diagnostic: off unless asked for)
+void GxdInit() {
+    ab::Start();
+    VgxAbOn = ab::Active() ? 1 : 0;   // (MSC_AB, vgx_ab.h: the first call after the environment is applied reads it; later calls do nothing)
+    g_gxd = static_cast<uint32_t>(EnvInt("MSC_VGX_GXD", static_cast<long>(kGxdDefault)));
+    g_rsCacheMode = -1; // (read again: the environment file is applied by now)
+    g_extBreak = (EnvInt("MSC_VGX_BREAK", 0) & 1) != 0;
+}
 
 namespace {
 inline int sext11(uint32_t v) { return static_cast<int>(v << 21) >> 21; }
@@ -23,6 +42,68 @@ enum { T_NONE = 0, T_DIRECT = 1, T_INDEX8 = 2, T_INDEX16 = 3 };
 enum { C_U8 = 0, C_S8 = 1, C_U16 = 2, C_S16 = 3, C_F32 = 4 };
 } // namespace
 
+// ------------------------------------------------------------------ key-register hash (MSC_VGX_RSCACHE)
+// State::keyHash: a hash of every register the shader keys are built from (BuildFsKey / BuildVsKey in vgx_draw.cpp: the BP registers of
+// MarkBP's key class and XF 0x09, 0x0E..0x12, 0x40..0x47, 0x50..0x57), kept up to date as they change: each register contributes
+// KeyZ(register, value), combined by exclusive or, so a change costs two evaluations and the hash says "the same keys as before" whatever
+// order the registers were written in. vgx_draw.cpp's resolution cache looks the shader ids up by it instead of gathering, hashing and
+// comparing the 104 key words of the state for every material change. (MSC_VGX_RSCACHE=0: not maintained.)
+// The list must be a superset of what BuildFsKey / BuildVsKey read; a register missing from it would give a stale key (MSC_VGX_RSCACHE=2 checks).
+int g_rsCacheMode = -1;
+int RsCacheModeSlow() {
+    long m = EnvInt("MSC_VGX_RSCACHE", 1);
+    if (m < 0 || m > 2) m = 1;
+    g_rsCacheMode = static_cast<int>(m);
+    return g_rsCacheMode;
+}
+static constexpr bool IsKeyBP(uint32_t reg) {
+    return reg == 0x00 || (reg >= 0x10 && reg <= 0x1F) || (reg >= 0x27 && reg <= 0x2F) || (reg >= 0x41 && reg <= 0x43) || (reg >= 0xC0 && reg <= 0xDF) ||
+           reg == 0xF1 || reg == 0xF3 || (reg >= 0xF5 && reg <= 0xFD);
+}
+static constexpr bool IsKeyXF(uint32_t r) { return r == 0x09 || (r >= 0x0E && r <= 0x12) || (r >= 0x40 && r <= 0x47) || (r >= 0x50 && r <= 0x57); }
+// KeyZ(i, v) for register i (BP 0..255, XF 0x100 + r): two 32-bit lanes, each a multiply-xorshift of the value keyed by a random word per
+// register (the console's processor has no 64-bit multiply; the keys come from a fixed splitmix sequence).
+struct KeyZTable {
+    uint32_t a[0x158], b[0x158];
+    constexpr KeyZTable() : a(), b() {
+        uint64_t x = 0x243F6A8885A308D3ull;
+        for (int i = 0; i < 0x158; ++i) {
+            for (int k = 0; k < 2; ++k) {
+                x += 0x9E3779B97F4A7C15ull;
+                uint64_t z = x;
+                z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+                z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+                z ^= z >> 31;
+                (k ? b : a)[i] = static_cast<uint32_t>(z) | 1u;
+            }
+        }
+    }
+};
+static constexpr KeyZTable kKeyZ;
+// (the register file before any reset: all zero, whose hash is not zero)
+static const bool g_keyHashInit = [] { g.keyHash = KeyHashOf(g); return true; }();
+static inline __attribute__((always_inline)) uint64_t KeyZ(uint32_t i, uint32_t v) {
+    uint32_t a = (v ^ kKeyZ.a[i]) * 0x85EBCA6Bu;
+    a ^= a >> 15; a *= 0xC2B2AE35u; a ^= a >> 13;
+    uint32_t b = (v + kKeyZ.b[i]) * 0x846CA68Bu;
+    b ^= b >> 16; b *= 0x2C1B3C6Du; b ^= b >> 12;
+    return (static_cast<uint64_t>(a) << 32) | b;
+}
+static inline __attribute__((always_inline)) void KeyHashBP(uint32_t reg, uint32_t oldv, uint32_t newv) {
+    if (RsCacheMode() != 0) g.keyHash ^= KeyZ(reg, oldv) ^ KeyZ(reg, newv);
+}
+static inline void KeyHashXF(uint32_t r, uint32_t oldv, uint32_t newv) {
+    if (IsKeyXF(r) && RsCacheMode() != 0) g.keyHash ^= KeyZ(0x100u + r, oldv) ^ KeyZ(0x100u + r, newv);
+}
+uint64_t KeyHashOf(const State& s) {
+    uint64_t h = 0;
+    for (uint32_t r = 0; r < 256; ++r)
+        if (IsKeyBP(r)) h ^= KeyZ(r, s.bp[r]);
+    for (uint32_t r = 0; r < 0x58; ++r)
+        if (IsKeyXF(r)) h ^= KeyZ(0x100u + r, s.xfReg[r]);
+    return h;
+}
+
 // Which part of the resolved draw state a changed register invalidates. Most draws change
 // only values (TEV colours, a matrix index, material colours); rebuilding and comparing the
 // shader keys and the render state for each of those was a third of the player's time.
@@ -31,36 +112,48 @@ enum { C_U8 = 0, C_S8 = 1, C_U16 = 2, C_S16 = 3, C_F32 = 4 };
 // keep them in step). A register that none of them reads marks nothing: the texture-coordinate
 // scale registers 0x30-0x3F, which change with every texture, used to cost a rebuild of
 // both shader keys (145 of 202 rebuilds per open-play frame changed nothing).
-static inline void MarkBP(uint8_t reg) {
-    // Fragment key (and with it render state and TEV block): genMode, indirect stages and
-    // their order, TEV order, blend mode, destination alpha, pixel format, TEV stages, fog
-    // type, alpha test, Z-texture mode, swap tables / konst selection.
-    if (reg == 0x00 || (reg >= 0x10 && reg <= 0x1F) || (reg >= 0x27 && reg <= 0x2F) || (reg >= 0x41 && reg <= 0x43) || (reg >= 0xC0 && reg <= 0xDF) ||
-        reg == 0xF1 || reg == 0xF3 || (reg >= 0xF5 && reg <= 0xFD)) {
+// Fragment key (and with it render state and TEV block): genMode, indirect stages and
+// their order, TEV order, blend mode, destination alpha, pixel format, TEV stages, fog
+// type, alpha test, Z-texture mode, swap tables / konst selection: kMarkKey (bpKeyDirty, bpDirty).
+// Render state only: scissor and its offset, line width, depth mode: kMarkRs (bpRsDirty).
+// Values of the TEV uniform block only: TEV / konst colours, fog parameters and colour,
+// Z-texture bias, indirect matrices and scales: kMarkTev (bpDirty).
+enum : uint8_t { kMarkKey = 1, kMarkTev = 2, kMarkRs = 4 };
+struct BpMarkTable {
+    uint8_t t[256];
+    constexpr BpMarkTable() : t() {
+        for (int reg = 0; reg < 256; ++reg) {
+            uint8_t c = 0;
+            if (IsKeyBP(static_cast<uint32_t>(reg))) c = kMarkKey;
+            else if (reg == 0x20 || reg == 0x21 || reg == 0x22 || reg == 0x40 || reg == 0x59) c = kMarkRs;
+            else if ((reg >= 0xE0 && reg <= 0xE7) || reg == 0xEE || reg == 0xEF || reg == 0xF0 || reg == 0xF2 || reg == 0xF4 || (reg >= 0x06 && reg <= 0x0E) ||
+                     reg == 0x25 || reg == 0x26)
+                c = kMarkTev;
+            t[reg] = c;
+        }
+    }
+};
+static constexpr BpMarkTable kBpMark;
+// (everything not in the table: copy set-up 0x49-0x54, read when a copy is made; texture and TLUT registers, bound through GXLoadTexObj;
+// coordinate scales; performance counters)
+static inline void MarkBP(uint8_t reg, uint32_t oldv, uint32_t newv) {
+    const uint8_t c = kBpMark.t[reg];
+    if (!c) return;
+    if (c & kMarkKey) {
+        KeyHashBP(reg, oldv, newv);
         g.bpKeyDirty = true;
-        g.bpDirty = true;
-        return;
     }
-    // Render state only: scissor and its offset, line width, depth mode.
-    if (reg == 0x20 || reg == 0x21 || reg == 0x22 || reg == 0x40 || reg == 0x59) {
-        g.bpRsDirty = true;
-        return;
-    }
-    // Values of the TEV uniform block only: TEV / konst colours, fog parameters and colour,
-    // Z-texture bias, indirect matrices and scales.
-    if ((reg >= 0xE0 && reg <= 0xE7) || reg == 0xEE || reg == 0xEF || reg == 0xF0 || reg == 0xF2 || reg == 0xF4 || (reg >= 0x06 && reg <= 0x0E) ||
-        reg == 0x25 || reg == 0x26)
-        g.bpDirty = true;
-    // (everything else: copy set-up 0x49-0x54, read when a copy is made; texture and TLUT
-    // registers, bound through GXLoadTexObj; coordinate scales; performance counters)
+    if (c & (kMarkKey | kMarkTev)) g.bpDirty = true;
+    if (c & kMarkRs) g.bpRsDirty = true;
 }
-static inline void MarkXFReg(uint32_t r) { // r = address - 0x1000
+static inline void MarkXFReg(uint32_t r, uint32_t oldv, uint32_t newv) { // r = address - 0x1000
+    KeyHashXF(r, oldv, newv);
     if (r == 0x18 || r == 0x19) return;                   // matrix indices: xfMtxDirty (set by the caller)
     if (r >= 0x1A && r <= 0x1F) g.xfViewDirty = true;
     else if (r >= 0x20 && r <= 0x26) g.xfProjDirty = true;
     else if (r >= 0x0A && r <= 0x0D) g.xfColorDirty = true;
     else if (r == 0x09 || (r >= 0x0E && r <= 0x12) || r == 0x3F || (r >= 0x40 && r <= 0x4F)) g.xfKeyDirty = true;
-    else if (r >= 0x50 && r <= 0x57) { g.xfKeyDirty = true; g.xfMtxDirty = true; } // post-transform: key and matrix rows
+    else if (r >= 0x50 && r <= 0x57) { g.xfKeyDirty = true; g.xfMtxDirty = true; g.mtxFull = true; } // post-transform: key and matrix rows
     else g.xfRegDirty = true;
 }
 
@@ -84,7 +177,7 @@ void WriteBP(uint32_t rv) {
         std::memcpy(old, dst[idx], sizeof old);
         if (reg & 1) { dst[idx][2] = lo; dst[idx][1] = hi; } // BG
         else { dst[idx][0] = lo; dst[idx][3] = hi; }         // RA
-        if (std::memcmp(old, dst[idx], sizeof old) != 0) MarkBP(reg);
+        if (std::memcmp(old, dst[idx], sizeof old) != 0) { ExtBump(); MarkBP(reg, 0, 0); }
         g.bp[reg] = nv;
         return;
     }
@@ -103,8 +196,9 @@ void WriteBP(uint32_t rv) {
     }
     if (reg == 0x00 && (nv & ~g.bp[0x00] & (1u << 19))) ++g_coPlanarOn;
     if (g.bp[reg] != nv) {
+        const uint32_t ov = g.bp[reg];
         g.bp[reg] = nv;
-        MarkBP(reg);
+        MarkBP(reg, ov, nv);
     }
 }
 
@@ -123,21 +217,23 @@ void StoreBP(uint8_t reg, uint32_t nv) {
             if (same) return;
             if (reg & 1) { dst[idx][2] = lo; dst[idx][1] = hi; }
             else { dst[idx][0] = lo; dst[idx][3] = hi; }
-            MarkBP(reg);
+            ExtBump();
+            MarkBP(reg, 0, 0);
             return;
         }
         int old[4];
         std::memcpy(old, dst[idx], sizeof old);
         if (reg & 1) { dst[idx][2] = lo; dst[idx][1] = hi; } // BG
         else { dst[idx][0] = lo; dst[idx][3] = hi; }         // RA
-        if (std::memcmp(old, dst[idx], sizeof old) != 0) MarkBP(reg);
+        if (std::memcmp(old, dst[idx], sizeof old) != 0) { ExtBump(); MarkBP(reg, 0, 0); }
         g.bp[reg] = nv;
         return;
     }
     if (reg == 0x00 && (nv & ~g.bp[0x00] & (1u << 19))) ++g_coPlanarOn; // (MSC_VGX_ZFTRACE: how often the game sets GX Z-freeze)
     if (g.bp[reg] != nv) {
+        const uint32_t ov = g.bp[reg];
         g.bp[reg] = nv;
-        MarkBP(reg);
+        MarkBP(reg, ov, nv);
     }
 }
 
@@ -145,53 +241,68 @@ void SetBPField(uint8_t reg, int shift, int count, uint32_t value) {
     const uint32_t mask = ((1u << count) - 1u) << shift;
     const uint32_t nv = (g.bp[reg] & ~mask) | ((value << shift) & mask);
     if (nv != g.bp[reg]) {
+        const uint32_t ov = g.bp[reg];
         g.bp[reg] = nv & 0x00FFFFFFu;
-        MarkBP(reg);
+        MarkBP(reg, ov, g.bp[reg]);
     }
 }
 
 // ------------------------------------------------------------------ XF
-static void WriteXFWord(uint32_t a, uint32_t w) {
+static inline __attribute__((always_inline)) void WriteXFWordImpl(uint32_t a, uint32_t w) {
     if (a < 0x100) {
         float& f = g.xfPos[a >> 2][a & 3];
-        if (f2u(f) != w) { f = u2f(w); g.xfMtxDirty = true; }
+        if (f2u(f) != w) { f = u2f(w); g.xfMtxDirty = true; MtxMarkPos(a, 1); }
     } else if (a >= 0x400 && a < 0x460) {
         const uint32_t o = a - 0x400;
         float& f = g.xfNrm[o / 3][o % 3];
-        if (f2u(f) != w) { f = u2f(w); g.xfMtxDirty = true; }
+        if (f2u(f) != w) { f = u2f(w); g.xfMtxDirty = true; MtxMarkNrm(o, 1); }
     } else if (a >= 0x500 && a < 0x600) {
         const uint32_t o = a - 0x500;
         float& f = g.xfPost[o >> 2][o & 3];
-        if (f2u(f) != w) { f = u2f(w); g.xfMtxDirty = true; }
+        if (f2u(f) != w) { f = u2f(w); g.xfMtxDirty = true; MtxMarkPost(o, 1); }
     } else if (a >= 0x600 && a < 0x680) {
         const uint32_t o = a - 0x600;
         uint32_t& d = g.xfLight[o >> 4][o & 15];
-        if (d != w) { d = w; g.xfLightDirty = true; }
+        if (d != w) { d = w; g.xfLightDirty = true; ExtBump(); }
     } else if (a >= 0x1000 && a < 0x1058) {
         uint32_t& d = g.xfReg[a - 0x1000];
-        if (a == 0x1018) { if (g.matIdxA != w) { g.matIdxA = w; g.xfMtxDirty = true; } }
+        if (a == 0x1018) { if (g.matIdxA != w) { g.matIdxA = w; g.xfMtxDirty = true; } }  // (the indices are compared with the ones the blocks were built with)
         else if (a == 0x1019) { if (g.matIdxB != w) { g.matIdxB = w; g.xfMtxDirty = true; } }
-        if (d != w) { d = w; MarkXFReg(a - 0x1000); }
+        if (d != w) {
+            const uint32_t o = d;
+            d = w;
+            const uint32_t xr = a - 0x1000;
+            if (xr == 0x09 || (xr >= 0x0E && xr <= 0x11)) ExtBump();
+            MarkXFReg(xr, o, w);
+        }
     }
 }
+// The call form (GXD_XFWORD off: the code of 1.1 and the first 1.2 builds; also what the byte-stream writer below uses).
+static __attribute__((noinline)) void WriteXFWord(uint32_t a, uint32_t w) { WriteXFWordImpl(a, w); }
 void WriteXF(uint32_t addr, uint32_t count, const uint32_t* w) {
+    // GXD_XFWORD (Galaxy e90cc10): the single words the game sends (matrix indices, texture-coordinate set-up, projection) are
+    // written in place, without the call (two thirds of its instructions were the call).
+    if (count == 1 && Gxd(GXD_XFWORD)) {
+        WriteXFWordImpl(addr, w[0]);
+        return;
+    }
     // Whole matrices are the common case (12 words of position / texture
     // matrix memory, 9 of normal matrix memory): one compare and one copy
     // instead of a classification per word.
     if (count > 1) {
         if (addr < 0x100 && addr + count <= 0x100) {
             float* dst = &g.xfPos[0][0] + addr; // rows of 4 are contiguous in address order
-            if (!SameWords(dst, w, count)) { CopyWords(dst, w, count); g.xfMtxDirty = true; }
+            if (!SameWords(dst, w, count)) { CopyWords(dst, w, count); g.xfMtxDirty = true; MtxMarkPos(addr, count); }
             return;
         }
         if (addr >= 0x400 && addr + count <= 0x460) {
             float* dst = &g.xfNrm[0][0] + (addr - 0x400);
-            if (!SameWords(dst, w, count)) { CopyWords(dst, w, count); g.xfMtxDirty = true; }
+            if (!SameWords(dst, w, count)) { CopyWords(dst, w, count); g.xfMtxDirty = true; MtxMarkNrm(addr - 0x400, count); }
             return;
         }
         if (addr >= 0x500 && addr + count <= 0x600) {
             float* dst = &g.xfPost[0][0] + (addr - 0x500);
-            if (!SameWords(dst, w, count)) { CopyWords(dst, w, count); g.xfMtxDirty = true; }
+            if (!SameWords(dst, w, count)) { CopyWords(dst, w, count); g.xfMtxDirty = true; MtxMarkPost(addr - 0x500, count); }
             return;
         }
     }
@@ -268,6 +379,7 @@ void WriteCP(uint8_t reg, uint32_t v) {
 }
 
 void InitState(State& g) {
+    ++g_extGen;
     g = State{};
     g.bpMask = 0x00FFFFFFu;
     g.bp[0x00] = 0; // genMode: one TEV stage, no texgens
@@ -289,6 +401,7 @@ void InitState(State& g) {
     g.xfReg[0x1D] = f2u(320.0f + 342.0f); g.xfReg[0x1E] = f2u(240.0f + 342.0f); g.xfReg[0x1F] = f2u(16777215.0f);
     g.xfReg[0x26] = 1;
     g.xfReg[0x20] = f2u(1.0f); g.xfReg[0x22] = f2u(1.0f); g.xfReg[0x24] = f2u(1.0f);
+    g.keyHash = KeyHashOf(g);
 }
 void ResetState() { InitState(g); }
 
@@ -427,8 +540,8 @@ inline void DecodeColor(const uint8_t* s, int type, uint8_t* o, bool le = false)
 const uint8_t kZero[64] = {};
 
 // Resolves an index into an array element pointer; out-of-range reads see zeros.
-inline const uint8_t* ArrayElem(int attr, uint32_t idx, uint32_t elemSize, bool& le) {
-    const ArrayRef& ar = g.arrays[attr];
+inline const uint8_t* ArrayElemIn(const ArrayRef* arrs, int attr, uint32_t idx, uint32_t elemSize, bool& le) {
+    const ArrayRef& ar = arrs[attr];
     le = ar.le;
     const uint64_t off = static_cast<uint64_t>(idx) * ar.stride;
     if (!ar.data || off + elemSize > ar.size) {
@@ -437,6 +550,7 @@ inline const uint8_t* ArrayElem(int attr, uint32_t idx, uint32_t elemSize, bool&
     }
     return ar.data + off;
 }
+inline const uint8_t* ArrayElem(int attr, uint32_t idx, uint32_t elemSize, bool& le) { return ArrayElemIn(g.arrays, attr, idx, elemSize, le); }
 
 } // namespace
 
@@ -600,6 +714,70 @@ inline void IndexRange16(const uint8_t* s, uint32_t count, uint32_t ss, uint32_t
     mn = lo;
     mx = hi;
 }
+// MSC_VGX_FASTIDX: kernels for 16-bit indices that the caller has already shown to lie inside their array (IndexRange16: the highest index addresses an element
+// inside it, so every index does): no per-vertex range test, no select of the element's address, four vertices an iteration (the guarded kernels above come to
+// about 60 instructions per two vertices in the compiler's output, the lane loads and the range bookkeeping included). The same arithmetic as DecodeS16Idx16Neon /
+// DecodeRgba8, so the stored words are the same; a tail of fewer than four vertices goes to the guarded kernel.
+template <int N, bool LE>
+__attribute__((noinline)) uint32_t DecodeS16Idx16Fast(const uint8_t* s, uint8_t* o, uint32_t count, uint32_t ss, uint32_t os, const uint8_t* adata,
+                                                      uint32_t astride, uint32_t maxOff, float scale) {
+    const float32x4_t vs = vdupq_n_f32(scale);
+    for (; count >= 4; count -= 4, s += 4 * ss, o += 4 * os) {
+        const uint8_t* const e0 = adata + static_cast<uint32_t>(be16(s)) * astride;
+        const uint8_t* const e1 = adata + static_cast<uint32_t>(be16(s + ss)) * astride;
+        const uint8_t* const e2 = adata + static_cast<uint32_t>(be16(s + 2 * ss)) * astride;
+        const uint8_t* const e3 = adata + static_cast<uint32_t>(be16(s + 3 * ss)) * astride;
+        uint32x2_t a = vld1_lane_u32(reinterpret_cast<const U32u*>(e0), vdup_n_u32(0), 0);
+        a = vld1_lane_u32(reinterpret_cast<const U32u*>(e1), a, 1);
+        uint32x2_t b = vld1_lane_u32(reinterpret_cast<const U32u*>(e2), vdup_n_u32(0), 0);
+        b = vld1_lane_u32(reinterpret_cast<const U32u*>(e3), b, 1);
+        int16x4_t ha = vreinterpret_s16_u32(a), hb = vreinterpret_s16_u32(b);
+        if (!LE) {
+            ha = vreinterpret_s16_u8(vrev16_u8(vreinterpret_u8_s16(ha)));
+            hb = vreinterpret_s16_u8(vrev16_u8(vreinterpret_u8_s16(hb)));
+        }
+        const float32x4_t fa = vmulq_f32(vcvtq_f32_s32(vmovl_s16(ha)), vs); // x0 y0 x1 y1
+        const float32x4_t fb = vmulq_f32(vcvtq_f32_s32(vmovl_s16(hb)), vs); // x2 y2 x3 y3
+        vst1_f32(reinterpret_cast<float*>(o), vget_low_f32(fa));
+        vst1_f32(reinterpret_cast<float*>(o + os), vget_high_f32(fa));
+        vst1_f32(reinterpret_cast<float*>(o + 2 * os), vget_low_f32(fb));
+        vst1_f32(reinterpret_cast<float*>(o + 3 * os), vget_high_f32(fb));
+        if (N == 3) {
+            uint16x4_t z = vld1_lane_u16(reinterpret_cast<const U16u*>(e0 + 4), vdup_n_u16(0), 0);
+            z = vld1_lane_u16(reinterpret_cast<const U16u*>(e1 + 4), z, 1);
+            z = vld1_lane_u16(reinterpret_cast<const U16u*>(e2 + 4), z, 2);
+            z = vld1_lane_u16(reinterpret_cast<const U16u*>(e3 + 4), z, 3);
+            int16x4_t hz = vreinterpret_s16_u16(z);
+            if (!LE) hz = vreinterpret_s16_u8(vrev16_u8(vreinterpret_u8_s16(hz)));
+            const uint32x4_t wz = vreinterpretq_u32_f32(vmulq_f32(vcvtq_f32_s32(vmovl_s16(hz)), vs)); // z0 z1 z2 z3
+            vst1q_lane_u32(reinterpret_cast<U32u*>(o + 8), wz, 0);
+            vst1q_lane_u32(reinterpret_cast<U32u*>(o + os + 8), wz, 1);
+            vst1q_lane_u32(reinterpret_cast<U32u*>(o + 2 * os + 8), wz, 2);
+            vst1q_lane_u32(reinterpret_cast<U32u*>(o + 3 * os + 8), wz, 3);
+        }
+    }
+    return count ? DecodeS16Idx16Neon<N, LE>(s, o, count, ss, os, adata, astride, maxOff, scale) : 0u;
+}
+__attribute__((noinline)) uint32_t DecodeRgba8Idx16Fast(const uint8_t* s, uint8_t* o, uint32_t count, uint32_t ss, uint32_t os, const uint8_t* adata,
+                                                        uint32_t astride, uint32_t maxOff, float) {
+    for (; count >= 4; count -= 4, s += 4 * ss, o += 4 * os) {
+        const uint8_t* const e0 = adata + static_cast<uint32_t>(be16(s)) * astride;
+        const uint8_t* const e1 = adata + static_cast<uint32_t>(be16(s + ss)) * astride;
+        const uint8_t* const e2 = adata + static_cast<uint32_t>(be16(s + 2 * ss)) * astride;
+        const uint8_t* const e3 = adata + static_cast<uint32_t>(be16(s + 3 * ss)) * astride;
+        uint32_t w0, w1, w2, w3;
+        std::memcpy(&w0, e0, 4);
+        std::memcpy(&w1, e1, 4);
+        std::memcpy(&w2, e2, 4);
+        std::memcpy(&w3, e3, 4);
+        std::memcpy(o, &w0, 4);
+        std::memcpy(o + os, &w1, 4);
+        std::memcpy(o + 2 * os, &w2, 4);
+        std::memcpy(o + 3 * os, &w3, 4);
+    }
+    return count ? DecodeRgba8<2>(s, o, count, ss, os, adata, astride, maxOff, 1.0f) : 0u;
+}
+bool FastIdx(); // MSC_VGX_FASTIDX
 // The position-matrix-index column: the byte of every vertex as a float, and the highest one (GX_VA_PNMTXIDX; 8 instructions per vertex in the
 // scalar loop, about 4 here).
 inline uint32_t MatrixIndexColumn(const uint8_t* s, uint8_t* o, uint32_t count, uint32_t ss, uint32_t os) {
@@ -643,23 +821,149 @@ const AttrFn kAttrFnLe[3][5][4] = {VGX_ATTR_IDX(0, false), VGX_ATTR_IDX(1, true)
 const AttrFn kRgba8Fn[3] = {&DecodeRgba8<0>, &DecodeRgba8<1>, &DecodeRgba8<2>};
 #undef VGX_ATTR_ROW
 #undef VGX_ATTR_IDX
+// MSC_VGX_FASTIDX=0|1 (code default 0; on in the Vita's list): see DecodeS16Idx16Fast. The stored words are the same as the guarded kernels'.
+bool FastIdx() {
+    static int on = -1;
+    if (on < 0) on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_FASTIDX", 0) != 0)) ? 1 : 0;
+    return on != 0;
+}
 // MSC_VGX_DECODE=0: the general loops only (to compare the two: frame hashes must be equal).
 inline bool SpecialisedDecode() {
-    static const bool on = EnvInt("MSC_VGX_DECODE", 1) != 0;
+    const bool on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_DECODE", 1) != 0));
     return on;
 }
 } // namespace
 
-void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* out, ArraySpans* spans) {
+// GXD_DECFILL: the decoder's default stores for `count` vertices of `os` bytes at `out`: z (offset 8) for a position of two components, the matrix
+// row (w, offset 12) when no PNMTXIDX is read, the texture-matrix indices (8 bytes at offTmi). Same bytes as the per-vertex tests.
+template <bool Z, bool W, bool T>
+static __attribute__((noinline)) void FillDefaults(uint8_t* out, uint32_t count, uint32_t os, uint32_t offTmi) {
+    uint8_t* o = out;
+    for (uint32_t v = 0; v < count; ++v, o += os) {
+        if (Z) std::memset(o + 8, 0, 4);
+        if (W) std::memset(o + 12, 0, 4);
+        if (T) std::memset(o + offTmi, 0, 8);
+    }
+}
+
+
+// MSC_VGX_DECODECENSUS=<frame> (diagnostic, nothing is changed): for the 60 frames from <frame>, one line per frame, path (B: display-list cache build, S: stream decode),
+// tag of the packet being drawn, layout mask, skin, attribute signature: calls and vertices decoded.
+namespace {
+struct DecRec { uint32_t path, tag, mask, sig, calls, verts; };
+DecRec g_dec[96];
+int g_nDec = 0;
+long DecCensusFrom() {
+    static long v = -2;
+    if (v == -2) v = static_cast<long>(VGX_KNOB(EnvInt("MSC_VGX_DECODECENSUS", -1)));
+    return v;
+}
+// What a content memo of the stream decodes would find: the stream bytes and the whole arrays hashed, against the set of the picture before.
+std::unordered_set<uint64_t> g_memoPrev, g_memoCur;
+uint32_t g_memoCalls = 0, g_memoVerts = 0, g_memoHits = 0, g_memoHitVerts = 0, g_memoBytes = 0;
+void DecCensusNote(const Plan& p, const uint8_t* src, uint32_t count, bool build) {
+    const long from = DecCensusFrom();
+    if (from < 0) return;
+    const uint64_t f = CurrentFrame();
+    if (f < static_cast<uint64_t>(from) || f >= static_cast<uint64_t>(from) + 60) return;
+    if (!build && !g_skin.on) {
+        uint64_t h = XXH3_64bits(src, static_cast<size_t>(count) * p.streamSize);
+        uint32_t bytes = count * p.streamSize;
+        uint32_t off = 0;
+        for (int i = 0; i < p.n; ++i) {
+            const AttrPlan& a = p.a[i];
+            const uint32_t so = off;
+            off += a.srcSize;
+            const ArrayRef& ar = g.arrays[a.attr];
+            if (a.attr > 8 && a.mode != T_DIRECT && ar.data && ar.stride) {
+                // the elements the indices name: lowest to highest (clamped to the array)
+                uint32_t lo = 0xFFFFFFFFu, hi = 0;
+                for (uint32_t v = 0; v < count; ++v) {
+                    const uint8_t* e = src + static_cast<size_t>(v) * p.streamSize + so;
+                    const uint32_t idx = a.mode == T_INDEX16 ? be16(e) : e[0];
+                    if (idx < lo) lo = idx;
+                    if (idx > hi) hi = idx;
+                }
+                const uint64_t b0 = static_cast<uint64_t>(lo) * ar.stride, b1 = static_cast<uint64_t>(hi) * ar.stride + a.elemSize;
+                if (lo <= hi && b1 <= ar.size) { h = XXH3_64bits_withSeed(ar.data + b0, static_cast<size_t>(b1 - b0), h); bytes += static_cast<uint32_t>(b1 - b0); }
+            }
+        }
+        ++g_memoCalls; g_memoVerts += count; g_memoBytes += bytes;
+        if (g_memoPrev.count(h)) { ++g_memoHits; g_memoHitVerts += count; }
+        g_memoCur.insert(h);
+    }
+    uint32_t sig = 0;
+    for (int i = 0; i < p.n; ++i) sig = sig * 31u + static_cast<uint32_t>(p.a[i].attr * 64 + p.a[i].mode * 8 + p.a[i].type);
+    const uint32_t path = build ? 1u : 0u, skin = g_skin.on ? 1u : 0u;
+    for (int i = 0; i < g_nDec; ++i)
+        if (g_dec[i].path == path && g_dec[i].tag == g_diagTag && g_dec[i].mask == (p.layoutMask | (skin << 31)) && g_dec[i].sig == sig) { ++g_dec[i].calls; g_dec[i].verts += count; return; }
+    if (g_nDec < 96) g_dec[g_nDec++] = DecRec{path, g_diagTag, p.layoutMask | (skin << 31), sig, 1, count};
+}
+} // namespace
+void DecodeCensusFrame(uint64_t frame) {
+    if (DecCensusFrom() < 0) return;
+    if (g_memoCalls) std::fprintf(stderr, "[decmemo] f=%llu S calls=%u verts=%u srcbytes=%u hits=%u hitverts=%u\n", static_cast<unsigned long long>(frame), g_memoCalls, g_memoVerts, g_memoBytes, g_memoHits, g_memoHitVerts);
+    std::swap(g_memoPrev, g_memoCur); g_memoCur.clear(); g_memoCalls = g_memoVerts = g_memoHits = g_memoHitVerts = g_memoBytes = 0;
+    for (int i = 0; i < g_nDec; ++i)
+        std::fprintf(stderr, "[deccensus] f=%llu %c tag=%08X mask=%08X sig=%08X calls=%u verts=%u\n", static_cast<unsigned long long>(frame), g_dec[i].path ? 'B' : 'S', g_dec[i].tag, g_dec[i].mask,
+                     g_dec[i].sig, g_dec[i].calls, g_dec[i].verts);
+    g_nDec = 0;
+}
+// (MSC_VGX_FEPAR: the decoder reads the array bindings through `arrs` and reports the matrix-index maximum through `mxOut`, so that a worker thread can run it over a
+// snapshot of both; DecodeVertices is the player's call: the live bindings and g_lastPosMtxMax.)
+static void DecodeVerticesImpl(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* out, ArraySpans* spans, uint32_t outStride, uint32_t onlyAttrs, const ArrayRef* arrs, uint32_t* mxOut);
+void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* out, ArraySpans* spans, uint32_t outStride, uint32_t onlyAttrs) {
     if (TagCensusOn()) TagCensusDecode(count);
+    DecCensusNote(p, src, count, spans != nullptr);
+    if (!onlyAttrs) g_lastPosMtxMax = 0;
+    DecodeVerticesImpl(p, src, count, out, spans, outStride, onlyAttrs, g.arrays, &g_lastPosMtxMax);
+}
+// (nxcpu25, MSC_VGX_FEPAR_MTX=0|1, code default 0: no route has a matrix-index stream draw (0 of 72,000 at the tour, 0 at the Dump, the goal and the replay), so the path is unexercised) a plan with a matrix-index attribute (PNMTXIDX, attr 0) may be decoded by the worker too. EmitDraw needs the draw's matrix-index maximum (the palette
+// size, g_lastPosMtxMax) at once: the player gets it from StreamMatrixMax, a one-byte-a-vertex scan of the stream, and the worker's own decode (which writes the same column) is checked against it in verify mode.
+bool FeparMtxOn() {
+    static int on = -1;
+    if (on < 0) on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_FEPAR_MTX", 0) != 0)) ? 1 : 0;
+    return on != 0;
+}
+bool PlanHasMatrixIndex(const Plan& p) {
+    for (int i = 0; i < p.n; ++i)
+        if (p.a[i].attr == 0) return true;
+    return false;
+}
+uint32_t StreamMatrixMax(const Plan& p, const uint8_t* src, uint32_t count) {
+    uint32_t off = 0, at = 0;
+    bool have = false;
+    for (int i = 0; i < p.n; ++i) {
+        if (p.a[i].attr == 0) { at = off; have = true; }   // (the decode reports the last such attribute's maximum)
+        off += p.a[i].srcSize;
+    }
+    if (!have) return 0;
+    uint32_t mx = 0;
+    const uint8_t* s = src + at;
+    const uint32_t ss = p.streamSize;
+    for (uint32_t v = 0; v < count; ++v, s += ss) if (s[0] > mx) mx = s[0];
+    return mx;
+}
+bool DecodeDeferrable(const Plan& p) {
+    (void)FastIdx();
+    if (TagCensusOn() || DecCensusFrom() >= 0 || GxdVerify() || !SpecialisedDecode()) return false;   // (the censuses count at the decode; verify keeps scratch vectors; the unspecialised decode fills defaults after the matrix column)
+    if (!FeparMtxOn() && PlanHasMatrixIndex(p)) return false;
+    return true;
+}
+void DecodeVerticesSnap(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* out, const ArrayRef* arrs, uint32_t* mxOut) {
+    uint32_t mx = 0;
+    DecodeVerticesImpl(p, src, count, out, nullptr, 0, 0, arrs, &mx);
+    if (mxOut) *mxOut = mx;
+}
+static void DecodeVerticesImpl(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* out, ArraySpans* spans, uint32_t outStride, uint32_t onlyAttrs, const ArrayRef* arrs, uint32_t* mxOut) {
     const VtxLayout& L = p.layout;
-    g_lastPosMtxMax = 0;
-    const uint32_t ss = p.streamSize, os = L.stride;
+    const uint32_t ss = p.streamSize, os = outStride ? outStride : L.stride;
     if (spans) *spans = ArraySpans{};
     // Defaults: z = 0 for two-component positions, matrix row 0, texture-matrix indices 0.
     // (Skipped for what an attribute of this plan writes for every vertex anyway: z by a
     // three-component position, the matrix row by PNMTXIDX.)
-    {
+    // (onlyAttrs, MSC_VGX_DLREFRESH: the vertices hold a full decode already: its defaults stand)
+    if (!onlyAttrs) {
         bool needZ = true, needW = true;
         for (int i = 0; i < p.n; ++i) {
             if (p.a[i].attr == A_POS && p.a[i].comps == 3) needZ = false;
@@ -669,10 +973,23 @@ void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* 
         const bool tmi = (L.mask & VL_TMI) != 0;
         if (needZ || needW || tmi) {
             uint8_t* o = out;
-            for (uint32_t v = 0; v < count; ++v, o += os) {
-                if (needZ) std::memset(o + 8, 0, 4);
-                if (needW) std::memset(o + 12, 0, 4);
-                if (tmi) std::memset(o + L.offTmi, 0, 8);
+            if (Gxd(GXD_DECFILL)) {
+                // (the flags tested once, not for every vertex: 12 instructions a vertex in the general loop below, 5 here)
+                switch ((needZ ? 1u : 0u) | (needW ? 2u : 0u) | (tmi ? 4u : 0u)) {
+                case 1: FillDefaults<true, false, false>(out, count, os, L.offTmi); break;
+                case 2: FillDefaults<false, true, false>(out, count, os, L.offTmi); break;
+                case 3: FillDefaults<true, true, false>(out, count, os, L.offTmi); break;
+                case 4: FillDefaults<false, false, true>(out, count, os, L.offTmi); break;
+                case 5: FillDefaults<true, false, true>(out, count, os, L.offTmi); break;
+                case 6: FillDefaults<false, true, true>(out, count, os, L.offTmi); break;
+                default: FillDefaults<true, true, true>(out, count, os, L.offTmi); break;
+                }
+            } else {
+                for (uint32_t v = 0; v < count; ++v, o += os) {
+                    if (needZ) std::memset(o + 8, 0, 4);
+                    if (needW) std::memset(o + 12, 0, 4);
+                    if (tmi) std::memset(o + L.offTmi, 0, 8);
+                }
             }
         }
     }
@@ -681,6 +998,7 @@ void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* 
         const AttrPlan& a = p.a[i];
         const uint8_t* s = src + srcOff;
         srcOff += a.srcSize;
+        if (onlyAttrs && !((onlyAttrs >> a.attr) & 1u)) continue;
         uint8_t* o = out + a.outOff;
         if (a.attr <= 8) {
             if (a.attr == 0) {
@@ -704,14 +1022,14 @@ void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* 
                     const float f = static_cast<float>(s[0]);
                     std::memcpy(o, &f, 4); // outOff = 12: the position's w
                 }
-                g_lastPosMtxMax = mx;
+                if (mxOut) *mxOut = mx;
             } else {
                 for (uint32_t v = 0; v < count; ++v, s += ss, o += os) o[0] = s[0];
             }
             continue;
         }
         // Source element for vertex v: the stream itself (direct) or an array element (indexed).
-        const ArrayRef& ar = g.arrays[a.attr];
+        const ArrayRef& ar = arrs[a.attr];
         const bool indexed = a.mode != T_DIRECT;
         const bool idx16 = a.mode == T_INDEX16;
         const uint32_t elem = (a.attr == A_NRM && a.cnt == 2) ? 3u * static_cast<uint32_t>(CompSize(a.type)) : a.elemSize; // NBT3: normal only
@@ -753,7 +1071,7 @@ void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* 
             if (!done)
             for (uint32_t v = 0; v < count; ++v, si += ss) {
                 const uint32_t idx = idx16 ? be16(si) : si[0];
-                if (static_cast<uint64_t>(idx) * astride + elem > asize) continue;
+                if (static_cast<uint64_t>(idx) * astride + elem > asize) { spans->incomplete = true; continue; }
                 if (idx < minIdx) minIdx = idx;
                 if (idx > maxIdx) maxIdx = idx;
             }
@@ -762,7 +1080,7 @@ void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* 
             // Little-endian elements without a specialised kernel (16-bit colours, out-of-range or wide strides, MSC_VGX_DECODE=0).
             for (uint32_t v = 0; v < count; ++v, s += ss, o += os) {
                 bool leElem = false;
-                const uint8_t* e = ArrayElem(a.attr, idx16 ? be16(s) : s[0], elem, leElem);
+                const uint8_t* e = ArrayElemIn(arrs, a.attr, idx16 ? be16(s) : s[0], elem, leElem);
                 if (a.attr == A_CLR0 || a.attr == A_CLR1) { DecodeColor(e, a.type, o, leElem); continue; }
                 const int cs = CompSize(a.type);
                 const float scale = a.type == C_F32 ? 1.0f : 1.0f / static_cast<float>(1u << a.frac);
@@ -786,7 +1104,23 @@ void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* 
             if (!color || a.type == 5) {
                 uint32_t bad;
                 if (color) {
-                    bad = kRgba8Fn[im](s, o, count, ss, os, adata, astride, maxOff, 1.0f);
+                    AttrFn cfn = kRgba8Fn[im];
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+                    if (im == 2 && count >= 4 && Gxd(GXD_DEC_NEON) && FastIdx()) {
+                        uint32_t mn, mx;
+                        IndexRange16(s, count, ss, mn, mx);
+                        if (static_cast<uint64_t>(mx) * astride + elem <= asize) cfn = &DecodeRgba8Idx16Fast; // (every index is inside the array)
+                    }
+#endif
+                    bad = cfn(s, o, count, ss, os, adata, astride, maxOff, 1.0f);
+                    if (cfn != kRgba8Fn[im] && GxdVerify()) {
+                        static std::vector<uint8_t> tmp;
+                        tmp.assign(static_cast<size_t>(count) * os + 16, 0);
+                        const uint32_t bad2 = kRgba8Fn[im](s, tmp.data(), count, ss, os, adata, astride, maxOff, 1.0f);
+                        if (bad2 != bad) GxdFail("colour decode: out-of-range flag differs", bad, bad2);
+                        for (uint32_t v = 0; v < count; ++v)
+                            if (std::memcmp(o + static_cast<size_t>(v) * os, tmp.data() + static_cast<size_t>(v) * os, 4) != 0) { GxdFail("colour decode: vertex differs", v, count); break; }
+                    }
                 } else {
                     // POS: 2 or 3 components; NRM: 3 (of 3 or 9); TEXn: 1 or 2 (the second defaults to 0).
                     const int n = a.attr == A_NRM ? 3 : a.comps;
@@ -796,8 +1130,15 @@ void DecodeVertices(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* 
                     AttrFn fn = (le ? kAttrFnLe : kAttrFn)[im][type][padT ? 3 : (n >= 1 && n <= 3 ? n - 1 : 2)];
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
                     if (im == 2 && !padT && (n == 2 || n == 3) && Gxd(GXD_DEC_NEON)) {
-                        if (type == C_S16)
+                        if (type == C_S16) {
                             fn = n == 2 ? (le ? &DecodeS16Idx16Neon<2, true> : &DecodeS16Idx16Neon<2, false>) : (le ? &DecodeS16Idx16Neon<3, true> : &DecodeS16Idx16Neon<3, false>);
+                            if (count >= 4 && FastIdx()) {
+                                uint32_t mn, mx;
+                                IndexRange16(s, count, ss, mn, mx);
+                                if (static_cast<uint64_t>(mx) * astride + elem <= asize) // (every index is inside the array)
+                                    fn = n == 2 ? (le ? &DecodeS16Idx16Fast<2, true> : &DecodeS16Idx16Fast<2, false>) : (le ? &DecodeS16Idx16Fast<3, true> : &DecodeS16Idx16Fast<3, false>);
+                            }
+                        }
                         else if (type == C_F32)
                             fn = n == 2 ? (le ? &DecodeF32Idx16Neon<2, true> : &DecodeF32Idx16Neon<2, false>) : (le ? &DecodeF32Idx16Neon<3, true> : &DecodeF32Idx16Neon<3, false>);
                     }
@@ -940,6 +1281,97 @@ void SkinNoteMissed(uint32_t count) {
 // `src`. The game's CPU loop: for each bone below nBones, for each vertex, the slots up to the first zero weight whose bone is that bone; so a slot counts
 // when it and every slot before it have a weight and its bone is below nBones. The counting slots are sorted by bone number (the CPU sums bone by bone,
 // in that order) and the others get weight 0 and bone 0.
+namespace {
+// The bone rows and weights of the vertex with position index `idx` (the bytes SkinExpand and SkinFill store at the layout's offSkin).
+inline void SkinSlots(const SkinState& sk, uint32_t idx, uint8_t* o) {
+    uint8_t bone[4] = {0, 0, 0, 0};
+    float w[4] = {0, 0, 0, 0};
+    int n = 0;
+    if (idx < sk.nVerts) {
+        const uint8_t* ws = sk.weights + static_cast<size_t>(idx) * 16u;
+        const uint8_t* is = sk.indices + static_cast<size_t>(idx) * 4u;
+        for (int j = 0; j < 4; ++j) {
+            const float wj = bef32(ws + 4 * j);
+            if (wj == 0.0f) break;
+            if (is[j] >= sk.nBones) continue;
+            int at = n++;
+            while (at > 0 && bone[at - 1] > is[j]) { bone[at] = bone[at - 1]; w[at] = w[at - 1]; --at; }
+            bone[at] = is[j];
+            w[at] = wj;
+        }
+    }
+    for (int j = 0; j < 4; ++j) o[j] = static_cast<uint8_t>(bone[j] * 3u);
+    std::memcpy(o + 4, w, 16);
+}
+// MSC_VGX_SKINMEMO=0|1|2 (code default 0; on in the Vita's list; 2: every lookup is also computed the long way and compared, a line for the first difference and a
+// count every 65536 lookups). The 20 bytes SkinSlots makes for a position index are a function of the weight and bone-index arrays (and the bone count) alone, and a
+// character draws the same few thousand indices every picture, so they are kept per (weights, indices, bone count, vertex count). A kept table is valid while the
+// write generations under the two arrays (vgx_guestmem.cpp, the counters the display-list cache trusts for the same arrays) have not moved; when they have, it is
+// emptied. Arrays outside guest RAM (generations unknown) are never kept. At most kSkinTabBytes of tables, the least recently used one goes first.
+int SkinMemoMode() {
+    static int m = -1;
+    if (m < 0) m = static_cast<int>(VGX_KNOB(EnvInt("MSC_VGX_SKINMEMO", 0)));
+    return m;
+}
+constexpr int kSkinTabs = 32;
+constexpr size_t kSkinTabBytes = 3u << 20;
+struct SkinTab {
+    const uint8_t* w = nullptr;
+    const uint8_t* i = nullptr;
+    uint32_t nBones = 0, nVerts = 0;
+    uint64_t gen = 0, used = 0;
+    std::vector<uint8_t> slot, have;
+    size_t Bytes() const { return slot.size() + have.size(); }
+};
+SkinTab g_skinTabs[kSkinTabs];
+uint64_t g_skinTabClock = 0, g_skinMemoLookups = 0, g_skinMemoDiffs = 0, g_skinMemoMisses = 0, g_skinMemoFills = 0;
+size_t g_skinTabTotal = 0;
+SkinTab* SkinTabFor(const SkinState& sk) {
+    if (!SkinMemoMode() || !sk.nVerts || sk.nVerts > 20000) return nullptr;
+    const uint64_t gw = GuestWriteGeneration(sk.weights, sk.nVerts * 16u), gi = GuestWriteGeneration(sk.indices, sk.nVerts * 4u);
+    if (gw == kNotGuest || gi == kNotGuest) return nullptr;
+    const uint64_t gen = gw * 0x9E3779B97F4A7C15ull ^ gi;
+    SkinTab* freeT = nullptr;
+    SkinTab* lru = nullptr;
+    for (SkinTab& t : g_skinTabs) {
+        if (t.w == sk.weights && t.i == sk.indices && t.nBones == sk.nBones && t.nVerts == sk.nVerts) {
+            if (t.gen != gen) { std::memset(t.have.data(), 0, t.have.size()); t.gen = gen; }
+            t.used = ++g_skinTabClock;
+            return &t;
+        }
+        if (!t.w) freeT = freeT ? freeT : &t;
+        else if (!lru || t.used < lru->used) lru = &t;
+    }
+    const size_t need = static_cast<size_t>(sk.nVerts) * 21u;
+    if (need > kSkinTabBytes) return nullptr;
+    SkinTab* t = freeT;
+    if (!t) { t = lru; g_skinTabTotal -= t->Bytes(); *t = SkinTab(); }
+    while (g_skinTabTotal + need > kSkinTabBytes) { // (least recently used first)
+        SkinTab* v = nullptr;
+        for (SkinTab& u : g_skinTabs) if (u.w && &u != t && (!v || u.used < v->used)) v = &u;
+        if (!v) return nullptr;
+        g_skinTabTotal -= v->Bytes();
+        *v = SkinTab();
+    }
+    t->w = sk.weights; t->i = sk.indices; t->nBones = sk.nBones; t->nVerts = sk.nVerts; t->gen = gen; t->used = ++g_skinTabClock;
+    t->slot.assign(static_cast<size_t>(sk.nVerts) * 20u, 0);
+    t->have.assign(sk.nVerts, 0);
+    g_skinTabTotal += t->Bytes();
+    return t;
+}
+inline void SkinSlotsMemo(const SkinState& sk, SkinTab* tab, uint32_t idx, uint8_t* o) {
+    if (!tab || idx >= sk.nVerts) { SkinSlots(sk, idx, o); return; }
+    uint8_t* e = tab->slot.data() + static_cast<size_t>(idx) * 20u;
+    if (!tab->have[idx]) { SkinSlots(sk, idx, e); tab->have[idx] = 1; ++g_skinMemoFills; }
+    else if (SkinMemoMode() == 2) {
+        uint8_t fresh[20];
+        SkinSlots(sk, idx, fresh);
+        if (std::memcmp(fresh, e, 20) != 0 && ++g_skinMemoDiffs == 1) std::fprintf(stderr, "[skinmemo] DIFFERENCE at index %u (weights %p)\n", idx, (const void*)sk.weights);
+    }
+    if (SkinMemoMode() == 2 && (++g_skinMemoLookups & 65535u) == 0) std::fprintf(stderr, "[skinmemo] lookups %llu differences %llu fills %llu\n", (unsigned long long)g_skinMemoLookups, (unsigned long long)g_skinMemoDiffs, (unsigned long long)g_skinMemoFills);
+    std::memcpy(o, e, 20);
+}
+} // namespace
 void SkinExpand(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* v) {
     uint32_t posOff = 0;
     int mode = T_NONE;
@@ -950,30 +1382,38 @@ void SkinExpand(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* v) {
     const VtxLayout L1 = MakeLayout(p.layoutMask | VL_SKIN);
     const uint32_t s0 = p.layout.stride, s1 = L1.stride, ss = p.streamSize;
     const SkinState& sk = g_skin;
+    SkinTab* const tab = SkinTabFor(sk);
     for (uint32_t k = count; k-- > 0;) {
         uint8_t* d = v + static_cast<size_t>(k) * s1;
         std::memmove(d, v + static_cast<size_t>(k) * s0, s0);
         const uint8_t* e = src + static_cast<size_t>(k) * ss + posOff;
         const uint32_t idx = mode == T_INDEX16 ? be16(e) : e[0];
-        uint8_t bone[4] = {0, 0, 0, 0};
-        float w[4] = {0, 0, 0, 0};
-        int n = 0;
-        if (idx < sk.nVerts) {
-            const uint8_t* ws = sk.weights + static_cast<size_t>(idx) * 16u;
-            const uint8_t* is = sk.indices + static_cast<size_t>(idx) * 4u;
-            for (int j = 0; j < 4; ++j) {
-                const float wj = bef32(ws + 4 * j);
-                if (wj == 0.0f) break;
-                if (is[j] >= sk.nBones) continue;
-                int at = n++;
-                while (at > 0 && bone[at - 1] > is[j]) { bone[at] = bone[at - 1]; w[at] = w[at - 1]; --at; }
-                bone[at] = is[j];
-                w[at] = wj;
-            }
-        }
-        uint8_t* o = d + L1.offSkin;
-        for (int j = 0; j < 4; ++j) o[j] = static_cast<uint8_t>(bone[j] * 3u);
-        std::memcpy(o + 4, w, 16);
+        SkinSlotsMemo(sk, tab, idx, d + L1.offSkin);
+    }
+}
+// MSC_VGX_SKINDIRECT=0|1 (code default 0; on in the Vita's list): vertices that carry the skin state are decoded at the skinned layout's stride in the first place
+// (the layout only appends the skin attributes, so every offset is the plan's own) and SkinFill writes those; SkinExpand decoded at the narrow stride and moved
+// every vertex to its place from the last one down (a memmove call per vertex). The bytes of every vertex are the same.
+bool SkinDirect() {
+    static int on = -1;
+    if (on < 0) on = static_cast<bool>(VGX_KNOB(EnvInt("MSC_VGX_SKINDIRECT", 0) != 0)) ? 1 : 0;
+    return on != 0;
+}
+void SkinFill(const Plan& p, const uint8_t* src, uint32_t count, uint8_t* v) {
+    uint32_t posOff = 0;
+    int mode = T_NONE;
+    for (int i = 0; i < p.n; ++i) {
+        if (p.a[i].attr == A_POS) { mode = p.a[i].mode; break; }
+        posOff += p.a[i].srcSize;
+    }
+    const VtxLayout L1 = MakeLayout(p.layoutMask | VL_SKIN);
+    const uint32_t s1 = L1.stride, ss = p.streamSize;
+    const SkinState& sk = g_skin;
+    SkinTab* const tab = SkinTabFor(sk);
+    for (uint32_t k = 0; k < count; ++k) {
+        const uint8_t* e = src + static_cast<size_t>(k) * ss + posOff;
+        const uint32_t idx = mode == T_INDEX16 ? be16(e) : e[0];
+        SkinSlotsMemo(sk, tab, idx, v + static_cast<size_t>(k) * s1 + L1.offSkin);
     }
 }
 
@@ -990,8 +1430,19 @@ void DrawStream(uint8_t prim, int fmt, const uint8_t* src, uint32_t count, uint3
     const uint32_t mask = skin ? (p.layoutMask | VL_SKIN) : p.layoutMask;
     uint8_t* out = BeginVertices(mask, count);
     if (!out) return;
-    DecodeVertices(p, src, count, out, nullptr);
-    if (skin) SkinExpand(p, src, count, out);
+    if (!skin && FeparMode() && FeparStage(p, src, count)) {   // (MSC_VGX_FEPAR: EmitDraw decodes, or a worker does; a plan without a matrix index leaves the maximum at 0, as DecodeVertices does; one with it, the scan's)
+        const uint32_t mx = FeparStagedMtxMax();
+        g_lastPosMtxMax = mx;
+        SetPendingPosMtxMax(mx);
+        EmitDraw(prim, mask, count);
+        return;
+    }
+    if (FeparMode()) FeparNoteInline(p, count, skin);
+    {
+        workload::FeScope feDecode(workload::FeDecode);
+        DecodeVertices(p, src, count, out, nullptr, skin && SkinDirect() ? MakeLayout(mask).stride : 0);
+    }
+    if (skin) { if (SkinDirect()) SkinFill(p, src, count, out); else SkinExpand(p, src, count, out); }
     SetPendingPosMtxMax(g_lastPosMtxMax);
     EmitDraw(prim, mask, count);
 }
@@ -1000,17 +1451,19 @@ void DrawDecoded(uint8_t prim, uint32_t layoutMask, const uint8_t* verts, uint32
     if (count == 0) return;
     if (g_skin.on) SkinNoteMissed(count);
     uint8_t* out = BeginVertices(layoutMask, count);
+    if (!out) return;   // (MSC_VGX_ARENA_SOFT: the arena could not grow; the draw is dropped)
     std::memcpy(out, verts, static_cast<size_t>(count) * MakeLayout(layoutMask).stride);
     EmitDraw(prim, layoutMask, count);
 }
 
 // ------------------------------------------------------- command streams
 void ProcessStream(const uint8_t* p, uint32_t nbytes) {
+    workload::FeScope feStream(workload::FeStream);
     const uint8_t* const end = p + nbytes;
     ++stats::Cur().streams;
     stats::Cur().streamBytes += nbytes;
     // MSC_VGX_DLTRACE=<frame>: one line per command stream of that frame.
-    static const long dlTrace = EnvInt("MSC_VGX_DLTRACE", -1);
+    const long dlTrace = static_cast<long>(VGX_KNOB(EnvInt("MSC_VGX_DLTRACE", -1)));
     const bool traceThis = dlTrace >= 0 && static_cast<uint64_t>(dlTrace) == CurrentFrame();
     const uint8_t* const start = p;
     const uint32_t verts0 = stats::Cur().vertsDL, prims0 = stats::Cur().primsDL;

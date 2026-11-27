@@ -1,0 +1,7 @@
+# fast boot (test only): env for routes/fb-live19.txt (pause menu VITA SETTINGS checks; the route header says what it proves). Run: emu.sh <tag> <vpk> env/fb-live19.txt <seconds> routes/fb-live19.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-live19.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_RENDER=320x224

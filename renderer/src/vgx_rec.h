@@ -51,7 +51,7 @@ enum Op : uint32_t {
     R_STREAM_COPY,  // [1] nbytes, [n] bytes
     R_DRAW_RAW,     // aux = prim | fmt << 8; [1] vertex count, [1] nbytes, [n] big-endian vertex bytes as the game wrote them
     R_DRAW_DEC,     // aux = prim; [1] layout mask, [1] vertex count, [n] decoded vertices
-    R_COPY_TEX,     // aux = clear | half << 1; [1] fmt, [2] src x,y / w,h (s16 pairs), [1] dst w | h << 16, [2] dest pointer
+    R_COPY_TEX,     // aux = clear | half << 1 | clearOnly << 2 (nxr4b MSC_GLOW_L0OFF=2: the game says nothing reads this copy, only its clear is wanted); [1] fmt, [2] src x,y / w,h (s16 pairs), [1] dst w | h << 16, [2] dest pointer
     R_COPY_DISP,    // aux = clear; [2] src x,y / w,h
     R_DESTROY_COPY, // [2] dest pointer
     R_SET_TARGET,   // [1] w | h << 16
@@ -68,6 +68,9 @@ struct Chunk {
     std::atomic<Chunk*> next{nullptr};
     std::atomic<uint32_t> committed{0}; // words the consumer may read
     uint32_t cap = 0;
+    // (diagnostics for the abort on a corrupt stream: which chunk it was, and whether the consumer had already handed it back to the free list)
+    std::atomic<uint32_t> serial{0};    // the n-th chunk made or taken from the free list
+    std::atomic<uint32_t> state{0};     // 0 in use by the stream, 1 handed back (in the free list)
     uint32_t data[1];
 };
 
@@ -86,6 +89,10 @@ enum { MODE_IMMEDIATE = 0, MODE_FRAME = 1, MODE_THREAD = 2 };
 
 void Grow(uint32_t words);  // makes room for a record of `words` words
 void AfterCommitSlow();     // immediate mode: play now; thread mode: wake the player
+void WakePlayerOnce();      // int28: wake an idle thread-mode player on the first record of a new frame
+extern std::atomic<bool> g_playerIdle;
+extern bool g_wakeCheckArmed;      // int31 (producer-only): armed after Present() so commits 1..4 immediately check g_playerIdle
+extern uint32_t g_commitSinceWake; // int31 (producer-only): periodic mid-frame wake cadence (1 in 32 commits)
 void CloseImm();            // finishes the open primitive (immediate-mode or raw), see vgx_rec.cpp
 extern bool g_immOpen;      // a primitive's record is reserved but not committed yet
 
@@ -99,19 +106,31 @@ inline uint32_t Wpos() { return static_cast<uint32_t>(g_prod.wp - g_prod.cur->da
 inline void RefreshLimit() { // (not while a primitive is open: it is closed by the slow path of the next Reserve)
     g_prod.limit = g_immOpen || !g_prod.cur ? 0 : reinterpret_cast<uintptr_t>(g_prod.cur->data + g_prod.cur->cap - 1u);
 }
+extern bool g_prefetchRec; // MSC_PREFETCH bit 4 (1.3 armcpu9, default off): the line 96 bytes ahead of the write pointer is requested for writing
 inline uint32_t* Reserve(uint32_t words) {
 #if defined(VGX_PRODUCER_CHECK)
     if (g_producerHook) g_producerHook();
 #endif
     uint32_t* const p = g_prod.wp;
+    if (g_prefetchRec) __builtin_prefetch(p + 24, 1);
     if (__builtin_expect(reinterpret_cast<uintptr_t>(p) + (static_cast<uintptr_t>(words) << 2) > g_prod.limit, 0)) return ReserveSlow(words);
     return p;
 }
 inline void Commit(uint32_t words) {
     g_prod.wp += words;
     g_prod.cur->committed.store(Wpos(), std::memory_order_release);
-    // The player is not woken per record (a wake is a system call): it polls
-    // every millisecond while idle and is woken explicitly at present.
+    if (__builtin_expect(g_mode == MODE_THREAD, 1)) {
+        const uint32_t c = ++g_commitSinceWake;
+        if (__builtin_expect(g_wakeCheckArmed || ((c & 31u) == 0u), 0)) {
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            if (__builtin_expect(g_playerIdle.load(std::memory_order_relaxed), 0)) {
+                WakePlayerOnce();
+                g_wakeCheckArmed = false;
+            } else if (c >= 4u) {
+                g_wakeCheckArmed = false;
+            }
+        }
+    }
     if (g_mode == MODE_IMMEDIATE) AfterCommitSlow();
 }
 // State records (registers, matrices, descriptors, array and texture binds: 11 000 of the
@@ -184,9 +203,38 @@ extern Shadow gs;
 
 // ---- recording entry points used by vgx_api.cpp
 void Reset();
-void BP(uint32_t regAndValue);                  // raw write (mask register honoured)
+void BPSlow(uint32_t regAndValue);              // raw write (mask register honoured): the general path
+void BPFieldSlow(uint8_t reg, int shift, int count, uint32_t value);
+// MSC_REC_FAST (wave 9, default 1; 0 = the calls as they were): the two register writes of every GXSet* call inline. The records and the shadow are the same words as
+// BPSlow / BPFieldSlow make (MSC_REC_HASH proves the stream): the common case (no mask pending, a register that is neither the mask, a token register nor the EFB-copy trigger)
+// skips the dispatch of the general path.
+extern bool g_recFast;
+extern uint64_t g_recCnt[4];  // MSC_REC_FAST_STATS=1 prints at exit: [0] BPSlow calls, [1] unused, [2] fog memo hits, [3] fog computed
+extern int g_recBreak;   // MSC_REC_FAST_BREAK=1|2 (mutants of the proof, never on): 1 the inline BP does not update the shadow, 2 the fog memo ignores its key
+inline void BP(uint32_t rv) {
+    const uint32_t reg = rv >> 24;
+    if (__builtin_expect(g_recFast && gs.bpMask == 0x00FFFFFFu && reg != 0xFE && reg != 0x45 && reg != 0x47 && reg != 0x48 && reg != 0x52, 1)) {
+        const uint32_t nv = rv & 0x00FFFFFFu;
+        if (__builtin_expect(g_recBreak != 1, 1)) gs.bp[reg] = nv;
+        uint32_t* r = Reserve(2);
+        r[0] = Hdr(R_BP, 0);
+        r[1] = rv;
+        CommitState(2);
+        return;
+    }
+    BPSlow(rv);
+}
 inline void BP(uint8_t reg, uint32_t v) { BP((static_cast<uint32_t>(reg) << 24) | (v & 0x00FFFFFFu)); }
-void BPField(uint8_t reg, int shift, int count, uint32_t value);
+inline void BPField(uint8_t reg, int shift, int count, uint32_t value) {
+    if (__builtin_expect(!g_recFast, 0)) { BPFieldSlow(reg, shift, count, value); return; }
+    const uint32_t mask = ((1u << count) - 1u) << shift;
+    const uint32_t nv = ((gs.bp[reg] & ~mask) | ((value << shift) & mask)) & 0x00FFFFFFu;
+    gs.bp[reg] = nv;
+    uint32_t* r = Reserve(2);
+    r[0] = Hdr(R_BP, 0);
+    r[1] = (static_cast<uint32_t>(reg) << 24) | nv;
+    CommitState(2);
+}
 void XF(uint32_t addr, uint32_t count, const uint32_t* hostWords);
 // GXD_RECFAST: the same records XF() makes (tools/gxd/tests/test_recxf.cpp compares the streams word for word), encoded without the call, and the matrix
 // words copied once, from the caller's matrix into the record (the API functions made a stack copy first and XF() copied it again).
@@ -244,6 +292,7 @@ void Tlut(int idx, const TlutObj& obj);
 void Stream(const uint8_t* data, uint32_t nbytes, bool mayWriteCp = true);
 void DrawRaw(uint8_t prim, int fmt, const uint8_t* data, uint32_t count, uint32_t nbytes);
 void CopyTex(const void* dest, bool clear);
+void NextCopyClearOnly();   // nxr4b: the next CopyTex is marked clear-only (consumed by it)
 void CopyDisp(bool clear);
 void DestroyCopy(const void* dest);
 void SetTarget(uint16_t w, uint16_t h);

@@ -28,6 +28,9 @@
 #include <string.h>
 
 extern unsigned int gNetworkRandomSeed;
+extern unsigned int nlDefaultSeed;
+extern unsigned int gEffectsRandomSeed;
+extern "C" unsigned int* NpRngSeedFor(unsigned int* seed);   // MSC_RENDER_RNG=2: inside a step the simulation's copy (identity otherwise)
 
 namespace
 {
@@ -179,6 +182,22 @@ extern "C" void NpDetStepBegin()
     if (sPoisonStack >= 0)
     {
         PoisonStack(sPoisonStack);
+    }
+    // NP_DET_PIN_SEED=<hex> (host proofs only; nothing without it): the simulation's random seed is set to the value at the first step of a match. The seed is drawn from by the
+    // presentation and loading tasks in every frame before kick-off, so a run with a different number of frames there (MSC_DISCARD_FAST) starts the step with another seed: pinning it
+    // compares everything else.
+    static unsigned sPin = 0xFFFFFFFFu;
+    if (sPin == 0xFFFFFFFFu)
+    {
+        const char* e = getenv("NP_DET_PIN_SEED");
+        sPin = (e != 0 && *e != 0) ? (unsigned)strtoul(e, 0, 16) : 0u;
+        if (sPin == 0xFFFFFFFFu) sPin = 0xFFFFFFFEu;
+    }
+    if (sPin != 0 && GetFixedUpdateTask()->GetFrame() == 0)
+    {
+        gNetworkRandomSeed = sPin;
+        *NpRngSeedFor(&nlDefaultSeed) = sPin ^ 1u;           // (the other seeds the loading and presentation tasks draw from, and the step reads: pinned the same way)
+        *NpRngSeedFor(&gEffectsRandomSeed) = sPin ^ 2u;
     }
 }
 

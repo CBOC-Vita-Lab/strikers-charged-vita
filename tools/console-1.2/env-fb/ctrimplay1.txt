@@ -1,0 +1,14 @@
+# console-1.2 run ctrimplay1: Crowd trim in open play too
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group cpu, route tour, version payload 1.3, role ab
+# MSC_VGX_CROWDTRIM_PLAY=0 is the default in 1.3: the crowd trim does not follow the impostor passes and does not cut the crowd in match-play pictures (the crowd is far and small there: the host census at Vice and The Dump has the trim saving 0.1 to 0.9 of a screen of fill in open play, against 1.2 M instructions of the back-end core); it still acts in walk-outs, replays and cut-scenes. This run is the A/B: the trim in open play too, as in 1.2. Against the tour: the back-end thread's ms in open play (the CPU the trim costs) and the GPU ms (what it saves).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_CROWDTRIM_PLAY=1

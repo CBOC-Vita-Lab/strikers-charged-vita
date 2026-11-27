@@ -33,10 +33,33 @@ LIBDIR := $(O)/lib
 
 # Match native/platform/vita/tools/vitadeps_glb.sh. The shipped vitaGL source
 # already contains its local patches; do not apply them a second time.
-VGL_OPTS := -DHAVE_SHADER_CACHE -DSTORE_DEPTH_STENCIL -DSKIP_SPLASHSCREEN -DHAVE_SHARK_LOG -DLOG_ERRORS -DHAVE_SCRATCH_MEMORY -DSKIP_ERROR_HANDLING -DDRAW_SPEEDHACK
-VGL_HASH := cdbba42-glb
+# (1.2: VGL_EXTRA_OPTS adds options to the library. The default is the gsco recipe below, which the release build uses; set VGL_EXTRA_OPTS= (empty) for the plain
+#  stk library, or another list for a prefix of its own, e.g. DEPS_OUT=<dir> VGL_EXTRA_OPTS="-DGXM_STATE_CACHE" for the console A/B)
+VGL_EXTRA_OPTS ?= -DGXM_STATE_CACHE -DSAMPLERS_SPEEDHACK -DINDICES_SPEEDHACK
+VGL_BASE_OPTS := -DHAVE_SHADER_CACHE -DSTORE_DEPTH_STENCIL -DSKIP_SPLASHSCREEN -DHAVE_SHARK_LOG -DLOG_ERRORS -DHAVE_SCRATCH_MEMORY -DSKIP_ERROR_HANDLING -DDRAW_SPEEDHACK
+# VGL_NO_DRAW_SPEEDHACK=1: the library without DRAW_SPEEDHACK (needed for HAVE_VERTEX_LAYOUT_CACHE, which upstream disables when DRAW_SPEEDHACK is on); experimental, see
+# docs of the 1.2 A/B variants. The cache identity (VGL_BASE_OPTS) stays the same: no shader compilation changes.
+VGL_NO_DRAW_SPEEDHACK ?=
+# 1.2: VGL_LAZY_OPT: patch 0015's lazy glClear is compiled in by default (run-time switch vglSetLazyClear / MSC_VGX_LAZYCLEAR; it changes no shader compilation, so it is not part of the
+# cache identity). VGL_LAZY_OPT= (empty) builds the library without it.
+VGL_LAZY_OPT ?= -DLAZY_CLEAR
+VGL_OPTS := $(if $(VGL_NO_DRAW_SPEEDHACK),$(filter-out -DDRAW_SPEEDHACK,$(VGL_BASE_OPTS)),$(VGL_BASE_OPTS)) $(VGL_LAZY_OPT) $(VGL_EXTRA_OPTS)
+# VGL_COMMIT: the upstream commit the source tree is based on (the id string vitaGL logs, VGL_GIT_HASH).
+# VGL_HASH + VGL_BASE_OPTS: the compiled-shader cache identity. The game keys its shader cache folder (and the package's shader pack) by the FNV-1a of
+# options.txt; they stay the 1.1 values on purpose: the moves to 9a14d17 and then 9bf3e3f and the draw-path options of VGL_EXTRA_OPTS change no
+# shader compilation, so the existing caches and packs stay valid and the console A/B variants share one cache. Change VGL_HASH (and take
+# renderer/vita/vgx_host_vita.cpp's LegacyCacheKey into account) only when a library change alters what the shader compiler produces.
+# Library variants of the 1.2 console A/B (each a prefix of its own; the shader cache identity is the same for all):
+#   stk   (no extra options)      upstream 9bf3e3f + patches 0001-0029; GXM_STATE_CACHE and the speed hacks are not compiled in
+#   gsc   VGL_EXTRA_OPTS="-DGXM_STATE_CACHE"                                   + the sceGxm state cache (run-time switch MSC_VGX_GXMCACHE, default off)
+#   gsco  VGL_EXTRA_OPTS="-DGXM_STATE_CACHE -DSAMPLERS_SPEEDHACK -DINDICES_SPEEDHACK"   + the two upstream speed hacks vgx can use (patch 0014 makes SAMPLERS safe); THE DEFAULT, used by the release build
+#   gscl  VGL_NO_DRAW_SPEEDHACK=1 VGL_EXTRA_OPTS="-DGXM_STATE_CACHE -DSAMPLERS_SPEEDHACK -DINDICES_SPEEDHACK -DHAVE_VERTEX_LAYOUT_CACHE"   experimental: no DRAW_SPEEDHACK
+#         (upstream turns the layout cache off when DRAW_SPEEDHACK is on) and so no MSC_VGX_ONESTREAM; compile-checked only, not recommended
+# 0052: add -DVGL_FINISH_NOSCENE to VGL_EXTRA_OPTS for glFinish that ends the open scene and waits with none open (upstream 74c5a4a; off by default, same shader cache identity).
+VGL_COMMIT := 9bf3e3f
+VGL_HASH := 9a14d17-glb
 VGL_CFLAGS := -g -O3 -ffast-math -mtune=cortex-a9 -mfpu=neon -Wno-incompatible-pointer-types -Wno-stringop-overflow \
-              -mfp16-format=ieee -DVGL_GIT_HASH='"$(VGL_HASH)"' -I$(VGL)/source -I$(INCDIR) $(VGL_OPTS) \
+              -mfp16-format=ieee -DVGL_GIT_HASH='"$(VGL_COMMIT)-glb"' -I$(VGL)/source -I$(INCDIR) $(VGL_OPTS) \
               -DsceClibPrintf=msc_vgl_printf -w \
               -ffile-prefix-map=$(ROOT)=. -ffile-prefix-map=$(O)=build/dependencies/prefix   # (no local paths in the log strings)
 VGL_CXXFLAGS := $(VGL_CFLAGS) -fexceptions -std=gnu++11 -Wno-write-strings
@@ -123,6 +146,7 @@ $(O)/vitagl/%.o: $(VGL)/source/%.cpp $(HEADERS)
 	$(CXX) $(VGL_CXXFLAGS) -c $< -o $@
 $(LIBDIR)/libvitaGL.a: $(VGL_OBJ)
 	@mkdir -p $(LIBDIR); rm -f $@; $(AR) -rc $@ $^
-	@echo "vitaGL $(VGL_HASH) built with: $(VGL_OPTS) uniform-ring-$(VGL_UNIFORM_RING_MIB)MiB" | tee $(O)/vitagl/options.txt
+	@echo "vitaGL $(VGL_HASH) built with: $(VGL_BASE_OPTS) uniform-ring-$(VGL_UNIFORM_RING_MIB)MiB" | tee $(O)/vitagl/options.txt
+	@echo "vitaGL $(VGL_COMMIT)-glb built with: $(VGL_OPTS) uniform-ring-$(VGL_UNIFORM_RING_MIB)MiB" > $(O)/vitagl/build-options.txt
 
 .PHONY: all headers

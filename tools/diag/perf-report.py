@@ -41,7 +41,8 @@ def stats(values):
 
 
 def read_bank(path):
-    data = open(path, "rb").read()
+    with open(path, "rb") as stream:
+        data = stream.read()
     if len(data) < HEADER + 4 or data[:7] != b"MSCTD02":
         raise ValueError(f"{path}: not a recorder bank (MSCTD02)")
     version, size, count, capacity, nxt, overflow = struct.unpack_from("<6I", data, 8)

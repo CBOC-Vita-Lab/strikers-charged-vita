@@ -5,10 +5,10 @@
 #   make abi                   -> tools/gx_abi.py: function / enumerator / struct conformance against vgx's headers
 #
 # Variables:
-#   VGX      the vgx checkout on branch `np`      (default /home/claude/msc/npw/vgx-np)
-#   VGXOUT   vgx's native build output root      (default /home/claude/msc/build/np/NPR/vgx)
+#   VGX      the vgx checkout on branch `np`      (default /work/msc/npw/vgx-np)
+#   VGXOUT   vgx's native build output root      (default /work/msc/build/np/NPR/vgx)
 #   RVL_INC  the SDK headers the glue is compiled against (default np/libs/RVL_SDK/include, the game's own)
-#   OUT      output root                          (default /home/claude/msc/build/np/NPR/gx)
+#   OUT      output root                          (default /work/msc/build/np/NPR/gx)
 #   SHIM     header shim for `make abi` only (platform/gx/tools/shim: an empty revolution/os.h and size_t.h: the ABI tool
 #            parses the SDK headers without the game's compatibility header)
 #
@@ -18,14 +18,14 @@
 HERE     := $(dir $(lastword $(MAKEFILE_LIST)))
 ROOT     := $(abspath $(HERE))
 NPROOT   := $(abspath $(ROOT)/../..)
-VGX      ?= /home/claude/msc/npw/vgx-np
-VGXOUT   ?= /home/claude/msc/build/np/NPR/vgx
+VGX      ?= /work/msc/npw/vgx-np
+VGXOUT   ?= /work/msc/build/np/NPR/vgx
 RVL_INC  ?= $(NPROOT)/libs/RVL_SDK/include
 ARCH     ?= host32
 ifeq ($(ARCH),armhf)
-OUT      ?= /home/claude/msc/build/np/NPR/gx-armhf
+OUT      ?= /work/msc/build/np/NPR/gx-armhf
 else
-OUT      ?= /home/claude/msc/build/np/NPR/gx
+OUT      ?= /work/msc/build/np/NPR/gx
 endif
 SHIM     ?= $(ROOT)/tools/shim
 CXX      := clang++
@@ -57,8 +57,9 @@ NPABI    := -funsigned-char -fno-short-enums -fshort-wchar -fno-strict-aliasing 
 NPFLAGS  := $(NPDEFS) $(NPINC) $(NPABI) -include np/compat.h -std=gnu++11 -fno-exceptions -fno-rtti
 SDKFLAGS := $(NPFLAGS) -Wno-macro-redefined -Wno-unknown-pragmas
 # (units without SDK headers: C++17, standard library)
-CXXFLAGS := -std=c++17 -O2 -g -pipe $(ARCHFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-missing-braces -I$(ROOT)/src
-SDKCXX   := -O2 -g -pipe $(ARCHFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-missing-braces -I$(ROOT)/src
+# (EXTRA: flags appended last, from np/platform/gx/gx.mk VGX_OPT / VGX_LTO; AR: llvm-ar for bitcode objects)
+CXXFLAGS := -std=c++17 -O2 -g -pipe $(ARCHFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-missing-braces -I$(ROOT)/src $(EXTRA)
+SDKCXX   := -O2 -g -pipe $(ARCHFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-missing-braces -I$(ROOT)/src $(EXTRA)
 
 .PHONY: glue clean abi
 glue: $(OUT)/libnpgx.a
@@ -90,7 +91,7 @@ clean:
 	rm -rf $(OUT)
 
 # ---- the standalone drawing test (no game, no recompilation runtime): scene.cpp (SDK headers) + main.cpp
-I386ROOT ?= /home/claude/msc/build/np/NPR/i386apt/root
+I386ROOT ?= /work/msc/build/np/NPR/i386apt/root
 I386LIB  := $(I386ROOT)/usr/lib/i386-linux-gnu
 TESTBACK ?= gl
 VGXLIB    = $(VGXOUT)/$(if $(filter armhf,$(ARCH)),armhf,host32)-$(TESTBACK)/libvgx-native.a
@@ -163,14 +164,19 @@ GXXV    := 15.2.0
 # enums are 4 bytes, np/Makefile TARGET=vita; the SDK-facing units must agree with the game's objects on struct layouts.
 # The vgx library (native-vita.mk) keeps -fsigned-char -fshort-enums: its interface is plain C ints, nothing of that crosses.)
 VTARGET := --target=armv7a-none-eabihf -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -mthumb \
-           -funsigned-char -fno-short-enums -femulated-tls -fno-pic -munaligned-access \
+           -funsigned-char -fno-short-enums -femulated-tls -fno-pic -munaligned-access -fomit-frame-pointer \
            -D__vita__ -D__USES_INITFINI__ -U_GNU_SOURCE -Wno-builtin-macro-redefined \
            -U__WINT_TYPE__ '-D__WINT_TYPE__=unsigned int' \
            -U__INT_FAST8_TYPE__ -D__INT_FAST8_TYPE__=int -U__INT_FAST16_TYPE__ -D__INT_FAST16_TYPE__=int \
            -U__UINT_FAST8_TYPE__ '-D__UINT_FAST8_TYPE__=unsigned int' -U__UINT_FAST16_TYPE__ '-D__UINT_FAST16_TYPE__=unsigned int' \
            -nostdlibinc
 VCXXSYS := -isystem $(VSYS)/include/c++/$(GXXV) -isystem $(VSYS)/include/c++/$(GXXV)/arm-vita-eabi -isystem $(VSYS)/include/c++/$(GXXV)/backward -isystem $(VSYS)/include
-VFLAGS  := -std=gnu++17 -O2 -w -pipe $(VTARGET) $(VCXXSYS) -I$(ROOT)/src -I$(VGX)/native
+# (VEXTRA / VARCH: from gx.mk VGX_OPT / VGX_LTO: extra flags appended last, llvm-ar for bitcode objects)
+VARCH   ?= $(VITASDK)/bin/arm-vita-eabi-gcc-ar
+VFLAGS  := -std=gnu++17 -O2 -fno-math-errno -w -pipe $(VTARGET) $(VCXXSYS) -I$(ROOT)/src -I$(VGX)/native $(VEXTRA)
+# (the two units without SDK headers carry the C++ library's default ABI; as bitcode in the game's LTO link their module flags must equal the game's:
+#  only then (VEXTRA given) they are built with the game's char / enum / wchar flags. They use none of the three.)
+VSTDABI := $(if $(strip $(VEXTRA)),-fno-short-enums -funsigned-char -fshort-wchar)
 VOUT    := $(OUT)/vita
 VOBJS   := $(patsubst %,$(VOUT)/%.o,$(SDK_SRC) $(STD_SRC))
 .PHONY: glue-vita
@@ -179,16 +185,16 @@ glue-vita: $(VOUT)/libnpgx-vita.a
 $(VOUT)/gx_selfcheck.o: $(ROOT)/src/gx_selfcheck.cpp
 	@mkdir -p $(dir $@)
 	@echo VCXX $(notdir $<)
-	@clang++ $(VFLAGS) -I$(ROOT)/include -I$(VGX)/src -c $< -o $@
+	@clang++ $(VFLAGS) $(VSTDABI) -I$(ROOT)/include -I$(VGX)/src -c $< -o $@
 $(VOUT)/gx_copytrack.o: $(ROOT)/src/gx_copytrack.cpp
 	@mkdir -p $(dir $@)
 	@echo VCXX $(notdir $<)
-	@clang++ $(VFLAGS) -I$(ROOT)/include -c $< -o $@
+	@clang++ $(VFLAGS) $(VSTDABI) -I$(ROOT)/include -c $< -o $@
 $(VOUT)/%.o: $(ROOT)/src/%.cpp $(wildcard $(ROOT)/include/*.h) $(wildcard $(ROOT)/include/revolution/gx/*.h)
 	@mkdir -p $(dir $@)
 	@echo VCXX $(notdir $<)
 	@clang++ $(VFLAGS) $(NPDEFS) -DNP_TARGET_VITA=1 $(NPINC) -fshort-wchar -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -include np/compat.h -std=gnu++11 -fno-exceptions -fno-rtti -Wno-macro-redefined -Wno-unknown-pragmas -c $< -o $@
 $(VOUT)/libnpgx-vita.a: $(VOBJS)
 	@rm -f $@
-	@$(VITASDK)/bin/arm-vita-eabi-gcc-ar rcs $@ $(VOBJS)
+	@$(VARCH) rcs $@ $(VOBJS)
 	@echo "built $@"

@@ -14,10 +14,13 @@
 #include "np/fps.h"
 
 #if defined(__vita__)
+#include "np_vita_internal.h"
 #include <psp2/kernel/threadmgr.h>
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -64,7 +67,136 @@ void NpFpsProbeRegisterThread(int tid, int kind)
     ++g_count;
 }
 
+namespace {
+// gt27 (MSC_FPS_PROBE_ASYNC=1, default 0): the per-core probe (one sceKernelGetThreadInfo per registered thread, ~0.6 ms of the game thread every picture on the
+// console, [gsplit-rest] probe) is read by a thread of its own on core 2, kicked by the game thread's probe call; the call returns the last finished reading (cumulative
+// per core, as before) at once. What the controller hears is one picture older; nothing else reads the probe (np_fps.cpp: Auto::Predict and the free-run gate only).
+struct AsyncSnap { double cpu[4], time[4]; int gameCore; int ok; };
+AsyncSnap g_snap;
+std::atomic<uint32_t> g_snapSeq{0};   // 0 = unready; odd = write in progress; even >= 2 = published seqlock
+std::atomic<int> g_busy{0};
+std::atomic<int> g_asyncState{0};     // 0 = uninit, 1 = initializing, 2 = disabled, 3 = enabled
+SceUID g_sema = -1;
+std::atomic<unsigned long> g_asyncCalls{0}, g_asyncWaited{0}, g_asyncReads{0}, g_asyncStale{0};
+int ReadAll(NpFpsProbeOut* out);
+int AsyncMain(SceSize, void*)
+{
+    // int28: move off busy Core 2 onto Core 3 when proven and not online-held; register before re-checking held/lost to avoid TOCTOU,
+    // and keep low priority (0x10000100 + 20 = abs 180) so online retreat to Cores 1-2 never preempts player (160) or render (148).
+    if (VitaThreads::Core3Proven && VitaThreads::Core3Proven() && !VitaThreads::g_core3HeldNow())
+    {
+        const SceUID self = sceKernelGetThreadId();
+        if (sceKernelChangeThreadCpuAffinityMask(self, 0x00080000) >= 0)
+        {
+            VitaThreads::Core3Register(self);
+            if (VitaThreads::g_core3HeldNow() || VitaThreads::g_core3LostNow())
+            {
+                sceKernelChangeThreadCpuAffinityMask(self, 0x00010000 << 2);
+            }
+            else
+            {
+                std::fprintf(stderr, "[fps] probe async thread placed on core 3 (prio 0x%X)\n", static_cast<unsigned>(0x10000100 + 20));
+            }
+        }
+    }
+    for (;;)
+    {
+        if (sceKernelWaitSema(g_sema, 1, nullptr) < 0) { sceKernelDelayThread(1000); continue; }
+        NpFpsProbeOut o;
+        std::memset(&o, 0, sizeof o);
+        const int ok = ReadAll(&o);
+        const uint32_t s = g_snapSeq.load(std::memory_order_relaxed);
+        g_snapSeq.store(s + 1u, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release);
+        for (int c = 0; c < 4; ++c) { g_snap.cpu[c] = o.cpuMs[c]; g_snap.time[c] = o.timeMs[c]; }
+        g_snap.gameCore = o.gameCore;
+        g_snap.ok = ok;
+        std::atomic_thread_fence(std::memory_order_release);
+        g_snapSeq.store(s + 2u, std::memory_order_release);
+        g_asyncReads.fetch_add(1, std::memory_order_relaxed);
+        g_busy.store(0, std::memory_order_release);
+    }
+    return 0;
+}
+bool AsyncStart()
+{
+    g_sema = sceKernelCreateSema("np_fpsprobe", 0, 0, 1, nullptr);
+    if (g_sema < 0) return false;
+    const SceUID th = sceKernelCreateThread("np_fpsprobe", AsyncMain, 0x10000100 + 20, 16 * 1024, 0, 0x00010000 << 2, nullptr);
+    if (th < 0) return false;
+    return sceKernelStartThread(th, 0, nullptr) >= 0;
+}
+} // namespace
+
 int NpFpsPlatformProbe(NpFpsProbeOut* out)
+{
+    int state = g_asyncState.load(std::memory_order_acquire);
+    if (state < 2)
+    {
+        int expected = 0;
+        if (g_asyncState.compare_exchange_strong(expected, 1, std::memory_order_acq_rel))
+        {
+            const char* e = std::getenv("MSC_FPS_PROBE_ASYNC");
+            const bool want = (e && *e && *e != '0');
+            if (want && !AsyncStart())
+            {
+                std::fprintf(stderr, "[fps] MSC_FPS_PROBE_ASYNC=1: the probe thread cannot start: the probe stays on the game thread\n");
+                g_asyncState.store(2, std::memory_order_release);
+            }
+            else if (want)
+            {
+                std::fprintf(stderr, "[fps] probe async on (MSC_FPS_PROBE_ASYNC=1): the per-core reading is made off the game thread by its own thread; the controller hears the reading one picture older\n");
+                g_asyncState.store(3, std::memory_order_release);
+            }
+            else
+            {
+                g_asyncState.store(2, std::memory_order_release);
+            }
+        }
+        else
+        {
+            while ((state = g_asyncState.load(std::memory_order_acquire)) < 2) sceKernelDelayThread(50);
+        }
+        state = g_asyncState.load(std::memory_order_acquire);
+    }
+    if (state != 3) return ReadAll(out);
+    const unsigned long calls = g_asyncCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (g_snapSeq.load(std::memory_order_acquire) == 0)
+    {
+        const int ok = ReadAll(out);   // (the first call: a reading now, then the thread takes over)
+        if (g_busy.exchange(1, std::memory_order_acq_rel) == 0) sceKernelSignalSema(g_sema, 1);
+        return ok;
+    }
+    if (g_busy.load(std::memory_order_acquire) != 0) g_asyncStale.fetch_add(1, std::memory_order_relaxed);
+    AsyncSnap local{};
+    bool got = false;
+    for (int tries = 0; tries < 64; ++tries)
+    {
+        const uint32_t s0 = g_snapSeq.load(std::memory_order_acquire);
+        if (s0 & 1u)
+        {
+#if defined(__arm__)
+            __asm__ __volatile__("yield" ::: "memory");
+#endif
+            continue;
+        }
+        std::memcpy(&local, &g_snap, sizeof(local));
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (g_snapSeq.load(std::memory_order_relaxed) == s0) { got = true; break; }
+    }
+    if (!got) return ReadAll(out);
+    for (int c = 0; c < 4; ++c) { out->cpuMs[c] = local.cpu[c]; out->timeMs[c] = local.time[c]; }
+    out->gameCore = local.gameCore;
+    const int ok = local.ok;
+    if (g_busy.exchange(1, std::memory_order_acq_rel) == 0) sceKernelSignalSema(g_sema, 1);
+    if (calls % 3600 == 0)
+        std::fprintf(stderr, "[fps] probe async: %lu calls, %lu readings by the probe thread, %lu calls waited for the last reading, %lu heard an older reading again (stale)\n",
+                     calls, g_asyncReads.load(std::memory_order_relaxed), g_asyncWaited.load(std::memory_order_relaxed), g_asyncStale.load(std::memory_order_relaxed));
+    return ok;
+}
+
+namespace {
+int ReadAll(NpFpsProbeOut* out)
 {
     Guard guard;
     for (int i = 0; i < g_count;)
@@ -85,6 +217,7 @@ int NpFpsPlatformProbe(NpFpsProbeOut* out)
     out->gameCore = g_gameCore;
     return g_count > 0 ? 1 : 0;
 }
+} // namespace
 
 // CPU time of the calling thread in milliseconds (the game thread's simulation cost, np_fps.cpp NpFpsSimBegin/End).
 double NpFpsPlatformThreadClockMs(void)

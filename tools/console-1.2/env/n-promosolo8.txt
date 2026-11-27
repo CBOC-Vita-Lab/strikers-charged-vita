@@ -1,0 +1,14 @@
+# console-1.2 run n-promosolo8: Lone small meshes get a static buffer after 8 replays
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group draw, route ntour, version payload 1.3, role nab
+# MSC_VGX_PROMOSOLO, off until this A/B. Compare the FE and back end ms; a hitch at the first seconds of a stadium would be the uploads.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/ntour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_VGX_PROMOSOLO=8

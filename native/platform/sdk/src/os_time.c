@@ -2,6 +2,8 @@
 // OSGetTime/OSGetTick, which read the PowerPC time base register, are native (np_plat clock).
 #include <time.h>
 #include "np_internal.h"
+#include "np_ticks_fast.h"
+#include <stdlib.h>
 #include <revolution/os.h>
 
 #define USEC_MAX 1000
@@ -30,9 +32,16 @@ static s32 LeapYearDays[MONTH_MAX] = {0,   31,  60,  91,  121, 152,
 static uint64_t g_t0_ns;
 static uint64_t g_base_ticks;
 
+// 1.3 cpuexact13, MSC_TICKS_FAST (default 1; 0 = the original two 64-bit divides): see np_ticks_fast.h for the identity and its limits (the game's bus clock, ns < 2^50 = 13 days).
+static int g_ticks_fast = -1;
 uint64_t np_os_ticks_from_ns(uint64_t ns) {
     const uint64_t clock = OS_TIME_SPEED;
-    return (ns / 1000000000ull) * clock + (ns % 1000000000ull) * clock / 1000000000ull;
+    if (__builtin_expect(g_ticks_fast < 0, 0)) {
+        const char* e = getenv("MSC_TICKS_FAST");
+        g_ticks_fast = (e && e[0] == '0') ? 0 : 1;
+    }
+    if (g_ticks_fast && clock == NP_TICKS_FAST_CLOCK && ns < NP_TICKS_FAST_NS_LIMIT) return np_ticks_from_ns_243(ns);
+    return np_ticks_from_ns_ref(ns, clock);
 }
 
 // The inverse: the np_time_ns() instant at which the time base reads `ticks` (alarm deadlines become event times).

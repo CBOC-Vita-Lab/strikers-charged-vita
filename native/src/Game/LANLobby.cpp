@@ -1,3 +1,5 @@
+#include "platform/sdk/net/np_lan.h"
+#include "platform/sdk/net/np_found_games.h"
 #include "Game/NetworkMessageRegistry.h"
 #include "Game/NetworkSession.h"
 #include "Game/OnlinePlayer.h"
@@ -223,6 +225,7 @@ int LANLobby::JoinGame(LANGameInfo* game, int gameType)
             if (game == 0)
             {
                 tDebugPrintManager::Print(DC_NETWORK, "No games to join\n");
+                NpLanJoinFoundNoGame();
                 return LAN_RESULT_NO_GAME_FOUND;
             }
         }
@@ -731,24 +734,31 @@ void LANLobby::EnumerateGames()
 
 void LANLobby::ProcessFoundGame(NetMessageFoundGame* message)
 {
-    if (mFoundGameCount >= 10)
+    const NpFound::Verdict verdict = NpFound::Decide(mFoundGames[0].mHostName, sizeof(LANGameInfo), &mFoundGames[0].mTimeSinceSeen, sizeof(LANGameInfo),
+                                                     mFoundGameCount, 10, message->mHostName, g_fLANGameExpireTime);
+    if (verdict.action == NpFound::kIgnore)
         return;
-    for (int index = 0; index < mFoundGameCount; ++index)
+    LANGameInfo* slot = &mFoundGames[verdict.index];
+    if (verdict.action == NpFound::kRefresh)
     {
-        if (nlStrCmp(mFoundGames[index].mHostName, message->mHostName) == 0)
-        {
-            mFoundGames[index].mTimeSinceSeen = 0.0f;
-            return;
-        }
+        // a known name: the timer, and the address the newest beacon came from (a host that rejoined the Wi-Fi may have another one)
+        slot->mTimeSinceSeen = 0.0f;
+        slot->mGameType = message->mGameType;
+        memcpy(slot->mAddress, message->mAddress, 4);
+        slot->mPort = message->mPort;
+        return;
     }
-    mFoundGames[mFoundGameCount].mGameType = message->mGameType;
-    memcpy(mFoundGames[mFoundGameCount].mAddress, message->mAddress, 4);
-    mFoundGames[mFoundGameCount].mPort = message->mPort;
-    nlStrNCpy(mFoundGames[mFoundGameCount].mHostName, message->mHostName, 11);
-    mFoundGames[mFoundGameCount].mTimeSinceSeen = 0.0f;
+    if (verdict.action == NpFound::kReplace && mListener != 0)
+        mListener->OnGameExpired(slot);
+    slot->mGameType = message->mGameType;
+    memcpy(slot->mAddress, message->mAddress, 4);
+    slot->mPort = message->mPort;
+    nlStrNCpy(slot->mHostName, message->mHostName, 11);
+    slot->mTimeSinceSeen = 0.0f;
     if (mListener != 0)
-        mListener->OnGameFound(&mFoundGames[mFoundGameCount]);
-    ++mFoundGameCount;
+        mListener->OnGameFound(slot);
+    if (verdict.action == NpFound::kAppend)
+        ++mFoundGameCount;
 }
 
 void LANLobby::SendGamePeerAdded(int index)
@@ -905,6 +915,12 @@ void LANLobby::ProcessJoinResponse(int index, NetMessageJoinResponse* message)
 void LANLobby::ProcessGamePeerAdded(NetMessageGamePeerAdded* message)
 {
     s8 peer = message->mPeer.mPeerIndex;
+    // The index and the count come off the wire: machine 0 is the host and the list holds 8 (1.3).
+    if (peer < 1 || peer >= 8 || mPeerCount >= 8)
+    {
+        tDebugPrintManager::Print(DC_NETWORK, "Ignored GamePeerAdded with peer %d, count %d\n", peer, mPeerCount);
+        return;
+    }
     mPeerInfoList[peer].mAddress.word = *(u32*)message->mPeer.mAddress;
     mPeerInfoList[peer].mPort = message->mPeer.mPort;
     nlStrNCpy(mPeerInfoList[peer].mName, message->mPeer.mName, 11);
@@ -1006,6 +1022,8 @@ int LANLobby::ProcessMessage(NetworkMessage* message)
             if (peer > 0 && peer < mPeerCount)
             {
                 NetMessageClientConfirmedJoin* reply = static_cast<NetMessageClientConfirmedJoin*>(message);
+                if (reply->mMachineIndex != peer)   // (off the wire: a machine confirms only itself, 1.3)
+                    break;
                 mPeerInfoList[reply->mMachineIndex].mHostState = LAN_PEER_JOIN_CONFIRMED;
                 if (reply->mMachineIndex > 1)
                     SendGamePeerAdded(reply->mMachineIndex);
@@ -1090,7 +1108,7 @@ void LANLobby::DebugDraw(int column, int* row)
         {
             glFontPrintf(GetDebugFontView(), column, (*row)++, "Num Games:%d", mFoundGameCount);
             for (int index = 0; index < mFoundGameCount; ++index)
-                glFontPrintf(GetDebugFontView(), column, (*row)++, mFoundGames[index].mHostName);
+                glFontPrintf(GetDebugFontView(), column, (*row)++, "%s", mFoundGames[index].mHostName);
         }
         if (mPeerCount > 0)
         {

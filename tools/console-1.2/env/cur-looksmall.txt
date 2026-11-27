@@ -1,0 +1,16 @@
+# console-1.2 run cur-looksmall: Look 1.3 current at a fixed 864x488: 1-px edge lines, static on shadows and decals
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 0, group core-look, route look, version payload 1.3, role look
+# The exact-viewport fix (MSC_VGX_VP_EXACT) and the FS_TRIM final clamp at a reduced odd size: no dark line on the right/bottom edge of glow and shadows, no noise on shadows or decals.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/look.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_FPS=30
+MSC_VITA_SHOT=700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2200
+MSC_VITA_SHOT_SIZE=640x448
+MSC_VITA_RENDER=864x488

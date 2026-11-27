@@ -1,0 +1,13 @@
+# console-1.2 run holdoff: Full picture off: the older size ladder
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group picture, route tour, version payload 1.3, role ab
+# MSC_PICTURE_HOLD=full (renderer/src/vgx_hold.h) is the player build's default picture for live play: 960x544 held, a late frame gives up the effects target, far shadows, all shadows and the crowd refresh in that order, then up to three size steps (864x488, 776x440, 704x400; targets made at match load, about 8 MiB); frozen in replays, cut-scenes and Mega Strikes. This run is the A/B: the older ladder (the game's size, larger or smaller by the load, 4x and 2x multisampling when there is room). Against the tour: [frame-timing] p50 and p99, late frames, fps in open play, and the [hold] lines of the tour (steps, the match summary with the seconds at each level, objects made after a size change, the video memory of the targets made ahead).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_PICTURE_HOLD=0

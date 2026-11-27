@@ -5,8 +5,15 @@
 #include "np_time.h"
 #include <cstdio>
 #include <cstdlib>
+#include <unistd.h>
 
 namespace NpHarness { void MockSetFrame(uint64_t); }
+
+// exit17: MSC_TEST_JOIN_HANG=1 makes the frame-send join (the first step of the harness's Finish) never return, as the 23 Nov console runs' end of run seemed to: the exit
+// watchdog (MSC_EXIT_WATCHDOG_S) must name the step and leave. A strong definition here wins over the harness's weak reference.
+extern "C" void NpFsJoin(void) {
+    if (std::getenv("MSC_TEST_JOIN_HANG")) for (;;) usleep(10000);
+}
 
 // A library constructor that reads the (interposed) clock before the harness' own static initialisers, as Mesa / libstdc++ do in
 // the game: the main thread must still be recognised as the game thread afterwards (MSC_EARLY_READ=1 enables it for the test).

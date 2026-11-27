@@ -1,0 +1,56 @@
+# UX pictures (tools/mp/ux_shots.py): Online Central: the first-time notice, the hub, FRIEND MATCH without friends
+mash 100 20 scene == 0
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+idle 60
+shot 01-main-menu
+idle 12
+idle 10
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 10
+press 100
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 90
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 60
+mash 4 15 onctx == 2 300
+idle 10
+press 100
+wait scene == 40 || scene == 10 3600
+idle 20
+shot 40-login-or-notice
+idle 12
+if scene == 10
+idle 120
+shot 41-first-time-notice
+idle 12
+mash 100 40 scene != 10 1200
+endif
+wait scene == 40 3600
+idle 200
+shot 42-online-hub
+idle 12
+press 100
+idle 90
+shot 43-friend-match-no-friends
+idle 12
+press 100
+idle 60
+shot 44-hub-after-popup
+idle 12
+exit

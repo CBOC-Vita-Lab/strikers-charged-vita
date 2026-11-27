@@ -1,6 +1,6 @@
 #!/bin/bash
 # Regression suite of the native port (NPB3). Run it after every merge into main, as ONE heavy job:
-#   /home/claude/msc/tools/heavy.sh -t 590 tools/regress.sh [-x exe] [-q] [-t tag] [-T "boot kickoff fulltime survey movie det"]
+#   /work/msc/tools/heavy.sh -t 590 tools/regress.sh [-x exe] [-q] [-t tag] [-T "boot kickoff fulltime survey movie det"]
 #
 #   -x exe   the executable (default build/np/host32/np-host32-full-null, the vgx null back end: no Mesa, fast; with -q build/np/armhf/np-armhf-full)
 #   -q       run the armhf executable under qemu-arm (cortex-a9) instead of the host32 one (3-5x slower per frame, boot/kickoff/det only by default)
@@ -24,7 +24,7 @@
 # A test passes when the process exits 0 by itself (the script's `exit`), no TIMEOUT / crash / stub-abort line is in the log, and every expected marker
 # is there. The summary (one line per test: PASS/FAIL, frames, wall seconds) is printed and written to the summary file. Exit status 0 = all pass.
 NP=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)   # the worktree this script lives in (DEC: runs in any worktree)
-B=${BUILD_ROOT:-/home/claude/msc/build/np}
+B=${BUILD_ROOT:-/work/msc/build/np}
 EXE=; Q=0; TAG=$(date +%m%d-%H%M); LIST=
 while getopts "x:qt:T:" o; do case $o in x) EXE=$OPTARG;; q) Q=1;; t) TAG=$OPTARG;; T) LIST=$OPTARG;; *) exit 2;; esac; done
 [ -n "$EXE" ] || { [ $Q = 1 ] && EXE=$B/armhf/np-armhf-full || EXE=$B/host32/np-host32-full-null; }
@@ -32,8 +32,8 @@ while getopts "x:qt:T:" o; do case $o in x) EXE=$OPTARG;; q) Q=1;; t) TAG=$OPTAR
 OUT=$B/B3/regress; mkdir -p $OUT
 SUM=$OUT/$TAG.txt
 NAV=$NP/tools/nav
-ORACLE_KICKOFF=/home/claude/msc/tools/scripts/nav_kickoff.txt
-QEMU=/home/claude/research/qemu-full/build/qemu-arm
+ORACLE_KICKOFF=/work/msc/tools/scripts/nav_kickoff.txt
+QEMU=/work/research/qemu-full/build/qemu-arm
 
 # name|script|max frames|wall seconds (host32; x3 under qemu)|markers
 declare -A SCRIPT FRAMES SECS MARK SAVE XENV   # SAVE[t]=1: the data dir starts with a save file (no first-run popup)
@@ -46,18 +46,18 @@ XENV[fulltime]="MSC_FPS=60"
 SCRIPT[fulltime30]=$NP/tools/fps/nav/nav_fulltime30.txt;  FRAMES[fulltime30]=40000; SECS[fulltime30]=240; MARK[fulltime30]="STATE open play;STATE full time;STATE post-game: DONE button visible;STATE results done, rematch started;script end"
 SCRIPT[survey]=$NAV/survey_full.txt;     FRAMES[survey]=30000; SECS[survey]=200; MARK[survey]="STATE open play;STATE pausing (survey);STATE resumed (survey)"
 SCRIPT[movie]=$NAV/movie_end.txt;        FRAMES[movie]=14000; SECS[movie]=150;  MARK[movie]="STATE intro movie playing;STATE title screen reached by itself"
-SCRIPT[det]=/home/claude/msc/tools/scripts/nav_match60.txt; FRAMES[det]=4600;    SECS[det]=120;    MARK[det]="STATE open play"; SAVE[det]=1
-SCRIPT[detfresh]=/home/claude/msc/tools/scripts/nav_match60.txt; FRAMES[detfresh]=4600; SECS[detfresh]=120; MARK[detfresh]="STATE open play"
+SCRIPT[det]=/work/msc/tools/scripts/nav_match60.txt; FRAMES[det]=4600;    SECS[det]=120;    MARK[det]="STATE open play"; SAVE[det]=1
+SCRIPT[detfresh]=/work/msc/tools/scripts/nav_match60.txt; FRAMES[detfresh]=4600; SECS[detfresh]=120; MARK[detfresh]="STATE open play"
 
 # one run: run_one <test> <logfile> [padBytes]; prints "<rc> <frames> <wall>"
 run_one() {
   local t=$1 log=$2 pad=${3:-0} D=$OUT/data-$TAG-$1-$$ T0=$(date +%s) rc fr
   rm -rf $D; mkdir -p $D
-  [ -n "${SAVE[$t]}" ] && cp -a ${SAVEDIR:-/home/claude/msc/build/np/B3/rundata-save}/. $D/
+  [ -n "${SAVE[$t]}" ] && cp -a ${SAVEDIR:-/work/msc/build/np/B3/rundata-save}/. $D/
   local tmo=${SECS[$t]}; [ $Q = 1 ] && tmo=$((tmo * 3))
   (
     cd $D
-    export NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=${SCRIPT[$t]} MSC_MAX_FRAMES=${FRAMES[$t]} MSC_VIRTUAL_TIME=1 \
+    export NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=${SCRIPT[$t]} MSC_MAX_FRAMES=${FRAMES[$t]} MSC_VIRTUAL_TIME=1 \
            MSC_FRAME_LOG=100000 MSC_WATCH=1 MSC_WATCH_EVERY=100000 MSC_STATE_HASH=${HASHEVERY:-30} NP_DET_NAN=1
     [ "$pad" != 0 ] && export NPB3PAD=$(head -c $pad /dev/zero | tr '\0' 'x')
     [ -n "$TRACE" ] && export NP_DET_TRACE=$TRACE

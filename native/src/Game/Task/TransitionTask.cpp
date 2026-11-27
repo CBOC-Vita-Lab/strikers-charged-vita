@@ -23,6 +23,12 @@
 #include "NL/nlTask.h"
 #include "types.h"
 #include "Game/Render/Presentation.h"
+#ifdef NP_NATIVE
+#include "np/stall.h"   // MSC_STALL_TIMERS (stall10)
+#endif
+#ifndef NP_NATIVE
+#define NP_STALL(name)
+#endif
 
 // Charged keeps the predecessor's transition-manager surface but replaces
 // several of its subsystem calls.
@@ -80,7 +86,7 @@ void TransitionTask::StateTransition(u32 from, u32 to)
 
     if (to == 0x10)
     {
-        NisPlayer::Instance()->SetupNisPlayback();
+        { NP_STALL("Transition: SetupNisPlayback"); NisPlayer::Instance()->SetupNisPlayback(); }
     }
 
     if (BasicStadium::GetCurrentStadium() != NULL)
@@ -95,7 +101,7 @@ void TransitionTask::StateTransition(u32 from, u32 to)
         }
     }
 
-    HandlePresentationStateTransition(GetPresentation(), from, to);
+    { NP_STALL("Transition: HandlePresentationStateTransition"); HandlePresentationStateTransition(GetPresentation(), from, to); }
 
     if (to == 2)
     {
@@ -103,7 +109,7 @@ void TransitionTask::StateTransition(u32 from, u32 to)
 
         if (from != 1 && from != 0x20)
         {
-            ReplayManager::Instance()->PrepareForRecording();
+            { NP_STALL("Transition: PrepareForRecording"); ReplayManager::Instance()->PrepareForRecording(); }
         }
 
         if (!gSkipPresentationResetOnReturnToGame)
@@ -131,7 +137,7 @@ void TransitionTask::StateTransition(u32 from, u32 to)
 
     if (g_pOverlayManager != NULL)
     {
-        static_cast<OverlayManager*>(g_pOverlayManager)->HandleStateTransition(from, to);
+        { NP_STALL("Transition: OverlayManager::HandleStateTransition"); static_cast<OverlayManager*>(g_pOverlayManager)->HandleStateTransition(from, to); }
     }
 
     if ((to & 0x18) || to == 0x20000)
@@ -148,11 +154,11 @@ void TransitionTask::StateTransition(u32 from, u32 to)
                 g_pTeams[i]->StopPlayingAllTrackedSFX();
             }
 
-            ClearCharacterEffectsTexturing();
+            { NP_STALL("Transition: ClearCharacterEffectsTexturing"); ClearCharacterEffectsTexturing(); }
 
-            g_pGame->ResetPowerups(false);
-            gNPCManager->ResetNPCs();
-            lbl_806E12C8->ResetEffects();
+            { NP_STALL("Transition: ResetPowerups"); g_pGame->ResetPowerups(false); }
+            { NP_STALL("Transition: ResetNPCs"); gNPCManager->ResetNPCs(); }
+            { NP_STALL("Transition: ResetEffects"); lbl_806E12C8->ResetEffects(); }
         }
     }
     else if ((from & 0x18) || (from == 1 && (nlTaskManager::m_pInstance->mPreviousState & 0x18)))
@@ -163,11 +169,11 @@ void TransitionTask::StateTransition(u32 from, u32 to)
             presentation->mLetterBoxEnabled = false;
             presentation->mLetterBoxDuration = 0.0f;
 
-            ClearCharacterEffectsTexturing();
+            { NP_STALL("Transition: ClearCharacterEffectsTexturing"); ClearCharacterEffectsTexturing(); }
 
-            g_pGame->ResetPowerups(false);
-            gNPCManager->ResetNPCs();
-            lbl_806E12C8->ResetEffects();
+            { NP_STALL("Transition: ResetPowerups"); g_pGame->ResetPowerups(false); }
+            { NP_STALL("Transition: ResetNPCs"); gNPCManager->ResetNPCs(); }
+            { NP_STALL("Transition: ResetEffects"); lbl_806E12C8->ResetEffects(); }
         }
         else if (to == 1)
         {

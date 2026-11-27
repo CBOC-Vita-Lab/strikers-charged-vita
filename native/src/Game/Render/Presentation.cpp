@@ -3,6 +3,7 @@
 #include "Game/Render/Presentation.h"
 #include "port/wii_numeric.h"
 #include "np/framepace.h"
+#include "np/fps.h"
 #include "Game/DetInput.h"
 #include "Game/Blinker.h"
 
@@ -65,6 +66,10 @@
 #include "NL/nlMath.h"
 #include "NL/nlString.h"
 #include "NL/nlTask.h"
+#ifdef NP_NATIVE
+extern "C" int NpLoadHoldFrames(void);   // InputManager.cpp: MSC_LOADHOLD
+static int sLoadHeld;                      // the walk-out frames held hidden so far (reset while the wait for the walk-out runs)
+#endif
 #include "Game/Render/MegastrikeBackgroundOverlay.h"
 
 static inline bool IsDuringGamePauseState();
@@ -167,6 +172,15 @@ Presentation* GetPresentation()
     static Presentation instance;
     return &instance;
 }
+
+#ifdef NP_NATIVE
+// scenes30 (MSC_HEAD_STAT, np_head17.h MomentOf): the function the match presentation is playing (GameBegin: the walk-out, Goal*: a goal's celebration, Megastrike*: the Mega Strike's launch
+// and result), read once a picture by the frame-rate code's headroom line. Read only: the game's own buffer, on the game thread.
+extern "C" const char* NpPresentationFunction(void)
+{
+    return GetPresentation()->mCurrentFunction;
+}
+#endif
 
 /**
  * Address/Size: 0x80284ABC | size: 0x58
@@ -507,8 +521,19 @@ void Presentation::Update(float deltaT)
         {
             if (nlTaskManager::m_pInstance->mCurrentState != TASK_NIS)
             {
-                glDiscardFrame(1);
+                glDiscardFrameWhy(1, "GameBegin, walk-out not ready");
+#ifdef NP_NATIVE
+                sLoadHeld = 0;
+#endif
             }
+#ifdef NP_NATIVE
+            else if (sLoadHeld < NpLoadHoldFrames())
+            {
+                // MSC_LOADHOLD (stall10): the walk-out is ready; its first frames are made hidden (glSendFrame sends a "GameBegin hold" frame as a rehearsal) before the first picture
+                ++sLoadHeld;
+                glDiscardFrameWhy(1, "GameBegin hold");
+            }
+#endif
         }
 
         if (m_RunState == INTERPRETER_SUSPENDED)
@@ -792,6 +817,10 @@ void Presentation::OnGoalScored(GoalScoredData* data)
     {
         return;
     }
+
+#ifdef NP_NATIVE
+    NpFpsNoteGoal();   // wave 7 (MSC_CADENCE, MSC_DL_WARM): render-side notes only; nothing the simulation or the network reads
+#endif
 
     if (data->uGoalType != GOAL_MEGA_STRIKE)
     {

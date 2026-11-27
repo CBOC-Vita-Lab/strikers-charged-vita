@@ -12,6 +12,7 @@
 #include <map>
 #include <mutex>
 
+#include <psp2/display.h>
 #include <psp2/kernel/cpu.h>
 #include <psp2/kernel/error.h>
 #include <psp2/kernel/sysmem.h>
@@ -45,6 +46,9 @@ Thr* thr(int id) {
 }  // namespace
 
 extern "C" {
+// No physical display in this fixture: exercise the SDK's timer fallback.
+int sceDisplayWaitVblankStart(void) { return -1; }
+int sceDisplayGetVcount(void) { return -1; }
 SceUID sceKernelCreateSema(const char*, SceUInt, int initVal, int, SceKernelSemaOptParam*) {
     Sema* s = new Sema;
     sem_init(&s->s, 0, (unsigned)initVal);

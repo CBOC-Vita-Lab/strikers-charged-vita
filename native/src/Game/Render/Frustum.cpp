@@ -148,6 +148,26 @@ FrustumResult ClassifyBoxInFrustum(const nlVector4* pPlanes,
     return result;
 }
 
+bool IsBoxVisibleInFrustum(const nlVector4* pPlanes,
+    const nlVector3* pBoundsMin, const nlVector3* pBoundsMax)
+{
+    // int28: exact positive-vertex rejection only (ClassifyBoxInFrustum != FRUSTUM_OUTSIDE when pPlaneMask == 0).
+    // Preserves exact scalar evaluation order (px*nx + py*ny + pz*nz + w < 0.0f).
+    const float minX = pBoundsMin->x, minY = pBoundsMin->y, minZ = pBoundsMin->z;
+    const float maxX = pBoundsMax->x, maxY = pBoundsMax->y, maxZ = pBoundsMax->z;
+    for (int i = 0; i < 6; ++i, ++pPlanes)
+    {
+        const float nx = pPlanes->x, ny = pPlanes->y, nz = pPlanes->z;
+        nlVector3 positive;
+        positive.x = nx >= 0.0f ? maxX : minX;
+        positive.y = ny >= 0.0f ? maxY : minY;
+        positive.z = nz >= 0.0f ? maxZ : minZ;
+        if (nlVec3DotProduct(positive, *(const nlVector3*)pPlanes) + pPlanes->w < 0.0f)
+            return false;
+    }
+    return true;
+}
+
 FrustumResult ClassifySphereInFrustum(const nlVector4* pPlanes,
     const nlVector3* pPosition, float fRadius)
 {

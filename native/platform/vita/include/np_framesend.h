@@ -18,6 +18,7 @@
  *   MSC_FRAMESEND=off|thread|serial|inline   (inline: the snapshot path, the job runs at the fork: no reordering) default off until the proof runs of docs/wave3-NPP2.md are in (thread on the Vita and armhf
  *                                     once the default is switched: see NpFsDefaultMode)
  *   MSC_FS_STATES=<mask>              task states in which a frame is forked (default 0x2: open play and the kick-off)
+ *   MSC_FS_HELD=0|1|2                 (rep27, thread mode, MSC_FS_STATES not set) 1: replays, 2: also cut-scenes / walk-out are sent on the game thread
  *   MSC_FS_FREEGATE=0|1|2             a heap free of a block older than the window: 1 joins first, 2 keeps the free until the join (default 2)
  *   MSC_FS_TASKS=<mask of priorities> tasks that may run while a job is pending (see nlTask.cpp; default: 0-8, 17, 24 = all but 9..16)
  *   MSC_FS_STACK_KB=<n>               worker stack (default 256 on the Vita, 1024 elsewhere)
@@ -41,6 +42,7 @@ extern volatile int NpFsBusy;
 
 int NpFsMode(void);                           /* decided on first use from MSC_FRAMESEND */
 int NpFsStates(void);                         /* MSC_FS_STATES */
+int NpFsHeldStates(void);                     /* rep27 MSC_FS_HELD: the task-state bits sent on the game thread (0: none) */
 int NpFsFreeGate(void);                       /* MSC_FS_FREEGATE: 0 none (unsafe), 1 join, 2 defer the free to the join */
 int NpFsTaskMask(void);                       /* bit p set: a task of priority p may run while a job is pending */
 void NpFsFork(NpFsJobFn fn, void* arg);
@@ -60,17 +62,30 @@ void NpFsLogStats(const char* when);          /* one block of [fs] lines */
 void NpFsHeapAlloc(void* ptr);
 int NpFsHeapFree(void* ptr);
 void NpFsSetFreeFn(void (*fn)(void*));
+void NpFsSetOverlap(int on);                  /* MSC_SIMT=2 (NpSimRun17.cpp): np_sim runs beside the game thread from the kick to the join: its heap events and gates take the np_sim rules */
 /* the worker made a heap call (a violation of the job contract: counted and logged once) */
 void NpFsWorkerHeapCall(void);
 
 /* A helper lane for data-parallel work of the game thread (NPP2: the software skinning of cut-scenes and 3D menus): a second thread that runs the
  * submitted jobs in order, one at a time, beside the game thread. MSC_SKIN_LANE=1 enables it (default 0); NpLaneEnabled() says whether it is on.
- *   NpLaneSubmit(fn, arg)  game thread: queue fn(arg); it runs on the lane thread (when the queue is full the lane is drained first and fn runs here)
- *   NpLaneWait()           game thread: returns when every job submitted so far has finished (nothing submitted: returns at once)
- * The caller keeps arg alive until NpLaneWait returned; jobs of one submitter run in the order submitted. */
+ *   NpLaneTrySubmit(fn, arg)  game thread: queue fn(arg), returns 1; returns 0 (nothing queued) when the lane is off, cannot start or its queue is full:
+ *                             the caller then does the work itself (this is the fallback of the skinning; it never waits for room)
+ *   NpLaneSubmit(fn, arg)     as above, but a full queue is drained first (NpLaneWait) and fn runs here if it is still refused
+ *   NpLaneWait()              game thread: returns when every job submitted so far has finished (nothing submitted: returns at once). The wait is in
+ *                             slices of 4 ms; if no job finishes for 3 slices and the lane thread is not inside a job, the game thread runs the queued
+ *                             jobs itself, in order (a lane thread that is not scheduled cannot hang the game). Log lines: "[lane] ...".
+ * The caller keeps arg alive until NpLaneWait returned; jobs of one submitter run in the order submitted (one at a time: they may share buffers).
+ * The hand-off uses atomics plus binary wake-up semaphores: the Vita's kernel semaphores here have a maximum of 1 and DROP a second post, so no count
+ * is carried in a semaphore (np_framesend.cpp, "Hand-off design"). Host tests: MSC_SEM_MAX1=1 emulates the maximum, MSC_LANE_FREEZE_MS=n delays the
+ * lane thread's start; MSC_VITA_PRIO_LANE=<prio> sets the lane thread's priority on the console. */
 int NpLaneEnabled(void);
+int NpLaneTrySubmit(NpFsJobFn fn, void* arg);
 void NpLaneSubmit(NpFsJobFn fn, void* arg);
 void NpLaneWait(void);
+int NpLaneTakeUnstarted(void);   /* lane24: the jobs still queued that the lane thread has not started are run by the caller now, in order (a job the lane thread is inside is left; returns how many ran) */
+int NpLaneForce(void);   /* gt27 (MSC_BLEND_ASYNC): start the lane for a user of its own; NpLaneEnabled (the skinning's MSC_SKIN_LANE) is unchanged. 1 = running */
+double NpFsJoinWaitedSeconds(void);   /* pace24: total wall time NpFsJoin has blocked the game thread (a measurement aid) */
+double NpLaneWaitedSeconds(void);   /* total wall time NpLaneWait has blocked the game thread (a measurement aid) */
 
 #ifdef __cplusplus
 }

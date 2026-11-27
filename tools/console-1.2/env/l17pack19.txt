@@ -1,0 +1,14 @@
+# console-1.2 run l17pack19: Shader pack19 (489 programs) with the warm-up cap 500 (MSC_WARM_CAP=500), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group r17, route tour, version payload pack19, role manual
+# list17: pack19 holds 489 programs / 769 variants (pack16 329 / 565); the cap 400 would leave 89 to first use. Against d1: `[boot]` present 2 time (the cost: console boot cost unmeasured) and `[cuts]` first uses at the first goal, replay and walk-out (the gain). One fragment shader (B8A601C15245AAA5, 3 programs) still compiles on the console. Needs versions/pack19 (`swap pack19`, then `swap 1.3` to put the r17 package's own pack back).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_WARM_CAP=500

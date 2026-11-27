@@ -229,6 +229,7 @@ public:
     virtual void Receive(void* buffer, int size);
     virtual void SendVoice(u8 aid, void* buffer, int size);
     virtual void Update(float dt);
+    int ReceiveOnly();   // delay19: the receive loop of Update() alone (NetworkSocket.cpp)
     virtual void DebugDraw(int a, int* b, bool c);
     virtual void DrawScreenPrinter();
     virtual u8* GetLocalAddress();

@@ -3,7 +3,7 @@
 #   RUN="<qemu-arm ...>" BIN=<test_harness> TOOLS=<this directory> run_tests.sh
 # Each case runs the test program with an environment and checks the log and the exit code.
 BIN=${BIN:?}; RUN=${RUN:-}; TOOLS=${TOOLS:-$(dirname "$0")}
-NAVDIR=${NAVDIR:-/home/claude/msc/tools/scripts}
+NAVDIR=${NAVDIR:-/work/msc/tools/scripts}
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 pass=0; fail=0
 ok()   { pass=$((pass+1)); echo "ok   $1"; }
@@ -122,6 +122,15 @@ exit
 S
 FRAMES=300 run "script: && condition, if/endif, exit" 0 "branch taken" "script exit at frame" -- MSC_INPUT_SCRIPT="$T/s4.txt"
 grep -q 'NOT taken' "$T/all.txt" && bad "script: if skips" "wrong branch taken" || ok "script: if skips the untaken branch"
+# exit17: the end of a run names its steps; a step that never finishes is reported and the process leaves (exit 3) instead of vanishing
+FRAMES=300 run "exit steps: every step of the end of a run is marked, in order" 0 "\[exit\] step 1: script flush" "\[exit\] step 2: frame-send join" \
+  "\[exit\] step [0-9]+: exit hooks" "\[exit\] step [0-9]+: memory report" "\[exit\] step [0-9]+: plat line" "\[exit\] step [0-9]+: final flush" "script exit at frame" -- MSC_INPUT_SCRIPT="$T/s4.txt"
+grep -q 'EXIT STUCK' "$T/all.txt" && bad "exit steps: no false alarm" "EXIT STUCK in a normal run" || ok "exit steps: a normal end of a run raises no alarm"
+FRAMES=300 run "exit steps: MSC_EXIT_TRACE=0 silences the step lines" 0 "script exit at frame" -- MSC_INPUT_SCRIPT="$T/s4.txt" MSC_EXIT_TRACE=0
+grep -q '\[exit\] step' "$T/all.txt" && bad "exit steps: trace off" "step lines with MSC_EXIT_TRACE=0" || ok "exit steps: trace off prints no step line"
+FRAMES=300 run "exit watchdog: a hung step is named and the process leaves with 3" 3 "\[exit\] step 2: frame-send join" "\[plat\] EXIT STUCK in step frame-send join after 1 s \(step 2\)" -- \
+  MSC_INPUT_SCRIPT="$T/s4.txt" MSC_TEST_JOIN_HANG=1 MSC_EXIT_WATCHDOG_S=1
+grep -q 'script exit at frame' "$T/all.txt" && bad "exit watchdog: hung" "the [plat] line was printed after a hung join" || ok "exit watchdog: nothing after the hung step"
 
 FRAMES=120 run "MSC_WATCH: [nav] changes and [watch] lines" 0 "\[nav\] f=[0-9]+ scenes: \[18:scene18\]" "\[nav\] f=[0-9]+ match state -1 -> 1" \
   "\[nav\] f=[0-9]+ score 0-0 -> 1-0" "\[nav\] f=[0-9]+ pause menu on" "\[watch\] f=60 " "sim=[0-9]+ simt=" -- MSC_WATCH=1 MSC_WATCH_EVERY=60

@@ -5,6 +5,7 @@
 #include "NL/nlDLRing.h"
 #include "NL/nlPrint.h"
 #include <stdio.h>
+#include "np/overlap.h"
 
 
 bool g_bPrintMemoryNewLowWaterMarks;
@@ -143,21 +144,46 @@ static inline void* InitializeAllocation(void* block, unsigned long size, u32 pr
     return result;
 }
 
+#ifdef NP_NATIVE
+// 1.3 smooth (the "alloc" part of a [hitch] line, renderer vgx_backend_gl.cpp HitchRecord): the free list is walked from its start on every allocation; this keeps the longest walk
+// and the number of walks over 1000 blocks since the last NpAllocScanTake. Two counters written by the game thread and read, then cleared, by the back end's thread: a diagnostic, a
+// lost update is no harm. It changes no allocation.
+extern "C" {
+volatile unsigned g_npAllocScanMax = 0, g_npAllocScanLong = 0;
+unsigned NpAllocScanTake(unsigned* longWalks)
+{
+    const unsigned m = g_npAllocScanMax;
+    if (longWalks) *longWalks = g_npAllocScanLong;
+    g_npAllocScanMax = 0;
+    g_npAllocScanLong = 0;
+    return m;
+}
+}
+#endif
+
 void* MemoryAllocator::AllocateFromStart(unsigned long size, unsigned int alignment)
 {
+#ifdef NP_NATIVE
+    unsigned scanned = 0;
+#endif
     FreeBlockList* start = nlDLRingGetStart(m_free_block_list);
     FreeBlockList* cur = start;
     u32 alignedSize = (size + 3) & ~3u;
     u32 prefix;
     u32 usedSize;
     u32 blockSize;
+    // MSC_ALLOC_MASK (np/overlap.h): nlAlignUp is value % alignment (a software divide on the Cortex-A9, once per block that is big enough, the whole free list
+    // from the start on each allocation). For a nonzero power of two a is (v + a - 1) & ~(a - 1) the same number for every v, wrap-around included
+    // (v - v % a + a when v % a != 0, v otherwise; 2^32 is a multiple of a).
+    const u32 alignMask = alignment - 1;
+    const bool maskAlign = NpAllocMask() != 0 && alignment != 0 && (alignment & alignMask) == 0;
 
     for (;;)
     {
         blockSize = cur->m_size;
         if (blockSize > alignedSize)
         {
-            u32 address = nlAlignUp((u32)cur + 4, alignment);
+            u32 address = maskAlign ? (((u32)cur + 4 + alignMask) & ~alignMask) : nlAlignUp((u32)cur + 4, alignment);
             prefix = address - (u32)cur;
             usedSize = prefix + alignedSize;
             if (usedSize <= blockSize)
@@ -166,6 +192,9 @@ void* MemoryAllocator::AllocateFromStart(unsigned long size, unsigned int alignm
             }
         }
 
+#ifdef NP_NATIVE
+        ++scanned;
+#endif
         cur = cur->m_next;
         if (cur == start)
         {
@@ -173,6 +202,13 @@ void* MemoryAllocator::AllocateFromStart(unsigned long size, unsigned int alignm
         }
     }
 
+#ifdef NP_NATIVE
+    if (scanned > 1000)
+    {
+        ++g_npAllocScanLong;
+        if (scanned > g_npAllocScanMax) g_npAllocScanMax = scanned;
+    }
+#endif
     FreeBlockList* prev = cur->m_prev;
     if (cur->m_next == cur)
     {
@@ -451,7 +487,7 @@ char sFreeMemoryDumpTotalFormat[] = "Total free memory: %d\n";
 void FreeBlockDumpCallback::Callback(FreeBlockList* block)
 {
     char buffer[512];
-    nlSNPrintf(buffer, sizeof(buffer), "%4d| 0x%08x| %10d| \n", count, block, block->m_size);
+    nlSNPrintf(buffer, sizeof(buffer), "%4d| 0x%08x| %10d| \n", count, static_cast<unsigned>(reinterpret_cast<unsigned long>(block)), block->m_size);
     buffer[511] = 0;
     if (nlDebugFileIsValid(file))
     {

@@ -21,6 +21,7 @@ public:
         PhysicsObject*, dContact*, int, PhysicsObject*);
     virtual PhysicsBoneID ResolvePhysicsBoneIDFromName(const char*);
 
+    void PostUpdatePre(); // MSC_PHYS_POSE: PostUpdate up to the character's own pose (np/physpose.h)
     void DisablePhysicsColumn();
     void EnablePhysicsColumn();
     void GetRadius(float* radius);

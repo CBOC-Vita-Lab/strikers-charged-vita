@@ -1,0 +1,109 @@
+# In-game discovery, cancellation, both local links, then online host/join discovery.
+mash 100 20 scene == 0
+mash 100 30 scene != 0
+wait scene == 1 || scene == 10
+wait scene == 10 || nbuttons >= 8
+if scene == 10
+wait nbuttons >= 2
+idle 10
+mash 100 30 scene == 1
+wait nbuttons >= 8
+endif
+wait onctx == 0
+idle 30
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 30
+press 100
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 60
+log STATE mode chooser opened without online preference
+press 200
+wait scene == 1 1200
+idle 60
+log STATE cancelled mode choice
+
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 30
+press 100
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 60
+mash 4 15 onctx == 1 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 900
+wait nbuttons >= 3 900
+idle 60
+press 200
+wait scene == 1 900
+wait scene == 10 900
+wait nbuttons >= 3 900
+idle 60
+log STATE local back returned to mode chooser
+mash 4 15 onctx == 1 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 900
+wait nbuttons >= 3 900
+idle 60
+mash 4 15 onctx == 1 180
+idle 10
+press 100
+wait scene == 24 2400
+idle 120
+log STATE same wifi lobby
+press 200
+wait scene == 1 1200
+idle 90
+log STATE left same wifi
+
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 30
+press 100
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 60
+mash 4 15 onctx == 1 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 900
+wait nbuttons >= 3 900
+idle 60
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+wait scene == 24 2400
+idle 120
+log STATE nearby lobby
+press 200
+wait scene == 1 1200
+idle 90
+log STATE left nearby
+
+hold 30 0 -80 80
+wait onctx == 1 120
+idle 30
+press 100
+wait scene == 10 1200
+wait nbuttons >= 3 900
+idle 60
+mash 8 15 onctx == 0 180
+idle 10
+press 100
+wait scene == 1 900
+wait scene == 10 900
+wait nbuttons >= 3 900
+idle 60
+log STATE online host join visible after local play
+press 200
+wait scene == 1 1200
+idle 60
+log STATE modes complete
+exit

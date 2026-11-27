@@ -1,0 +1,13 @@
+# console-1.2 run texc-base: Dump baseline right before the texture compression runs (same env as texc-ceil without the key)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route worstgpu, version payload 1.3, role ab
+# texc15b.md: the plain Dump baseline the texc runs are read against (run just before texc-ceil, same session).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/worstgpu.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1

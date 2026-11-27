@@ -1,0 +1,15 @@
+# console-1.2 run bg30dump: Background at 30, players at 60 (MSC_BG30=2), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group bg30, route worstgpu, version payload 1.3, role ab
+# MSC_BG30=2 at the heaviest stadium. Expected (estimate): the pair does not fit at 960x544 2x (full 28-30 + light 8-11 ms GPU); read [lane] GPU by picture kind (light pictures should be 8-11 ms) to size the background ladder.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_BG30=2
+MSC_FPS=60

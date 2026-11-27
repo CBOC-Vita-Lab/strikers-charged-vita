@@ -51,7 +51,7 @@ NP_VLINK := $(VBIN)/arm-vita-eabi-g++
 
 # kubridge's header (no package installed here; no licence file in the clone, so it is used in place,
 # not copied). Only the weak crash-handler hook uses it (np_vita_crash.cpp).
-KUBRIDGE ?= /home/claude/research/vita-refs/bythos14_kubridge
+KUBRIDGE ?= /work/research/vita-refs/bythos14_kubridge
 NP_VINC  := -I$(KUBRIDGE)
 
 # Package identity. Two ids, one app (W5-ONE):
@@ -80,7 +80,9 @@ else
 NP_TITLE_ID ?= MSCN00001
 NP_TITLE    ?= Mario Strikers Charged (native test)
 endif
-NP_APP_VER  ?= 01.00
+# The version in param.sfo (APP_VER, NN.NN): plain release numbers, 02.00 for 2.0 (VitaDB lists the app by it). Raise it with every release,
+# with cboc-release.json's "version" and NP_ONLINE_APP_VERSION (platform/sdk/net/online/np_app_version.h).
+NP_APP_VER  ?= 02.00
 
 # Lab mode (lab/vitalab.py over Wi-Fi: upload builds, start runs, fetch logs; see lab/README.md):
 # on for test titles, off for the release build.
@@ -88,6 +90,14 @@ LAB ?= $(if $(filter 1,$(NP_RELEASE) $(NP_PLAYER)),0,1)
 
 NP_VDEFS := -DNP_VITA=1 $(if $(filter 1,$(NP_PLAYER)),-DNP_PLAYER=1) -DNP_TITLE_ID='"$(NP_TITLE_ID)"' $(if $(filter 1,$(LAB)),-DMSC_LAB=1 '-DMSC_LAB_BUILD_ID="np-$(shell git -C $(NPV_DIR) rev-parse --short HEAD 2>/dev/null)-$(shell date +%m%d.%H%M%S)"')
 NP_VDEFS += -DNP_LOGGING=$(NP_LOGGING)
+# The build's identity in the LAN fingerprint (so_net.cpp): source hash plus the options that can change what the game computes, unless the build names one.
+# Two consoles pair only with the same identity. Exported so that sub-makes do not hash again.
+NP_BUILD_ROOTDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../../..)
+ifeq ($(strip $(NP_BUILD_ID)),)
+NP_BUILD_ID := $(shell cd "$(NP_BUILD_ROOTDIR)" && { find native renderer dependencies/vitaGL -type f \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.S' \) -print0 | LC_ALL=C sort -z | xargs -0 cat; echo "$(filter -O%,$(OPT)) $(LTO) $(NP_CLANG_PGO)"; } | sha256sum | cut -c1-16)
+endif
+export NP_BUILD_ID
+NP_VDEFS += $(if $(NP_BUILD_ID),-DNP_BUILD_ID='"$(NP_BUILD_ID)"')
 
 # Optimisation flag sets for the game's objects (the game's Makefile picks one):
 #   base   -O2, no unsafe math
@@ -102,18 +112,19 @@ NP_VPGO_USE  := $(NP_VOPT_LTO) -fprofile-use -fprofile-correction -Wno-missing-p
 # Libraries: the Sony import stubs the platform layer uses (an import table each; vita-elf-create
 # fails if a referenced function is missing), -pthread (NOT -lpthread: VitaSDK's spec turns it into
 # --whole-archive, which libstdc++'s weak pthread references need: std::thread, std::mutex and
-# condition variables silently do nothing without it), kubridge's WEAK stubs.
-NP_VBUILD ?= /home/claude/msc/build/np/NPV/vita
+# condition variables silently do nothing without it), kubridge's WEAK stubs. (diag13: the pc sampler's three ForVM imports are WEAK, linked as loose objects: Makefile.vpk NP_FORVM_OBJS.)
+NP_VBUILD ?= /work/msc/build/np/NPV/vita
 NP_VLIBS := -L$(NP_VBUILD)/stubs -lkubridge_stub_weak \
             -lSceDisplay_stub -lSceCtrl_stub -lSceAudio_stub -lScePower_stub -lSceAppMgr_stub -lSceVshBridge_stub \
             -lSceTouch_stub -lSceSysmem_stub -lSceKernelThreadMgr_stub -lSceIofilemgr_stub -lSceProcessmgr_stub \
-            -lSceRtc_stub -pthread -lm
+            -lSceRtc_stub -lSceJpeg_stub_weak -pthread -lm
 # NPM's network layer (platform/sdk/net): the Wi-Fi/ad hoc radio of the Vita backend. The ad hoc import is WEAK: a
 # console that cannot load the PSP ad hoc module still starts the application (the recompiled build linked it strong).
-NP_VLIBS += -lSceNet_stub -lSceNetCtl_stub -lScePspnetAdhoc_stub_weak -lSceSysmodule_stub
+# ScePromoterUtil_stub_weak is also linked unconditionally for on-device LiveArea auto-branding (vita_livearea_art.cpp).
+NP_VLIBS += -lSceNet_stub -lSceNetCtl_stub -lScePspnetAdhoc_stub_weak -lSceSysmodule_stub -lScePromoterUtil_stub_weak
 ifeq ($(LAB),1)
 # The lab server's sockets; every exit of the process passes through vita_lab.cpp.
-NP_VLIBS += -lSceNet_stub -lSceNetCtl_stub -lSceSysmodule_stub -lScePromoterUtil_stub_weak
+NP_VLIBS += -lSceNet_stub -lSceNetCtl_stub -lSceSysmodule_stub
 endif
 # --wrap: pthread_create gives attribute-less threads a real stack and the helper core
 # (np_vita_process.cpp); the mutex/cond wraps make an all-zero std::mutex usable before its
@@ -128,7 +139,15 @@ NP_VWRAPS := -Wl,--wrap=pthread_create \
              -Wl,--wrap=pthread_cond_signal -Wl,--wrap=pthread_cond_broadcast -Wl,--wrap=remove \
              -Wl,--wrap=sceClibMspaceCreate -Wl,--wrap=sceClibMspaceDestroy -Wl,--wrap=sceClibMspaceMalloc \
              -Wl,--wrap=sceClibMspaceCalloc -Wl,--wrap=sceClibMspaceRealloc -Wl,--wrap=sceClibMspaceMemalign \
-             -Wl,--wrap=sceClibMspaceFree -Wl,--wrap=pte_osSemaphoreCancellablePend
+             -Wl,--wrap=sceClibMspaceFree -Wl,--wrap=pte_osSemaphoreCancellablePend \
+             -Wl,--wrap=abort -Wl,--wrap=__assert_func
+# wave 14 (MSC_VGX_ASYNC_HEAPONLY, renderer/vita/vgx_host_vita.cpp __wrap_vgl*): vitaGL's four allocation entry points, so that the shader compile worker allocates from newlib's heap only.
+NP_VWRAPS += -Wl,--wrap=vglMalloc -Wl,--wrap=vglCalloc -Wl,--wrap=vglMemalign -Wl,--wrap=vglRealloc
+# One process-wide lock around the calls that take or give back a slot of libc's FILE table (np_stdio_lock.cpp): the SDK's newlib searches for a free slot
+# without a lock, and two threads opening at once could share one (descriptor -1, empty reads; the Galaxy port's "game data not found" at launch).
+NP_VWRAPS += -Wl,--wrap=fopen -Wl,--wrap=freopen -Wl,--wrap=fdopen -Wl,--wrap=tmpfile -Wl,--wrap=fclose
+# a seek on a handle that is not open answers EBADF instead of a data abort at address 4 (np_stdio_lock.cpp __wrap__lseek_r; Galaxy's fd_guard)
+NP_VWRAPS += -Wl,--wrap=_lseek_r
 ifeq ($(LAB),1)
 NP_VWRAPS += -Wl,--wrap=sceKernelExitProcess -Wl,--wrap=_exit
 endif
@@ -136,8 +155,14 @@ ifeq ($(NP_DIAG_GPU),1)
 # opt-in GPU-call timing for the MSC_TOUCH_DIAG recorder (platform/compat/np_diag_gpu.cpp)
 NP_VWRAPS += -Wl,--wrap=sceGxmFinish -Wl,--wrap=sceGxmNotificationWait -Wl,--wrap=sceGxmDisplayQueueAddEntry -Wl,--wrap=sceGxmBeginScene -Wl,--wrap=sceGxmEndScene
 endif
-ifeq ($(NP_LOGGING),0)
+# MSC_TLS_FAST (np_fasttls.cpp): the emulated thread-local lookup without its call chain; every wrap forwards to the real function until np_tls_fast_init() proved the fast read
+NP_VWRAPS += -Wl,--wrap=__getreent -Wl,--wrap=pte_osTlsGetValue -Wl,--wrap=__emutls_get_address
 NP_VCOMMA := ,
+ifeq ($(NP_LOGGING),0)
 NP_VWRAPS += $(addprefix -Wl$(NP_VCOMMA)--wrap=,printf vprintf fprintf vfprintf puts putchar fputs fputc putc fwrite np_log OSReport OSVReport)
+else
+# crash26b: the same calls in logging builds go around stdout / stderr's FILE, which the SDK's newlib does not lock (vita_silent_stdio.cpp, np_log_stdio.h;
+# MSC_STDIO_LOCK=0 forwards them to the real functions)
+NP_VWRAPS += $(addprefix -Wl$(NP_VCOMMA)--wrap=,printf vprintf fprintf vfprintf puts putchar fputs fputc putc fwrite)
 endif
 endif # NP_VITA_MK

@@ -28,6 +28,7 @@ void InitializeCrowdImpostors(bool alternateView);
 void UninitializeCrowdImpostors();
 void CreateCrowdLayoutObject();
 void SetCrowdModelTexture(unsigned int textureHash, unsigned long texture);
+int CrowdClusterReaders();
 void SetCrowdImpostorsExcited();
 void SetCrowdImpostorsIdle();
 void UpdateCrowdImpostorAnimation(float value);

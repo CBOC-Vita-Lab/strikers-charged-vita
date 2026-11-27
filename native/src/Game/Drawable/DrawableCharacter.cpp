@@ -1,6 +1,9 @@
+#include "np/render_neon.h"
+#include "np/snap_onecopy.h"
 #include "Game/Task/GameTaskState.h"
 #include "NL/nlDLListContainer.inl"
 #include "Game/Drawable/DrawableCharacter.h"
+#include "np/overlap.h"
 #include "Game/Render/StadiumLoading.h"
 #include "Game/GameObjectLighting.h"
 #include "Game/Character.h"
@@ -17,7 +20,10 @@
 #include "Game/PoseAccumulator.h"
 #include "Game/PoseNode.h"
 #include "Game/Render/RLView.h"
+#include "Game/Render/Amortize.h"
 #include "Game/Render/RenderShadow.h"
+#include "np/amortize.h"
+#include "np/livetrades.h"
 #include "Game/Render/SkinAnimatedNPC.h"
 #include "Game/Render/WorldNPC.h"
 #include "Game/SHierarchy.h"
@@ -33,6 +39,16 @@
 #include "NL/nlTask.h"
 #include "NL/gl/glTexture.h"
 #include "Game/SharedStaticStorage.h"
+#include "np/scenecut.h"
+#include "np/lod.h"
+#include "Game/Render/MegastrikeBackgroundOverlay.h"
+#include <stdio.h>
+#include <stdlib.h>
+#ifdef NP_NATIVE
+extern "C" int VgxHoldShadowStep(void) __attribute__((weak));
+extern "C" int VgxHoldShadowStepFor(int key) __attribute__((weak));   // renderer (MSC_PICTURE_HOLD): the step in force for this player; a change reaches the players one after another over about 3 s    // renderer (MSC_PICTURE_HOLD): 0, 1 or 2
+extern "C" int VgxLock60ShadowStep(void) __attribute__((weak));   // renderer (MSC_LOCK60): 0, 1 or 2 frames added to a visible player's shadow interval
+#endif
 
 static int g_nOnscreenUpdate[3] = { 2, 2, 2 };
 static int g_nOffscreenUpdate[3] = { 4, 4, 4 };
@@ -95,7 +111,7 @@ static inline void BlendTranslationAccum(
     else
     {
         output.bIdentity = false;
-        nlVecLerp(output.t, lhs.t, rhs.t, weight);
+        NpRVecLerp(output.t, lhs.t, rhs.t, weight);
     }
 }
 
@@ -114,7 +130,7 @@ static inline void BlendScaleAccum(
     else
     {
         output.bIdentity = false;
-        nlVecLerp(output.s, lhs.s, rhs.s, weight);
+        NpRVecLerp(output.s, lhs.s, rhs.s, weight);
     }
 }
 
@@ -131,6 +147,7 @@ DrawableCharacter::DrawableCharacter()
     facingDirection = 0;
     headSpin = 0;
     headTilt = 0;
+    poseCulled = 0;
     height = 0.0f;
     scale = 1.0f;
     blendAmount = 1.0f;
@@ -229,7 +246,11 @@ void DrawableCharacter::Grab(cCharacter& source)
     }
     else
     {
-        *poseAccumulator = *source.m_pPoseAccumulator;
+        const int oneCopy = NpSnapOneCopy();   // MSC_SNAP_ONECOPY
+        if (oneCopy != 0)
+            poseAccumulator->CopyForSnapshot(*source.m_pPoseAccumulator, oneCopy);
+        else
+            *poseAccumulator = *source.m_pPoseAccumulator;
     }
 
     if (g_bIgnoreFrozenHammerTransform == 0 && hammerTransformFrozen)
@@ -274,7 +295,7 @@ void DrawableCharacter::BuildNodeMatrices(cPoseAccumulator* accumulator)
         accumulator->SetBuildNodeMatrixCallback(character->m_nHeadJointIndex, DrawableCharacterHeadTrackCallback, (unsigned int)this, 0);
     }
 
-    accumulator->BuildNodeMatrices(worldMatrix);
+    accumulator->BuildNodeMatricesRender(worldMatrix);   // a drawable character's pose is a render pose (MSC_RENDER_NEON)
 
     if (character != 0)
     {
@@ -291,11 +312,90 @@ void DrawableCharacter::BuildNpcMatrix()
     poseAccumulator->BuildNodeMatricesFromQuaternions(worldMatrix);
 }
 
-void DrawableCharacter::Render(cCharacter& source)
+#ifdef NP_NATIVE
+// MSC_REPLAY_FARLOD (np/scenecut.h): the mesh choice of the character being drawn, made once so that the pose and the draw agree
+static bool sDrawLowPoly;
+static bool sDrawFlatShadow;   // MSC_SHADOW_DEADMESH (from the plan)
+static int sDrawLevel;      // MSC_LOD_SIZE: 0 full, 1 lower mesh, 2 built L2
+static int sDrawScene;
+
+// MSC_LOD_SIZE (np/lod.h): the level of a character by the projected size of its bounding sphere in the view it is drawn in. Render thread only; reads the camera
+// matrices and the character's position, writes nothing the simulation reads. Returns false when the character is too small to draw.
+static bool ChooseLodLevel(const cCharacter& source, const nlVector3& position, bool* lowPoly)
 {
+    sDrawLevel = 0;
+    sDrawScene = NpLodSceneOf(nlTaskManager::m_pInstance->mCurrentState);
+    if (NpLodMode() == 0 || sDrawScene == NP_LOD_SCENE_OTHER)
+        return true;
+    nlMatrix4 view, proj;
+    GetShadowedView()->m_Interface->GetViewMatrix(view);
+    GetShadowedView()->m_Interface->GetProjectionMatrix(proj);
+    const float depth = -(position.x * view.e2[0][2] + position.y * view.e2[1][2] + position.z * view.e2[2][2] + view.e2[3][2]);
+    const float radius = source.m_DetChar.m_eCharacterClass == 3 ? 1.4f : 1.0f;
+    const float px = NpLodProjectedPx(radius, depth, proj.e2[1][1]);
+    int cull = 0;
+    sDrawLevel = NpLodChoose(&source, sDrawScene, px, &cull);
+    static const bool trace = getenv("MSC_LOD_TRACE") != 0;   // (once: this runs for every character of every frame)
+    if (trace)
+        fprintf(stderr, "[lod-trace] scene %d char %p class %d depth %.2f px %.1f level %d cull %d\n", sDrawScene, (const void*)&source, source.m_DetChar.m_eCharacterClass, depth, px, sDrawLevel, cull);
+    *lowPoly = sDrawLevel >= 1;
+    return !cull;
+}
+
+static bool ChooseLowPoly(const nlVector3& position)
+{
+    const unsigned long state = nlTaskManager::m_pInstance->mCurrentState;
+    const float cutoff = NpSceneFarLod();
+    float distanceSquared = 0.0f;
+    if (cutoff > 0.0f && (state & (TASK_REPLAY | TASK_NIS)) != 0)
+    {
+        nlMatrix4 inverseView;
+        GetShadowedView()->m_Interface->GetInverseViewMatrix(inverseView);
+        const float dx = position.x - inverseView.m41;
+        const float dy = position.y - inverseView.m42;
+        const float dz = position.z - inverseView.m43;
+        distanceSquared = dx * dx + dy * dy + dz * dz;
+    }
+    return NpSceneUseLowPoly(state == TASK_GAMEPLAY, (state & (TASK_REPLAY | TASK_NIS)) != 0, cutoff, distanceSquared) != 0;
+}
+
+// MSC_SHADOW_FAR, MSC_PICTURE_HOLD (np/amortize.h NpShadowExtraFrames): frames added to the interval of this player's shadow picture. Render thread; reads the camera and the position.
+static int ShadowExtraFrames(const nlVector3& position, int key)   // key: the character's shadow partition index (stable; 0..10). It was a pointer bit, (this >> 5) & 7, which can put every player on the same step
+{
+    static const int farOn = NpAmortEnvInt("MSC_SHADOW_FAR", 0);
+    const int step = VgxHoldShadowStepFor ? VgxHoldShadowStepFor(key & 7) : (VgxHoldShadowStep ? VgxHoldShadowStep() : 0);
+    if (farOn <= 0 && step <= 0)
+        return 0;
+    static const float farPx = (float)NpAmortEnvInt("MSC_SHADOW_FAR_PX", 60);
+    nlMatrix4 view, proj;
+    GetShadowedView()->m_Interface->GetViewMatrix(view);
+    GetShadowedView()->m_Interface->GetProjectionMatrix(proj);
+    const float depth = -(position.x * view.e2[0][2] + position.y * view.e2[1][2] + position.z * view.e2[2][2] + view.e2[3][2]);
+    const float px = NpLodProjectedPx(1.0f, depth, proj.e2[1][1]);
+    return NpShadowExtraFrames(farOn, NpShadowIsFar(px, farPx), step);
+}
+#endif
+
+#ifdef NP_NATIVE
+// MSC_SKIN_POSE_PAR: the pose of one skin mesh, made now or (plan.defer) listed for the lanes; the order of the calls is the serial order
+static inline void NpPoseOrDefer(cCharacter& source, cPoseAccumulator* accumulator, NpRenderPlan& plan, int modelType)
+{
+    if (plan.defer)
+        plan.types[plan.nPose++] = (signed char)modelType;
+    else
+        source.PoseSkinMesh(accumulator, modelType);
+}
+#endif
+
+// The old Render, up to the poses: false where it returned. Everything it decides is kept in `plan` for RenderDraw.
+bool DrawableCharacter::RenderDecide(cCharacter& source, NpRenderPlan& plan)
+{
+    plan.nPose = 0;
+    plan.shock = false;
+    plan.flatShadow = false;
     if (!visible)
     {
-        return;
+        return false;
     }
 
     if (spRenderOnlyThisCharacter != 0
@@ -303,7 +403,7 @@ void DrawableCharacter::Render(cCharacter& source)
         && !sbRenderOpposingGoalieToo)
     {
         source.fn_8001C574();
-        return;
+        return false;
     }
 
     bool renderShockModel = false;
@@ -313,24 +413,82 @@ void DrawableCharacter::Render(cCharacter& source)
         renderShockModel = true;
     }
 
+#ifdef NP_NATIVE
+    // MSC_POSE_CULL (np/overlap.h): SendToGl would return at its frustum test, and the skin meshes are read by nothing else
+    if (NpPoseCullLevel() != 0)
+    {
+        const bool drawn = !poseCulled && WillBeDrawn(source, bip01Position);
+        NpOverlapPose(!drawn);
+        if (!drawn)
+        {
+            source.fn_8001C574();
+            return false;
+        }
+    }
+#endif
+
     if (renderShockModel)
     {
-        source.PoseSkinMesh(poseAccumulator, 1);
+        NpPoseOrDefer(source, poseAccumulator, plan, 1);
     }
 
+#ifdef NP_NATIVE
+    sDrawLowPoly = ChooseLowPoly(bip01Position);
+    if (!ChooseLodLevel(source, bip01Position, &sDrawLowPoly))
+    {
+        source.fn_8001C574();
+        return false;
+    }
+#endif
     if (!renderShockModel || g_bRenderScorchPass != 0)
     {
+#ifdef NP_NATIVE
+        if (sDrawLowPoly)
+#else
         if (nlTaskManager::m_pInstance->mCurrentState == TASK_GAMEPLAY)
+#endif
         {
-            source.PoseSkinMesh(poseAccumulator, 2);
+            NpPoseOrDefer(source, poseAccumulator, plan, 2);
         }
         else
         {
-            source.PoseSkinMesh(poseAccumulator, 0);
+            NpPoseOrDefer(source, poseAccumulator, plan, 0);
         }
     }
-    source.PoseSkinMesh(poseAccumulator, 3);
+#ifdef NP_NATIVE
+    // MSC_SHADOW_DEADMESH (nxvis25, exact): in live play with MSC_SHADOW_LIVE=flat RenderCharacterShadow draws a flat ellipse from the position alone and drops the shadow mesh's model:
+    // its pose, PrepareToRender and model copy (8-10 characters a picture) are dead work. The test is the one RenderCharacterShadow makes at its flat early return.
+    static const bool deadMesh = [] { const char* e = getenv("MSC_SHADOW_DEADMESH"); return !(e && *e == '0'); }();
+    plan.flatShadow = deadMesh && nlTaskManager::m_pInstance->mCurrentState == TASK_GAMEPLAY && !gMegastrikeBackgroundOverlay.mActive && NpShadowLiveFlat();
+    if (!plan.flatShadow)
+#endif
+    NpPoseOrDefer(source, poseAccumulator, plan, 3);
+    plan.shock = renderShockModel;
+#ifdef NP_NATIVE
+    plan.lowPoly = sDrawLowPoly;
+    plan.level = sDrawLevel;
+    plan.scene = sDrawScene;
+#endif
+    return true;
+}
 
+void DrawableCharacter::Render(cCharacter& source)
+{
+    NpRenderPlan plan;
+    plan.defer = false;
+    if (RenderDecide(source, plan))
+        RenderDraw(source, plan);
+}
+
+void DrawableCharacter::RenderDraw(cCharacter& source, const NpRenderPlan& plan)
+{
+    const bool renderShockModel = plan.shock;
+#ifdef NP_NATIVE
+    sDrawLowPoly = plan.lowPoly;
+    sDrawLevel = plan.level;
+    sDrawFlatShadow = plan.flatShadow;
+    sDrawScene = plan.scene;
+#endif
     cCharacter* renderOnly = spRenderOnlyThisCharacter;
     if (renderOnly == 0 || renderOnly == &source
         || (sbRenderOpposingGoalieToo
@@ -353,6 +511,30 @@ void DrawableCharacter::Render(cCharacter& source)
     source.fn_8001C574();
 }
 
+// SendToGl's frustum test: `bip01` is the position it will test
+bool DrawableCharacter::WillBeDrawn(const cCharacter& source, const nlVector3& bip01) const
+{
+    if (nlTaskManager::m_pInstance->mCurrentState == TASK_NIS)
+    {
+        return true;
+    }
+    if (IsStadiumWorldLoaded())
+    {
+        float fRadius;
+        if (source.m_DetChar.m_eCharacterClass == 3)
+        {
+            fRadius = 3.5f;
+        }
+        else
+        {
+            fRadius = 2.5f;
+        }
+        return ClassifySphereInFrustum(
+            GetShadowedView()->m_Interface->GetShadowMatrix(), &bip01, fRadius) != 0;
+    }
+    return true;
+}
+
 void DrawableCharacter::SendToGl(cCharacter& source, int renderPass)
 {
     GLSkinMesh* skinMesh;
@@ -373,7 +555,11 @@ void DrawableCharacter::SendToGl(cCharacter& source, int renderPass)
 
     if (renderPass != 2)
     {
+#ifdef NP_NATIVE
+        if (sDrawLowPoly)
+#else
         if (nlTaskManager::m_pInstance->mCurrentState == TASK_GAMEPLAY)
+#endif
         {
             skinMesh = source.GetSkinMesh(2);
         }
@@ -400,31 +586,7 @@ void DrawableCharacter::SendToGl(cCharacter& source, int renderPass)
         SetGameObjectLightingMode(OBJECT_LIGHTING_IN_GAME);
     }
 
-    bool isVisible;
-    if (nlTaskManager::m_pInstance->mCurrentState == TASK_NIS)
-    {
-        isVisible = true;
-    }
-    else if (IsStadiumWorldLoaded())
-    {
-        float fRadius;
-        if (characterClass == 3)
-        {
-            fRadius = 3.5f;
-        }
-        else
-        {
-            fRadius = 2.5f;
-        }
-        isVisible = ClassifySphereInFrustum(
-            GetShadowedView()->m_Interface->GetShadowMatrix(), &bip01Position, fRadius) != 0;
-    }
-    else
-    {
-        isVisible = true;
-    }
-
-    if (!isVisible)
+    if (!WillBeDrawn(source, bip01Position))
     {
         return;
     }
@@ -439,6 +601,15 @@ void DrawableCharacter::SendToGl(cCharacter& source, int renderPass)
     }
     skinMesh->PrepareToRender();
     glModel* pModel = glModelDupNoStreams(skinMesh->GetModel(), false, 0);
+#ifdef NP_NATIVE
+    if (renderPass != 2 && NpLodMode() != 0 && sDrawScene != NP_LOD_SCENE_OTHER)
+    {
+        const bool hasLow = source.fn_8001C534(2);
+        if (NpLodMode() >= 2 && sDrawLevel >= 1 && !(sDrawLevel == 1 && hasLow))
+            NpLodApply(pModel, skinMesh->pModel, sDrawLevel == 1 ? 1 : 2);
+        NpLodNote(sDrawScene, sDrawLevel, pModel, source.GetSkinMesh(0)->pModel);
+    }
+#endif
     ApplyDamageEffects(source, pModel, renderPass);
     bool attachEffects = false;
     ApplyMaterialEffects(source, pModel, (eCharacterRenderPass)renderPass, &attachEffects);
@@ -468,7 +639,11 @@ void DrawableCharacter::SendToGl(cCharacter& source, int renderPass)
     }
 
     GLSkinMesh* shadowMesh = source.GetSkinMesh(3);
-    if (shadowMesh != skinMesh)
+    if (shadowMesh != skinMesh
+#ifdef NP_NATIVE
+        && !sDrawFlatShadow
+#endif
+        )
     {
         shadowMesh->m_Unknown0C = 1;
         if (g_bForceSoftwareSkinning
@@ -524,6 +699,13 @@ void DrawableCharacter::Render(SkinAnimatedNPC& npc)
 
 void DrawableCharacter::Blend(const float* blendFactors, DrawableCharacter& lhs, DrawableCharacter& rhs)
 {
+    if (NpPrefetchOn(2))
+    {
+        // the two snapshots come from the replay history (cold: written many pictures ago) and the target from the last picture
+        NpPrefetchLines(&lhs, 256, 0);
+        NpPrefetchLines(&rhs, 256, 0);
+        NpPrefetchLines(this, 256, 1);
+    }
     const float rhsWeight = *blendFactors;
     const float lhsWeight = 1.0f - rhsWeight;
 
@@ -604,6 +786,11 @@ void DrawableCharacter::Blend(const float* blendFactors, DrawableCharacter& lhs,
     facingDirection = lhs.facingDirection + facingOffset;
     height = lhs.scale * lhsWeight + rhsWeight * rhs.scale;
 
+    if (poseCulled)   // (MSC_POSE_CULL=2, RenderSnapshot::Blend decided it on the game thread: everything above is what the frame reads of this character)
+    {
+        return;
+    }
+
     if (poseAccumulator == 0)
     {
         poseAccumulator = new (nlMalloc(sizeof(cPoseAccumulator), 8, false)) cPoseAccumulator(lhs.poseAccumulator->m_BaseSHierarchy, false);
@@ -632,8 +819,8 @@ void DrawableCharacter::Blend(const float* blendFactors, DrawableCharacter& lhs,
             poseAccumulator->BlendRotAroundZ(i, rhsRot.rotAroundZ, rhsRotAroundZWeight);
             float lhsQuatWeight = lhsRot.quatAccumulatedWeight * lhsWeight;
             float rhsQuatWeight = rhsRot.quatAccumulatedWeight * rhsWeight;
-            poseAccumulator->BlendRot(i, &lhsRot.q, lhsQuatWeight, false);
-            poseAccumulator->BlendRot(i, &rhsRot.q, rhsQuatWeight, false);
+            poseAccumulator->BlendRotRender(i, &lhsRot.q, lhsQuatWeight);
+            poseAccumulator->BlendRotRender(i, &rhsRot.q, rhsQuatWeight);
 
             BlendTranslationAccum(
                 poseAccumulator->m_trans[i],
@@ -662,7 +849,7 @@ void DrawableCharacter::Blend(const float* blendFactors, DrawableCharacter& lhs,
 
         for (int i = 0; i < poseAccumulator->GetNumNodes(); i++)
         {
-            nlQuatNLerp(
+            NpRQuatNLerp(
                 poseAccumulator->GetNodeQuaternion(i),
                 lhs.poseAccumulator->GetNodeQuaternion(i),
                 rhs.poseAccumulator->GetNodeQuaternion(i),
@@ -1099,16 +1286,69 @@ void DrawableCharacter::RenderCharacterShadow(const cCharacter& source, glModel*
 
     if (nlTaskManager::m_pInstance->mCurrentState == TASK_GAMEPLAY)
     {
+#ifdef NP_NATIVE
+        // MSC_SHADOW_PLAY, MSC_AMORT_60 (np/amortize.h)
+        static const int shadowPlay = NpShadowPlayParse(NpAmortEnvInt("MSC_SHADOW_PLAY", 2));
+        const int sixty = AmortizeSixty();
+        params.nVisibleInterval = NpShadowVisibleEvery(g_nOnscreenUpdate[characterSizeIndex], shadowPlay, sixty);
+        params.nInvisibleInterval = NpShadowHiddenEvery(g_nOffscreenUpdate[characterSizeIndex], sixty);
+        // MSC_LOCK60 (the renderer's last step when the picture is at its floor and the frame is still over budget): shadow pictures redrawn 1, then 2 frames less often. The shadow's place
+        // still follows the player every frame; nothing the simulation reads (frame % interval, no random number).
+        if (VgxLock60ShadowStep)
+        {
+            const int extra = VgxLock60ShadowStep();
+            params.nVisibleInterval += (unsigned long)extra;
+        }
+        params.nVisibleInterval += (unsigned long)ShadowExtraFrames(bip01Position, params.nPartitionIndex);   // MSC_SHADOW_FAR, MSC_PICTURE_HOLD
+#else
         params.nVisibleInterval = g_nOnscreenUpdate[characterSizeIndex];
         params.nInvisibleInterval = g_nOffscreenUpdate[characterSizeIndex];
+#endif
     }
     else
     {
+#ifdef NP_NATIVE
+        // MSC_SHADOW_EVERY (np/scenecut.h): the game redraws every shadow every frame outside open play; n > 1 staggers them as open play does (ShouldShadowBeUpdated)
+        const unsigned long shadowEvery = (nlTaskManager::m_pInstance->mCurrentState & (TASK_REPLAY | TASK_NIS)) != 0 ? NpSceneShadowEvery() : 1;
+        params.nVisibleInterval = shadowEvery;
+        params.nInvisibleInterval = shadowEvery;
+        if ((nlTaskManager::m_pInstance->mCurrentState & (TASK_REPLAY | TASK_NIS)) != 0)
+        {
+            // MSC_SHADOW_FAR, MSC_PICTURE_HOLD: replays and cut-scenes too (the policy's floor for them is two steps). The shape of a shadow lags, its place does not.
+            params.nVisibleInterval += (unsigned long)ShadowExtraFrames(bip01Position, params.nPartitionIndex);
+        }
+#else
         params.nVisibleInterval = 1;
         params.nInvisibleInterval = 1;
+#endif
     }
 
+#ifdef NP_NATIVE
+    // MSC_SHADOW_LIVE=flat / MSC_LIVE_TRADES (np/livetrades.h): in live play (and only there: the check is made every frame, so the cut is exact) the shadow is a soft ellipse in the
+    // main scene; no shadow picture, so no model copy, pass or texture copy. Nothing here is read by the simulation.
+    // A Mega Strike charge starts inside the gameplay task (its overlay is active some frames before the task state changes): the renderer already holds that scene at its full look, so it is not live play.
+    if (((nlTaskManager::m_pInstance->mCurrentState == TASK_GAMEPLAY && !gMegastrikeBackgroundOverlay.mActive) || NpShadowLiveBreak()) && NpShadowLiveFlat())
+    {
+        RLView* flatView = SetCharacterShadowView(GetLayerView((eCLV)view));
+        RenderFlatShadow(params);
+        SetCharacterShadowView(flatView);
+        return;
+    }
+#endif
+#ifdef NP_NATIVE
+    bool flatWait = false;
+    const bool due = NpShadowLiveFlat() ? ShadowPictureDue(params, &flatWait) : ShouldShadowBeUpdated(params);
+    if (flatWait)   // MSC_SHADOW_CUT: this character's picture is not ready yet; its flat shadow stays until it is
+    {
+        RLView* waitView = SetCharacterShadowView(GetLayerView((eCLV)view));
+        RenderFlatShadow(params, true);
+        SetCharacterShadowView(waitView);
+        return;
+    }
+    if (due)
+#else
     if (ShouldShadowBeUpdated(params))
+#endif
     {
         params.pModel = glModelDupNoStreams(model, false, 0);
         if (1.0f != alphaValue)

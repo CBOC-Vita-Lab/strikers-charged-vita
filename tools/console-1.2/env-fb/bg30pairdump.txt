@@ -1,0 +1,21 @@
+# console-1.2 run bg30pairdump: Background at 30 + balanced pair + pair controller, The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 1, group bg30, route worstgpu, version payload 1.3, role ab
+# bg30pair at the heaviest stadium. Expected (estimate): the pair does not fit at 960x544 2x (full 28-30 + light 8-11 ms GPU), so the controller must stay at the even 30 without flapping ([pair] lines: no more than one entry try per 2-32 s cool-down); this is the run that sizes the per-stadium background cut (MSC_BG30_CUTS).
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_BG30=2
+MSC_BG30_BALANCE=3
+MSC_PAIR_RATE=1
+MSC_FPS=30
+MSC_GSPLIT=1
+MSC_RENDER_RNG=1
+MSC_FRAMELOCK_STEP=1
+MSC_VIS_STEP=1

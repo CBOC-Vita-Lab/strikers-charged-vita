@@ -23,8 +23,10 @@ public:
     static void RenderTimeLineAsset(TLInstance* pTLInstance, float fCurrentTime, const nlMatrix4& parentMatrix);
     static unsigned char RenderImageInstance(const TLImageInstance* pTLImageInstance, const nlMatrix4& matrix);
     static void PushTransformMatrix(const TLInstance* instance, const nlMatrix4& parentMatrix, nlMatrix4& combinedMatrix);
+    static void RenderNotice();   // np: the online banner, after the last scene of the frame (platform/sdk/net/np_notice.cpp)
 
     static FEScene* m_pRenderScene;
+    static FEScene* m_pLastScene;   // np: the last scene drawn this frame (its view and matrix carry the banner)
 };
 
 // Image-instance model callback installed by GameRenderTask and invoked from

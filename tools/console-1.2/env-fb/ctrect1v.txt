@@ -1,0 +1,14 @@
+# console-1.2 run ctrect1v: Crowd trim cell set by rectangle with the verify (MSC_VGX_CROWDTRIM_RECT=2), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group exact, route tour, version payload 1.3, role ab
+# exact17: the plan has it on (ctrect0 is the off A/B); this runs the plain form on a copy and compares all cells and the grid: no [ctrect] MISMATCH line in a goal celebration. Not a timing run.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_CROWDTRIM_RECT=2

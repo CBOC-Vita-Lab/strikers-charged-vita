@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 12:00:00 -0500
+Subject: [PATCH] scene census (vglSceneCensusSetup, vglGetSceneCensus): scenes begun per render target in one picture against its scenesPerFrame
+
+---
+
+diff --git a/source/gxm.c b/source/gxm.c
+index e626d50..2eed6c6 100644
+--- a/source/gxm.c
++++ b/source/gxm.c
+@@ -137,6 +137,68 @@ static int gc_thread_priority = 0x10000100;
+ static int gc_thread_affinity = 0;
+ static uint8_t gxm_display_rt_size = 1; // Number of scenes per frame to use for the display rendertarget
+ static uint8_t gxm_fbo_rt_size = 1; // Number of scenes per frame to use for framebuffers rendertargets
++
++// 0033 scene census (MSC_VITA_SCENE_COUNT): scenes begun per render target in one picture against the scenesPerFrame the target was created with. A scene past the
++// capacity waits for the GPU (sceGxmCreateRenderTarget). Off by default; on, one array scan per scene begin on the render thread.
++#define SCN_SLOTS 32
++static uint8_t scn_on = 0;
++static const void *scn_target[SCN_SLOTS];
++static uint16_t scn_count[SCN_SLOTS];
++static uint32_t scn_used = 0, scn_display = 0;
++static vglSceneCensus scn_c;
++static inline void scn_begin(const void *target, int display) {
++	if (!scn_on)
++		return;
++	if (display) {
++		++scn_display;
++		return;
++	}
++	for (uint32_t i = 0; i < scn_used; i++) {
++		if (scn_target[i] == target) {
++			++scn_count[i];
++			return;
++		}
++	}
++	if (scn_used < SCN_SLOTS) {
++		scn_target[scn_used] = target;
++		scn_count[scn_used++] = 1;
++	} else {
++		++scn_c.slots_full;
++	}
++}
++static inline void scn_frame_end(void) {
++	if (!scn_on)
++		return;
++	uint32_t worst = 0;
++	for (uint32_t i = 0; i < scn_used; i++) {
++		if (scn_count[i] > worst)
++			worst = scn_count[i];
++		if (scn_count[i] > gxm_fbo_rt_size)
++			++scn_c.over_fbo;
++	}
++	++scn_c.frames;
++	if (worst > scn_c.worst_fbo)
++		scn_c.worst_fbo = worst;
++	if (scn_used > scn_c.worst_fbo_targets)
++		scn_c.worst_fbo_targets = scn_used;
++	if (scn_display > scn_c.worst_display)
++		scn_c.worst_display = scn_display;
++	if (scn_display > gxm_display_rt_size)
++		++scn_c.over_display;
++	scn_used = 0;
++	scn_display = 0;
++}
++void vglSceneCensusSetup(int on) {
++	scn_on = on ? 1 : 0;
++}
++void vglGetSceneCensus(vglSceneCensus *out, int reset) {
++	scn_c.cap_display = gxm_display_rt_size;
++	scn_c.cap_fbo = gxm_fbo_rt_size;
++	*out = scn_c;
++	if (reset) {
++		vgl_memset(&scn_c, 0, sizeof(scn_c));
++	}
++}
+ #ifdef HAVE_PTHREAD
+ pthread_t gc_thread;
+ #else
+@@ -735,6 +797,7 @@ GLboolean scene_reset(void) {
+ 				gxm_back_buffer_index = (shared_fb_info.index + 1) % 2;
+ 			}
+ 			rt_applied = vgl_rt_scene_begin(&gxm_depth_stencil_surface, DISPLAY_WIDTH, DISPLAY_HEIGHT);
++			scn_begin(gxm_render_target, 1);
+ 			vgl_mb_scene_begin(&gxm_depth_stencil_surface, rt_applied); // 1.3 MASK_BG (tests.c)
+ 			int r = sceGxmBeginScene(gxm_context, 0, gxm_render_target,
+ 				NULL, NULL,
+@@ -794,6 +857,7 @@ GLboolean scene_reset(void) {
+ 				return scene_reset_failed();
+ 			}
+ 			rt_applied = vgl_rt_scene_begin(active_write_fb->depthbuffer_ptr, active_write_fb->width, active_write_fb->height);
++			scn_begin(active_write_fb->target, 0);
+ 			vgl_mb_scene_begin(active_write_fb->depthbuffer_ptr, rt_applied); // 1.3 MASK_BG (tests.c)
+ #ifdef HAVE_SHARED_RENDERTARGETS
+ 			render_target *fbo_rt = (render_target *)active_write_fb->target;
+@@ -951,6 +1015,7 @@ void vglSwapBuffers(GLboolean has_commondialog) {
+ 	frame_start_profiler_cnt = tick;
+ #endif
+ 
++	scn_frame_end();
+ 	vgl_framecount++;
+ #if !defined(DISABLE_CIRCULAR_POOL) && !defined(CIRCULAR_POOL_SPEEDHACK)
+ #ifdef HAVE_DEBUG_INTERFACE
+diff --git a/source/vitaGL.h b/source/vitaGL.h
+index 07937e7..4887cf4 100644
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1136,6 +1136,18 @@ void vglSetDrawCaches(GLboolean frag_memo, GLboolean uni_reuse);
+ void vglSetViewportExact(GLboolean exact); // 1.3 glViewport halves as floats (patch 0025; default GL_TRUE)
+ void vglSetMaskKeep(GLboolean on); // 1.3 MASK_KEEP (patch 0026; default GL_FALSE): a scissor mask rebuild the depth/stencil surface already holds is not drawn
+ void vglGetMaskKeepStats(uint32_t *drawn, uint32_t *kept); // 1.3 MASK_KEEP: mask rebuilds drawn and not drawn so far (counted with the switch off too)
++// 0033 scene census: scenes begun per render target in one picture against the target's scenesPerFrame (vglSetupRenderTargetScenesNum). Off until
++// vglSceneCensusSetup(1). The worst values since the last reset (reset != 0) and how many pictures had a target past its capacity.
++typedef struct {
++	uint32_t frames;                          // pictures counted
++	uint32_t worst_display, worst_fbo;        // most scenes begun on the display target, on any one framebuffer-object target, in one picture
++	uint32_t worst_fbo_targets;               // most distinct framebuffer-object targets in one picture
++	uint32_t cap_display, cap_fbo;            // scenesPerFrame the two kinds of target were created with
++	uint32_t over_display, over_fbo;          // counts (a target in a picture) past that capacity
++	uint32_t slots_full;                      // scenes on a 33rd target in one picture (not counted per target)
++} vglSceneCensus;
++void vglSceneCensusSetup(int on);
++void vglGetSceneCensus(vglSceneCensus *out, int reset);
+ void vglSetMaskBackground(int mode); // 1.3 MASK_BG (patch 0029; default 0): a scene that does not load its depth/stencil surface and has the scissor test off begins with the background mask set, and the full-target quad that sets it is not drawn. Bit 0: framebuffer-object scenes, bit 1: the display's scene
+ void vglGetMaskBackgroundStats(uint32_t *armed, uint32_t *kept); // 1.3 MASK_BG: scenes begun that way, quads left out
+ // 1.3 MEMFREE (patch 0028): vglMemFree / vgl_mem_get_free_space without walking the heap. The allocator wrappers keep per pool the usable bytes and the count of live blocks;

@@ -18,6 +18,8 @@ Mock g;
 // The test drives time by calling this before each NpOnFramePresented().
 void MockSetFrame(uint64_t f) { g.frame = f; }
 
+void SampleCoreState(State& s) { s = State{}; }   // (exit17: NpDiagSnapshot in np_harness.cpp references it; the mock has no game core)
+
 void SampleState(State& s, std::vector<Button>* buttons, float* pointer) {
     const uint64_t f = g.frame;
     s = State{};
@@ -60,9 +62,11 @@ bool ResolveSymbol(const char* name, uintptr_t* addr) {
 }
 bool DeepDigest(uint32_t* chk, uint32_t* rng) { *chk = 0; *rng = 0; return false; }
 bool LaunchMatch(const LaunchSpec&, std::string& msg) { msg = "mock"; return false; }
+bool PinSimSeed(uint32_t) { return false; }
 bool PushScene(int, bool, std::string& msg) { msg = "mock"; return false; }
 bool PopScene(std::string& msg) { msg = "mock"; return false; }
 bool SetGlobalFloat(const char*, float, std::string& msg) { msg = "mock"; return false; }
+bool ScoreGoal(int, std::string& msg) { msg = "mock"; return false; }
 uint64_t SimDigest() {
     State s; SampleState(s, nullptr, nullptr);
     uint64_t h = 1469598103934665603ull;

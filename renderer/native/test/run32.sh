@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs a host32 GL program with the private i386 Mesa (llvmpipe, surfaceless EGL).
 #   native/test/run32.sh <program> [args]
-R=${I386ROOT:-/home/claude/msc/build/np/NPR/i386apt/root}
+R=${I386ROOT:-/work/msc/build/np/NPR/i386apt/root}
 L=$R/usr/lib/i386-linux-gnu
 export LD_LIBRARY_PATH=$L${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 export LIBGL_DRIVERS_PATH=$L/dri

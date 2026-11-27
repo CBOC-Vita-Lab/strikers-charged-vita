@@ -152,6 +152,26 @@ struct PowerupRegistry
 PowerupModelPool powerupModelPool;
 PowerupRegistry powerupRegistry;
 
+#ifdef NP_NATIVE
+// MSC_POWERUP_FILTER=0|1 (default 1). FindPowerUp is asked about each of the 150 drawable power-up slots at every snapshot (DrawablePowerup::Grab,
+// once per simulation step) and walks all 25 registry entries for every slot that has no live power-up, which is nearly all of them (about
+// 3,000 loop turns a frame on the PGO routes). With 1 the two functions that write the registry also keep a count of the registered hashes by
+// their low 6 bits; a nonzero hash whose bucket is empty cannot be in the registry, and FindPowerUp returns 0 at once. Every other lookup (the
+// hash 0 included) takes the plain walk. Exact by construction: the same answer for every hash. No simulation state is read or written by it.
+#include <stdlib.h>
+static unsigned char sNpPowerupBucket[64];
+static int sNpPowerupFilter = -1;
+static inline bool NpPowerupFilterOn()
+{
+    if (sNpPowerupFilter < 0)
+    {
+        const char* e = getenv("MSC_POWERUP_FILTER");
+        sNpPowerupFilter = (e != 0 && e[0] == '0') ? 0 : 1;
+    }
+    return sNpPowerupFilter != 0;
+}
+#endif
+
 const char* uFREEZE_SHELL_STREAK_TEXTURE = "global/blueshellstreak";
 const char* uSPINY_SHELL_STREAK_TEXTURE = "global/redshellstreak";
 const char* uGREEN_SHELL_STREAK_TEXTURE = "global/greenshellstreak";
@@ -817,6 +837,10 @@ int PowerupCreateAndThrow(cFielder* pThrower, cFielder* pTarget,
 
 static inline PowerupBase* FindPowerUpImpl(unsigned long hashOfDrawable)
 {
+#ifdef NP_NATIVE
+    if (hashOfDrawable != 0 && sNpPowerupBucket[hashOfDrawable & 63] == 0 && NpPowerupFilterOn())
+        return 0;
+#endif
     const Pair* entry = powerupRegistry.registry;
     for (int i = 0; i < 25; ++i)
     {
@@ -2031,6 +2055,10 @@ static inline void UnregisterPowerup(unsigned long hashID)
     {
         if (hashID == powerupRegistry.registry[i].hashId)
         {
+#ifdef NP_NATIVE
+            if (hashID != 0)
+                --sNpPowerupBucket[hashID & 63];
+#endif
             powerupRegistry.registry[i].hashId = 0;
             return;
         }
@@ -2364,6 +2392,10 @@ static inline void RegisterPowerup(unsigned long hashID, PowerupBase* powerup)
         {
             powerupRegistry.registry[j].hashId = hashID;
             powerupRegistry.registry[j].powerup = powerup;
+#ifdef NP_NATIVE
+            if (hashID != 0)
+                ++sNpPowerupBucket[hashID & 63];   // (at most 25 entries: no overflow)
+#endif
             return;
         }
     }

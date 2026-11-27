@@ -7,6 +7,7 @@ try:
     r = json.load(open(d / "result.json"))
 except Exception as e:
     print("no result.json:", e); sys.exit(1)
+print("end_digests=%s end_mismatch=%s" % (r.get("end_digests"), r.get("end_digest_mismatch")))
 print("passed=%s exit=%s sync_ticks_compared=%d mismatch_within=%s mismatch_between=%s zero_crc_lines=%d" % (
     r["passed"], r["exit_codes"], r["sync_ticks_compared"], r["sync_mismatch_within_log"], r["sync_mismatch_between_logs"], r["sync_zero_crc_lines"]))
 for i, p in enumerate(r["peers"]):

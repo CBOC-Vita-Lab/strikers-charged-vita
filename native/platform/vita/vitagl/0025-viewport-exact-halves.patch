@@ -1,0 +1,50 @@
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Subject: [PATCH] 1.3: glViewport halves width and height as floats (vglSetViewportExact)
+
+MSC_VGX_VP_EXACT (default on; ported from the Galaxy port r82): the integer shift (width >> 1) drew an odd-sized viewport one pixel short, a
+1-px line on the far edge of an odd-sized copy or pass at dynamic-resolution sizes. vglSetViewportExact(GL_FALSE) restores the shift.
+Even sizes give the same numbers either way. Host test: renderer/tests/run_vitagl_viewport_test.sh.
+
+--- a/source/misc.c
++++ b/source/misc.c
+@@ -149,6 +149,13 @@
+ 
+ viewport gl_viewport; // Current viewport state
+ GLboolean skip_viewport_override = GL_FALSE;
++// 1.3 (patch 0025, MSC_VGX_VP_EXACT; the Galaxy port's r82 "exact-halves glViewport"): half of a viewport's width and height as floats. The integer shift
++// (width >> 1) mapped an odd-sized viewport onto one pixel less than asked, starting at the same corner: a 1-px line on the far edge. vglSetViewportExact(GL_FALSE)
++// restores the shift. Even sizes give the same numbers either way.
++GLboolean vgl_viewport_exact = GL_TRUE;
++void vglSetViewportExact(GLboolean exact) {
++	vgl_viewport_exact = exact;
++}
+ 
+ void update_polygon_offset() {
+ 	VGL_LC_SYNC();
+@@ -331,9 +338,14 @@
+ 	}
+ #endif
+ 
+-	x_scale = width >> 1;
++	if (vgl_viewport_exact) {
++		x_scale = (float)width * 0.5f;
++		y_scale = -((float)height * 0.5f);
++	} else {
++		x_scale = width >> 1;
++		y_scale = -(height >> 1);
++	}
+ 	x_port = x + x_scale;
+-	y_scale = -(height >> 1);
+ 	y_port = (is_rendering_display ? DISPLAY_HEIGHT : in_use_framebuffer->height) - y + y_scale;
+ #ifndef HAVE_UNFLIPPED_FBOS
+ 	if (!is_rendering_display) {
+--- a/source/vitaGL.h
++++ b/source/vitaGL.h
+@@ -1133,6 +1133,7 @@
+ // copy in this scene name that copy again. Neither changes what is drawn.
+ #define VGL_HAS_DRAW_CACHES 1
+ void vglSetDrawCaches(GLboolean frag_memo, GLboolean uni_reuse);
++void vglSetViewportExact(GLboolean exact); // 1.3 glViewport halves as floats (patch 0025; default GL_TRUE)
+ GLboolean vglGetUniformShadow(GLuint prog, GLint location, void **vptr, void **fptr, uint32_t *bytes); // 1.3 vgx uniform shadows (patch 0024)
+ void vglUniformShadowWritten(GLuint prog, uint32_t stages);
+ 

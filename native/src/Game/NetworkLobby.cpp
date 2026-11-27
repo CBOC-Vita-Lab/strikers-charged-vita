@@ -336,7 +336,7 @@ void NetworkLobby::OnConnectionClosed(
     {
         tDebugPrintManager::Print(DC_NETWORK,
             "Lost connection AID %d not in range 0 >= x < %d\n",
-            mMachineCount);
+            aid, mMachineCount);
     }
 }
 

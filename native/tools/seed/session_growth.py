@@ -23,7 +23,7 @@ def sets(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--rec', default='/home/claude/msc/build/np/W5SEED/rec')
+    ap.add_argument('--rec', default=os.path.join(os.environ.get('SEED_ROOT', '/work/msc/build/np/W5SEED'), 'rec'))
     ap.add_argument('--match', default=r'^(ai_|hu_|cv_|cvp_|rnd_|ho_|hx_)')
     ap.add_argument('--core')
     ap.add_argument('-k', default='1,2,3,5,10,20,50')

@@ -1,0 +1,18 @@
+# console-1.2 run be26off-r: be26 A/B: both off, goal, celebration and replay route
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group be26, route crep, version payload 1.3, role ab
+# As be26off-v on the replay route. Read `[beph]` us per draw (pre / uniforms / issue) and cpu ms/pic for scene 3(cut), `[lane]` be cpu, `[vgx] vitaGL uniform buffers` (copies and KiB not copied a frame), `[fastcmp]` (UNICMP blocks compared). Pass rule: no new [hitch], no fault, the picture as in the base run.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/crep.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=2
+MSC_VGX_BEPH=1
+MSC_VGX_BEPH_EVERY=1
+MSC_VGX_GXM_DIRECT=1
+MSC_VGX_UNICMP=0
+MSC_VGX_VGL_UNIHIST=0

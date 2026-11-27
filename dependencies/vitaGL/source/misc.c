@@ -149,8 +149,16 @@ GLboolean point_sprite_state = GL_FALSE; // Current state for GL_POINT_SPRITE
 
 viewport gl_viewport; // Current viewport state
 GLboolean skip_viewport_override = GL_FALSE;
+// 1.3 (patch 0025, MSC_VGX_VP_EXACT; the Galaxy port's r82 "exact-halves glViewport"): half of a viewport's width and height as floats. The integer shift
+// (width >> 1) mapped an odd-sized viewport onto one pixel less than asked, starting at the same corner: a 1-px line on the far edge. vglSetViewportExact(GL_FALSE)
+// restores the shift. Even sizes give the same numbers either way.
+GLboolean vgl_viewport_exact = GL_TRUE;
+void vglSetViewportExact(GLboolean exact) {
+	vgl_viewport_exact = exact;
+}
 
 void update_polygon_offset() {
+	VGL_LC_SYNC();
 	switch (polygon_mode_front) {
 	case SCE_GXM_POLYGON_MODE_TRIANGLE_LINE:
 		if (pol_offset_line)
@@ -202,6 +210,7 @@ static enum {
 } vglCullMode;
 
 void change_cull_mode() {
+	VGL_LC_SYNC();
 	// Setting proper cull mode in sceGxm depending to current openGL machine state
 	if (cull_face_state) {
 #ifdef HAVE_UNFLIPPED_FBOS
@@ -248,6 +257,7 @@ void change_cull_mode() {
 
 void glPolygonMode(GLenum face, GLenum mode) {
 	THREAD_SAFE()
+	VGL_LC_SYNC();
 
 	SceGxmPolygonMode new_mode;
 	switch (mode) {
@@ -320,6 +330,7 @@ void glFrontFace(GLenum mode) {
 
 void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
 	THREAD_SAFE()
+	VGL_LC_SYNC();
 
 #ifndef SKIP_ERROR_HANDLING
 	if ((width < 0) || (height < 0)) {
@@ -327,9 +338,14 @@ void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
 	}
 #endif
 
-	x_scale = width >> 1;
+	if (vgl_viewport_exact) {
+		x_scale = (float)width * 0.5f;
+		y_scale = -((float)height * 0.5f);
+	} else {
+		x_scale = width >> 1;
+		y_scale = -(height >> 1);
+	}
 	x_port = x + x_scale;
-	y_scale = -(height >> 1);
 	y_port = (is_rendering_display ? DISPLAY_HEIGHT : in_use_framebuffer->height) - y + y_scale;
 #ifndef HAVE_UNFLIPPED_FBOS
 	if (!is_rendering_display) {
@@ -350,6 +366,7 @@ void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
 
 void glDepthRange(GLdouble nearVal, GLdouble farVal) {
 	THREAD_SAFE()
+	VGL_LC_SYNC();
 
 	z_port = (farVal + nearVal) / 2.0f;
 	z_scale = (farVal - nearVal) / 2.0f;
@@ -358,6 +375,7 @@ void glDepthRange(GLdouble nearVal, GLdouble farVal) {
 
 void glDepthRangef(GLfloat nearVal, GLfloat farVal) {
 	THREAD_SAFE()
+	VGL_LC_SYNC();
 
 	z_port = (farVal + nearVal) / 2.0f;
 	z_scale = (farVal - nearVal) / 2.0f;
@@ -366,6 +384,7 @@ void glDepthRangef(GLfloat nearVal, GLfloat farVal) {
 
 void glDepthRangex(GLfixed _nearVal, GLfixed _farVal) {
 	THREAD_SAFE()
+	VGL_LC_SYNC();
 
 	GLfloat nearVal = (float)_nearVal / 65536.0f;
 	GLfloat farVal = (float)_farVal / 65536.0f;
@@ -640,6 +659,140 @@ void glDisable(GLenum cap) {
 	}
 }
 
+#ifdef LAZY_CLEAR
+/*
+ * 1.2 LAZY_CLEAR (patch 0015): glClear without the set/restore traffic.
+ *
+ * The classic glClear sets about twenty sceGxm states for its full-screen quad (viewport, cull, depth function, depth write, depth bias, polygon mode, stencil, fragment
+ * program enable, programs, both default uniform buffers) and sets them all back from the GL state right after the draw. Here the restore is deferred: the states stay as the
+ * clear left them (vgl_lc_pending) and vgl_lc_flush() sets them back, with exactly the calls the classic path ends with, before anything can depend on them (see shared.h).
+ * A clear that comes while the state is still the clear's sets only what differs from the previous clear (depth write, fragment program enable, stencil).
+ * Nothing the GL state variables hold is touched: the set side uses sceGxm calls only, so the restore reads the same GL state the classic path would have restored.
+ * The picture is the same by construction; only the number of state calls changes. vglSetLazyClear(GL_FALSE) (the default) is the classic path.
+ */
+GLboolean vgl_lc_on = GL_FALSE;
+GLboolean vgl_lc_in_clear = GL_FALSE;
+uint32_t vgl_lc_pending = 0;
+uint32_t vgl_lc_stat[4]; // clears made lazily, state restores made, clears that found the state still the clear's, restores that had a clear's state to undo
+static int lc_wr = -1; // depth write mode the clear state holds (-1 not set)
+static int lc_fpoff = 0; // 1: fragment program disabled in the clear state
+static int lc_st_kind = 0; // stencil: 0 not set, 1 keep, 2 replace (lc_st_mf / lc_st_mb / lc_st_ref)
+static uint8_t lc_st_mf, lc_st_mb, lc_st_ref;
+
+void vgl_lc_flush(void) {
+	if (!vgl_lc_pending)
+		return;
+	vgl_lc_pending = 0;
+	vgl_lc_stat[1]++;
+	// the ends of the classic path, in its order (its second depth write call repeats the one change_depth_func makes)
+	change_depth_func();
+	refresh_stencil_settings();
+	sceGxmSetFrontPolygonMode(gxm_context, polygon_mode_front);
+	sceGxmSetBackPolygonMode(gxm_context, polygon_mode_back);
+	sceGxmSetFrontFragmentProgramEnable(gxm_context, SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+	sceGxmSetBackFragmentProgramEnable(gxm_context, SCE_GXM_FRAGMENT_PROGRAM_ENABLED);
+	update_polygon_offset();
+	validate_viewport();
+	change_cull_mode();
+	vglRestoreFragmentUniformBuffer();
+	vglRestoreVertexUniformBuffer();
+}
+
+void vglSetLazyClear(GLboolean on) {
+	VGL_LC_SYNC();
+	vgl_lc_on = on;
+}
+
+// The viewport of the whole target, as glViewport(0, 0, width, height) makes it, without touching the viewport variables
+static void lc_set_full_viewport(void) {
+	if (is_rendering_display) {
+		vglSetViewport(gxm_context, fullscreen_x_port, fullscreen_x_scale, fullscreen_y_port, fullscreen_y_scale, fullscreen_z_port, fullscreen_z_scale);
+	} else {
+		float xs = vgl_viewport_exact ? ((float)in_use_framebuffer->width * 0.5f) : (float)(in_use_framebuffer->width >> 1);
+		float xp = xs;
+		float ys = vgl_viewport_exact ? -((float)in_use_framebuffer->height * 0.5f) : (float)(-(in_use_framebuffer->height >> 1));
+		float yp = (float)in_use_framebuffer->height + ys;
+#ifndef HAVE_UNFLIPPED_FBOS
+		yp = (float)in_use_framebuffer->height - yp;
+		ys = -ys;
+#endif
+		vglSetViewport(gxm_context, xp, xs, yp, ys, z_port, z_scale);
+	}
+}
+
+// After scene_reset: the clear itself
+static void lc_clear(GLbitfield mask) {
+	void *fbuffer, *vbuffer;
+	const GLfloat clear_depth_value = depth_value * 2 - 1;
+	const int first = !vgl_lc_pending;
+	if (first) {
+		orig_depth_test = depth_test_state;
+		lc_set_full_viewport();
+		sceGxmSetCullMode(gxm_context, SCE_GXM_CULL_NONE);
+		sceGxmSetFrontDepthFunc(gxm_context, SCE_GXM_DEPTH_FUNC_ALWAYS);
+		sceGxmSetBackDepthFunc(gxm_context, SCE_GXM_DEPTH_FUNC_ALWAYS);
+		sceGxmSetFrontDepthBias(gxm_context, 0, 0);
+		sceGxmSetBackDepthBias(gxm_context, 0, 0);
+		sceGxmSetFrontPolygonMode(gxm_context, SCE_GXM_POLYGON_MODE_TRIANGLE_FILL);
+		sceGxmSetBackPolygonMode(gxm_context, SCE_GXM_POLYGON_MODE_TRIANGLE_FILL);
+		sceGxmSetVertexProgram(gxm_context, clear_vertex_program_patched);
+		sceGxmSetFragmentProgram(gxm_context, vgl_msaa_fp(0, is_fbo_float));
+		lc_wr = -1;
+		lc_fpoff = 0; // (the fragment program is enabled whenever no clear is pending: the classic path always ends with it enabled)
+		lc_st_kind = 0;
+	} else {
+		vgl_lc_stat[2]++;
+	}
+
+	// Enable depth write if both depth mask is true and the depth buffer bit is active.
+	const int wr = (depth_mask_state && (mask & GL_DEPTH_BUFFER_BIT)) ? 1 : 0;
+	if (wr != lc_wr) {
+		const SceGxmDepthWriteMode m = wr ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED;
+		sceGxmSetFrontDepthWriteEnable(gxm_context, m);
+		sceGxmSetBackDepthWriteEnable(gxm_context, m);
+		lc_wr = wr;
+	}
+
+	sceGxmReserveVertexDefaultUniformBuffer(gxm_context, &vbuffer);
+	sceGxmSetUniformDataF(vbuffer, clear_position, 0, 4, &clear_vertices->x);
+	sceGxmSetUniformDataF(vbuffer, clear_depth, 0, 1, &clear_depth_value);
+
+	sceGxmReserveFragmentDefaultUniformBuffer(gxm_context, &fbuffer);
+	sceGxmSetUniformDataF(fbuffer, clear_color, 0, 4, &clear_rgba_val.r);
+
+	// Disable fragment program if not clearing color buffer. Depth and stencil clears are unaffected.
+	const int fpoff = (mask & GL_COLOR_BUFFER_BIT) ? 0 : 1;
+	if (fpoff != lc_fpoff) {
+		const SceGxmFragmentProgramMode m = fpoff ? SCE_GXM_FRAGMENT_PROGRAM_DISABLED : SCE_GXM_FRAGMENT_PROGRAM_ENABLED;
+		sceGxmSetFrontFragmentProgramEnable(gxm_context, m);
+		sceGxmSetBackFragmentProgramEnable(gxm_context, m);
+		lc_fpoff = fpoff;
+	}
+
+	if (!(mask & GL_STENCIL_BUFFER_BIT)) {
+		// Set stencil functions to KEEP if not clearing stencil buffer.
+		if (lc_st_kind != 1) {
+			sceGxmSetFrontStencilFunc(gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xFF, 0xFF);
+			sceGxmSetBackStencilFunc(gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0xFF, 0xFF);
+			lc_st_kind = 1;
+		}
+	} else if (lc_st_kind != 2 || lc_st_mf != (stencil_mask_front_write & 0xFF) || lc_st_mb != (stencil_mask_back_write & 0xFF) || lc_st_ref != (stencil_value & 0xFF)) {
+		sceGxmSetFrontStencilFunc(gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, 0xFF, stencil_mask_front_write & 0xFF);
+		sceGxmSetFrontStencilRef(gxm_context, stencil_value & 0xFF);
+		sceGxmSetBackStencilFunc(gxm_context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, SCE_GXM_STENCIL_OP_REPLACE, 0xFF, stencil_mask_back_write & 0xFF);
+		sceGxmSetBackStencilRef(gxm_context, stencil_value & 0xFF);
+		lc_st_kind = 2;
+		lc_st_mf = stencil_mask_front_write & 0xFF;
+		lc_st_mb = stencil_mask_back_write & 0xFF;
+		lc_st_ref = stencil_value & 0xFF;
+	}
+
+	sceGxmDrawPrecomputed(gxm_context, &clear_draw_state);
+	vgl_lc_pending = 1;
+	vgl_lc_stat[0]++;
+}
+#endif
+
 void glClear(GLbitfield mask) {
 	THREAD_SAFE()
 
@@ -654,7 +807,23 @@ void glClear(GLbitfield mask) {
 		vgl_rt_clear_full = (mask & GL_DEPTH_BUFFER_BIT) && depth_mask_state && !scissor_test_state &&
 			(!stencil || ((mask & GL_STENCIL_BUFFER_BIT) && (stencil_mask_front_write & 0xFF) == 0xFF && (stencil_mask_back_write & 0xFF) == 0xFF));
 	}
-	scene_reset();
+#ifdef LAZY_CLEAR
+	if (vgl_lc_on) {
+		vgl_lc_in_clear = GL_TRUE;
+		const GLboolean ok = scene_reset();
+		vgl_lc_in_clear = GL_FALSE;
+		if (!ok)
+			return; // 1.2: no scene could be started: the clear is skipped
+		if (mask & GL_STENCIL_BUFFER_BIT)
+			vgl_mk_touch(); // 1.3 MASK_KEEP (tests.c): the mask is not assumed to survive a stencil clear
+		lc_clear(mask);
+		return;
+	}
+#endif
+	if (!scene_reset())
+		return; // 1.2: no scene could be started: the clear is skipped
+	if (mask & GL_STENCIL_BUFFER_BIT)
+		vgl_mk_touch(); // 1.3 MASK_KEEP (tests.c): the mask is not assumed to survive a stencil clear
 
 	// Invalidating viewport and culling
 	invalidate_viewport();
@@ -677,7 +846,7 @@ void glClear(GLbitfield mask) {
 	sceGxmSetBackPolygonMode(gxm_context, SCE_GXM_POLYGON_MODE_TRIANGLE_FILL);
 
 	sceGxmSetVertexProgram(gxm_context, clear_vertex_program_patched);
-	sceGxmSetFragmentProgram(gxm_context, is_fbo_float ? clear_fragment_program_float_patched : clear_fragment_program_patched);
+	sceGxmSetFragmentProgram(gxm_context, vgl_msaa_fp(0, is_fbo_float));
 
 	sceGxmReserveVertexDefaultUniformBuffer(gxm_context, &vbuffer);
 	sceGxmSetUniformDataF(vbuffer, clear_position, 0, 4, &clear_vertices->x);
@@ -1106,3 +1275,9 @@ void glPopAttrib(void) {
 		glViewport(gl_viewport.x, gl_viewport.y, gl_viewport.w, gl_viewport.h);
 	}
 }
+
+#ifndef LAZY_CLEAR
+void vglSetLazyClear(GLboolean on) {
+	(void)on;
+}
+#endif

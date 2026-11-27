@@ -10,7 +10,7 @@ set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:?usage: mkinc.sh <outdir>}
 # the headers of the main tree (np/libs/RVL_SDK/include, the decomp's with NPB's NP_NATIVE patches) when present
-if [ -d "$HERE/../../libs/RVL_SDK/include/revolution" ]; then DEF_SRC="$(cd "$HERE/../../libs/RVL_SDK/include" && pwd)"; else DEF_SRC=/home/claude/research/decomp/mscharged-decomp/libs/RVL_SDK/include; fi
+if [ -d "$HERE/../../libs/RVL_SDK/include/revolution" ]; then DEF_SRC="$(cd "$HERE/../../libs/RVL_SDK/include" && pwd)"; else DEF_SRC=/work/research/decomp/mscharged-decomp/libs/RVL_SDK/include; fi
 SRC=${SDK_INC:-$DEF_SRC}
 STAMP="$OUT/.stamp"
 NEW=$( (cat "$0"; find "$HERE/shim" -type f | sort | xargs cat; echo "$SRC") | sha1sum | cut -c1-16)

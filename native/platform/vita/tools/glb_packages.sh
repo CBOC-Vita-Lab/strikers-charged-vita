@@ -3,17 +3,17 @@
 #   stage 0: seed $R/lto from W4 (cp -a, fix .d paths; W4 itself is never written)
 #   stage 1: lab build MSCN00001    -> $R/lto/vita/pkg/np/mscharged-np.vpk        (libvitaGL = deps-glb, vgx = W5GLB-vgx)
 #   stage 2: player MSCN00003+seed  -> $R/lto/vita/pkg-player/np/mscharged-np.vpk
-cd /home/claude/msc/npw/W5GLB
+cd /work/msc/npw/W5GLB
 export VITASDK=/opt/vitasdk PATH=/opt/vitasdk/bin:$PATH
-R=/home/claude/msc/build/np/W5GLB
-GX=/home/claude/msc/npw/W5GLB-vgx
-export VDEPS=${VDEPS:-/home/claude/msc/build/np/W5GLB/deps-glb}
+R=/work/msc/build/np/W5GLB
+GX=/work/msc/npw/W5GLB-vgx
+export VDEPS=${VDEPS:-/work/msc/build/np/W5GLB/deps-glb}
 SEED=$R/seed/shadercache
 # The shader seed of W4 was made with the perf library (cache key 30223cc9). The glb library has another id string (cdbba42-glb), so another key; the compiled shaders are the
 # same (the patch touches no shader code), so the seed folder is copied under the glb key (the key is the FNV-1a of "<options.txt>|<kHostShaderAbi>|gen <n>", as ShaderCacheFolder computes).
 mkseed() {
   [ -f $VDEPS/vitagl/options.txt ] || return 0
-  rm -rf $SEED; mkdir -p $SEED; cp -a /home/claude/msc/build/np/W4/seed/shadercache/. $SEED/
+  rm -rf $SEED; mkdir -p $SEED; cp -a /work/msc/build/np/W4/seed/shadercache/. $SEED/
   K=$(python3 -I - "$VDEPS/vitagl/options.txt" <<'PY'
 import sys
 vid = open(sys.argv[1]).read().rstrip("\n")
@@ -30,7 +30,7 @@ PY
 [ -f $VDEPS/lib/libvitaGL.a ] || { echo "no $VDEPS/lib/libvitaGL.a (run platform/vita/tools/vitadeps_glb.sh first)"; exit 1; }
 if [ ! -d $R/lto ]; then
   echo "== seeding $R/lto from W4 (cp -a, fix .d paths)"
-  cp -a /home/claude/msc/build/np/W4/lto $R/lto || exit 1
+  cp -a /work/msc/build/np/W4/lto $R/lto || exit 1
   find $R/lto -name '*.d' -print0 | xargs -0 sed -i 's|/build/np/W4/|/build/np/W5GLB/|g'
   # the game sources of this worktree are newer than W4's objects but identical (W5GLB changes no game source): objects must not be rebuilt
   find $R/lto/vita/obj $R/lto/vita/pobj -type f -exec touch {} +

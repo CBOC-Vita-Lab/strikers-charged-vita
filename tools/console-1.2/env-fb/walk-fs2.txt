@@ -1,0 +1,16 @@
+# console-1.2 run walk-fs2: Walk-out / cut-scene frames sent on the game thread (MSC_FS_HELD=2), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group w16, route tour, version payload 1.3, role ab
+# walk15.md: rep27's switch in walk-outs and cut-scenes (the end-frame send was 27.5 ms in the walk-out, gsplit1): read the game / send / fe lanes. Low expectation: replays were no faster in rep27.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was tour.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_FS_HELD=2

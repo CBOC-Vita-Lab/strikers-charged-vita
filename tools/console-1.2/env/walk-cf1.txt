@@ -1,0 +1,14 @@
+# console-1.2 run walk-cf1: Walk-out and goal cut-scene with MSC_CROWD_CLUSTERFLAG=1 (visible: far crowd rows animate at half rate), Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route tour, version payload 1.3, role ab
+# walk15.md (host: walk-out passes 36.1 -> 20.7, goal cut-scene 33.2 -> 25.6; ESTIMATE -3 to -6 ms GPU): B side, same lines as walk-cf0 and the passes/copies in the walk-out census line. Look at the crowd: far rows animate at half rate, near rows and the players unchanged. Decides a default (visible).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_CROWD_CLUSTERFLAG=1

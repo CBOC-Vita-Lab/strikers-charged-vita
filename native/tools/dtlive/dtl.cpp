@@ -443,7 +443,7 @@ void dtl_dispatch(uint32_t target, CpuContext* ctx) {
 // ------------------------------------------------------------------------------------------------------------------------
 namespace dtl {
 static void load_dol() {
-    const char* path = getenv("NP_DTL_DOL"); if (!path) path = "/home/claude/msc/game/sys/main.dol";
+    const char* path = getenv("NP_DTL_DOL"); if (!path) path = "/work/msc/game/sys/main.dol";
     FILE* fp = fopen(path, "rb"); if (!fp) { say("[dtl] cannot open %s\n", path); abort(); }
     uint32_t hdr[0x100 / 4]; if (fread(hdr, 4, 0x100 / 4, fp) != 0x100 / 4) abort();
     for (auto& h : hdr) h = __builtin_bswap32(h);

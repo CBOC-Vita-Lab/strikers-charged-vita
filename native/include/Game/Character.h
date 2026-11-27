@@ -175,6 +175,7 @@ public:
         AnimRetargetList* pAnimRetargetList, int nIndex,
         eClassTypes eNewClassType);
     virtual void PostPhysicsUpdate();
+    void PostPhysicsUpdatePre(); // MSC_PHYS_POSE: the part of PostPhysicsUpdate before the pose (np/physpose.h)
     virtual void PrePhysicsUpdate();
     virtual void Unknown7(float dt);
     virtual void PreUpdate(float dt);

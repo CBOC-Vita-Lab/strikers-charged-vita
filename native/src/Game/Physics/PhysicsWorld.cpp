@@ -6,6 +6,11 @@
 #include "ode/NLGAdditions.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "np/gsplit.h"
+#include "np/physpose.h"   // MSC_GSPLIT phase markers (no-ops unless NP_NATIVE and MSC_GSPLIT)
 
 PhysicsWorld::PhysicsWorld()
 {
@@ -66,6 +71,7 @@ void PhysicsWorld::PostUpdate(PhysicsObject* object)
 
 void PhysicsWorld::DoCollide(CollisionSpace* collisionSpace)
 {
+    NP_GS(NPGS_PH_BROAD);
     collisionSpace->DoCollide(this, SpaceCollideCallback);
 }
 
@@ -80,6 +86,7 @@ PhysicsWorld::CollisionSpaceCallback s_LogSpaceCallback = &PhysicsWorld::LogSpac
 
 void PhysicsWorld::Collide()
 {
+    NP_GS(NPGS_PH_PRECOLLIDE);
     PhysicsObjectCallback bodyCallback = s_PreCollideObjectCallback;
     for (dBodyID body = dWorldGetFirstBody(m_World); body != 0; body = dBodyGetNextBody(body))
     {
@@ -108,18 +115,29 @@ void PhysicsWorld::PreUpdate()
     }
 
     PhysicsObjectCallback bodyCallback = s_PreUpdateObjectCallback;
+    NP_GS(NPGS_PH_PREUPD);
     for (dBodyID body = dWorldGetFirstBody(m_World); body != 0; body = dBodyGetNextBody(body))
     {
-        (this->*bodyCallback)((PhysicsObject*)dBodyGetData(body));
+        NP_GSC(NPGC_BODIES, 1);
+        PhysicsObject* const object = (PhysicsObject*)dBodyGetData(body);
+        NP_GS(g_npGsOn ? NpGsPairId(1, object->m_geomID ? dGeomGetClass(object->m_geomID) : 15, 0) : 0);
+        (this->*bodyCallback)(object);
     }
 }
 
 void PhysicsWorld::PostUpdate()
 {
     PhysicsObjectCallback bodyCallback = s_PostUpdateObjectCallback;
+    NP_GS(NPGS_PH_POSTUPD);
+#ifdef NP_NATIVE
+    if (NpPhysPoseMode() != 0)
+        NpPhysPoseRun(this);
+#endif
     for (dBodyID body = dWorldGetFirstBody(m_World); body != 0; body = dBodyGetNextBody(body))
     {
-        (this->*bodyCallback)((PhysicsObject*)dBodyGetData(body));
+        PhysicsObject* const object = (PhysicsObject*)dBodyGetData(body);
+        NP_GS(g_npGsOn ? NpGsPairId(2, object->m_geomID ? dGeomGetClass(object->m_geomID) : 15, 0) : 0);
+        (this->*bodyCallback)(object);
     }
 }
 
@@ -127,7 +145,61 @@ void PhysicsWorld::Update(float quickStepSize, bool clearAccumulators)
 {
     dWorldSetClearAccumulators(m_World, clearAccumulators ? 1 : 0);
     dWorldQuickStep(m_World, quickStepSize);
-    dJointGroupEmpty(m_ContactGroup);
+    {
+        NP_GS(NPGS_PH_JOINTS);
+        dJointGroupEmpty(m_ContactGroup);
+    }
+}
+
+// MSC_PHYS27_PLANE (ode/collision_kernel.cpp NpOdeNoContact)
+int NpOdeNoContact(dxGeom* o1, dxGeom* o2);
+namespace
+{
+int sP27Mode = -1, sP27Break = 0;
+unsigned long long sP27Pairs, sP27Skipped, sP27Checked, sP27Wrong;
+unsigned long long sP27Left[32][32];
+int NpPhys27PlaneMode()
+{
+    if (sP27Mode < 0)
+    {
+        const char* e = getenv("MSC_PHYS27_PLANE");
+        sP27Mode = (e && (e[0] == '1' || e[0] == '2')) ? e[0] - '0' : 0;
+        const char* b = getenv("MSC_PHYS27_PLANE_BREAK");
+        sP27Break = (b && b[0] == '1') ? 1 : 0;
+    }
+    return sP27Mode;
+}
+bool NpPhys27Reject(dxGeom* g1, dxGeom* g2)
+{
+    sP27Pairs++;
+    bool r = NpOdeNoContact(g1, g2) != 0;
+    if (sP27Break == 1 && !r && (sP27Pairs & 7) == 0 && (dGeomGetClass(g1) == dPlaneClass || dGeomGetClass(g2) == dPlaneClass))
+        r = true;   // proof mutant
+    if (r)
+        sP27Skipped++;
+    else
+    {
+        // what is left: class pairs of the callbacks that were run (a diagnostic of the first 8 x 8 class numbers; planes and transforms show their inner class)
+        int c1 = dGeomGetClass(g1), c2 = dGeomGetClass(g2);
+        if (c1 == dGeomTransformClass && dGeomTransformGetGeom(g1)) c1 = 100 + dGeomGetClass(dGeomTransformGetGeom(g1));
+        if (c2 == dGeomTransformClass && dGeomTransformGetGeom(g2)) c2 = 100 + dGeomGetClass(dGeomTransformGetGeom(g2));
+        if (c1 > c2) { int t = c1; c1 = c2; c2 = t; }
+        c1 = c1 < 100 ? c1 : c1 - 100 + 16;
+        c2 = c2 < 100 ? c2 : c2 - 100 + 16;
+        if (c1 < 32 && c2 < 32)
+            sP27Left[c1][c2]++;
+    }
+    if ((sP27Pairs % 200000) == 0)
+    {
+        printf("[phys27plane] mode=%d break=%d pairs=%llu skipped=%llu verify checked=%llu wrong=%llu\n", sP27Mode, sP27Break, sP27Pairs, sP27Skipped, sP27Checked, sP27Wrong);
+        for (int a = 0; a < 32; a++)
+            for (int b = 0; b < 32; b++)
+                if (sP27Left[a][b] * 200 > sP27Pairs)
+                    printf("[phys27plane]   left: class %d%s x %d%s: %llu\n", a < 16 ? a : a - 16, a < 16 ? "" : "(in transform)", b < 16 ? b : b - 16, b < 16 ? "" : "(in transform)", sP27Left[a][b]);
+        fflush(stdout);
+    }
+    return r;
+}
 }
 
 void PhysicsWorld::SpaceCollideCallback(void* data, dxGeom* geom1, dxGeom* geom2)
@@ -146,6 +218,14 @@ void PhysicsWorld::SpaceCollideCallback(void* data, dxGeom* geom1, dxGeom* geom2
         return;
     }
 
+    // MSC_PHYS27_PLANE: a pair that dCollide surely answers with 0 contacts (no collider for the classes: plane-plane; a plane and a transformed sphere / box /
+    // capsule whose AABB is clear of the plane) has no effect in this callback (the body test, SetContactInfo and the narrow phase only fill locals), so it
+    // is not run. =2 verify: runs the callback as before and checks that a pair the test calls empty gave 0 contacts (counted, printed every 20000 pairs).
+    // MSC_PHYS27_PLANE_BREAK=1: proof mutant (a reject also for a plane and a transform that has no clearance: every 8th pair).
+    if (NpPhys27PlaneMode() == 1 && NpPhys27Reject(geom1, geom2))
+        return;
+    NP_GS(NPGS_PH_NEAR);
+    NP_GSC(NPGC_CALLBACK, 1);
     dContact* contact;
     dContact contacts[20];
     dBodyID body1;
@@ -157,6 +237,7 @@ void PhysicsWorld::SpaceCollideCallback(void* data, dxGeom* geom1, dxGeom* geom2
     {
         if (dAreConnectedExcluding(body1, body2, 4) != 0)
         {
+            NP_GSC(NPGC_CB_CONNECTED, 1);
             return;
         }
     }
@@ -168,17 +249,46 @@ void PhysicsWorld::SpaceCollideCallback(void* data, dxGeom* geom1, dxGeom* geom2
     bool canCollide2 = object2->SetContactInfo(&contacts[0], object1, false);
     if (!canCollide1 || !canCollide2)
     {
+        NP_GSC(NPGC_CB_NOCOLL, 1);
         return;
     }
 
-    int numContacts = dCollide(geom1, geom2, 20, &contacts[0].geom, sizeof(dContact));
+    int numContacts;
+    {
+        int gsC1 = 0, gsC2 = 0;
+        if (g_npGsOn)
+        {
+            gsC1 = dGeomGetClass(geom1);
+            gsC2 = dGeomGetClass(geom2);
+            if (gsC1 > gsC2) { int t = gsC1; gsC1 = gsC2; gsC2 = t; }
+        }
+        NP_GS(g_npGsOn ? NpGsPairId(0, gsC1, gsC2) : 0);
+        NP_GSC(NPGC_NARROW, 1);
+        numContacts = dCollide(geom1, geom2, 20, &contacts[0].geom, sizeof(dContact));
+    }
+    if (sP27Mode == 2)
+    {
+        // MSC_PHYS27_PLANE=2: the pair the test calls empty must have made no contact
+        if (NpPhys27Reject(geom1, geom2))
+        {
+            sP27Checked++;
+            if (numContacts > 0)
+                sP27Wrong++;
+        }
+    }
     if (numContacts <= 0)
     {
         return;
     }
+    NP_GSC(NPGC_NARROW_HIT, 1);
+    NP_GSC(NPGC_CONTACTS, numContacts);
 
-    ContactType result1 = object1->Contact(object2, contacts, numContacts);
-    ContactType result2 = object2->Contact(object1, contacts, numContacts);
+    ContactType result1, result2;
+    {
+        NP_GS(NPGS_PH_CONTACTCB);
+        result1 = object1->Contact(object2, contacts, numContacts);
+        result2 = object2->Contact(object1, contacts, numContacts);
+    }
 
     ContactType transformedResult2;
     if (result2 == ONE_WAY_CONTACT_OTHER)
@@ -211,6 +321,8 @@ void PhysicsWorld::SpaceCollideCallback(void* data, dxGeom* geom1, dxGeom* geom2
     int i;
     PhysicsWorld* world; // declared before the goto: C++ forbids jumping over initialisations
     dJointID joint;
+    NP_GS(NPGS_PH_JOINTS);
+    NP_GSC(NPGC_JOINTS, numContacts);
     contact = &contacts[0];
     i = 0;
     goto checkContact;
@@ -350,3 +462,38 @@ void PhysicsWorld::DoCollisions(
         dGeomCollideAABBs(geom, entry->entry->m_geomID, this, SpaceCollideCallback);
     }
 }
+
+#ifdef NP_NATIVE
+// MSC_GSPLIT census, printed with the physics line: the geoms of every collision space by class and by kind (dynamic = on a body, static = none), the enabled ones, and the bodies.
+// Read-only walk of the world on the game thread at the line (one picture in 300).
+extern "C" int NpGsPhysCensus(char* out, int cap)
+{
+    extern PhysicsWorld* g_PhysicsWorld;
+    if (g_PhysicsWorld == 0 || cap < 64) return 0;
+    static const char* const names[] = {"sphere", "box", "capsule", "cylinder", "plane", "ray", "transform", "trimesh", "simple", "hash", "quad", "user0", "user1", "user2", "user3", "?"};
+    int dyn[16] = {0}, sta[16] = {0}, enabledGeoms = 0, spaces = 0;
+    for (CollisionSpace* space = g_PhysicsWorld->m_SpaceList; space != 0; space = space->m_nextCollisionSpace)
+    {
+        ++spaces;
+        const int n = dSpaceGetNumGeoms(space->m_spaceID);
+        for (int i = 0; i < n; i++)
+        {
+            dGeomID geom = dSpaceGetGeom(space->m_spaceID, i);
+            const int c = dGeomGetClass(geom);
+            if (c < 0 || c > 15) continue;
+            if (dGeomGetBody(geom) != 0) dyn[c]++; else sta[c]++;
+            if (dGeomIsEnabled(geom)) enabledGeoms++;
+        }
+    }
+    int bodies = 0, bodiesOn = 0;
+    for (dBodyID body = dWorldGetFirstBody(g_PhysicsWorld->m_World); body != 0; body = dBodyGetNextBody(body))
+    {
+        ++bodies;
+        if (dBodyIsEnabled(body)) ++bodiesOn;
+    }
+    int m = snprintf(out, cap, "spaces %d geoms-enabled %d bodies %d enabled %d geoms (dynamic/static):", spaces, enabledGeoms, bodies, bodiesOn);
+    for (int c = 0; c < 16 && m < cap - 40; c++)
+        if (dyn[c] + sta[c] > 0) m += snprintf(out + m, cap - m, " %s %d/%d", names[c], dyn[c], sta[c]);
+    return m < cap ? m : cap - 1;
+}
+#endif

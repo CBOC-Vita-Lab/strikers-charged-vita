@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 20:15:49 -0400
+Subject: [PATCH] 1.2: SAMPLERS_SPEEDHACK made safe (gaps in the texture units hold a dummy sampler, arrays cleared at link)
+
+
+diff --git a/source/custom_shaders.c b/source/custom_shaders.c
+index 611617c..dfb9ca9 100644
+--- a/source/custom_shaders.c
++++ b/source/custom_shaders.c
+@@ -2652,6 +2652,11 @@ void glGetProgramiv(GLuint progr, GLenum pname, GLint *params) {
+ 	}
+ }
+ 
++// 1.2: SAMPLERS_SPEEDHACK (upstream) loops over the texture units of a program without asking whether a unit has a sampler. The units are indexed by the resource index
++// the shader compiler gave the sampler, which has a gap when a sampler was optimised out. A gap holds this record (unit 0, nothing is sampled from it) so the loop never
++// meets a null pointer. The arrays are cleared at every link: a program slot that is made again must not keep the pointers of the program that was in it.
++static uniform vgl_dummy_texunit = { .type = UNIFORM_SAMPLER, .sampler_index = 0 };
++
+ void glLinkProgram(GLuint progr) {
+ 	THREAD_SAFE()
+ 	if (!progr || progr > MAX_CUSTOM_PROGRAMS)
+@@ -2661,6 +2666,8 @@ void glLinkProgram(GLuint progr) {
+ 	program *p = &progs[progr - 1];
+ 	if (p->status != PROG_UNLINKED || !p->vshader || !p->fshader)
+ 		return;
++	vgl_memset(p->vert_texunits, 0, sizeof(p->vert_texunits));
++	vgl_memset(p->frag_texunits, 0, sizeof(p->frag_texunits));
+ #if defined(HAVE_VERTEX_LAYOUT_CACHE) && !defined(STRICT_DRAW_COMPLIANCE) && !defined(DRAW_SPEEDHACK)
+ 	p->vertex_layout_version = ++vertex_program_layout_current_ver;
+ #endif
+@@ -2987,6 +2994,14 @@ void glLinkProgram(GLuint progr) {
+ 			}
+ 		}
+ 	}
++#ifdef SAMPLERS_SPEEDHACK
++	for (int i = 0; i < p->max_frag_texunit_idx; i++)
++		if (!p->frag_texunits[i])
++			p->frag_texunits[i] = &vgl_dummy_texunit;
++	for (int i = 0; i < p->max_vert_texunit_idx; i++)
++		if (!p->vert_texunits[i])
++			p->vert_texunits[i] = &vgl_dummy_texunit;
++#endif
+ 	p->status = PROG_LINKED;
+ 	// 1.2 (upstream 9bf3e3f): glUseProgram(cur_program) no longer marks the uniform buffers dirty. A (re)linked program that is the one in use has fresh
+ 	// uniform buffers that no draw has uploaded yet: mark them here, where the old glUseProgram(same id) used to.

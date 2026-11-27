@@ -161,6 +161,7 @@ int ReadWholeFile(const char* path, char* out, int size) {
     return got;
 }
 
+void WriteState(const char* format, ...) __attribute__((format(printf, 1, 2)));
 void WriteState(const char* format, ...) {
     char text[400];
     va_list args;
@@ -465,6 +466,7 @@ bool SendAll(int s, const void* data, int size) {
     return true;
 }
 
+bool Reply(Conn& c, const char* format, ...) __attribute__((format(printf, 2, 3)));
 bool Reply(Conn& c, const char* format, ...) {
     char text[512];
     va_list args;
@@ -1072,6 +1074,7 @@ void RealExit(int code) {
     for (;;) sceKernelDelayThread(1000 * 1000);
 }
 
+void EndReason(const char* format, ...) __attribute__((format(printf, 1, 2)));
 void EndReason(const char* format, ...) {
     if (g_haveReason.exchange(true)) return;
     va_list args;

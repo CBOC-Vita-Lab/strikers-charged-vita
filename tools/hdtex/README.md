@@ -81,6 +81,12 @@ textures under 16x16 or not a power of two, and by name: specular / environment 
 HUD art in `extratextures.rlt` (`mega_hand*`, `mega_cone_colour`, `mega_gameplay_bg`,
 `<c>_banners*`, `<c>_logo`).
 
+The eye frames (`<c>/<c>_eye0`, `_eye1`, `_eye2`) stay in the pack but are not used by default: the game's blink swaps
+those three textures (`native/src/Game/Blinker.cpp`), the closed frames are on screen for one or two pictures, and an entry
+that arrives late or over `MSC_HDTEX_BUDGET` leaves an HD open eye flicking to an original closed one, so 1.3 keeps the game's own
+frames at load (`renderer/src/vgx_hdtex.cpp`, log line `hdtex: N eye frames left as the game has them`). `MSC_HDTEX_FACES=1`
+replaces them as 1.1 and 1.2 did. No rebuild of the pack is needed either way. Not checked on a pack or a console.
+
 ## How the game hands these textures to the GPU (what the key is computed over)
 
 - `.rlt` is big-endian on the disc. The port's converters (`npa_cvt_rlt_data`,

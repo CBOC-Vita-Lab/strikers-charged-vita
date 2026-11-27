@@ -1,9 +1,9 @@
 #!/bin/bash
-# (copied into the repo from /home/claude/msc/npw/SKIN.q1.sh; tools/heavy.sh -t 2400 tools/skin/qsurvey.sh before|after5)
+# (copied into the repo from /work/msc/npw/SKIN.q1.sh; tools/heavy.sh -t 2400 tools/skin/qsurvey.sh before|after5)
 # SKIN: armhf qemu per-thread instruction counts, survey script (menus, walk-out, celebrations, replays), before (switches off) / after (both on).
 # The GL back end over the do-nothing GL (glnull) on its own thread (MSC_VGX_BACKEND_THREAD=1): t0 game (+ frame send, nofork), t1 player (decode D), t2 back end (B, without vitaGL's own work).
-cd /home/claude/msc/npw/W5SKIN
-E=/home/claude/msc/build/np/W5SKIN/armhf/np-armhf-full
+cd /work/msc/npw/W5SKIN
+E=/work/msc/build/np/W5SKIN/armhf/np-armhf-full
 C="MSC_VGX_BACKEND_THREAD=1 MSC_VGX_PROMOSMALL=3 MSC_VGX_UNIDUP=2"
 case "${1:-before}" in
   before) TMO=${TMO:-2300} tools/skin/qrun.sh $E qbefor ${FR:-6760} $C MSC_SKIN_GPU=0 MSC_VGX_SOFTINST=0 | tail -2;;

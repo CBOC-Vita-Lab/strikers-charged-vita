@@ -1,0 +1,13 @@
+# console-1.2 run s-stab: Stability: twelve matches in one boot across stadiums (3,1,8,15,14,7,9,11,3,1,8,15)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 4, group stability, route cstab, version payload 1.3, role nstab
+# SC01 (pre-match crash, C2-12828-1) was reproduced in Vita3K on 1.1 at the end-of-game cut-scene with 21 MiB of the C heap free: fragmentation plus one large request. The run must reach script exit with all twelve @end stab-NN marks, no dump, no [arena] FATAL line, and a C heap that does not climb from match to match.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/cstab.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+# (no switch)

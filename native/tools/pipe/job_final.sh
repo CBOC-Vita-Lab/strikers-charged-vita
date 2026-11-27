@@ -5,9 +5,9 @@
 #   thread + skin lane        both second-core features (cut-scene skinning on the helper lane)
 # each against nofork: simulation digests, renderer frame hashes, [nav] lines; per-scene numbers.
 #   tools/heavy.sh -t 800 env V=a11 SRC=<snapshot> BUILD=1 BUILDVARS="OPT=-O2 NOPIC=1" tools/pipe/job_final.sh
-cd /home/claude/msc/npw/W5PIPE || exit 1
+cd /work/msc/npw/W5PIPE || exit 1
 V=${V:-a11}
-B=/home/claude/msc/build/np/W5PIPE
+B=/work/msc/build/np/W5PIPE
 [ -n "$BUILD" ] && { TAILN=6 tools/pipe/build.sh $V ${BUILDVARS:-OPT=-O2 NOPIC=1} || exit 1; }
 export MAXF=${MAXF:-4400}
 echo "=== $V nofork $(date +%T)"; V=$V TAG=nofork FS=nofork XVARS="MSC_SKIN_LANE=0" FSTAIL=2 tools/pipe/job_one.sh

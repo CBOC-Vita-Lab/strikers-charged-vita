@@ -83,6 +83,12 @@ public:
         m_overPeriods = 0;
         m_seenHead = 0;
         m_fadeIn = false;
+        // (1.3) a re-open starts from nothing: what the last device taught (start level, counters) belongs to that device
+        m_learnedPeriods = kMinStartPeriods;
+        m_learnedAge = 0;
+        m_dropped.store(0); m_underruns.store(0); m_silentPeriods.store(0); m_trims.store(0); m_trimmedFrames.store(0);
+        m_startFramesNow.store(0); m_maxQueued.store(0);
+        m_paceSlack = kTrimSlackPeriods / 2;
     }
 
     uint32_t Queued() const {
@@ -110,10 +116,16 @@ public:
     uint32_t PaceFrames() const {
         uint32_t want = m_startFramesNow.load(std::memory_order_relaxed);
         if (want < kMinStartPeriods * kPeriodFrames) want = kMinStartPeriods * kPeriodFrames;
-        want += (kTrimSlackPeriods / 2) * kPeriodFrames;
+        want += m_paceSlack * kPeriodFrames;
         const uint32_t limit = LimitFrames();
         return want < limit ? want : limit;
     }
+
+    // (1.3) MSC_AUDIO_PACE_SLACK: periods of queue the producer keeps above the start level (default kTrimSlackPeriods / 2 = 3, the 1.2
+    // pace: 48 ms). Each period less is 16 ms less between a kick and its sound and 16 ms less to ride out a stall of the mixer's core.
+    // Below the trim slack (6) so the queue never reaches the forward skip.
+    void SetPaceSlack(uint32_t periods) { m_paceSlack = periods < kTrimSlackPeriods ? periods : kTrimSlackPeriods - 1; }
+    uint32_t PaceSlack() const { return m_paceSlack; }
 
     // Producer. Returns false when the block had to be dropped.
     bool Enqueue(const Frame* frames, uint32_t count) {
@@ -295,6 +307,7 @@ private:
     std::atomic<uint32_t> m_head{0}; // total frames written (producer)
     std::atomic<uint32_t> m_tail{0}; // total frames read (consumer)
     uint32_t m_rate = 32000;
+    uint32_t m_paceSlack = kTrimSlackPeriods / 2;
     Policy m_policy = Policy::kFixed;
     // consumer state
     bool m_starved = true;

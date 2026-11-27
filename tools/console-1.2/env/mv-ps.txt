@@ -1,0 +1,13 @@
+# console-1.2 run mv-ps: Movies: press the PS button during the opening and during a stadium preview, then resume (MANUAL)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route cintro, version payload 1.3, role manual
+# fable-review-movie14.md: how the Vita behaves on suspend with a codec call in flight. Press PS during the opening, resume, then at a stadium preview, resume; the picture and sound must continue. Look for `has not returned` in the log, `[thp-hw]` lines. Remove the MSC_INPUT_SCRIPT line.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/cintro.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_THP_NOWAIT=1

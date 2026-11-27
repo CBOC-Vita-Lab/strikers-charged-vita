@@ -1,13 +1,13 @@
 #!/bin/bash
 # Regenerate patches/gcdonor/<path>.patch from the authoring branch and test them.
 #   tools/mkpatches.sh [AUTHOR_BRANCH]     (default NPD-scratch; run from anywhere)
-# Authoring happens in a separate worktree (/home/claude/msc/npw/NPD-scratch, branch NPD-scratch) that
+# Authoring happens in a separate worktree (/work/msc/npw/NPD-scratch, branch NPD-scratch) that
 # is kept rebased on `main`; a patch is the three-dot diff main...AUTHOR for one path, so it applies to
 # main's tip with `git apply` (also checked against a clean index of main, and against the working tree
-# of /home/claude/msc/np, which is where NPB integrates, read-only).
+# of /work/msc/np, which is where NPB integrates, read-only).
 set -e
-REPO=/home/claude/msc/np
-OUT=/home/claude/msc/npw/NPD/patches/gcdonor
+REPO=/work/msc/np
+OUT=/work/msc/npw/NPD/patches/gcdonor
 BR=${1:-NPD-scratch}
 cd "$REPO"
 base=$(git merge-base main "$BR")

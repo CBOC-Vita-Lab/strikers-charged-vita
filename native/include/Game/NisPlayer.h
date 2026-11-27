@@ -43,6 +43,9 @@ public:
     void LoadRelatedNis(const char* nisName, const char* relation, NisTarget target, NisUseStadiumOffset useStadiumOffset, NisWinnerType winnerType, bool mirrored, int renderMode);
     void LoadTriggers(Nis& nis);
     const char* GetTargetFilter(NisTarget target, NisWinnerType winnerType) const;
+#ifdef NP_NATIVE
+    void PrefetchMatchFiles();   // MSC_NIS_PREFETCH (np/dvd_keep.h): the match's goal, Mega Strike and end-of-game cut-scene files are read ahead, not in play
+#endif
     void SetTeamLogo(NisTarget target, NisWinnerType winnerType);
 
     bool HasTeamLogoPacket(const glModelPacket* packet) const
@@ -120,6 +123,9 @@ public:
     bool AllowsPIP();
     bool AllowsPIP(const char* name) const;
     static NisPlayer* Instance();
+#ifdef NP_NATIVE
+    static NisPlayer* InstanceIfAny();   // the player if it has been made, never makes it
+#endif
     static void AsyncLoad(nlFile* file, void* buffer, unsigned int size, unsigned long param);
 
     /* 0x00028 */ int mLoadedAssetMask;

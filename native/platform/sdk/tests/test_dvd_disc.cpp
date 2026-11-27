@@ -21,7 +21,7 @@ static int g_fail = 0;
     } while (0)
 
 int main() {
-    const char* disc = getenv("NP_TEST_DISC") ? getenv("NP_TEST_DISC") : "/home/claude/msc/game";
+    const char* disc = getenv("NP_TEST_DISC") ? getenv("NP_TEST_DISC") : "/work/msc/game";
     char p[512];
     snprintf(p, sizeof p, "%s/sys/fst.bin", disc);
     if (access(p, R_OK) != 0) { printf("test_dvd_disc: no disc, skipped\n"); return 0; }

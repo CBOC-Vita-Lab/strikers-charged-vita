@@ -139,7 +139,10 @@ void GLXTarget::ClearBuffers(bool clearColourBuffer, bool clearDepthBuffer, bool
     gxRestoreZMode();
 }
 
-void GLXTarget::CopyToTexture(bool flag0, bool flag1)
+#ifdef NP_NATIVE
+extern "C" void VgxNextCopyClearOnly(void) __attribute__((weak));   // renderer (vgx_api.cpp, nxr4b MSC_GLOW_L0OFF=2): the next GXCopyTex is only wanted for its clear
+#endif
+void GLXTarget::CopyToTexture(bool flag0, bool flag1, bool clearOnly)
 {
     unsigned long frame = glGetCurrentFrame();
     if (mLastCopyFrame != frame)
@@ -165,6 +168,9 @@ void GLXTarget::CopyToTexture(bool flag0, bool flag1)
     }
     GXSetTexCopySrc(srcLeft, srcTop, srcWidth, srcHeight);
     GXSetTexCopyDst(mWidth, mHeight, (GXTexFmt)mCopyFormat, halfSize);
+#ifdef NP_NATIVE
+    if (clearOnly && flag0 && VgxNextCopyClearOnly) VgxNextCopyClearOnly();   // (no renderer: the copy is made, as with mode 10)
+#endif
     GXCopyTex(mTexture->m_SwizzledData, flag0);
     GXPixModeSync();
     gxSetColourUpdate(colorUpdate);
@@ -177,9 +183,9 @@ GLXTarget* glplatCreateTarget(const GLTargetInfo* targetInfo)
     return new (8, false) GLXTarget(targetInfo);
 }
 
-void glplatCopyTargetToTexture(GLXTarget* target, bool flag0, bool flag1)
+void glplatCopyTargetToTexture(GLXTarget* target, bool flag0, bool flag1, bool clearOnly)
 {
-    target->CopyToTexture(flag0, flag1);
+    target->CopyToTexture(flag0, flag1, clearOnly);
 }
 
 GLXTarget::~GLXTarget()

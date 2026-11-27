@@ -1,6 +1,7 @@
 #include "revolution/types.h"
 #ifdef NP_NATIVE
 #include "np/framesend.h"
+#include "np/stall.h"   // MSC_STALL_TIMERS (stall10)
 #endif
 #include "NL/nlDLListContainer.inl"
 #include "Game/Font/FontLoading.h"
@@ -279,6 +280,9 @@ static inline void CreateInstance(T*& instance)
 
 void AsyncLoadingManager::DoFunctionCall(unsigned int functionIndex)
 {
+#ifdef NP_NATIVE
+    NP_STALL_CM("loading-script function", functionIndex, &mLoadingComment);   // (MSC_STALL_TIMERS: which script call a long loading frame sat in)
+#endif
     switch (functionIndex)
     {
     case 0:
@@ -527,7 +531,7 @@ void AsyncLoadingManager::DoFunctionCall(unsigned int functionIndex)
         SetLoadingComment("AsyncInitializeEmissionManager");
         if (ParticleUpdateTask::sInstance->FinishLoading(sPersistentResourcePool))
         {
-            glDiscardFrame(1);
+            glDiscardFrameWhy(1, "loading script: emission manager");
             FinishLoadingStep(this);
         }
         else
@@ -1188,7 +1192,12 @@ extern "C" u32 fn_80118B7C(AsyncLoadingManager* manager)
         result = ASYNC_LOADING_RUNNING;
         break;
     case ASYNC_LOADING_BOOT_TO_FE_RUN:
-        manager->Run();
+        {
+#ifdef NP_NATIVE
+            NP_STALL_CM("loading-script Run", manager->mSequenceState, &manager->mLoadingComment);
+#endif
+            manager->Run();
+        }
         if (manager->IsFinished())
         {
             manager->mSequenceState = ASYNC_LOADING_IDLE;
@@ -1206,7 +1215,12 @@ extern "C" u32 fn_80118B7C(AsyncLoadingManager* manager)
         result = ASYNC_LOADING_RUNNING;
         break;
     case ASYNC_LOADING_CLEAN_BOOT_RUN:
-        manager->Run();
+        {
+#ifdef NP_NATIVE
+            NP_STALL_CM("loading-script Run", manager->mSequenceState, &manager->mLoadingComment);
+#endif
+            manager->Run();
+        }
         if (manager->IsFinished())
         {
             manager->mSequenceState = ASYNC_LOADING_IDLE;
@@ -1224,7 +1238,12 @@ extern "C" u32 fn_80118B7C(AsyncLoadingManager* manager)
         result = ASYNC_LOADING_RUNNING;
         break;
     case ASYNC_LOADING_FE_TO_GAME_RUN:
-        manager->Run();
+        {
+#ifdef NP_NATIVE
+            NP_STALL_CM("loading-script Run", manager->mSequenceState, &manager->mLoadingComment);
+#endif
+            manager->Run();
+        }
         if (manager->IsFinished())
         {
             manager->mSequenceState = ASYNC_LOADING_IDLE;
@@ -1242,7 +1261,12 @@ extern "C" u32 fn_80118B7C(AsyncLoadingManager* manager)
         result = ASYNC_LOADING_RUNNING;
         break;
     case ASYNC_LOADING_GAME_TO_FE_RUN:
-        manager->Run();
+        {
+#ifdef NP_NATIVE
+            NP_STALL_CM("loading-script Run", manager->mSequenceState, &manager->mLoadingComment);
+#endif
+            manager->Run();
+        }
         if (manager->IsFinished())
         {
             manager->mSequenceState = ASYNC_LOADING_IDLE;
@@ -1260,7 +1284,12 @@ extern "C" u32 fn_80118B7C(AsyncLoadingManager* manager)
         result = ASYNC_LOADING_RUNNING;
         break;
     case ASYNC_LOADING_BOOT_TO_GAME_RUN:
-        manager->Run();
+        {
+#ifdef NP_NATIVE
+            NP_STALL_CM("loading-script Run", manager->mSequenceState, &manager->mLoadingComment);
+#endif
+            manager->Run();
+        }
         if (manager->IsFinished())
         {
             manager->mSequenceState = ASYNC_LOADING_IDLE;
@@ -1278,7 +1307,12 @@ extern "C" u32 fn_80118B7C(AsyncLoadingManager* manager)
         result = ASYNC_LOADING_RUNNING;
         break;
     case ASYNC_LOADING_STADIUM_VIEWER_RUN:
-        manager->Run();
+        {
+#ifdef NP_NATIVE
+            NP_STALL_CM("loading-script Run", manager->mSequenceState, &manager->mLoadingComment);
+#endif
+            manager->Run();
+        }
         if (manager->IsFinished())
         {
             manager->mSequenceState = ASYNC_LOADING_IDLE;

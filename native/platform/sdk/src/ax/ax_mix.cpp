@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include "np/host_alloc.h"
+
 // Workstream AUD: the kernels of the reference path stay out of line so that a per-function
 // instruction profile (qemu block profile by symbol) can tell them apart. Each is entered once
 // per voice or per bus per 96-sample frame, so the calls cost nothing measurable.
@@ -38,6 +40,9 @@ namespace AxFast {
 bool g_useNeon = true;
 } // namespace AxFast
 
+// (1.3) src/axfx_reverb_neon.c: the reverb's NEON form. Set in ReadAxMode.
+extern "C" int g_npAxfxReverbNeon;
+
 namespace AxDspHle {
 
 // Write journal of the mix (MSC_AX_VERIFY, see AXWii::ExecuteCommandList): every write of the
@@ -50,6 +55,8 @@ namespace {
 //   MSC_AX_FAST=0    the reference path only (the mixer as it was: scalar, per-sample reads)
 //   MSC_AX_FAST=1    the fast path (ax_mix_fast.h), NEON kernels on ARM              [default]
 //   MSC_AX_FAST=2    the fast path with the plain C++ kernels (what a non-ARM build runs anyway)
+//   MSC_AUDIO_NEON=0 (1.3) the game's reverb stays in the reference's VFP loop. Default 1: four samples at a time in NEON, same output
+//                    integers (src/axfx_reverb_neon.c); only with MSC_AX_FAST=1, since =0 and =2 ask for plain code
 //   MSC_AX_VERIFY=1  every command list is mixed twice, reference first, then the fast path
 //                    from the same starting state; buses, mixer state, aux shadows and every
 //                    guest byte either pass wrote are compared, differences are counted and the
@@ -95,6 +102,8 @@ void ReadAxMode() {
     }
     g_axMode = mode;
     AxFast::g_useNeon = mode.fast == 1;
+    const char* reverbNeon = std::getenv("MSC_AUDIO_NEON");
+    g_npAxfxReverbNeon = mode.fast == 1 && !(reverbNeon && (std::strcmp(reverbNeon, "0") == 0 || std::strcmp(reverbNeon, "off") == 0));
 }
 
 struct MixJournal {
@@ -1550,7 +1559,7 @@ private:
     bool m_toDspBusy = false;
     uint32_t m_cmdListSize = 0;
     std::array<uint16_t, 512> m_cmdList{};
-    std::deque<uint32_t> m_cpuMails;
+    std::deque<uint32_t, np::HostAllocator<uint32_t>> m_cpuMails;   // (1.3: host heap: pushed on the game thread for the whole run, np/host_alloc.h)
     uint32_t m_lastCpuMail = 0;
     uint32_t m_compressorPos = 0;
     uint32_t m_deferredResumeCallbacks = 0;
@@ -1699,7 +1708,7 @@ extern "C" void MscAxPrintStats(void) {
                  u(st.auxConst), u(st.auxRamp), u(st.outUnity), u(st.outConst), u(st.outRamp));
     std::fprintf(stderr, "[ax] commands:");
     for (int i = 0; i < 16; ++i) {
-        if (st.cmd[i]) std::fprintf(stderr, " %02X:%llu", i, u(st.cmd[i]));
+        if (st.cmd[i]) std::fprintf(stderr, " %02X:%llu", (unsigned)i, u(st.cmd[i]));
     }
     std::fprintf(stderr, " | compressor: scans=%llu applied=%llu\n", u(st.compressorScans), u(st.compressorApplied));
     std::fprintf(stderr, "[ax] worker mix time (real clock): %llu mixes, mean %.1f us, longest %.1f us\n", u(st.workerMixes),

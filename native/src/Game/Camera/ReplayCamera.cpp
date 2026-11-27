@@ -21,7 +21,9 @@
 #include "NL/gl/glMatrix.h"
 #include "NL/gl/glPlat.h"
 #include "Game/SharedStaticStorage.h"
+#include "np/overlap.h"
 #include <math.h>
+#include <string.h>
 
 static const nlVector3 sZeroVector = { 0.0f, 0.0f, 0.0f };
 
@@ -37,6 +39,73 @@ float gReplayCameraAspectRatio = 1.25f;
 float gReplayCameraWidescreenAspectRatio[2] = { 1.666f, 0.0f };
 
 u8 gMatrixEffectCameraFrozen[8];
+
+
+// MSC_REPLAYCAM_CFG (np/overlap.h): GetPosition and GetFov looked up a dozen keys by string every picture (hash of the key, a modulo by the table size, a
+// case-insensitive compare). The table of Config::Global() never moves or loses an entry (Config::Set only fills a free slot or rewrites the value in
+// place; there is no erase and no rehash, the array is allocated once), so once a key has been found its TagValuePair stays that key's pair, and reading
+// the value through the remembered pair gives, for every later call, exactly what a fresh lookup gives: it is read each call, a Set in between shows.
+// A key that is not there yet takes GetConfigFloat itself (it stores the default); the slot is filled by the next call.
+// MSC_REPLAYCAM_CFG=2 also does the fresh lookup and counts a result that differs in any bit (a line on stderr).
+struct ReplayCfgSlot
+{
+    Config::TagValuePair* tvp;
+};
+
+static inline float ReplayCfgValue(const Config::TagValuePair& tvp)
+{
+    float val;
+    if (tvp.type == CONFIG_BOOL)
+        val = LexicalCast<float, bool>(tvp.value.boolValue);
+    else if (tvp.type == CONFIG_INT)
+        val = LexicalCast<float, int>(tvp.value.intValue);
+    else if (tvp.type == CONFIG_FLOAT)
+        val = LexicalCast<float, float>(tvp.value.floatValue);
+    else if (tvp.type == CONFIG_STRING)
+        val = LexicalCast<float, const char*>(tvp.value.stringValue);
+    else
+        val = 0.0f;
+    return val;
+}
+
+static float ReplayCfgFloat(ReplayCfgSlot& slot, const char* key, float defaultValue)
+{
+    const int mode = NpReplayCamCfg();
+    if (mode == 0)
+        return GetConfigFloat(Config::Global(), key, defaultValue);
+    Config& cfg = Config::Global();
+    if (slot.tvp == 0)
+    {
+        Config::TagValuePair& found = cfg.FindTvp(key);
+        if (found.tag == 0)
+            return GetConfigFloat(cfg, key, defaultValue);
+        slot.tvp = &found;
+    }
+    const float val = ReplayCfgValue(*slot.tvp);
+    if (mode == 2)
+    {
+        const float fresh = GetConfigFloat(cfg, key, defaultValue);
+        NpReplayCfgChecked(memcmp(&fresh, &val, sizeof(float)) != 0);
+    }
+    return val;
+}
+
+#define REPLAY_CFG(key, def) ([]() -> float { static ReplayCfgSlot slot; return ReplayCfgFloat(slot, key, def); }())
+
+// the generic cameras' keys "replay/camera_generic_<n>_<x|y|z>": one slot each; the key text is only built while the slot is empty (or to compare)
+static ReplayCfgSlot sGenericCfg[(REPLAY_CAMERA_POSITION_GENERIC_LAST - REPLAY_CAMERA_POSITION_GENERIC_0 + 1)][3];
+
+static float ReplayCfgGeneric(int n, int axis, float defaultValue)
+{
+    ReplayCfgSlot& slot = sGenericCfg[n][axis];
+    const int mode = NpReplayCamCfg();
+    if (mode == 1 && slot.tvp != 0)
+        return ReplayCfgValue(*slot.tvp);
+    char key[256];
+    static const char* const formats[3] = { "replay/camera_generic_%d_x", "replay/camera_generic_%d_y", "replay/camera_generic_%d_z" };
+    nlSNPrintf(key, sizeof(key), formats[axis], n);
+    return ReplayCfgFloat(slot, key, defaultValue);
+}
 
 static inline float GetSideDirection(int side)
 {
@@ -460,9 +529,9 @@ float ReplayCamera::GetFov(ReplayCameraPosition position) const
     switch (position)
     {
     case REPLAY_CAMERA_POSITION_INSIDE_NET:
-        return GetConfigFloat(Config::Global(), "replay/camera_inside_net_fov", 50.0f);
+        return REPLAY_CFG("replay/camera_inside_net_fov", 50.0f);
     case REPLAY_CAMERA_POSITION_HIGH_UP:
-        return GetConfigFloat(Config::Global(), "replay/camera_high_up_fov", 50.0f);
+        return REPLAY_CFG("replay/camera_high_up_fov", 50.0f);
     default:
         if (position >= REPLAY_CAMERA_POSITION_GENERIC_0 && position <= REPLAY_CAMERA_POSITION_GENERIC_LAST)
         {
@@ -492,9 +561,9 @@ nlVector3 ReplayCamera::GetPosition(ReplayCameraPosition position, float directi
     {
     case REPLAY_CAMERA_POSITION_INSIDE_NET:
     {
-        float x = GetConfigFloat(Config::Global(), "replay/camera_inside_net_x", 7.0f);
-        float y = GetConfigFloat(Config::Global(), "replay/camera_inside_net_y", 8.0f);
-        float z = GetConfigFloat(Config::Global(), "replay/camera_inside_net_z", 2.0f);
+        float x = REPLAY_CFG("replay/camera_inside_net_x", 7.0f);
+        float y = REPLAY_CFG("replay/camera_inside_net_y", 8.0f);
+        float z = REPLAY_CFG("replay/camera_inside_net_z", 2.0f);
         ret.x = cField::GetGoalLineX(direction) + direction * x;
         ret.y = y;
         ret.z = z;
@@ -521,25 +590,25 @@ nlVector3 ReplayCamera::GetPosition(ReplayCameraPosition position, float directi
             DegreesToAngle(mBallToGoalRotationDegrees));
         RotateVector(ballToGoal, ballToGoal, rotation);
 
-        nlVec3Scale(ballToGoal, -GetConfigFloat(Config::Global(), "replay/camera_ball_to_goal_behind_dist", 16.0f));
+        nlVec3Scale(ballToGoal, -REPLAY_CFG("replay/camera_ball_to_goal_behind_dist", 16.0f));
         nlVec3Add(ret, ballPos, ballToGoal);
-        float minHeight = GetConfigFloat(Config::Global(), "replay/camera_ball_to_goal_min_height", 3.0f);
+        float minHeight = REPLAY_CFG("replay/camera_ball_to_goal_min_height", 3.0f);
         if (ret.z < minHeight)
             ret.z = minHeight;
 
-        float minDistToGoal = GetConfigFloat(Config::Global(), "replay/camera_ball_to_goal_min_dist_to_goal", 8.0f);
+        float minDistToGoal = REPLAY_CFG("replay/camera_ball_to_goal_min_dist_to_goal", 8.0f);
         if (nlAbs(goalPos.x - ret.x) < minDistToGoal)
             ret.x = goalPos.x - direction * minDistToGoal;
 
-        ret.y += GetConfigFloat(Config::Global(), "replay/camera_ball_to_goal_y_offset", 0.0f);
+        ret.y += REPLAY_CFG("replay/camera_ball_to_goal_y_offset", 0.0f);
         break;
     }
     case REPLAY_CAMERA_POSITION_HIGH_UP:
     {
-        float highX = GetConfigFloat(Config::Global(), "replay/camera_high_up_x", -6.0f);
-        float highY = GetConfigFloat(Config::Global(), "replay/camera_high_up_y", -5.0f);
-        float highZ = GetConfigFloat(Config::Global(), "replay/camera_high_up_z", 8.0f);
-        float minDistBehind = GetConfigFloat(Config::Global(), "replay/camera_high_up_min_dist_behind", 8.0f);
+        float highX = REPLAY_CFG("replay/camera_high_up_x", -6.0f);
+        float highY = REPLAY_CFG("replay/camera_high_up_y", -5.0f);
+        float highZ = REPLAY_CFG("replay/camera_high_up_z", 8.0f);
+        float minDistBehind = REPLAY_CFG("replay/camera_high_up_min_dist_behind", 8.0f);
 
         ret.x = highX * GetSideDirection(mSideOfInterest);
         ret.y = highY;
@@ -551,13 +620,10 @@ nlVector3 ReplayCamera::GetPosition(ReplayCameraPosition position, float directi
     default:
         if (position >= REPLAY_CAMERA_POSITION_GENERIC_0 && position <= REPLAY_CAMERA_POSITION_GENERIC_LAST)
         {
-            char key[256];
-            nlSNPrintf(key, sizeof(key), "replay/camera_generic_%d_x", position - REPLAY_CAMERA_POSITION_GENERIC_0);
-            float xVal = GetConfigFloat(Config::Global(), key, 0.0f) * GetSideDirection(mSideOfInterest);
-            nlSNPrintf(key, sizeof(key), "replay/camera_generic_%d_y", position - REPLAY_CAMERA_POSITION_GENERIC_0);
-            float yVal = GetConfigFloat(Config::Global(), key, 0.0f);
-            nlSNPrintf(key, sizeof(key), "replay/camera_generic_%d_z", position - REPLAY_CAMERA_POSITION_GENERIC_0);
-            float zVal = GetConfigFloat(Config::Global(), key, 0.0f);
+            const int generic = position - REPLAY_CAMERA_POSITION_GENERIC_0;
+            float xVal = ReplayCfgGeneric(generic, 0, 0.0f) * GetSideDirection(mSideOfInterest);
+            float yVal = ReplayCfgGeneric(generic, 1, 0.0f);
+            float zVal = ReplayCfgGeneric(generic, 2, 0.0f);
             ret.x = xVal;
             ret.y = yVal;
             ret.z = zVal;
@@ -570,9 +636,9 @@ nlVector3 ReplayCamera::GetPosition(ReplayCameraPosition position, float directi
     ret.z += mPositionOffset.z;
 
     nlVector3 max;
-    max.x = GetConfigFloat(Config::Global(), "replay/camera_max_behind_goal_line", 2.0f);
-    max.y = GetConfigFloat(Config::Global(), "replay/camera_max_beyond_side_line", 2.0f);
-    max.z = GetConfigFloat(Config::Global(), "replay/camera_max_height", 20.0f);
+    max.x = REPLAY_CFG("replay/camera_max_behind_goal_line", 2.0f);
+    max.y = REPLAY_CFG("replay/camera_max_beyond_side_line", 2.0f);
+    max.z = REPLAY_CFG("replay/camera_max_height", 20.0f);
     if (mUsePositionLimits == true)
     {
         max.x = mMaxBehindGoalLine;
@@ -580,7 +646,7 @@ nlVector3 ReplayCamera::GetPosition(ReplayCameraPosition position, float directi
         max.z = mMaxHeight;
     }
 
-    float minZ = GetConfigFloat(Config::Global(), "replay/camera_min_height", 0.5f);
+    float minZ = REPLAY_CFG("replay/camera_min_height", 0.5f);
 
     if (ret.z > max.z)
         ret.z = max.z;

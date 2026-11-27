@@ -2624,3 +2624,94 @@ void PhysicsObject::Unknown0()
         ZeroForceAccumulators();
     }
 }
+
+// MSC_SIM26_BONES (wave 12, sim26; PhysicsCharacterBase.cpp): the arithmetic of SetRotation(m4, WORLD_COORDINATES) and SetPosition(pos, 0) for an object whose
+// parent has no parent of its own, without the write. The statements are those of the two functions' depth-1 paths, in the same order, on the same operands:
+// dRot is the parent's ODE rotation and ppos its ODE position, read the same way (body when it has no geom, else the geom). Pure: nothing is written but the outputs.
+void NpSim26LocalRotation(const nlMatrix4& m4_in, const float* dRot, float* parentOdeRotation)
+{
+    nlMatrix4 parentRot;
+    nlMatrix4 localRotation;
+    nlMatrix4 transposeResult;
+    parentRot.e2[0][0] = dRot[0];
+    parentRot.e2[1][0] = dRot[1];
+    parentRot.e2[2][0] = dRot[2];
+    parentRot.e2[0][1] = dRot[4];
+    parentRot.e2[1][1] = dRot[5];
+    parentRot.e2[2][1] = dRot[6];
+    parentRot.e2[0][2] = dRot[8];
+    parentRot.e2[1][2] = dRot[9];
+    parentRot.e2[2][2] = dRot[10];
+    parentRot.e2[3][0] = 0.0f;
+    parentRot.e2[3][1] = 0.0f;
+    parentRot.e2[3][2] = 0.0f;
+    parentRot.e2[3][3] = 1.0f;
+    parentRot.e2[0][3] = 0.0f;
+    parentRot.e2[1][3] = 0.0f;
+    parentRot.e2[2][3] = 0.0f;
+    nlTransposeMatrix(transposeResult, parentRot);
+    parentRot = transposeResult;
+    nlMultMatrices(localRotation, m4_in, parentRot);
+    ConvertNLMat4ToDMat3(localRotation, parentOdeRotation);
+}
+
+void NpSim26LocalPosition(const nlVector3& pos, const float* dRot, const float* ppos, nlVector3* out)
+{
+    nlMatrix4 rot;
+    nlMatrix4 inv_rot;
+    nlVector3 _pos;
+    nlVector3 p;
+    rot.e2[0][0] = dRot[0];
+    rot.e2[1][0] = dRot[1];
+    rot.e2[2][0] = dRot[2];
+    rot.e2[0][1] = dRot[4];
+    rot.e2[1][1] = dRot[5];
+    rot.e2[2][1] = dRot[6];
+    rot.e2[0][2] = dRot[8];
+    rot.e2[1][2] = dRot[9];
+    rot.e2[2][2] = dRot[10];
+    rot.e2[3][0] = 0.0f;
+    rot.e2[3][1] = 0.0f;
+    rot.e2[3][2] = 0.0f;
+    rot.e2[3][3] = 1.0f;
+    rot.e2[0][3] = 0.0f;
+    rot.e2[1][3] = 0.0f;
+    rot.e2[2][3] = 0.0f;
+    nlVec3Set(p, ppos[0], ppos[1], ppos[2]);   // SetPosition: nlVec3Set(parentObj->m_position, ...), then p = parentObj->m_position
+    rot.e2[3][0] = p.x;
+    rot.e2[3][1] = p.y;
+    rot.e2[3][2] = p.z;
+    rot.e2[3][3] = 1.0f;
+    nlInvertRotTransMatrix(inv_rot, rot);
+    nlMultPosVectorMatrix(_pos, pos, inv_rot);
+    *out = _pos;
+}
+
+// The parent's ODE rotation / position as SetRotation and SetPosition read them.
+const float* NpSim26ObjRotation(const PhysicsObject* o)
+{
+    return (o->m_geomID == 0 && o->m_bodyID != 0) ? dBodyGetRotation(o->m_bodyID) : NpGeomGetRotation(o->m_geomID);
+}
+const float* NpSim26ObjPosition(const PhysicsObject* o)
+{
+    return (o->m_geomID == 0 && o->m_bodyID != 0) ? dBodyGetPosition(o->m_bodyID) : NpGeomGetPosition(o->m_geomID);
+}
+// The writes of the two functions' depth-1 paths, with the computed values.
+void NpSim26SetLocalRotation(PhysicsObject* o, const float* R)
+{
+    if (o->m_geomID == 0 && o->m_bodyID != 0)
+    {
+        dBodySetRotation(o->m_bodyID, R);
+        return;
+    }
+    NpGeomSetRotation(o->m_geomID, R);
+}
+void NpSim26SetLocalPosition(PhysicsObject* o, const nlVector3& p)
+{
+    if (o->m_geomID == 0 && o->m_bodyID != 0)
+    {
+        dBodySetPosition(o->m_bodyID, p.x, p.y, p.z);
+        return;
+    }
+    NpGeomSetPosition(o->m_geomID, p.x, p.y, p.z);
+}

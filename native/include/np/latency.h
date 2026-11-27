@@ -28,6 +28,9 @@ uint64_t NpLatTakeSendTag(void);                  /* the thread that sends the f
 void NpLatDecoded(uint64_t tag);                  /* the renderer has decoded the frame */
 void NpLatPresented(uint64_t tag);                /* the back end reached its display copy */
 void NpLatShown(uint64_t tag, uint64_t shownNs, int handedToo);   /* the frame appears at shownNs (handedToo: stamp "handed" now) */
+int NpLatSlackTake(uint32_t* minSlackUs, uint32_t* maxGapUs);   /* wave 6 (MSC_PAD_LATE): pictures shown since the last call, their smallest GPU-done -> shown slack and longest gap (us) */
+void NpLatEntered(uint64_t tag);                  /* wave 11 (press16): the display callback was entered for the frame (before its gate waits) */
+int NpLatSlackLbTake(uint32_t* minLbUs);          /* wave 11 (press16): pictures shown since the last call, their smallest callback entry -> shown time (us) */
 void NpLatTakeWindow(uint32_t* n, uint32_t* p50Us, uint32_t* p95Us);   /* frames shown since the last call: count and percentiles of the delay */
 #ifdef __cplusplus
 }

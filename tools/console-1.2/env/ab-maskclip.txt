@@ -1,0 +1,17 @@
+# console-1.2 run ab-maskclip: In-run A/B in the replay route: scissor-mask clear clip (MSC_VGX_VGL_MASKCLIP 0 against 1) and the display scene's mask background (MSC_VGX_VGL_MASKBG 1 against 3)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group s30, route replay, version payload 1.3, role ab
+# gpu24: only windows inside a replay or cut-scene show the clip (it acts in the crowd atlas pass); read `n` and expect few usable windows; the single pair maskclip1-d / scn-on-d is the main answer. Read: abpair.py --inrun LOG (key, metric, diff b minus a, 90 % interval, verdict); the `[ab] flip` lines show the clock of each flip, `[lane] ... ab KEY=v a wN` the windows. Replaces the pairs listed in w8/ab15.md and w8/ab15b.md.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/replay.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_AB=MSC_VGX_VGL_MASKCLIP,0,1;MSC_VGX_VGL_MASKBG,1,3
+MSC_AB_START_S=20
+MSC_AB_REPEATS=4
+MSC_HEAD_STAT=1

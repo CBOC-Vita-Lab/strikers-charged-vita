@@ -118,6 +118,7 @@ void NetworkPeerChannel::ApplyNetworkPeerChannelInput(const PackedDetInput* reco
     mInput.m_nConnected = connected;
     mInput.UpdatePolarAnalog();
     mInput.UpdateButtonStateTicks();
+    NpLanAppliedInput(this, record, remapAngle, connected);
 }
 
 void NetworkPeerChannel::PackNetworkPeerChannelInput(PackedDetInput* record)
@@ -344,7 +345,9 @@ void NetMessageInput::Serialize(
     if (!io.mOk && serializer->mDirection == 0)
     {
         // a malformed message from the other console: apply nothing from it
+        // (the flags too: a half-read message must not still announce sync data, a remap angle or records)
         mEventCount = 0;
+        mFlags = 0;
         memset(mRecordChanges, 0, sizeof(mRecordChanges));
         NpLanLog("malformed input message rejected\n");
     }

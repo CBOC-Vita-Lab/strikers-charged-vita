@@ -14,11 +14,27 @@
 //          the warm-up progress swaps, the game's first black frames), and the thread keeps animating the buffer last shown;
 //   - Finish() (the game created its boot screens: NpBootMark from BootLoadingScene::SceneCreated) runs the bar to the end and
 //     fades to black over 0.3 s; then the game's pictures show.
+//   - 1.3: a line under the bar names the milestone the boot has reached, and after MSC_BOOT_HINT seconds it says that a slow start is expected (the Galaxy port's fix for a
+//     screen that looked hung on a first start: the shader work there can take minutes). Each milestone is a "[boot] milestone" log line; a slow start also leaves a
+//     note in the player's basic record (log.txt).
+//   - art25: a package without boot/loading.bin (the public one) still shows the game's own art. The picture is made on the console from the player's own
+//     files (vita_bootart.cpp: files/Art/fe/mainui.dmn and files/opening.bnr, the port of tools/brand-from-disc.py's loading picture) and kept in
+//     ux0:data/mscharged/cache/loading.bin with a stamp of the two files' sizes. Order: the package's picture, else the cache when its stamp is current, else the
+//     plain screen at once and a low-priority thread (core 2, behind this one) builds the picture (about a second) and writes the cache (tmp + rename); the screen
+//     fades to it over half a second when it is ready, and never waits for it. A missing or damaged file means the plain screen, with one [boot] line saying why.
+//     Nothing of the game's art is in the package or the repository.
+//   MSC_BOOT_ART=0             no picture from the game files (neither the cache nor the build): the plain screen as before art25. Default on (it changes this screen only).
 //   MSC_BOOT_SCREEN=art|text   art is the player build's default, text (the debug console) the lab build's.
+//   MSC_BOOT_HINT=<s>          seconds before the slow-start line (default 20); 0: no milestone line and no hint, the screen as 1.2 drew it.
 //   MSC_BOOT_SHOT=1|<ms>       (tests) PPM pictures of the screen in ux0:data/mscharged/shots/boot_<ms>.ppm, every 1.5 s (or <ms>), at most 20, and 4 of the fade.
 // The drawing is plain C++ on 0xAABBGGRR pixels (the console's and vitaGL's display format), also built on the host for
 // tests/test_bootscreen.cpp, which writes pictures of it.
 #include "np_vita_internal.h"
+#include "vita_font.h"
+#include "vita_bootstate.h"
+#include "vita_bootart.h"
+#include "vita_livearea_art.h"
+#include "../../sdk/include/np/np_text.h"
 
 #include <atomic>
 #include <cstdarg>
@@ -34,6 +50,7 @@
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/power.h>
 #else
 #include "plat_realclock.h"
 #endif
@@ -55,9 +72,17 @@ std::atomic<int> g_mode{0};               // 0 undecided, 1 art (active), 2 text
 std::atomic<bool> g_paused{false};        // the settings screen has the console's framebuffer
 std::atomic<bool> g_stopThread{false};
 std::mutex g_draw;                        // one drawer at a time (the thread, Compose on the display queue thread)
+BootState::Machine g_m;                   // the life cycle (vita_bootstate.h), under g_draw
+std::atomic<bool> g_finishPosted{false};  // Finish() was called (read by every game present without the lock)
 void* g_front = nullptr;                  // phase B: the buffer vitaGL showed last (Compose's argument)
 uint32_t* g_scratch = nullptr;            // W x H in cached memory: every picture is composed here, then copied (see Thread); under g_draw
 bool g_haveArt = false;
+// art25: the picture made from the game files, as the 1 MiB file image (header, RGB565 pixels, stamp). The builder thread hands it over in g_artPending; the screen's
+// thread takes it into g_artImg (TickArt), blends it in over kArtFadeS, then expands it into g_bg and frees it. All under g_draw.
+uint8_t* g_artPending = nullptr;
+uint8_t* g_artImg = nullptr;
+double g_fadeStartS = -1.0;
+constexpr double kArtFadeS = 0.5;
 
 // ---- progress: events set an anchor (where the bar is) and a cap (where this stage ends); between events the target creeps
 // towards the cap with the stage's time constant, so the bar never stands still and never passes a stage it has not reached.
@@ -68,6 +93,16 @@ float g_shown = 0.0f;                     // what the bar shows (eased, never de
 double g_finishS = -1.0;                  // when Finish() was called
 std::atomic<bool> g_gameStage{false};
 uint64_t g_frameBase = 0;
+
+// ---- 1.3: the line under the bar
+constexpr int kLabelY = 518;              // inside the animated region, under the ball's edge
+constexpr const char* kSlowHint = "STILL LOADING. A FIRST START TAKES LONGER.";
+static_assert(46 * kVitaFontWidth <= kRegX1 - kRegX0, "the slow-start line and the guard notice (46 characters) must fit the region that is redrawn");
+std::atomic<const char*> g_milestone{nullptr};
+std::atomic<const char*> g_notice{nullptr};   // Notice(): an English key of np_text_strings.tsv, at most 46 characters in every language
+constexpr double kNoticeS = 7.0;              // process seconds it stays up (a start takes 10 s or more: the stage lines follow)
+std::atomic<bool> g_slowNoted{false};
+double g_hintAfterS = 20.0;               // 0: no line at all (MSC_BOOT_HINT)
 
 // One whole line per call: these lines come from three threads (the screen's, the display queue's, the boot thread) and stderr is unbuffered, so a
 // printf in parts is cut by the other threads' lines.
@@ -253,6 +288,29 @@ void DrawBall(uint32_t* fb, float cx, float cy, float angle, float pulse) {
     }
 }
 
+// Centred, with a one-pixel shadow: the picture behind it is the owner's art, of any brightness.
+void DrawLabel(uint32_t* fb, const char* text) {
+    text = NpText::Tr(text);   // (1.3) in the game's language (np_text.h); UTF-8, drawn in characters
+    const int count = VitaUtf8Length(text);
+    const int x0 = (W - count * kVitaFontWidth) / 2;
+    for (int pass = 0; pass < 2; ++pass) {
+        const int shift = pass == 0 ? 1 : 0;
+        const uint32_t color = pass == 0 ? 0xFF000000u : 0xFFF0F0F0u;
+        const char* t = text;
+        for (int c = 0; c < count; ++c) {
+            const uint16_t* glyph = VitaFontGlyph(VitaUtf8Next(t));
+            for (int j = 0; j < kVitaFontHeight; ++j) {
+                const int y = kLabelY + j + shift;
+                if (!glyph[j] || y >= kRegY1) continue;
+                for (int i = 0; i < kVitaFontWidth; ++i)
+                    if (glyph[j] & (1u << (kVitaFontWidth - 1 - i))) fb[y * W + x0 + c * kVitaFontWidth + i + shift] = color;
+            }
+        }
+    }
+}
+
+bool SlowStart(double now) { return g_hintAfterS > 0.0 && now >= g_hintAfterS; }
+
 // The bar region on top of the background that is already in `fb` there.
 void DrawElements(uint32_t* fb, float shown, double now) {
     const float yc = kTrackY + kTrackH * 0.5f;
@@ -321,6 +379,14 @@ void DrawElements(uint32_t* fb, float shown, double now) {
     // the ball rolls with the head (one turn per 2 pi radii of travel) and spins by itself
     const float angle = (head - fx0) / kBallR + static_cast<float>(now) * 3.4f;
     DrawBall(fb, head, yc, angle, pulse);
+    // 1.3: the settings guard's line (an older np-player.txt was updated) replaces the stage line for the first kNoticeS seconds; then the stages go on as before.
+    const char* notice = g_notice.load(std::memory_order_relaxed);
+    if (notice && now < kNoticeS) {
+        DrawLabel(fb, notice);
+    } else if (g_hintAfterS > 0.0) {
+        const char* label = SlowStart(now) ? kSlowHint : g_milestone.load(std::memory_order_relaxed);
+        if (label) DrawLabel(fb, label);
+    }
 }
 
 void RestoreRegion(uint32_t* fb, float brightness) {
@@ -360,6 +426,49 @@ float Advance(double now, float* brightness) {
     return g_shown;
 }
 
+// The picture behind the bar: g_bg, or while the made picture fades in (g_artImg) a blend of the plain background and it. Under g_draw. Small locals only:
+// the display callback (a 4 KiB stack) runs this too.
+void BackgroundInto(uint32_t* fb, double now) {
+    if (!g_artImg) {
+        std::memcpy(fb, g_bg, static_cast<size_t>(W) * H * 4u);
+        return;
+    }
+    const double t = g_fadeStartS < 0.0 ? 0.0 : (now - g_fadeStartS) / kArtFadeS;
+    const uint32_t k = t <= 0.0 ? 0u : (t >= 1.0 ? 256u : static_cast<uint32_t>(t * 256.0));
+    const uint16_t* art = reinterpret_cast<const uint16_t*>(g_artImg + VitaBootArt::kHeaderBytes);
+    for (int i = 0; i < W * H; ++i) {
+        const uint32_t p = art[i], s = g_bg[i];
+        const uint32_t r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31;
+        fb[i] = Pack(static_cast<int>(((s & 0xFF) * (256u - k) + ((r << 3) | (r >> 2)) * k) >> 8),
+                     static_cast<int>((((s >> 8) & 0xFF) * (256u - k) + ((g << 2) | (g >> 4)) * k) >> 8),
+                     static_cast<int>((((s >> 16) & 0xFF) * (256u - k) + ((b << 3) | (b >> 2)) * k) >> 8));
+    }
+}
+
+// The finished picture becomes the background for good (g_draw held; the screen's thread only: it frees memory).
+void FinalizeArt() {
+    if (!g_artImg) return;
+    const uint16_t* art = reinterpret_cast<const uint16_t*>(g_artImg + VitaBootArt::kHeaderBytes);
+    for (int i = 0; i < W * H; ++i) {
+        const uint32_t p = art[i], r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31;
+        g_bg[i] = Pack(static_cast<int>((r << 3) | (r >> 2)), static_cast<int>((g << 2) | (g >> 4)), static_cast<int>((b << 3) | (b >> 2)));
+    }
+    std::free(g_artImg);
+    g_artImg = nullptr;
+    g_fadeStartS = -1.0;
+}
+
+// Each turn of the screen's thread (g_draw held): take a handed-over picture, and end the fade (at once when the display is vitaGL's, where only
+// whole pictures are composed, or when the end of the loading screen has begun).
+[[maybe_unused]] void TickArt(double now, bool console) {
+    if (g_artPending && !g_artImg) {
+        g_artImg = g_artPending;
+        g_artPending = nullptr;
+        g_fadeStartS = now;
+    }
+    if (g_artImg && (!console || g_finishS >= 0.0 || now - g_fadeStartS >= kArtFadeS)) FinalizeArt();
+}
+
 void ComposeFull(uint32_t* fb, double now) {
     float brightness = 1.0f;
     const float shown = Advance(now, &brightness);
@@ -367,7 +476,7 @@ void ComposeFull(uint32_t* fb, double now) {
         for (int i = 0; i < W * H; ++i) fb[i] = 0xFF000000u;
         return;
     }
-    std::memcpy(fb, g_bg, static_cast<size_t>(W) * H * 4u);
+    BackgroundInto(fb, now);
     DrawElements(fb, shown, now);
     if (brightness < 0.999f) Darken(fb, 0, H, brightness);   // (the fade: everything once)
 }
@@ -379,6 +488,15 @@ void ComposeRegion(uint32_t* fb, double now) {
     RestoreRegion(fb, 1.0f);
     DrawElements(fb, shown, now);
     if (brightness < 0.999f) Darken(fb, kRegY0, kRegY1, brightness);
+}
+
+// The end, for good (g_draw held; the state machine has said so): mode 3, the thread told to stop, the console gets its text back (in memory: the renderer has the display).
+void EndLocked(double now) {
+    g_mode.store(3);
+    g_stopThread.store(true);
+    g_front = nullptr;
+    Log("[boot] loading screen done, the game's pictures show: %s  [+%lu ms]\n", g_m.endedBy ? g_m.endedBy : "", static_cast<unsigned long>(now * 1000.0));
+    VitaConsole::ShowText();
 }
 
 #if defined(__vita__)
@@ -433,18 +551,170 @@ void CopyRows(uint32_t* dst, const uint32_t* src, int y0, int y1, int x0, int x1
         std::memcpy(dst + y * W + x0, src + y * W + x0, static_cast<size_t>(x1 - x0) * 4u);
 }
 
+extern "C" const char* NpGameRootPath(void);
+
+// ---- art25: the picture from the player's game files (vita_bootart.cpp), the cache of it, and the thread that makes it
+struct GameFile {
+    SceUID fd = -1;
+    uint64_t size = 0;
+    GameFile() = default;
+    GameFile(const GameFile&) = delete;
+    GameFile& operator=(const GameFile&) = delete;
+    ~GameFile() { if (fd >= 0) sceIoClose(fd); }
+    bool Open(const char* path) {
+        fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+        if (fd < 0) { fd = -1; return false; }
+        const SceOff end = sceIoLseek(fd, 0, SCE_SEEK_END);
+        if (end <= 0) return false;
+        size = static_cast<uint64_t>(end);
+        return true;
+    }
+};
+bool ReadGameFile(void* context, uint64_t offset, void* destination, size_t length) {
+    GameFile* f = static_cast<GameFile*>(context);
+    char* out = static_cast<char*>(destination);
+    while (length > 0) {
+        const int n = sceIoPread(f->fd, out, static_cast<SceSize>(length > 262144 ? 262144 : length), static_cast<SceOff>(offset));
+        if (n <= 0) return false;
+        out += n;
+        offset += static_cast<uint64_t>(n);
+        length -= static_cast<size_t>(n);
+    }
+    return true;
+}
+
+struct ArtPaths {
+    char dmn[200], bnr[200], dir[160], cache[180], temp[190];
+    ArtPaths() {
+        const char* root = NpGameRootPath();
+        std::snprintf(dmn, sizeof dmn, "%s/files/Art/fe/mainui.dmn", root);
+        std::snprintf(bnr, sizeof bnr, "%s/files/opening.bnr", root);
+        std::snprintf(dir, sizeof dir, "%s/cache", VitaPlatform::kDataDevicePath);
+        std::snprintf(cache, sizeof cache, "%s/loading.bin", dir);
+        std::snprintf(temp, sizeof temp, "%s/loading.bin.tmp", dir);
+    }
+};
+
+bool BootArtOn() {
+    const char* e = std::getenv("MSC_BOOT_ART");
+    return !(e && e[0] == '0');
+}
+
+// The cache is current when its length is the picture's plus the stamp and the stamp names this format version and these two files' sizes.
+bool CacheCurrent(const ArtPaths& paths, uint64_t dmnSize, uint64_t bnrSize) {
+    GameFile cache;
+    if (!cache.Open(paths.cache) || cache.size != VitaBootArt::kCacheBytes) return false;
+    uint8_t trailer[VitaBootArt::kStampBytes];
+    if (!ReadGameFile(&cache, VitaBootArt::kPictureBytes, trailer, sizeof trailer)) return false;
+    return VitaBootArt::StampMatches(trailer, dmnSize, bnrSize);
+}
+
+// tmp + rename: a cut-off write (power, a kill) leaves the old file or none, never half of a new one.
+bool WriteCache(const ArtPaths& paths, const uint8_t* image) {
+    sceIoMkdir("ux0:/data", 0777);
+    sceIoMkdir(VitaPlatform::kDataDevicePath, 0777);
+    sceIoMkdir(paths.dir, 0777);
+    const SceUID out = sceIoOpen(paths.temp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (out < 0) return false;
+    bool ok = true;
+    for (size_t at = 0; at < VitaBootArt::kCacheBytes && ok;) {
+        const size_t n = VitaBootArt::kCacheBytes - at > 65536 ? 65536 : VitaBootArt::kCacheBytes - at;
+        ok = sceIoWrite(out, image + at, static_cast<SceSize>(n)) == static_cast<int>(n);
+        at += n;
+    }
+    if (sceIoClose(out) < 0) ok = false;
+    if (ok && sceIoRename(paths.temp, paths.cache) < 0) {
+        sceIoRemove(paths.cache);   // (a rename that will not replace)
+        ok = sceIoRename(paths.temp, paths.cache) >= 0;
+    }
+    if (!ok) sceIoRemove(paths.temp);
+    return ok;
+}
+
+volatile bool g_artCancel = false;   // a fatal report has the screen: stop making the picture
+SceUID g_artThread = -1;
+
+// The builder: reads the two game files, makes the loading picture, writes the cache, hands it to the screen,
+// and then (on first boot with generic artwork) builds the LiveArea & Home-screen bubble PNGs from the player's own disc.
+// Low priority on core 2: never blocks boot; peak memory stays bounded (~5.5 MiB) because the two phases run sequentially.
+int ArtThread(SceSize argsLen, void* argp) {
+    const uint32_t flags = (argsLen >= sizeof(uint32_t) && argp) ? *static_cast<const uint32_t*>(argp) : 1u;
+    if (flags & 1u) {
+        const double t0 = NowS();
+        const ArtPaths paths;
+        char why[120] = "";
+        uint8_t* image = static_cast<uint8_t*>(std::malloc(VitaBootArt::kCacheBytes));
+        bool built = false, cached = false;
+        GameFile dmn, bnr;
+        if (!image) std::snprintf(why, sizeof why, "no memory");
+        else if (!dmn.Open(paths.dmn)) std::snprintf(why, sizeof why, "Art/fe/mainui.dmn is missing or empty");
+        else if (!bnr.Open(paths.bnr)) std::snprintf(why, sizeof why, "opening.bnr is missing or empty");
+        else {
+            VitaBootArt::Source a, b;
+            a.read = b.read = ReadGameFile;
+            a.context = &dmn; a.size = dmn.size;
+            b.context = &bnr; b.size = bnr.size;
+            VitaBootArt::Stats stats;
+            built = VitaBootArt::Build(a, b, image, VitaBootArt::kCacheBytes, why, sizeof why, &stats, &g_artCancel);
+            if (built) {
+                VitaBootArt::WriteStamp(image + VitaBootArt::kPictureBytes, dmn.size, bnr.size);
+                cached = !g_artCancel && WriteCache(paths, image);
+            }
+        }
+        bool shown = false;
+        if (built) {
+            std::lock_guard<std::mutex> lock(g_draw);
+            if (g_mode.load() == 1 && !g_stopThread.load() && g_finishS < 0.0 && !g_artPending && !g_artImg && g_bgReady.load()) {
+                g_artPending = image;
+                image = nullptr;
+                shown = true;
+            }
+        }
+        std::free(image);
+        if (built) Log("[boot] picture: made from the game files in %u ms, %s, %s  [+%lu ms]\n", static_cast<unsigned>((NowS() - t0) * 1000.0),
+                       cached ? "cache written" : "cache NOT written (the next start makes it again)", shown ? "fading in" : "too late for this start",
+                       static_cast<unsigned long>(NowS() * 1000.0));
+        else Log("[boot] picture: plain, %s  [+%lu ms]\n", why[0] ? why : "not made", static_cast<unsigned long>(NowS() * 1000.0));
+    }
+    if ((flags & 2u) && !g_artCancel) {
+        VitaLiveAreaArt::ApplyIfNeeded(&g_artCancel);
+    }
+    g_artThread = -1;
+    sceKernelExitDeleteThread(0);
+    return 0;
+}
+
 int Thread(SceSize, void*) {
+    // int33: keep VitaOS from auto-suspending (~15 s unattended) during early first-run seed copy / art build before PowerWatch starts.
+    sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
     // the picture first (about 1 MiB from the package), then the animation
     uint32_t* bg = static_cast<uint32_t*>(std::malloc(static_cast<size_t>(W) * H * 4u));
     const double t0 = NowS();
+    // art25: the package's picture wins; else the cache of the picture made from the game files when its stamp is current; else the plain screen now and the
+    // picture made in the background (below, once the plain screen is up)
+    bool fromCache = false, build = false;
+    const char* plainWhy = "no picture in the package";
     if (bg) {
         g_haveArt = LoadArt("app0:boot/loading.bin", bg);
+        if (!g_haveArt) {
+            if (!BootArtOn()) {
+                plainWhy = "no picture in the package; MSC_BOOT_ART=0";
+            } else {
+                const ArtPaths paths;
+                GameFile dmn, bnr;
+                if (!dmn.Open(paths.dmn) || !bnr.Open(paths.bnr)) plainWhy = "no picture in the package, and no game files to make one from";
+                else if (CacheCurrent(paths, dmn.size, bnr.size) && LoadArt(paths.cache, bg)) { g_haveArt = true; fromCache = true; }
+                else build = true;
+            }
+        }
         if (!g_haveArt) MakePlainBackground(bg);
         g_bg = bg;
         g_bgReady.store(true, std::memory_order_release);
     }
     uint32_t* scratch = bg ? static_cast<uint32_t*>(std::malloc(static_cast<size_t>(W) * H * 4u)) : nullptr;
-    Log("[boot] loading screen: %s, ready in %u ms%s  [+%lu ms]\n", g_haveArt ? "the package's picture (boot/loading.bin)" : (bg ? "plain (no picture in the package)" : "NO MEMORY"),
+    char plainText[96];
+    std::snprintf(plainText, sizeof plainText, build ? "plain at first, the picture is made from the game files" : "plain (%s)", plainWhy);
+    Log("[boot] loading screen: %s, ready in %u ms%s  [+%lu ms]\n", g_haveArt ? (fromCache ? "the picture made from the game files (cache)" : "the package's picture (boot/loading.bin)") : (bg ? plainText : "NO MEMORY"),
                  static_cast<unsigned>((NowS() - t0) * 1000.0), scratch ? "" : " (no memory for the off-screen buffer: drawn in place)",
                  static_cast<unsigned long>(NowS() * 1000.0));
     if (!bg) { g_mode.store(2); return 0; }
@@ -460,25 +730,44 @@ int Thread(SceSize, void*) {
             }
         }
     }
+    const uint32_t artFlags = (build ? 1u : 0u) | (VitaLiveAreaArt::NeedsApply() ? 2u : 0u);
+    if (artFlags) {
+        // (behind this thread and the game's: core 2, one step above the lowest user priority; stack 96 KiB, the builder's own buffers are on the heap)
+        g_artThread = sceKernelCreateThread("np_bootart", ArtThread, 0x10000100 + 30, 96 * 1024, 0, 0x40000, nullptr);
+        if (g_artThread < 0 || sceKernelStartThread(g_artThread, sizeof artFlags, const_cast<uint32_t*>(&artFlags)) < 0) Log("[boot] picture: plain, the builder thread did not start (0x%X)\n", static_cast<unsigned>(g_artThread));
+    }
+    unsigned powerTickDiv = 0;
     while (!g_stopThread.load(std::memory_order_relaxed)) {
+        if (++powerTickDiv >= 30) {   // ~1 s at 30 Hz (2 vblanks per iteration)
+            powerTickDiv = 0;
+            if (g_mode.load(std::memory_order_relaxed) == 1 && !g_paused.load(std::memory_order_relaxed))
+                sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+        }
         // compose the next picture off screen, then show it at the second vertical blank from now (30 updates a second)
         bool full = false;
         {
             std::lock_guard<std::mutex> lock(g_draw);
             if (g_mode.load() != 1) break;
             const double now = NowS();
+            TickArt(now, VitaConsole::OwnsDisplay());
+            if (BootState::OnThreadTick(g_m, now)) { EndLocked(now); break; }   // (the safety net: neither the display callback nor a game present ended it)
+            if (SlowStart(now) && !g_slowNoted.exchange(true)) {
+                char note[96];
+                std::snprintf(note, sizeof note, "slow start: still loading after %.0f s at \"%s\"", g_hintAfterS, g_milestone.load() ? g_milestone.load() : "the start");
+                VitaLog::Note(note);
+            }
             const bool console = VitaConsole::OwnsDisplay();
             if (!g_scratch) {
                 // (no off-screen buffer: the old way, in the shown buffer)
                 if (console && !g_paused.load()) {
                     if (uint32_t* fb = const_cast<uint32_t*>(VitaConsole::Pixels())) {
-                        if (g_finishS >= 0.0) ComposeFull(fb, now); else ComposeRegion(fb, now);
+                        if (g_finishS >= 0.0 || g_artImg) ComposeFull(fb, now); else ComposeRegion(fb, now);
                     }
                 } else if (!console && g_front) {
                     ComposeRegion(static_cast<uint32_t*>(g_front), now);
                 }
             } else {
-                full = console && g_finishS >= 0.0;   // (phase A's fade darkens the whole screen)
+                full = console && (g_finishS >= 0.0 || g_artImg);   // (phase A's fade darkens the whole screen; so does the made picture's fade in: the whole background changes)
                 if (full) ComposeFull(g_scratch, now); else ComposeRegion(g_scratch, now);
                 MaybeShot(g_scratch, now);
             }
@@ -503,7 +792,17 @@ int Thread(SceSize, void*) {
         std::lock_guard<std::mutex> lock(g_draw);
         std::free(g_scratch);
         g_scratch = nullptr;
+        std::free(g_artImg);       // (a made picture the screen did not get to show; the builder frees one that comes later: it checks the mode under g_draw)
+        std::free(g_artPending);
+        g_artImg = g_artPending = nullptr;
+        // (a screen that ended for good gives its picture back too: every user checks the mode under g_draw first)
+        if (g_mode.load() == 3) {
+            g_bgReady.store(false, std::memory_order_release);
+            std::free(g_bg);
+            g_bg = nullptr;
+        }
     }
+    Log("[boot] loading screen thread ends, its buffers are freed  [+%lu ms]\n", static_cast<unsigned long>(NowS() * 1000.0));
     return 0;
 }
 #endif
@@ -516,6 +815,7 @@ bool Active() { return g_mode.load(std::memory_order_relaxed) == 1; }
 
 void Begin() {
     if (g_mode.load() != 0) return;
+    if (const char* e = std::getenv("MSC_BOOT_HINT"); e && *e) g_hintAfterS = std::atof(e);
 #if defined(NP_PLAYER)
     bool art = true;
 #else
@@ -524,10 +824,12 @@ void Begin() {
     if (const char* e = std::getenv("MSC_BOOT_SCREEN"); e && *e) art = std::strcmp(e, "text") != 0;
 #if defined(__vita__)
     if (art) {
+        g_m.mode = BootState::kArt;
         g_mode.store(1);
         g_thread = sceKernelCreateThread("np_bootscreen", Thread, 0x10000100 + 20, 64 * 1024, 0, 0x40000, nullptr);   // core 2, below the game's threads
         if (g_thread < 0 || sceKernelStartThread(g_thread, 0, nullptr) < 0) {
             Log("[boot] loading screen thread not started (0x%X): the text console instead\n", static_cast<unsigned>(g_thread));
+            g_m.mode = BootState::kText;
             g_mode.store(2);
             art = false;
         }
@@ -538,46 +840,106 @@ void Begin() {
     if (!art) {
         g_mode.store(2);
         VitaConsole::ShowText();
+#if defined(__vita__)
+        if (VitaLiveAreaArt::NeedsApply()) {
+            const uint32_t artFlags = 2u;
+            g_artThread = sceKernelCreateThread("np_bootart", ArtThread, 0x10000100 + 30, 96 * 1024, 0, 0x40000, nullptr);
+            if (g_artThread >= 0) sceKernelStartThread(g_artThread, sizeof artFlags, const_cast<uint32_t*>(&artFlags));
+        }
+#endif
     }
     Log("[boot] start-up screen: %s (MSC_BOOT_SCREEN=art|text)\n", ModeName(g_mode.load()));
 }
 
+// A new milestone: the line under the bar and one log line (the same milestone again, from a repeating progress report, is nothing).
+static void Milestone(const char* text) {
+    if (g_mode.load(std::memory_order_relaxed) == 3) {
+        std::lock_guard<std::mutex> lock(g_draw);
+        if (BootState::Guard(g_m)) Log("[boot] guard: a milestone (%s) was sent to the loading screen after it ended for good: nothing is drawn\n", text);
+        return;
+    }
+    if (g_milestone.exchange(text, std::memory_order_relaxed) == text) return;
+    Log("[boot] milestone: %s  [+%lu ms]\n", text, static_cast<unsigned long>(NowS() * 1000.0));
+}
+
+// np_boot_io.h: a file the start-up needs did not open or read and is being tried again (for up to 3 s): the line under the bar says so (the Tr table keeps the
+// English text when a language has no entry), instead of a bar that seems to hang.
+void Retrying() { Milestone("RETRYING THE GAME FILES"); }
+
+void Notice(const char* text) {
+    if (!text || !*text) return;
+    if (g_mode.load(std::memory_order_relaxed) == 3) {
+        std::lock_guard<std::mutex> lock(g_draw);
+        if (BootState::Guard(g_m)) Log("[boot] guard: a notice was sent to the loading screen after it ended for good (%s): nothing is drawn\n", text);
+        return;
+    }
+    g_notice.store(text, std::memory_order_relaxed);
+    Log("[boot] notice on the loading screen: %s\n", text);
+}
+
 void Stage(const char* text) {
-    if (!text || g_mode.load(std::memory_order_relaxed) != 1) return;
-    struct Anchor { const char* prefix; float base, cap, tau; };
+    if (!text) return;
+    struct Anchor { const char* prefix; float base, cap, tau; const char* milestone; };
     static const Anchor kAnchors[] = {
-        {"C++ static", 0.02f, 0.05f, 0.4f},
-        {"platform start-up", 0.05f, 0.09f, 0.6f},
-        {"checking the data", 0.09f, 0.10f, 0.3f},
-        {"first-run", 0.10f, 0.11f, 0.3f},
-        {"the native save", 0.11f, 0.12f, 0.3f},
-        {"installing the crash", 0.12f, 0.13f, 0.2f},
-        {"starting the helper", 0.13f, 0.14f, 0.2f},
-        {"wiring", 0.14f, 0.20f, 1.2f},
-        {"vitaGL start-up", 0.20f, 0.26f, 0.8f},
-        {"the game's start-up", 0.26f, 0.32f, 1.0f},
+        {"C++ static", 0.02f, 0.05f, 0.4f, "STARTING"},
+        {"platform start-up", 0.05f, 0.09f, 0.6f, "STARTING"},
+        {"checking the data", 0.09f, 0.10f, 0.3f, "CHECKING THE GAME FILES"},
+        {"first-run", 0.10f, 0.11f, 0.3f, "CHECKING THE GAME FILES"},
+        {"the native save", 0.11f, 0.12f, 0.3f, "CHECKING THE SAVE"},
+        {"installing the crash", 0.12f, 0.13f, 0.2f, "STARTING"},
+        {"starting the helper", 0.13f, 0.14f, 0.2f, "STARTING"},
+        {"wiring", 0.14f, 0.20f, 1.2f, "STARTING"},
+        {"vitaGL start-up", 0.20f, 0.26f, 0.8f, "STARTING THE GRAPHICS"},
+        {"the game's start-up", 0.26f, 0.32f, 1.0f, "LOADING THE GAME"},
     };
     for (const Anchor& a : kAnchors)
-        if (std::strncmp(text, a.prefix, std::strlen(a.prefix)) == 0) { SetAnchor(a.base, a.cap, a.tau); return; }
+        if (std::strncmp(text, a.prefix, std::strlen(a.prefix)) == 0) {
+            Milestone(a.milestone);
+            if (g_mode.load(std::memory_order_relaxed) == 1) SetAnchor(a.base, a.cap, a.tau);
+            return;
+        }
 }
 
 void Progress(int kind, unsigned done, unsigned total) {
     if (g_mode.load(std::memory_order_relaxed) != 1) return;
     if (kind == kSeedCopy) {
+        Milestone("PREPARING THE SHADERS");
         SetAnchor(0.15f, 0.20f, 15.0f);   // (the copy is the fallback path: its length is not known in advance)
     } else if (kind == kWarmup && total != 0 && !g_gameStage) {
+        Milestone("PREPARING THE SHADERS");
         const float f = static_cast<float>(done > total ? total : done) / static_cast<float>(total);
         SetAnchor(0.32f + 0.30f * f, 0.32f + 0.30f * f + 0.02f, 0.5f);
     } else if (kind == kPresent && done >= 2 && !g_gameStage) {
         // the renderer's second picture: the warm-up of frame 1 is over; the game's own start follows, about 80 frames to its
         // first picture (console log of 17 Oct)
         g_gameStage = true;
+        Milestone("LOADING THE GAME");
         SetAnchor(0.62f, 0.97f, 2.4f);
     }
 }
 
 void Frame(uint64_t frames) {
     if (g_mode.load(std::memory_order_relaxed) != 1) return;
+    if (g_finishPosted.load(std::memory_order_acquire)) {
+        // a game picture after Finish(), whichever path showed it (the display callback's Compose is not always called: the ladder, a long present, a stall): once the fade time has passed
+        // the loading screen ends here for good
+        bool ended = false;
+        {
+            std::lock_guard<std::mutex> lock(g_draw);
+            const double now = NowS();
+            ended = BootState::OnGamePresent(g_m, now);
+            if (ended) EndLocked(now);
+        }
+#if defined(__vita__)
+        if (ended && g_thread >= 0) {
+            SceUInt timeout = 300000;   // the thread leaves its loop within two vblanks
+            sceKernelWaitThreadEnd(g_thread, nullptr, &timeout);
+            sceKernelDeleteThread(g_thread);
+            g_thread = -1;
+        }
+#endif
+        if (ended) return;
+    }
     if (g_frameBase == 0) g_frameBase = frames;
     // A game that never shows its boot screens (a test scenario) must not keep the loading screen forever.
     if (frames - g_frameBase == 900) Finish("900 frames without the game's boot screens");
@@ -590,6 +952,11 @@ void Finish(const char* why) {
         if (g_finishS >= 0.0) return;
         g_finishS = NowS();
     }
+    {
+        std::lock_guard<std::mutex> lock(g_draw);
+        BootState::Finish(g_m, NowS());
+    }
+    g_finishPosted.store(true, std::memory_order_release);
     Log("[boot] loading screen ends: %s  [+%lu ms]\n", why ? why : "", static_cast<unsigned long>(NowS() * 1000.0));
 }
 
@@ -624,6 +991,7 @@ static int ComposeLocked(void* framebuffer) {
     std::lock_guard<std::mutex> lock(g_draw);
     if (g_mode.load() != 1) return 0;
     const double now = NowS();
+    BootState::OnCompose(g_m, now);   // (from here on g_m.mode == kDone when the fade is over: this picture is the last)
     if (g_scratch) {
         // composed in cached memory, then one write-only copy (blending in the CDRAM buffer read it back pixel by pixel)
         ComposeFull(g_scratch, now);
@@ -635,14 +1003,7 @@ static int ComposeLocked(void* framebuffer) {
 #if defined(__vita__)
     MaybeShot(g_scratch ? g_scratch : static_cast<uint32_t*>(framebuffer), now);
 #endif
-    if (g_finishS >= 0.0 && now - g_finishS > 0.45) {
-        // faded out: from the next picture on the game shows; the console gets its text back (in memory: the renderer has the display)
-        g_mode.store(3);
-        g_stopThread.store(true);
-        g_front = nullptr;
-        Log("[boot] loading screen done, the game's pictures show  [+%lu ms]\n", static_cast<unsigned long>(now * 1000.0));
-        VitaConsole::ShowText();
-    }
+    if (g_m.mode == BootState::kDone) EndLocked(now);   // faded out: from the next picture on the game shows
     return 1;
 }
 
@@ -655,6 +1016,11 @@ void Resume() {
     g_paused.store(false);
 #if defined(__vita__)
     if (g_mode.load() == 1 && VitaConsole::OwnsDisplay()) {
+        // (the screen is only redrawn before Finish(): after it the console side taking the display back ends the loading screen instead of drawing it again)
+        if (!BootState::OnResume(g_m, NowS())) {
+            if (g_m.mode == BootState::kDone) EndLocked(NowS());
+            return;
+        }
         uint32_t* fb = const_cast<uint32_t*>(VitaConsole::Pixels());
         if (fb) {
             if (g_scratch) { ComposeFull(g_scratch, NowS()); std::memcpy(fb, g_scratch, static_cast<size_t>(W) * H * 4u); }
@@ -666,8 +1032,13 @@ void Resume() {
 }
 void Stop() {
     if (g_mode.load() != 1) return;
+#if defined(__vita__)
+    g_artCancel = true;
+#endif
     g_stopThread.store(true);
     std::lock_guard<std::mutex> lock(g_draw);
+    g_m.mode = BootState::kDone;
+    g_m.endedBy = "a fatal report has the screen";
     g_mode.store(3);
     g_front = nullptr;
 }
@@ -688,4 +1059,19 @@ void TestRender(uint32_t* fb, float shown, double now, float brightness) {
     if (brightness < 0.999f) Darken(fb, 0, H, brightness);
 }
 
+// Tests (host): the made picture's fade. `picture` is a loading.bin image (the header and the RGB565 pixels); seconds is the time since the fade began.
+void TestFade(const unsigned char* picture, double seconds, uint32_t* fb, bool finish) {
+    if (!g_artImg) {
+        g_artImg = static_cast<uint8_t*>(std::malloc(VitaBootArt::kCacheBytes));
+        if (!g_artImg) return;
+        std::memcpy(g_artImg, picture, VitaBootArt::kPictureBytes);
+        g_fadeStartS = 0.0;
+    }
+    BackgroundInto(fb, seconds);
+    if (finish) FinalizeArt();
+}
+
 } // namespace VitaBootScreen
+
+// The stdio lock's start-up retry (np_stdio_lock.cpp) calls this while it waits to try a file again; from any thread.
+extern "C" void NpBootScreenNotice(void) { VitaBootScreen::Retrying(); }

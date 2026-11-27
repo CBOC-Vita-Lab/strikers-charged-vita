@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CBOC-Vita <cboc-vita@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 17:00:00 -0500
+Subject: [PATCH] glTexImage2D(GL_INTENSITY, GL_RED, GL_UNSIGNED_BYTE) takes the fast store: GL_INTENSITY is U8_RRRR (one byte a texel, the same layout as U8_R), so the bytes are copied as they are instead of one texel at a time through two callbacks (walk15; the renderer's MSC_VGX_LA88=2 / MSC_VGX_I8CHURN uploads)
+
+---
+
+diff --git a/source/textures.c b/source/textures.c
+index 1a1b7d4b..ae9e61fb 100644
+--- a/source/textures.c
++++ b/source/textures.c
+@@ -608,7 +608,7 @@ static inline __attribute__((always_inline)) void _glTexImage2D_FlatIMPL(texture
+ 	case GL_ALPHA:
+ 		switch (type) {
+ 		case GL_UNSIGNED_BYTE:
+-			if (internalFormat == GL_RED || internalFormat == GL_ALPHA)
++			if (internalFormat == GL_RED || internalFormat == GL_ALPHA || internalFormat == GL_INTENSITY) // 0053: GL_INTENSITY is U8_RRRR, one byte a texel like U8_R: the bytes go in as they are
+ 				fast_store = GL_TRUE;
+ 			else
+ 				read_cb = read_r8;

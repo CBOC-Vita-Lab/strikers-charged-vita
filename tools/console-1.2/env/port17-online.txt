@@ -1,0 +1,13 @@
+# console-1.2 run port17-online: Online socket binds below 32768 (MANUAL: Online Central > Check Connection)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w18, route onconn, version payload 1.3, role manual
+# port17.md: read `[np-net] UDP port 25110 bound (asked 25110, 1 bind tried)` or a chain of `bind to UDP port N failed (0x...)` lines. s36 must not be used for this: it asked for 41000, which the Vita refuses.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/on-conn.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+# (no switch)

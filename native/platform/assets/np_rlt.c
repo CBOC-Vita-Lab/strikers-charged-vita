@@ -63,7 +63,7 @@ int npa_cvt_rlt_data(NpaCtx* c, uint8_t* p, size_t size)
     size_t dictBytes;
     if (size < 16)
     {
-        npa_err(c, NPA_ERR_FORMAT, "texture bundle of %zu bytes", size);
+        npa_err(c, NPA_ERR_FORMAT, "texture bundle of %lu bytes", (unsigned long)size);
         return NPA_ERR_FORMAT;
     }
     if (npa_hrd32(p) == RLT_MAGIC && npa_rd32(p) != RLT_MAGIC) return NPA_ALREADY;
@@ -76,7 +76,7 @@ int npa_cvt_rlt_data(NpaCtx* c, uint8_t* p, size_t size)
     dictBytes = (size_t)n * 16;
     if (n > 65536 || 16 + dictBytes > size)
     {
-        npa_err(c, NPA_ERR_BOUNDS, "texture bundle: %u textures do not fit %zu bytes", n, size);
+        npa_err(c, NPA_ERR_BOUNDS, "texture bundle: %u textures do not fit %lu bytes", n, (unsigned long)size);
         return NPA_ERR_BOUNDS;
     }
     if (npa_swap32_range(c, p, 4, p, p + size)) return c->res->status;

@@ -169,6 +169,7 @@ public:
     virtual ~FEModelManager();
 
     void Update(float dt);
+    unsigned StillStamp(unsigned hash) const; // MSC_MENU_STILL: hash mixed with the characters on screen
     void Render();
     void FinishLoadModel(FEModelHandle* handle);
     void RegisterObject(StadiumFEModelMarker* object);

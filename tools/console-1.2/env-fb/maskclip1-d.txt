@@ -1,0 +1,16 @@
+# console-1.2 run maskclip1-d: Held moments with the scissor-mask clear over the old region only (MSC_VGX_VGL_MASKCLIP=1), The Dump
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group s30, route worstgpu, version payload 1.3, role ab
+# gpu24: FIRST check that the pictures are right (a leaking scissor would show in the crowd atlas: shadows or crowd figures cut or smeared in the walk-out and the celebration) and the `[rt] scissor mask clear clip` line (clears narrowed: about 20 a held picture, kilopixels left out: host model 15,000-24,000 a held picture). Then per held class ([head] walk-out, celebration, replay) GPU p50 / p95 and late % against scn-on-d: the difference is what the whole-target clears cost (an ESTIMATE only: no console reading of a stencil-only quad exists). Any [fatal], a garbled held scene = stop.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was worstgpu.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-dump.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_HEAD_STAT=1
+MSC_HITCH_LINES=1500
+MSC_VGX_VGL_MASKCLIP=1

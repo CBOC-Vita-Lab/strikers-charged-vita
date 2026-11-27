@@ -176,6 +176,7 @@ void Dump(const char* path) {
     for (auto& e : g_layouts) std::fprintf(f, " 0x%X=%llu", e.first, static_cast<unsigned long long>(e.second));
     std::fprintf(f, "\n");
     DlCacheReport(f);
+    FrontEndReport(f);
     TexCacheReport(f);
     PassCheckReport(f);
     std::fprintf(f, "notes:\n");

@@ -5,7 +5,7 @@
 
 class GLView;
 
-int nlScreenPrintf(int x, int y, bool bFromTop, int font, const char* format, ...);
+int nlScreenPrintf(int x, int y, bool bFromTop, int font, const char* format, ...) __attribute__((format(printf, 5, 6)));
 void DrawTextRectangle(GLView* view, const nlColour& c,
     float left, float top, float right, float bottom, float z, int layer,
     bool bApplyBorder, bool bVirtualCoords);

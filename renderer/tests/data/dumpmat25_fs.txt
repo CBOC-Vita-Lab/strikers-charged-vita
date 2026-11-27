@@ -1,0 +1,71 @@
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform sampler2D u_tex0;
+uniform sampler2D u_tex1;
+uniform sampler2D u_tex2;
+uniform sampler2D u_tex3;
+uniform vec4 u_tev[11];
+varying vec4 v_col0;
+varying vec3 v_tex0;
+varying vec3 v_tex1;
+varying vec3 v_tex2;
+varying vec3 v_tex3;
+void main() {
+  vec4 prev = u_tev[0], c0 = u_tev[1], c1 = u_tev[2], c2 = u_tev[3];
+  vec4 tex = vec4(1.0), ras = vec4(0.0);
+  vec3 kc = vec3(1.0);
+  float ka = 1.0;
+  vec2 uv0 = v_tex0.xy;
+  vec2 uv1 = v_tex1.xy;
+  vec2 uv2 = v_tex2.xy;
+  vec2 uv3 = v_tex3.xy;
+  // stage 0
+  tex = texture2D(u_tex1, uv1).rgba;
+  ras = vec4(0.0);
+  {
+    vec3 rc = (tex.rgb * tex.aaa);
+    prev.rgb = rc;
+  }
+  // stage 1
+  ras = vec4(0.0);
+  {
+    vec3 rc = (prev.rgb * u_tev[4].rgb);
+    prev.rgb = rc;
+  }
+  // stage 2
+  tex = texture2D(u_tex2, uv2).rgba;
+  ras = vec4(0.0);
+  {
+    vec3 rc = (prev.rgb * tex.rgb);
+    prev.rgb = rc;
+  }
+  // stage 3
+  tex = texture2D(u_tex0, uv0).rgba;
+  ras = v_col0.rgba;
+  {
+    vec3 rc = (prev.rgb + (ras.rgb * tex.rgb));
+    rc = min(rc, vec3(1.0));
+    float ra = tex.a;
+    prev.rgb = rc;
+    prev.a = ra;
+  }
+  // stage 4
+  tex = texture2D(u_tex3, uv3).rgba;
+  ras = vec4(0.0);
+  {
+    vec3 rc = (prev.rgb * tex.rgb);
+    float ra = prev.a;
+    prev.rgb = rc;
+    prev.a = ra;
+  }
+  vec4 fin = vec4(prev.rgb, prev.a);
+  float fg = u_tev[9].x / max(u_tev[9].y - gl_FragCoord.z, 0.000001);
+  fg = clamp(fg - u_tev[9].z, 0.0, 1.0);
+  fg = 1.0 - exp2(-8.0 * fg * fg);
+  fin.rgb = mix(fin.rgb, u_tev[10].rgb, fg);
+  gl_FragColor = fin;
+}
+

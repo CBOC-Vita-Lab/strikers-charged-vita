@@ -8,22 +8,22 @@
 #   C   30 fps    the same with pacing on
 # Logs: $BUILD_ROOT/runs/pace/<scene>-<cfg>.log ; the table: tools/msp/pace_report.py
 NP=$(cd "$(dirname "$0")/../.." && pwd); cd $NP || exit 1
-B=${BUILD_ROOT:-/home/claude/msc/build/np/MSP}
+B=${BUILD_ROOT:-/work/msc/build/np/MSP}
 EXE=${EXE:-$B/host32/np-host32-full-null}
 OUT=$B/runs/pace; mkdir -p $OUT
 SCENES=${*:-menu hof match}
-SAVEDIR=${SAVEDIR:-/home/claude/msc/build/np/B3/rundata-save}
+SAVEDIR=${SAVEDIR:-/work/msc/build/np/B3/rundata-save}
 declare -A SCRIPT FRAMES WIDE SAVE
 SCRIPT[menu]=$NP/tools/msp/nav/pace_menu.txt;   FRAMES[menu]=${MENUF:-2400};  WIDE[menu]=1; SAVE[menu]=0
 SCRIPT[hof]=$NP/tools/msp/nav/pace_hof.txt;     FRAMES[hof]=${HOFF:-4200};    WIDE[hof]=1;  SAVE[hof]=0
-SCRIPT[match]=/home/claude/msc/tools/scripts/nav_match60.txt; FRAMES[match]=${MATCHF:-4600}; WIDE[match]=0; SAVE[match]=1
+SCRIPT[match]=/work/msc/tools/scripts/nav_match60.txt; FRAMES[match]=${MATCHF:-4600}; WIDE[match]=0; SAVE[match]=1
 SCRIPT[survey]=$NP/tools/nav/survey_full.txt;   FRAMES[survey]=${SURVEYF:-30000}; WIDE[survey]=0; SAVE[survey]=0
 run() {  # run <scene> <cfg> [env...]
   local sc=$1 cfg=$2; shift 2
   local D=$OUT/data-$sc-$cfg-$$ T0=$(date +%s)
   rm -rf $D; mkdir -p $D
   [ "${SAVE[$sc]}" = 1 ] && cp -a $SAVEDIR/. $D/
-  ( cd $D; env NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=${SCRIPT[$sc]} MSC_MAX_FRAMES=${FRAMES[$sc]} MSC_VIRTUAL_TIME=1 \
+  ( cd $D; env NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$D MSC_INPUT_SCRIPT=${SCRIPT[$sc]} MSC_MAX_FRAMES=${FRAMES[$sc]} MSC_VIRTUAL_TIME=1 \
       MSC_FRAME_LOG=100000 MSC_WATCH=1 MSC_WATCH_EVERY=100000 MSC_STATE_HASH=30 NP_DET_NAN=1 NP_WIDESCREEN=${WIDE[$sc]} MSC_FRAME_PACING_LOG=2 "$@" \
       timeout -k 3 ${RUNT:-300} $EXE > $OUT/$sc-$cfg.log 2>&1; echo "rc=$?" >> $OUT/$sc-$cfg.log )
   rm -rf $D

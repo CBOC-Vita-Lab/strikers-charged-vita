@@ -25,7 +25,7 @@ class TransportMessage;
 
 struct TransportScreenPrinter
 {
-    void Printf(const char* format, ...);
+    void Printf(const char* format, ...) __attribute__((format(printf, 2, 3)));
     void Print(const char* text);
     void Draw();
 

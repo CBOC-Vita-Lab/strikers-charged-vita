@@ -26,6 +26,10 @@ public:
     void OnButtonPointerEnter(int index, void* context);
     void OnButtonPointerLeave(int index, void* context);
     void InitializePointerButtons();
+    // 1.3 (front19): the navigation overlay's DONE corner button, relabelled VITA SETTINGS (offered when NpOptionsSettingsOffer says so): opens SCENE_PAUSE_VITA_SETTINGS (SHVitaSettings.cpp)
+    void OnDonePointerPress(int index, void* context);
+    void OnDonePointerEnter(int index, void* context);
+    void OnDonePointerLeave(int index, void* context);
 
     enum ScenePhase
     {
@@ -42,6 +46,10 @@ public:
     /* 0x31D */ u8 mPadding31D[3];
     /* 0x320 */ int mScenePhase;
     /* 0x324 */ SceneList mNextScene;
-}; // size 0x328
+    // np (front19): not in the original layout (nothing reads OptionsScene's size)
+    FEPointerButton mDoneButton;
+    TLComponentInstance* mDoneInstance;
+    bool mDoneOffered;
+};
 
 #endif // GAME_SH_SH_OPTIONS_H

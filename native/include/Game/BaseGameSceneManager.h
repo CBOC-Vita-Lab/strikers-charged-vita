@@ -94,6 +94,7 @@ enum SceneList
     SCENE_LESSON = 85,
     SCENE_STRIKERS_101_LESSONS = 86,
     SCENE_LESSON_MOVIE = 87,
+    SCENE_PAUSE_VITA_SETTINGS = 88,   // np: the VITA SETTINGS screen (SHVitaSettings.cpp), made of the pause panel; was a hole in the table
     OVERLAY_HUD = 89,
     OVERLAY_IN_GAME_TEXT = 90,
     OVERLAY_POST_GAME_RESULTS = 91,

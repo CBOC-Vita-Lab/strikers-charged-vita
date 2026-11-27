@@ -41,8 +41,10 @@ void CaptureTexImage(GLenum target, GLint level, GLint internal, GLsizei w, GLsi
 #undef glPixelStorei
 #undef glGetIntegerv
 #undef glTexImage2D
+#include "backend_test_hooks.h"
 
-namespace vgx { bool LogEnabled() { return false; } }
+namespace vgx { bool LogEnabled() { return false; } const char* ShaderListPath() { return ""; } }   // (vgx_draw.cpp, not linked here)
+extern "C" int VgxStillArmed(void) { return 0; }
 
 int main() {
     vgx::TexUpload up;
@@ -63,5 +65,14 @@ int main() {
     uint64_t total = 0;
     for (int i = 1; i < VGX_STUB_KINDS; ++i) total += bytes[i];
     Check(total == 30, "GL memory census records compact allocation");
+    GLuint renderbuffer;
+    glGenRenderbuffers(1, &renderbuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 8, 4);
+    vgx_stub_mem(bytes, counts);
+    Check(bytes[VGX_STUB_RB] == 128 && counts[VGX_STUB_RB] == 1, "renderbuffer storage enters GL memory census");
+    glDeleteRenderbuffers(1, &renderbuffer);
+    vgx_stub_mem(bytes, counts);
+    Check(bytes[VGX_STUB_RB] == 0 && counts[VGX_STUB_RB] == 0, "renderbuffer deletion releases GL memory census");
     std::puts("PASS: real GL backend LA88 arguments, platform-specific alignment, payload and byte accounting (stub driver)");
 }

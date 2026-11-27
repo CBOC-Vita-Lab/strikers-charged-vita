@@ -1,5 +1,5 @@
 // W5-SEED: which compiled-shader files does a vgx shader list need, and which does a seed folder have?
-//   seedcheck <list.shl> [<cache dir: .../<key>/v2>] [--names]
+//   seedcheck <list.shl> [<cache dir: .../<key>/v3 (or v2)>] [--names]   (v3: 16-digit file names, v2: without leading zeros; a file is found in either spelling)
 // For every vertex / fragment key of the list the renderer's own generator (vgx_shadergen.cpp) makes the GLSL text; vitaGL names its cache file by
 // XXH3-64 of "#version 100\n" + text (v/ or f/, then the top byte as a folder, then the hash in hex, ".gxp"; checked against a seed that vitaGL itself
 // wrote: tools/seedtest/xh.c). Prints one line per shader with "have"/"MISSING" when a cache dir is given; exit status 1 if any is missing.
@@ -35,13 +35,15 @@ int main(int argc, char** argv) {
         else if (type == 2) { FsKey k; if (std::fread(&k, sizeof k, 1, f) != 1) break; src.fragment = true; frag = true; GenerateFragmentShader(k, src); ++nFs; }
         else if (type == 3) { uint32_t v[2]; if (std::fread(v, sizeof v, 1, f) != 1) break; continue; }
         else if (type == 4) { uint32_t v[4]; if (std::fread(v, sizeof v, 1, f) != 1) break; continue; }
+        else if (type == 5) { uint32_t v[2]; if (std::fread(v, sizeof v, 1, f) != 1) break; continue; }   // (a match mark: vertex and fragment index, 8 bytes; vgx_listmerge.h reads the same)
         else { std::fprintf(stderr, "unknown record type %u\n", type); return 2; }
         std::string text = "#version 100\n" + src.text;
         const unsigned long long h = XXH3_64bits(text.data(), text.size());
-        char rel[64];
-        std::snprintf(rel, sizeof rel, "%c/%02X/%llX.gxp", frag ? 'f' : 'v', (unsigned)(h >> 56), h);
+        char rel[64], relShort[64];
+        std::snprintf(rel, sizeof rel, "%c/%02X/%016llX.gxp", frag ? 'f' : 'v', (unsigned)(h >> 56), h);
+        std::snprintf(relShort, sizeof relShort, "%c/%02X/%llX.gxp", frag ? 'f' : 'v', (unsigned)(h >> 56), h);
         if (!dir.empty()) {
-            const bool ok = Exists(dir + "/" + rel);
+            const bool ok = Exists(dir + "/" + rel) || Exists(dir + "/" + relShort);
             ok ? ++have : ++missing;
             if (names || !ok) std::printf("%s %s %s\n", ok ? "have   " : "MISSING", frag ? "fs" : "vs", rel);
         } else if (names) std::printf("%s\n", rel);

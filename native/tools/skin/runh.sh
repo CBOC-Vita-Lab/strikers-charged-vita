@@ -4,10 +4,10 @@
 # (after tools/gxd/runh.sh). HASHMODE=0 switches the frame hash off; NOASLR=1 fixes the address space; DUMP="f1,f2,..." writes PNGs (GL exe).
 # The environment is padded to a fixed size so that runs of different executables / switches have the same process layout.
 EXE=${1:?exe}; TAG=${2:?tag}; NAV=${3:?script}; FR=${4:?frames}; shift 4
-B=${SKINB:-/home/claude/msc/build/np/W5SKIN}
+B=${SKINB:-/work/msc/build/np/W5SKIN}
 D=$B/runs/$TAG; rm -rf $D; mkdir -p $D/data
-[ -n "$SAVE" ] && cp -a /home/claude/msc/build/np/B3/rundata-save/. $D/data/
-export NP_DISC_DIR=/home/claude/msc/game NP_DATA_DIR=$D/data
+[ -n "$SAVE" ] && cp -a /work/msc/build/np/B3/rundata-save/. $D/data/
+export NP_DISC_DIR=/work/msc/game NP_DATA_DIR=$D/data
 for kv in "$@"; do export "$kv"; done
 [ "${HASHMODE:-1}" != 0 ] && export MSC_VGX_HASH=${HASHMODE:-1}
 export MSC_VGX_FRAMESTATS=$D/vgx_frames.csv MSC_STATE_HASH=${HASHEVERY:-120} MSC_MAX_FRAMES=$FR MSC_FRAME_LOG=100000 MSC_WATCH=1 MSC_WATCH_EVERY=100000 NP_DET_NAN=1

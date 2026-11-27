@@ -1,0 +1,14 @@
+# console-1.2 run wakegap-on: Wi-Fi gaps with the keep-awake filler (MSC_NET_KEEPAWAKE_MS=50) (MANUAL: LAN pair with the PC partner)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group w16, route onconn, version payload 1.3, role manual
+# wake14.md: on both consoles, then once on the Vita only: tx longest <= ~100 ms outside stalls; the partner's rx table should show no Vita burst after a quiet spell; the same goal / Mega Strike / replay: `[mp-lan] net` window after each cut-scene (starved=, rtt= max). Decides a default. NEEDS A PC PARTNER.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/on-conn.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_LINK_GAPLOG=50
+MSC_NET_KEEPAWAKE_MS=50

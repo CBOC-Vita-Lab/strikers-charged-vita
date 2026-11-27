@@ -1,0 +1,13 @@
+# console-1.2 run clk500-tour: 1.3 current at 500 MHz (PSVshellPlus profile set by hand)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 3, group addon, route ctour, version payload 1.3, role manual
+# Needs the owner's PSVshellPlus 500 MHz profile for CDXMP0001: the `clocks:` line must say about 498 MHz measured. Against cur-tour1..3.
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/ctour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_HITCH_MS=50
+# ---- under test: nothing here means the default ----
+MSC_VITA_CLOCK_POLICY=max

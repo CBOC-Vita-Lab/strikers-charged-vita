@@ -1,0 +1,21 @@
+# console-1.2 run exactall-vice: Every exact OFF switch on, with the verify modes, Vice
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group exact, route tour, version payload 1.3, role ab
+# exact17: the combined run (Galaxy's five-switch pattern): MSC_VGX_GXD all bits and the verify bit 30, HSR_PROVEN + FACTS (+ COUNT), CROWDTRIM_RECT=2 (verify), RENDER_NEON=1 (boot self-test), LA88=2, PREFETCH=15, SNAP_ONECOPY=1, split lines on. Left out: DISCARD_BLEND (new shader texts, the pack must be seeded first), RT_POOL and NODEPTH_PASS (memory, own runs). Read: every verify count 0, no new FAILED, [lane] ms against d1 (the verify costs a little front-end time: strip bit 30 for a pure timing run).
+# ---- route and logging: the same in every run ----
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/tour.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_VGX_GXD=2147483647
+MSC_VGX_HSR_PROVEN=1
+MSC_VGX_HSR_FACTS=1
+MSC_VGX_HSR_COUNT=1
+MSC_VGX_CROWDTRIM_RECT=2
+MSC_RENDER_NEON=1
+MSC_VGX_LA88=2
+MSC_PREFETCH=15
+MSC_GSPLIT=2

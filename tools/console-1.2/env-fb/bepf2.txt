@@ -1,0 +1,17 @@
+# console-1.2 run bepf2: be25: prefetch the next draws' records and uniform blocks (MSC_VGX_BEPREFETCH=2)
+# np-player.txt written by 1.3.0 build console-kit (the kit's files are not old settings files: the stale-settings guard leaves them as they are)
+# tier 2, group be25, route gsvice, version payload 1.3, role ab
+# Against bephv2: `pre` and `uniforms` us per draw (cpu) and cpu ms/pic should fall if those phases wait for memory; `[fastcmp]` draws prefetched about the draws of the picture. Ship (plan ON) if cpu falls 0.5 ms or more with no change anywhere else. Read `[beph]` (v2: every figure wall/cpu; scene 3(cut) is the goal cut-scene and walk-out, `uniforms` and `pre` are us per draw), `[lane]` be CPU / wall and `[fastcmp]`. Pass rule: no new [hitch], no fault, the picture as in the base run.
+# ---- route and logging: the same in every run ----
+# fast boot (test only): the route starts the match at the title screen, so the menu, intro and stadium-select time is not measured or spent; the old route was fb-vice-goal.txt
+MSC_INPUT_SCRIPT=ux0:data/mscharged-perf-test/fb-vice-goal.txt
+MSC_FRAME_TIMING=300
+MSC_LAT=1
+MSC_WATCH=1
+MSC_WATCH_EVERY=600
+MSC_VITA_CLOCK_POLICY=max
+# ---- under test: nothing here means the default ----
+MSC_GSPLIT=2
+MSC_VGX_BEPH=1
+MSC_VGX_GXM_DIRECT=1
+MSC_VGX_BEPREFETCH=2

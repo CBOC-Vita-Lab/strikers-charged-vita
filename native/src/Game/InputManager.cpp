@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "Game/NetworkMessageRegistry.h"
 #include "Game/InputManager.h"
 #include "Game/Sys/debug.h"
@@ -33,6 +34,57 @@ bool IsNetworkOrRecordedGame()
     }
     return false;
 }
+
+#ifdef NP_NATIVE
+bool NpLanActive() __attribute__((weak));
+// MSC_DISCARD_FAST (stall10; default 0 in the code, 1 in the Vita plan): discarded frames (NL/gl/gl.cpp glSendFrame) are not paced at one retrace each. Never in a LAN, online or
+// recorded game (their lockstep clock counts frames and time), and not while the session objects do not exist yet.
+extern "C" int NpDiscardFastAllowed(void)
+{
+    static int on = -1;
+    if (on < 0)
+    {
+        const char* e = getenv("MSC_DISCARD_FAST");
+        on = (e != 0 && *e != 0 && atoi(e) != 0) ? 1 : 0;
+    }
+    if (on == 0) return 0;
+    if (g_pNetworkSessionBase == 0 || gNetworkInputRecording == 0) return 0;
+    if (NpLanActive && NpLanActive()) return 0;
+    return IsNetworkOrRecordedGame() ? 0 : 1;
+}
+// MSC_DISCARD_REHEARSE=N (stall10; default 0 in the code and 0 (off) in the Vita plan; kit run rehearse6 is the ON side): every Nth discarded frame of the walk-out's wait (Presentation.cpp, "GameBegin") is sent to the renderer
+// as a hidden frame (executed, never presented): its display lists, textures, shaders and targets are made under the loading picture instead of on the first intro picture.
+// Same exclusions as MSC_DISCARD_FAST. 0 = none.
+extern "C" int NpDiscardRehearseEvery(void)
+{
+    static int n = -1;
+    if (n < 0)
+    {
+        const char* e = getenv("MSC_DISCARD_REHEARSE");
+        n = (e != 0 && *e != 0) ? atoi(e) : 0;
+        if (n < 0) n = 0;
+    }
+    if (n == 0) return 0;
+    if (g_pNetworkSessionBase == 0 || gNetworkInputRecording == 0) return 0;
+    if (NpLanActive && NpLanActive()) return 0;
+    return IsNetworkOrRecordedGame() ? 0 : n;
+}
+// MSC_LOADHOLD=N (stall10; default 0 in the code and 0 (off) in the Vita plan; kit run loadhold1 is the ON side): the first N frames of the walk-out (NIS) are executed hidden too, after the rehearsal frames and before the first
+// picture, so the loading picture stays up until the walk-out's own first frame has been made. Only with MSC_DISCARD_REHEARSE on (the same exclusions); capped at 3 frames.
+extern "C" int NpLoadHoldFrames(void)
+{
+    static int n = -1;
+    if (n < 0)
+    {
+        const char* e = getenv("MSC_LOADHOLD");
+        n = (e != 0 && *e != 0) ? atoi(e) : 0;
+        if (n < 0) n = 0;
+        if (n > 3) n = 3;
+    }
+    if (n == 0 || NpDiscardRehearseEvery() == 0) return 0;
+    return n;
+}
+#endif
 
 void InitializeInputManager()
 {
@@ -125,6 +177,10 @@ bool NetworkInputManager::PrepareUpdate()
     else if (!router->mQueueOverflowed)
     {
         router->CheckCongestion();
+        if (!router->HasInput() && NpLanRetryWait(router))   // delay19 (MSC_LAN_RETRY_US, default off): a bounded receive-only wait inside the frame
+        {
+            router->CheckCongestion();
+        }
         if (router->HasInput())
         {
             NpLanStep(false);  // multiplayer (np/patches/mp 0006): input delay and queue depths of this step, for the log
