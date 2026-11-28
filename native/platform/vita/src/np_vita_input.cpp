@@ -22,6 +22,7 @@
 // already gives +-72. Vita Y grows downwards; the GameCube's grows upwards.
 #include "np_vita.h"
 #include "np_vita_internal.h"
+#include "np_vita_multipad.h"
 #include "../../../include/np/touch_diag.h"
 
 #include <cmath>
@@ -54,13 +55,17 @@ constexpr float kDeadZone = 16.0f;       // raw units around the centre
 constexpr float kFullTravel = 102.0f;    // raw units from centre that count as full (80% of 127)
 constexpr float kFullScale = 72.0f;      // what the runtime treats as full deflection
 
+constexpr int kMaxSlots = 4;
 uint16_t g_lastButtons = 0;
 int g_lastStickX = 0, g_lastStickY = 0;
 // Codex input follow-up (controller-history.patch, merged 23 Oct): the game's and the passive debug observer's tap histories are
 // separate, so the renderer's debug-chord poll can no longer swallow a gameplay tap.
-uint64_t g_lastTapStamp = 0;
+// 2.0.1: per-slot tap histories (0..3) so extra Bluetooth pads on PS TV / MiniVitaTV keep independent tap latches.
+uint64_t g_lastTapStamp[kMaxSlots] = {};
 #if defined(__vita__)
 uint64_t g_debugTapStamp = 0;
+bool g_rumbleState[kMaxSlots] = {};
+int g_rumblePort[kMaxSlots] = {-1, -1, -1, -1};
 #endif
 
 // Wave 24 (feel24, X10; default OFF): MSC_STICK_DEAD=<raw units, 4..32> (default 16, the line above) and MSC_STICK_CURVE=<power 1..2, default 1 = linear> for the LEFT
@@ -100,7 +105,10 @@ void MapStick(uint8_t rawX, uint8_t rawY, int8_t& outX, int8_t& outY, const Stic
 
 } // namespace
 
-void InvalidateTapHistory() { g_lastTapStamp = 0; TapCarryClear(); }
+void InvalidateTapHistory() {
+    for (int i = 0; i < kMaxSlots; ++i) g_lastTapStamp[i] = 0;
+    TapCarryClear();
+}
 
 void Map(const Raw& raw, NpPadState& status) {
     uint16_t buttons = 0;
@@ -134,7 +142,80 @@ void LastState(uint16_t* buttons, int* stickX, int* stickY) {
 }
 
 #if defined(__vita__)
-static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
+static NpControls::TapCarry g_tapCarry[kMaxSlots];
+static VitaMultiPad::Slot g_slots[kMaxSlots];
+static bool g_slotsValid = false;
+static unsigned g_portPollCount = 0;
+static char g_lastSig[96] = {};
+constexpr unsigned kPortCachePolls = 60;   // ~1 s at 60 Hz; immediate refresh on disconnect
+
+static bool MultiPadEnabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("MSC_MULTIPAD");
+        return !(e && e[0] == '0' && e[1] == '\0');
+    }();
+    return on;
+}
+
+static bool RumbleEnabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("MSC_RUMBLE");
+        return !(e && e[0] == '0' && e[1] == '\0');
+    }();
+    return on;
+}
+
+static void StopPortRumbleIfActive(int slot) {
+    if (slot < 0 || slot >= kMaxSlots) return;
+    if (g_rumbleState[slot] && g_rumblePort[slot] >= 0) {
+        SceCtrlActuator zero{};
+        sceCtrlSetActuator(g_rumblePort[slot], &zero);
+    }
+    g_rumbleState[slot] = false;
+    g_rumblePort[slot] = -1;
+}
+
+static void RefreshSlots(bool force) {
+    if (!force && g_slotsValid && (++g_portPollCount % kPortCachePolls) != 0) return;
+    SceCtrlPortInfo info{};
+    uint8_t types[5] = {};
+    if (sceCtrlGetControllerPortInfo(&info) >= 0) {
+        std::memcpy(types, info.port, sizeof(types));
+    } else {
+        types[0] = VitaPlan::IsPsTv() ? VitaMultiPad::kTypeVirt : VitaMultiPad::kTypePhy;
+    }
+    VitaMultiPad::Slot next[kMaxSlots];
+    VitaMultiPad::SelectSlots(types, VitaPlan::IsPsTv(), MultiPadEnabled(), next);
+    int active = 0;
+    for (int i = 0; i < kMaxSlots; ++i) {
+        if (g_slotsValid && (g_slots[i].port != next[i].port || g_slots[i].extPort != next[i].extPort)) {
+            g_lastTapStamp[i] = 0;
+            g_tapCarry[i].Clear();
+            StopPortRumbleIfActive(i);
+        }
+        g_slots[i] = next[i];
+        if (next[i].port >= 0) ++active;
+    }
+    g_slotsValid = true;
+    char sig[96];
+    int pos = std::snprintf(sig, sizeof(sig), "%d (", active);
+    for (int i = 0; i < kMaxSlots && pos > 0 && static_cast<size_t>(pos) + 16 < sizeof(sig); ++i) {
+        if (g_slots[i].port < 0) continue;
+        pos += std::snprintf(sig + pos, sizeof(sig) - static_cast<size_t>(pos), "%sP%d=p%d:%s",
+                             i == 0 ? "" : " ", i + 1, g_slots[i].port, VitaMultiPad::TypeName(g_slots[i].type));
+        if (g_slots[i].extPort >= 0 && static_cast<size_t>(pos) + 12 < sizeof(sig)) {
+            pos += std::snprintf(sig + pos, sizeof(sig) - static_cast<size_t>(pos), "+p%d:%s",
+                                 g_slots[i].extPort, VitaMultiPad::TypeName(g_slots[i].extType));
+        }
+    }
+    if (pos > 0 && static_cast<size_t>(pos) + 2 < sizeof(sig)) { sig[pos++] = ')'; sig[pos] = '\0'; }
+    if (std::strcmp(sig, g_lastSig) != 0) {
+        std::snprintf(g_lastSig, sizeof(g_lastSig), "%s", sig);
+        std::fprintf(stderr, "[input] controllers active: %s\n", g_lastSig);
+    }
+}
+
+static bool ReadPortWithHistory(int port, bool usePositive2, bool allowPositiveFallback, bool trackLat16, Raw& raw, uint64_t& lastStamp) {
     static bool configured = false;
     if (!configured) {
         // Analog mode: without it the sticks read as centred. WIDE: the sticks report
@@ -142,6 +223,7 @@ static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
         // mode clips earlier); the ACGC port and SDL's Vita driver, both proven on
         // consoles, set the same (docs/acgc-vita-port-findings.md, item 4).
         sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
+        sceCtrlSetSamplingModeExt(SCE_CTRL_MODE_ANALOG_WIDE);
         configured = true;
     }
     // Peek, not Read: Read blocks until the next controller sample (a vblank). W5 CTL: the last few buffered samples, so that a
@@ -151,11 +233,16 @@ static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
     SceCtrlData pads[kBuffers];
     std::memset(pads, 0, sizeof(pads));
     const int want = NpControls::TapLatchEnabled() ? kBuffers : 1;
-    const bool diag=NpDiagActive()!=0;
-    const uint64_t begin=diag?NpDiagNow():0;
-    const int got = sceCtrlPeekBufferPositive(0, pads, want);
-    const uint64_t end=diag?NpDiagNow():0;
-    if(diag&&got<=0)NpDiagEvent(NPD_CTRL,0,NpDiagPollId(),begin,end,0,NpDiagInts(got,want),0);
+    const bool diag = trackLat16 && NpDiagActive() != 0;
+    const uint64_t begin = diag ? NpDiagNow() : 0;
+    bool actualPositive2 = usePositive2;
+    int got = usePositive2 ? sceCtrlPeekBufferPositive2(port, pads, want) : sceCtrlPeekBufferPositive(port, pads, want);
+    if (usePositive2 && got <= 0 && allowPositiveFallback && port == 0) {
+        got = sceCtrlPeekBufferPositive(0, pads, want);
+        actualPositive2 = false;
+    }
+    const uint64_t end = diag ? NpDiagNow() : 0;
+    if (diag && got <= 0) NpDiagEvent(NPD_CTRL, 0, NpDiagPollId(), begin, end, 0, NpDiagInts(got, want), 0);
     if (got <= 0) {
         lastStamp = 0;   // resume newest-only after an interval without input
         return false;
@@ -164,16 +251,19 @@ static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
     for (int i = 1; i < got && i < kBuffers; ++i)
         if (pads[i].timeStamp > pads[newest].timeStamp) newest = i;
     const SceCtrlData& pad = pads[newest];
-    if (&lastStamp == &g_lastTapStamp && (npl16::Wanted() || npl16::AgeLog())) npl16::GameRead(pad.timeStamp, npl16::RealUs());   // wave 11 (press16)
-    if(diag)NpDiagEvent(NPD_CTRL,0,NpDiagPollId(),begin,end,pad.timeStamp,NpDiagInts(got,want),
-        NpDiagInts(pad.buttons,uint32_t(pad.lx)|(uint32_t(pad.ly)<<8)|(uint32_t(pad.rx)<<16)|(uint32_t(pad.ry)<<24)));
+    if (trackLat16 && (npl16::Wanted() || npl16::AgeLog())) npl16::GameRead(pad.timeStamp, npl16::RealUs());   // wave 11 (press16)
     // every successful read advances the history, a single sample too (otherwise a later tap could be lost or replayed)
     uint32_t b[kBuffers];
     uint64_t t[kBuffers];
     const int n = got < kBuffers ? got : kBuffers;
-    for (int i = 0; i < n; ++i) { b[i] = pads[i].buttons; t[i] = pads[i].timeStamp; }
+    for (int i = 0; i < n; ++i) {
+        b[i] = VitaMultiPad::NormalizeButtons(pads[i].buttons, actualPositive2);
+        t[i] = pads[i].timeStamp;
+    }
+    if (diag) NpDiagEvent(NPD_CTRL, 0, NpDiagPollId(), begin, end, pad.timeStamp, NpDiagInts(got, want),
+        NpDiagInts(b[newest], uint32_t(pad.lx) | (uint32_t(pad.ly) << 8) | (uint32_t(pad.rx) << 16) | (uint32_t(pad.ry) << 24)));
     raw.buttons = NpControls::LatchTaps(b, t, n, &lastStamp, NpControls::TapGapUs());   // wave 6: MSC_TAP_GAP_MS
-    raw.newestButtons = pad.buttons;
+    raw.newestButtons = b[newest];
     raw.lx = pad.lx;
     raw.ly = pad.ly;
     raw.rx = pad.rx;
@@ -181,27 +271,94 @@ static bool ReadWithHistory(Raw& raw, uint64_t& lastStamp) {
     return true;
 }
 
-static NpControls::TapCarry g_tapCarry;
 static bool TapCarryOn() {
     static const bool on = [] { const char* e = getenv("MSC_TAP_CARRY"); return e && *e && atoi(e) != 0; }();
     return on;
 }
-void TapCarryHold(bool on) { g_tapCarry.SetHold(on && TapCarryOn()); }
-void TapCarryClear() { g_tapCarry.Clear(); }
+void TapCarryHold(bool on) {
+    const bool hold = on && TapCarryOn();
+    for (int i = 0; i < kMaxSlots; ++i) g_tapCarry[i].SetHold(hold);
+}
+void TapCarryClear() {
+    for (int i = 0; i < kMaxSlots; ++i) g_tapCarry[i].Clear();
+}
 
-bool Read(Raw& raw) {
-    if (!ReadWithHistory(raw, g_lastTapStamp)) return false;
-#if defined(__vita__)
-    if (TapCarryOn()) raw.buttons = g_tapCarry.Apply(raw.buttons, raw.newestButtons);   // wave 9 MSC_TAP_CARRY: a frame without a step takes no tap from the next step
-#endif
-    g_debugTapStamp = g_lastTapStamp;   // game reads drain the observer's history (old settings presses never replay as chords)
+bool ReadSlot(int slot, Raw& raw) {
+    if (slot < 0 || slot >= kMaxSlots) return false;
+    if (slot == 0) RefreshSlots(false);
+    else if (!g_slotsValid) RefreshSlots(true);
+    const VitaMultiPad::Slot s = g_slots[slot];
+    if (s.port < 0) {
+        g_lastTapStamp[slot] = 0;
+        g_tapCarry[slot].Clear();
+        return false;
+    }
+    const bool usePositive2 = (s.port != 0 || s.type != VitaMultiPad::kTypePhy);
+    if (!ReadPortWithHistory(s.port, usePositive2, slot == 0, slot == 0, raw, g_lastTapStamp[slot])) {
+        if (slot > 0) RefreshSlots(true);
+        return false;
+    }
+    // Handheld Vita + ds34vita: mirror DS3/DS4 L2/R2 onto Player 1 without creating a ghost Player 2.
+    if (slot == 0 && s.extPort >= 0) {
+        SceCtrlData extPad{};
+        if (sceCtrlPeekBufferPositive2(s.extPort, &extPad, 1) > 0) {
+            const uint32_t extra = VitaMultiPad::ExtraTriggersFromPositive2(extPad.buttons);
+            raw.buttons |= extra;
+            raw.newestButtons |= extra;
+        }
+    }
+    if (TapCarryOn()) raw.buttons = g_tapCarry[slot].Apply(raw.buttons, raw.newestButtons);   // wave 9 MSC_TAP_CARRY: a frame without a step takes no tap from the next step
+    if (slot == 0) g_debugTapStamp = g_lastTapStamp[0];   // game reads drain the observer's history (old settings presses never replay as chords)
     return true;
 }
 
-bool ReadDebug(Raw& raw) { return ReadWithHistory(raw, g_debugTapStamp); }
+bool Read(Raw& raw) { return ReadSlot(0, raw); }
+
+bool ReadDebug(Raw& raw) {
+    if (!g_slotsValid) RefreshSlots(true);
+    const VitaMultiPad::Slot s = g_slots[0];
+    const int port = s.port >= 0 ? s.port : 0;
+    const bool usePositive2 = (port != 0 || s.type != VitaMultiPad::kTypePhy);
+    return ReadPortWithHistory(port, usePositive2, true, false, raw, g_debugTapStamp);
+}
+
+void SetRumble(int slot, bool on) {
+    if (slot < 0 || slot >= kMaxSlots) return;
+    if (!RumbleEnabled()) on = false;
+    if (!g_slotsValid) RefreshSlots(true);
+    const VitaMultiPad::Slot s = g_slots[slot];
+    int port = -1;
+    if (s.port >= 0 && VitaMultiPad::SupportsRumble(s.type)) port = s.port;
+    else if (s.extPort >= 0 && VitaMultiPad::SupportsRumble(s.extType)) port = s.extPort;
+    if (port < 0) {
+        StopPortRumbleIfActive(slot);
+        return;
+    }
+    if (g_rumblePort[slot] >= 0 && g_rumblePort[slot] != port && g_rumbleState[slot]) {
+        SceCtrlActuator zero{};
+        sceCtrlSetActuator(g_rumblePort[slot], &zero);
+        g_rumbleState[slot] = false;
+    }
+    if (on == g_rumbleState[slot] && g_rumblePort[slot] == port) return;
+    SceCtrlActuator act{};
+    act.small = on ? 180 : 0;
+    act.large = on ? 220 : 0;
+    sceCtrlSetActuator(port, &act);
+    g_rumbleState[slot] = on;
+    g_rumblePort[slot] = port;
+}
+
+void StopAllRumble() {
+    for (int i = 0; i < kMaxSlots; ++i) SetRumble(i, false);
+}
 #else
+void TapCarryHold(bool) {}
+void TapCarryClear() {}
+bool ReadSlot(int, Raw&) { return false; }
 bool Read(Raw&) { return false; }
 bool ReadDebug(Raw&) { return false; }
+void SetRumble(int, bool) {}
+void StopAllRumble() {}
 #endif
 
 } // namespace VitaInput
@@ -231,23 +388,25 @@ extern "C" void NpVitaPadClearTaps(void) { VitaInput::TapCarryClear(); }
 static uint32_t g_inputActivity = 0;   // see the end of NpVitaReadInput
 extern "C" uint32_t NpVitaInputActivity(void) { return g_inputActivity; }
 
-int NpVitaReadInput(NpVitaInput* out) {
-    if (!out) return 0;
+int NpVitaReadPad(int slot, NpVitaInput* out) {
+    if (!out || slot < 0 || slot >= 4) return 0;
     std::memset(out, 0, sizeof(*out));
     out->lx = out->ly = out->rx = out->ry = 128;
     // A disabled or failed rear read is not evidence that all contacts lifted.
     out->rearCount = -1;
     if (np_vita_radio_dialog_active && np_vita_radio_dialog_active()) {
         VitaInput::InvalidateTapHistory();   // presses released during the dialog are not replayed into the game
-        return 1;   // neutral pad, no touch, while the dialog shows
+        return slot == 0 ? 1 : 0;   // neutral pad on P1, no touch, while the dialog shows
     }
     VitaInput::Raw raw;
-    const bool diag=NpDiagActive()!=0;
-    if(diag)NpDiagPollNext();
-    if (!VitaInput::Read(raw)) return 0;
+    const bool diag = (slot == 0) && (NpDiagActive() != 0);
+    if (diag) NpDiagPollNext();
+    if (!VitaInput::ReadSlot(slot, raw)) return 0;
     out->buttons = raw.buttons;
     out->lx = raw.lx; out->ly = raw.ly; out->rx = raw.rx; out->ry = raw.ry;
 #if defined(__vita__)
+    // Front and rear touch belong strictly to Player 1 (slot 0).
+    if (slot == 0) {
     // The front panel is read when anything uses it: the menu pointer (NP_TOUCH_POINTER) or a minigame (MSC_TOUCH_MINIGAMES and the
     // per-minigame switches). W5 CTL: before, MSC_TOUCH_MINIGAMES=0 (the MEGA STRIKE TOUCH row) also switched the menu pointer off.
     static const bool touchEnabled = [] {
@@ -399,6 +558,7 @@ int NpVitaReadInput(NpVitaInput* out) {
             }
         }
     }
+    }   // slot == 0 touch panels
 #endif
     // r16 (fable-da21 F3): the keep-awake idle limit (np_keep_awake.h) watches this counter: it moves on a poll with a button, a stick well off
     // centre or a finger on the panel (about ten instructions; a pad at rest costs nothing more).
@@ -406,6 +566,10 @@ int NpVitaReadInput(NpVitaInput* out) {
         ++g_inputActivity;
     return 1;
 }
+
+int NpVitaReadInput(NpVitaInput* out) { return NpVitaReadPad(0, out); }
+void NpVitaSetRumble(int slot, int on) { VitaInput::SetRumble(slot, on != 0); }
+void NpVitaStopAllRumble(void) { VitaInput::StopAllRumble(); }
 
 void NpVitaMapGcPad(const NpVitaInput* in, NpPadState* pad) {
     if (!in || !pad) return;

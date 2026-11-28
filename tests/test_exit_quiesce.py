@@ -101,7 +101,7 @@ int main() {
 
 
 def pieces():
-    state = SRC[SRC.index("std::atomic<bool> g_quiesce{false};"):SRC.index("\n", SRC.index("std::atomic<int> g_inHand"))]
+    state = SRC[SRC.index("std::atomic<bool> g_quiesce{false};"):SRC.index("\n", SRC.index("std::atomic<int> g_beBusy"))]
     h0 = SRC.index("struct HandGuard")
     h1 = SRC.index("\n}\n", SRC.index("void HandOver(CmdBuf& buf) {")) + 3
     q0 = SRC.index("extern \"C\" void VgxHostQuiesceGpu(unsigned ms) __attribute__((weak));")

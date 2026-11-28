@@ -102,6 +102,8 @@ nlMatrix4& nlMultMatrices(nlMatrix4& output, const nlMatrix4&, const nlMatrix4&)
 extern "C" {
 int NpCrowdGT(void) { return 0; }
 void NpCrowdGTCount(int, int) {}
+int NpCrowdBlankSkip(void) { return 0; }
+void NpCrowdBlankCount(int) {}
 void NpCrowdGovCount(int, unsigned) {}
 int NpCrowdPoseOnce(void) { return 0; }
 int NpPoseJobs(void) { return 0; }

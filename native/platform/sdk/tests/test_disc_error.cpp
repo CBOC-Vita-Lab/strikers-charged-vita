@@ -63,6 +63,7 @@ static void write_file(const char* path, size_t size) {
 static int scenario(const char* mode, bool virtualTime) {
     alarm(10);
     setenv("NP_VIRTUAL_TIME", virtualTime ? "1" : "0", 1);
+    setenv("MSC_DVD_RETRY", "0", 1);   // fatal-error reporting test; retry backoff is tested by test_dvd_retry.cpp
     gameThread = pthread_self();
     char root[] = "/tmp/np_disc_error_XXXXXX";
     CHECK(mkdtemp(root) != nullptr);

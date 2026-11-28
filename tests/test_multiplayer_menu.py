@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -19,6 +20,7 @@ class MultiplayerMenu(unittest.TestCase):
             "-I", str(ROOT / "native"), str(ROOT / "native/platform/sdk/net/np_menu_flow.cpp"),
             str(ROOT / "native/platform/sdk/net/np_conntest.cpp"), str(ROOT / "native/platform/sdk/net/np_mpdiag.cpp"), str(ROOT / "native/platform/sdk/net/np_mpreport.cpp"),   # (wave 11: the connection test's classifier and the diagnostics ring)
             str(ROOT / "native/tools/net/menu_flow_test.cpp"), "-o", str(cls.binary),
+            *(["-Wl,-undefined,dynamic_lookup"] if sys.platform == "darwin" else []),
         ], text=True, capture_output=True)
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)

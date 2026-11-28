@@ -194,6 +194,8 @@ READERS = {
     "MSC_UNLOCK_CAPTAINS": (["native/platform/compat/np_unlocks.cpp"], lambda v: v in ("0", "1"), "first character 0 is off"),
     "MSC_UNLOCK_STADIUMS": (["native/platform/compat/np_unlocks.cpp"], lambda v: v in ("0", "1"), "first character 0 is off"),
     "MSC_CONTROLS": (["native/platform/sdk/input/np_controls.h"], lambda v: v in ("classic", "modern"), "ConfiguredLayout(): classic | CLASSIC | 0, else modern"),
+    "MSC_MULTIPAD": (["native/platform/vita/src/np_vita_wire.cpp"], lambda v: v in ("0", "1", "online"), "1", "2.0.1 (default 1): local 2-4 player controller support on PS TV and handhelds with extra paired Bluetooth controllers; gated off automatically during online and Vita-to-Vita LAN sessions unless set to online; 0 forces single-controller mode"),
+    "MSC_RUMBLE": (["native/platform/vita/src/np_vita_input.cpp"], lambda v: v in ("0", "1"), "1", "2.0.1 (default 1): per-player DualShock 3 / DualShock 4 vibration via sceCtrlSetActuator; 0 disables external controller rumble"),
     "MSC_REAR_TOUCH": (["native/include/np/live_settings.h"], lambda v: v in ("0", "1"), "RearEnabled(): first character 0 is off"),
     "NP_MENU_NAV": (["native/platform/sdk/input/np_menu_nav.cpp"], lambda v: v == "0", "Enabled(): a value starting with 0 is off"),
     "NP_TOUCH_POINTER": (["native/platform/sdk/input/np_game_input.cpp", "native/platform/sdk/src/input_native.cpp"], lambda v: v == "0", "first character 0 is off (atoi 0 in input_native)"),

@@ -345,6 +345,23 @@ void default_adjust(NpPadSample* s) {
     }
 }
 
+// Checks for hot-plugged controllers (e.g. turning on a 2nd-4th DualShock on PS TV after boot) at most once per
+// sample epoch so PlatPadManager::PadConnectChanged fires without restarting the game.
+void sync_hotplug(uint64_t epoch) {
+    static uint64_t last_epoch = 0;
+    if (epoch == last_epoch) return;
+    last_epoch = epoch;
+    for (int i = 0; i < WPAD_MAX_CONTROLLERS; ++i) {
+        Chan& c = g_chan[i];
+        if (!c.connect_cb || c.connected_reported) continue;
+        NpRawPad raw;
+        if (read_raw(i, &raw)) {
+            c.connected_reported = true;
+            c.connect_cb(i, WPAD_ERR_OK);
+        }
+    }
+}
+
 // Builds the emulated state of `chan` (one sample per retrace and channel, see sample_epoch).
 bool emu_sample(int chan, Emu* out) {
     load_env();
@@ -352,6 +369,7 @@ bool emu_sample(int chan, Emu* out) {
     Chan& c = g_chan[chan];
     uint64_t now = np_time_ns();
     const uint64_t epoch = sample_epoch(now);
+    if (chan == 0) sync_hotplug(epoch);
     const bool diag=NpDiagActive&&NpDiagActive()&&chan==0;
     if (c.cache_valid && c.cache_epoch == epoch) {
         if(diag){NpDiagUsePoll(c.diag_poll);const uint64_t f=NpDiagFrame();
@@ -370,6 +388,7 @@ bool emu_sample(int chan, Emu* out) {
     c.cache_ns = now;
     if (NpLatPadUse) NpLatPadUse(now, chan);
     if (!e.present) {
+        c.connected_reported = false;
         c.cache_have = false;
         c.cache = e;
         *out = e;
@@ -586,8 +605,10 @@ s32 WPADReadFaceData(s32 chan, void* dst, u32 size, u32 src, WPADCallback cb) {
 
 WPADResult WPADProbe(WPADChannel chan, WPADDeviceType* devType) {
     load_env();
+    if (chan == 0) sync_hotplug(sample_epoch(np_time_ns()));
     NpRawPad raw;
     if (chan < 0 || chan >= WPAD_MAX_CONTROLLERS || !read_raw(chan, &raw)) {
+        if (chan >= 0 && chan < WPAD_MAX_CONTROLLERS) g_chan[chan].connected_reported = false;
         if (devType) *devType = WPAD_DEV_NOT_FOUND;
         return WPAD_ERR_NO_CONTROLLER;
     }
@@ -602,7 +623,12 @@ WPADConnectCallback* WPADSetConnectCallback(s32 chan, WPADConnectCallback* cb) {
     c.connect_cb = cb;
     // a controller that is already connected reports itself to the new callback
     NpRawPad raw;
-    if (cb && read_raw(chan, &raw)) cb(chan, WPAD_ERR_OK);
+    if (cb && read_raw(chan, &raw)) {
+        c.connected_reported = true;
+        cb(chan, WPAD_ERR_OK);
+    } else {
+        c.connected_reported = false;
+    }
     return old;
 }
 WPADExtensionCallback* WPADSetExtensionCallback(s32 chan, WPADExtensionCallback* cb) {

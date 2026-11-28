@@ -161,13 +161,23 @@ class Generated(unittest.TestCase):
                     self.assertEqual(len(re.findall(r"(?:^|\s)[A-Z][A-Z0-9_]{2,}=", line)), 1, r["id"] + ": more than one assignment on a line: " + line)
 
     def test_runs_turn_the_build_defaults_off(self):
-        """The 1.2 defaults (vita_plan.cpp: quality and timing switches) are on in the build, so a 1.2 run that names one of those keys must write a value
-        that differs from the default, and every default is switched off by at least one run (the A/B of the owner's 'best experience by default')."""
+        """The 1.2/1.3 defaults (vita_plan.cpp: quality and timing switches) are on in the build, so a kit run that names one of those keys must write a value
+        that differs from the default, and every default is switched off by at least one run (the A/B of the owner's 'best experience by default').
+        Switches promoted or flipped later in 2.0 (ship26/int26/int28) are kept out of the frozen console-1.2 kit check."""
+        promoted_in_2_0 = {
+            "MSC_BALL_FINS", "MSC_DOF", "MSC_FPS_PROBE_ASYNC", "MSC_FX_GLOW", "MSC_FX_GLOW_COARSE",
+            "MSC_FX_GOV_MAX", "MSC_FX_MENU", "MSC_FX_OFFVIEW", "MSC_HELD_GOV_SEED", "MSC_HELD_GOV_SIZE",
+            "MSC_HELD_SCENES", "MSC_HOLD60_WALLSIM", "MSC_LANE_CORE3", "MSC_MEGA_FX_MAXDIV",
+            "MSC_SKIN_POSE_PAR_AVOID", "MSC_STADIUM_CUT_FAR", "MSC_VGX_BEPREFETCH", "MSC_VGX_FEPAR_KEEP",
+            "MSC_VGX_HSR_PROVEN", "MSC_VGX_LA88", "MSC_VGX_SHQUAD_HELD", "MSC_VGX_ZERODRAW",
+            "MSC_VITA_FBO_KEEP", "MSC_VITA_PRIO_LANE", "MSC_VITA_QUEUE_FIXED60", "MSC_VITA_STREAM_CACHED",
+        }
         plan = (REPO / "native/platform/vita/src/vita_plan.cpp").read_text()
         block = plan[plan.index("kQuality[][2]"):]
         block = block[:block.index("};")]
         defaults = dict(re.findall(r'\{"([A-Z0-9_]+)", "([^"]*)"\}', block))
         defaults.update(re.findall(r'add\("(MSC_VGX_MSAA)", "([^"]*)"\)', plan))
+        defaults = {k: v for k, v in defaults.items() if k not in promoted_in_2_0}
         self.assertGreaterEqual(len(defaults), 11)
         turned_off = set()
         for r in M.RUNS:

@@ -58,9 +58,11 @@ int main(int argc, char** argv) {
     SetShaderListFile(argv[2]);
     EnsureShaderList();
     Sink(g_buf);
-    // A key that is not in the list, met in play: appended in its plain form, once.
+    // A key that is not in the list, met in play: appended in its plain form with its program pair, once.
     const FsKey n = Fs(9);
     const uint16_t id = Lookup(g_fsReg, n, true, GenerateFragmentShader);
+    const uint32_t pair[2] = {0u, id};
+    if (g_progSeen.insert(id).second) ListAppend(3, pair, sizeof pair);
     std::printf("new key: id %u, generated form %u\n", id, g_fsReg.sources[id]->fkey->prec);
     if (g_shaderList) std::fclose(g_shaderList);
     return 0;

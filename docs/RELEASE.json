@@ -1,21 +1,22 @@
 {
   "schemaVersion": 2,
-  "releaseId": "strikers-v2.0",
+  "releaseId": "strikers-v2.0.1",
   "date": "2026-11-27",
   "titleId": "MSCN00003",
   "package": {
     "path": "Strikers-Charged-Vita.vpk",
-    "sha256": "4d7793aa583f38a30c09c4278e0f48c1a5a393c669add18239e257c1fbfc743f",
-    "runtimeSha256": "d7bcec2fbab91f232586e453c45462bce27bf1b24c8cdc19562f6d138fe280f7"
+    "sha256": "ba5c6874c164cb9d34950f8ad0c855cc048b50514a7e42c7dd2ae011a7cfe128",
+    "runtimeSha256": "830a8cf90e2463ed28d562825b6e38a1e9754d66480d08d0887f4622d4303ccd"
   },
   "previousRelease": {
-    "releaseId": "strikers-v1.1",
-    "runtimeSha256": "8d58eea7fa849a1220902efe6732e300446c5c6b859e353c1f0c70fdc44d599d",
-    "vpkSha256": "1854ef4b163aace32b10b70a86a289c5e137802cf34b71569ac83a1b9595218f"
+    "releaseId": "strikers-v2.0",
+    "runtimeSha256": "d7bcec2fbab91f232586e453c45462bce27bf1b24c8cdc19562f6d138fe280f7",
+    "vpkSha256": "4d7793aa583f38a30c09c4278e0f48c1a5a393c669add18239e257c1fbfc743f"
   },
   "buildOptions": {
     "NP_PLAYER": 1,
     "NP_LOGGING": 0,
+    "NP_BUILD_ID": "d3eabe5f5305c345",
     "LTO": "thin",
     "NP_PGO_ALL": 1,
     "OPT": "-O2 -ffunction-sections -fdata-sections -ffile-prefix-map=<repo>=. -ffile-prefix-map=<build>=build"
@@ -24,7 +25,7 @@
     "gcc": "VitaSDK arm-vita-eabi-gcc 15.2.0",
     "clang": "18.1.3"
   },
-  "packaging": "tools/repack-release.py --app-version 02.00 --shadercache <pack33>: eboot.bin and licenses/ from the build; shadercache/ from pack33 (4,281 compiled Vita shaders + core33 warm-up list); param.sfo from the previous release with APP_VER 02.00; LiveArea template.xml updated to content-rev=\"5\" (no Settings tile). One VPK: Settings is inside the game (pause menu VITA SETTINGS and OPTIONS > VITA SETTINGS).",
+  "packaging": "tools/repack-release.py --app-version 02.01 --shadercache <pack33>: eboot.bin and licenses/ from the build; shadercache/ from pack33 (4,281 compiled Vita shaders + core33 warm-up list); param.sfo from the previous release with APP_VER 02.01; LiveArea template.xml at content-rev=\"5\" (no Settings tile). One VPK: Settings is inside the game (pause menu VITA SETTINGS and OPTIONS > VITA SETTINGS).",
   "packageMembersFromPreviousRelease": [
     "sce_sys/icon0.png",
     "sce_sys/livearea/contents/bg.png",
@@ -34,11 +35,11 @@
     "sce_sys/param.sfo"
   ],
   "verification": {
-    "hostTests": "python3 -m unittest discover -s tests; native/platform/sdk make T=host32 check; native/platform/vita/tests settings & runtime suites",
+    "hostTests": "python3 -m unittest discover -s tests (including tests/test_multipad_cpp.py); native/platform/sdk make T=host32 check & PLATFAKE=1; capture lifecycle; shader forms; native/platform/vita/tests settings & runtime suites",
     "emulator": "Vita3K: start-up, menus, matches, Pipeline Central, Spanish and French menus",
     "physicalVita": true,
     "desktopInstaller": true
   },
   "publicReleaseAccepted": true,
-  "appVersion": "02.00"
+  "appVersion": "02.01"
 }

@@ -283,9 +283,12 @@ enum : uint32_t {
 };
 // Vita controls -> the GameCube pad (the nav scripts' and the SDK layer's PAD form).
 void Map(const Raw& raw, NpPadState& status);
-// Reads the console's controls. False when no sample is available.
+// Reads the console's controls (slot 0, or slot 0..3 for multi-controller PS TV / MiniVitaTV). False when disconnected / no sample.
 bool Read(Raw& raw);
+bool ReadSlot(int slot, Raw& raw);
 bool ReadDebug(Raw& raw);   // passive observer (renderer debug chords): does not consume the game's tap history
+void SetRumble(int slot, bool on);
+void StopAllRumble();
 void InvalidateTapHistory();
 void TapCarryHold(bool on);   // wave 9 MSC_TAP_CARRY
 void TapCarryClear();

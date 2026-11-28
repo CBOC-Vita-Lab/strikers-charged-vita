@@ -6,10 +6,11 @@ please [open an issue](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/is
 ## Performance
 
 - **60 fps depends on the scene.** **SMOOTH 60** (default) runs matches up to
-  60 fps at native 960×544 and steps smoothly to 45 or 30 in the heaviest
-  moments (crowded stadiums, heavy weather or cut-scenes). If you prefer a
-  constant frame rate everywhere, set **Frame Rate** to **30 LOCKED** in
-  VITA SETTINGS.
+  60 fps with crisp dynamic resolution up to native `960×544` (with the HUD,
+  menus, and Mega Saves locked at full `960×544`), stepping smoothly to 45 or 30
+  in the heaviest moments (crowded stadiums, heavy weather or cut-scenes). If you
+  prefer a constant frame rate everywhere, set **Frame Rate** to **30 LOCKED** in
+  VITA SETTINGS for native `960×544` with `2× MSAA`.
 - **Goal replays and heavy cut-scenes run at 30 fps or below.** Close-up
   cameras draw far more detail than open play. Gameplay itself is not affected.
 - **Rare unseen shader combinations.** The 2.0 package ships **4,281**
@@ -56,12 +57,16 @@ please [open an issue](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/is
 
 ## Local Play And Online
 
-- **2.0 cannot play 1.0 or 1.1 over the local link.** The versions use
-  different link versions, so each ignores the other: the host's game never
-  appears in the other Vita's list. Update both Vitas. Two 2.0 Vitas with
-  different match rules (No Mega Strikes, Original Game Fixes: ALL) also do not
-  find each other. The link carries the game's version, so both Vitas need the
-  same release to play each other.
+- **2.0 / 2.0.1 are cross-compatible, but cannot play 1.0 or 1.1 over the local link.**
+  Version `2.0.1` keeps the exact same simulation and link fingerprint as `2.0`, so
+  `2.0` and `2.0.1` players can connect freely over both Online and Local Wi-Fi /
+  Nearby play. Earlier `1.0` and `1.1` builds use an older link version — update
+  both Vitas to connect. Two Vitas with different match rules (No Mega Strikes,
+  Original Game Fixes: ALL) also do not find each other.
+- **Same-console multi-controller play is local-only by default.** Extra paired
+  controllers (Players 2–4 on PS TV or handheld with `MiniVitaTV`) work in local
+  matches and menus and are paused automatically during Online and Vita-to-Vita
+  LAN sessions to keep network lockstep clean (`MSC_MULTIPAD=online` overrides).
 - **Online play (Beta) needs Wi-Fi and a correct console date and time.** The
   service is live; MULTIPLAYER offers hosting and joining with a code, Quick
   Play and Ranked Match. Some networks need a relay, and a service outage or

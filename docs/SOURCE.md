@@ -1,8 +1,28 @@
 # Source Record
 
-Versions are plain numbers: the game's `APP_VER` is `02.00` for 2.0, `cboc-release.json` says `"version": "2.0"`,
-and the release is tagged `v2.0`. Every release is one VPK, `Strikers-Charged-Vita.vpk`, with Settings inside the
+Versions are plain numbers: the game's `APP_VER` is `02.01` for 2.0.1, `cboc-release.json` says `"version": "2.0.1"`,
+and the release is tagged `v2.0.1`. Every release is one VPK, `Strikers-Charged-Vita.vpk`, with Settings inside the
 game (the in-game Settings screen, opened from the pause menu's VITA SETTINGS or OPTIONS > VITA SETTINGS, title ID `MSCN00003`).
+
+## Version 2.0.1 (`strikers-v2.0.1`)
+
+| Item | Value |
+| --- | --- |
+| Package | `Strikers-Charged-Vita.vpk` |
+| Title ID | `MSCN00003` (same app as every earlier release; installs as an update) |
+| `APP_VER` | `02.01` |
+| Executable SHA-256 | `830a8cf90e2463ed28d562825b6e38a1e9754d66480d08d0887f4622d4303ccd` |
+| VPK SHA-256 | `ba5c6874c164cb9d34950f8ad0c855cc048b50514a7e42c7dd2ae011a7cfe128` |
+| Shader pack | `shadercache/874a13e0.pack` (4,281 compiled Vita shaders) + `vgx_shaderlist.bin` (`core33`: 830 marked boot programs, 238 `pal60` keys) |
+| Player build flags | `NP_PLAYER=1 NP_LOGGING=0 NP_APP_VER=02.01 NP_BUILD_ID=d3eabe5f5305c345 NP_PGO_ALL=1`, ThinLTO `-O2` + ARMv7 NEON PGO |
+| Toolchain | VitaSDK GCC 15.2.0, Clang 18.1.3 |
+
+2.0.1 adds 2–4 player same-console local multiplayer on PlayStation TV and handheld Vita with extra paired Bluetooth controllers (e.g. `MiniVitaTV`), DualShock 3/4 `L2`/`R2` trigger bindings, per-player rumble (`sceCtrlSetActuator`), live controller hot-plugging/reconnection, and full CI test suite fixes.
+It preserves `2.0`'s exact simulation and `NP_BUILD_ID=d3eabe5f5305c345` link fingerprint so `2.0` and `2.0.1` consoles remain 100% cross-compatible over Online and Local Wi-Fi / Nearby play.
+The package was made with `tools/repack-release.py --app-version 02.01 --shadercache <pack33>`.
+`appUpdateFrom` includes the 2.0 (`d7bcec2f...`) and 1.1 (`8d58eea7...`) executables so updating preserves game files, saves, and settings.
+
+Verification for this release: full host & 32-bit CI suites (`tests/`, `tests/test_multipad_cpp.py`, `native/platform/sdk` `host32` + `PLATFAKE=1`, `capture_lifecycle`, `shader_forms`, settings & runtime suites, `verify_vpk.py`, `public_scan.py`), ELF symbol/hook verification (`check_elf_hooks.py`), and physical PS Vita installation, read-back SHA-256 verification, and clean boot/settings testing.
 
 ## Version 2.0 (`strikers-v2.0`)
 

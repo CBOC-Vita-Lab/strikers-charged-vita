@@ -64,6 +64,11 @@ typedef struct NpVitaInput {
 } NpVitaInput;
 /* Peeks the controls (never blocks). 0 = no sample (host builds, or the display is owned by a script run). */
 int NpVitaReadInput(NpVitaInput* out);
+/* Peeks player slot `slot` (0..3) for multi-controller play on PS TV / MiniVitaTV; 0 = disconnected / no sample. */
+int NpVitaReadPad(int slot, NpVitaInput* out);
+/* Drives DualShock 3 / DualShock 4 rumble on player slot `slot` (0..3); safe no-op on handheld Vita. */
+void NpVitaSetRumble(int slot, int on);
+void NpVitaStopAllRumble(void);
 /* The GameCube-pad form of the Vita controls (Cross=A, Square=B, Circle=X, Triangle=Y, L, R,
  * Select=Z, Start, D-pad, left stick = main stick, right stick = C stick; dead zone 16, 80 % of
  * travel = +-72). Fills `pad` completely. */

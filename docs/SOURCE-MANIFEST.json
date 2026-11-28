@@ -7120,7 +7120,7 @@
   },
   {
    "path": "native/platform/sdk/Makefile",
-   "sha256": "d5a3ad04062db1dbd2d05bbb85db9bd592ac5c2968b797a23ccfb2aa8d11b653"
+   "sha256": "c2d3aa1f07e8cd0f0602deceed0983611d964161e5485c1021994cb67b15922b"
   },
   {
    "path": "native/platform/sdk/dwc/README.md",
@@ -7312,7 +7312,7 @@
   },
   {
    "path": "native/platform/sdk/input/np_menu_nav.cpp",
-   "sha256": "21d9bf56cef7b683bdfa46c15542678b537c8e7ba21d965bda3485643b405cb2"
+   "sha256": "52e6f7b53bf57a854b2b7587a0703cde8accba9d800375e8af957bbe4a47abe6"
   },
   {
    "path": "native/platform/sdk/input/np_prompt_art.cpp",
@@ -7328,7 +7328,7 @@
   },
   {
    "path": "native/platform/sdk/input/np_touch.cpp",
-   "sha256": "e63df266eb214e8a8b1e8ddfa1331eab8a73e6cb89f858e38b5331cfb7ef120f"
+   "sha256": "1f89bf3525899b97f58e1ac97d4855f6484fb599e1b5a5cbdb86ce85fff6c941"
   },
   {
    "path": "native/platform/sdk/inputtest/test_menu_nav.cpp",
@@ -7508,7 +7508,7 @@
   },
   {
    "path": "native/platform/sdk/net/online/np_app_version.h",
-   "sha256": "dc21133b24261527322ba630c2b9dc0071ceebbca375ed94ac44cdda2386ac27"
+   "sha256": "f8134958d24e3d8fb942ca93629f044e84384bcf1af478cbe6209c15d844e6b4"
   },
   {
    "path": "native/platform/sdk/net/online/np_crypto.cpp",
@@ -7840,7 +7840,7 @@
   },
   {
    "path": "native/platform/sdk/src/input_native.cpp",
-   "sha256": "c37468f7dc27a7f839d703653a5746be0ceee1f72e6c3c146b2cb7deefaa6469"
+   "sha256": "347f3e50b23dd24d29ddc8aac7291851c7758b7fe8bd797ebfacaef24a3293e6"
   },
   {
    "path": "native/platform/sdk/src/mtx_native.c",
@@ -8016,7 +8016,7 @@
   },
   {
    "path": "native/platform/sdk/tests/test_disc_error.cpp",
-   "sha256": "9f2d1f7bacf903b6ecb02eba8bb9fe76d31daf857bf26c54bb362ad75d3b7290"
+   "sha256": "b96383110636208d8efc919e88a147f9722823dc82606633703a8998a7456f22"
   },
   {
    "path": "native/platform/sdk/tests/test_disc_error_no_hooks.cpp",
@@ -8068,7 +8068,7 @@
   },
   {
    "path": "native/platform/sdk/tests/test_input.cpp",
-   "sha256": "f0675b85e11c0ef1febbb192c845ffb4f241077e179add67bb712c1ddc7c135a"
+   "sha256": "666365bf6877605ae943c421e2427a8d1055ecb7d0532be8d239d1d56615ab4f"
   },
   {
    "path": "native/platform/sdk/tests/test_input_default.cpp",
@@ -8232,7 +8232,7 @@
   },
   {
    "path": "native/platform/vita/include/np_vita.h",
-   "sha256": "70161fc8b1e510a0f136ceddfa6ac3db4a3c22d67ff22d79560fc46606cc7e41"
+   "sha256": "a59ac2dfd5af96ac7001262815fa0a0be3123137f04d242c07973082b03b7277"
   },
   {
    "path": "native/platform/vita/lab/vitalab.py",
@@ -8544,7 +8544,7 @@
   },
   {
    "path": "native/platform/vita/src/np_build_identity.h",
-   "sha256": "965ae02ebfc779d228c1fb6cbd9907f12e19c6ad4cca88c2569a48e3642ab375"
+   "sha256": "7f292f03abd389e14418d3284d24e3b06059e6d68d3bce5bd112d0ad9f9152a8"
   },
   {
    "path": "native/platform/vita/src/np_change_guard.cpp",
@@ -8676,15 +8676,19 @@
   },
   {
    "path": "native/platform/vita/src/np_vita_input.cpp",
-   "sha256": "6f0be5e0dc49b40346583a177c9b8f5b84815d16d634844a4f38308622854f83"
+   "sha256": "8478e7a7f856629658619324755b9e46bb3b505924cda5abadfd86f078c9f3ec"
   },
   {
    "path": "native/platform/vita/src/np_vita_internal.h",
-   "sha256": "adb831100edb1e10b3716af5c882878867c8c22ca86706634a1729e475d46723"
+   "sha256": "1c3ba63b7148ffea4601a176a31560d7205f34f0c9f9094c7a53e36d3934596a"
   },
   {
    "path": "native/platform/vita/src/np_vita_main.cpp",
    "sha256": "928c27eb3272e7bba75b55b6317c9f3dfcaaf6d51be72b898b927eaa5f12242a"
+  },
+  {
+   "path": "native/platform/vita/src/np_vita_multipad.h",
+   "sha256": "f8fa5f4cbb974468bb193c2a7b69ea9b785cd6f820ff3d473f3a5dd9c9826056"
   },
   {
    "path": "native/platform/vita/src/np_vita_platform.cpp",
@@ -8708,7 +8712,7 @@
   },
   {
    "path": "native/platform/vita/src/np_vita_wire.cpp",
-   "sha256": "14a66caef891a217013250e8775c9bebe3fc797f1048874da82ffe8a0e5f2872"
+   "sha256": "607f433bbdb2a5dc096c105756c7ef264d1eb927a481a90655da7646484f5685"
   },
   {
    "path": "native/platform/vita/src/plat_realclock.h",
@@ -8808,7 +8812,7 @@
   },
   {
    "path": "native/platform/vita/tests/audit_settings_keys.py",
-   "sha256": "8626d1d90462de30f48d33126d92040278a698a159ada2f203934d3464be2bb2"
+   "sha256": "1e623ab61282e3208848700876bfb245439662d7d7e2eeb27dff3f36f2a0313d"
   },
   {
    "path": "native/platform/vita/tests/check_elf_hooks.py",
@@ -9404,7 +9408,7 @@
   },
   {
    "path": "native/platform/vita/vita.mk",
-   "sha256": "612bd7754adadcd9c238ba2af6d8c3c82fef477a5759e453a23ca74791ca6b5d"
+   "sha256": "1ad735b2b83ba0b2ec7a58414ca8a916b8b18d6a11e7e7b12bbc577e746f692f"
   },
   {
    "path": "native/platform/vita/vita_clang.mk",
@@ -9412,7 +9416,7 @@
   },
   {
    "path": "native/platform/vita/vita_require.mk",
-   "sha256": "29e56e9d11f56cb7ee52f8ec29ad212a2d01ea81c27b3927393ce9cfb58ceb71"
+   "sha256": "1f78660fa5d5709a60441b41d2ad0b528c9f504b834a3df8903b00b9d56907f3"
   },
   {
    "path": "native/platform/vita/vitagl/0001-glb-aligned-pool-stats-cached-stream-skip-sets.patch",
@@ -15564,7 +15568,7 @@
   },
   {
    "path": "native/tools/crowd/capture_lifecycle_platform.cpp",
-   "sha256": "bd87a299d0550316b8be9e5d140abfec66714138284968307bb84ff66897a2ca"
+   "sha256": "d43e7e0b1bed54f6392918aa3acb45a181b8fe3cd20e5526bba143d2442ab8d2"
   },
   {
    "path": "native/tools/crowd/capture_lifecycle_test.cpp",
@@ -16044,7 +16048,7 @@
   },
   {
    "path": "native/tools/fps/fps_gate_unit.cpp",
-   "sha256": "962bc3cc71b30b4a2e0efb5f901a892006f0e3498a76b33b5f2d4aa57442201a"
+   "sha256": "8db84878c44b9724f464e09a8f560498f6be3eb7337c7ba0f4c7cb460b331468"
   },
   {
    "path": "native/tools/fps/fps_hold30_unit.cpp",
@@ -16060,7 +16064,7 @@
   },
   {
    "path": "native/tools/fps/fps_probe_unit.cpp",
-   "sha256": "a45545a98f33bc556b2dc8ef6ec458d8d4ab6ee6100405e1f9c7e2526c5893eb"
+   "sha256": "3337f33923c28d0e6c240da1dd0824708dc8f078b07a05306dd90bdd7cc16233"
   },
   {
    "path": "native/tools/fps/fps_sticky_unit.cpp",
@@ -17204,7 +17208,7 @@
   },
   {
    "path": "native/tools/net/menu_flow_test.cpp",
-   "sha256": "ebc403880c81388770c721c9d0c5e5933217d8c29daab646912dcf1a2f5c1e9b"
+   "sha256": "1b3ac6b7baf7f6ea93d926c71244e69fa2a065bb7da8243180ea5fe3b1c6413f"
   },
   {
    "path": "native/tools/net/mpfix18_mutants.sh",
@@ -19240,7 +19244,7 @@
   },
   {
    "path": "renderer/src/vgx_shadertab.h",
-   "sha256": "078b6c513b8e78aa4ed5ef026d5a6c90e6fe95ec082d7250d50edcd19cf82cb1"
+   "sha256": "609a4ef2dc9fb32386a39336e7d4283adf650e64d85634a29b541a24f9ed570b"
   },
   {
    "path": "renderer/src/vgx_shadertext.h",
@@ -19560,7 +19564,7 @@
   },
   {
    "path": "renderer/tests/picture_half.cpp",
-   "sha256": "9994cfe78371f4b5c5fb78a9d93ae74ef90aec1733516b7f15596c3192ed7d09"
+   "sha256": "55cc50a9e579d5af8a483d4667675424af68e2f6a3717f6522806c6c3094b942"
   },
   {
    "path": "renderer/tests/picture_hold.cpp",
@@ -19816,7 +19820,7 @@
   },
   {
    "path": "renderer/tests/run_shader_forms_test.sh",
-   "sha256": "17daf6265f7d91866ecea65cad1cc3550d8ae9a59c1acc60a7050ebf1ce554ad"
+   "sha256": "e30647bae0a7645d31fe2839c39e05ce14462c71beecbf6e0c74ff60db3abc51"
   },
   {
    "path": "renderer/tests/run_shader_text_test.sh",
@@ -19976,7 +19980,7 @@
   },
   {
    "path": "renderer/tests/shader_forms_list.cpp",
-   "sha256": "132abbe45a3414c006b857e0e9ab5fe73c90395a6a2a3d60690b5dd40ff02692"
+   "sha256": "9510c7ea0e26c81bf3ddc70fe398031756180969b1aa817295a6a60a0a6750f9"
   },
   {
    "path": "renderer/tests/shader_text_gl.cpp",

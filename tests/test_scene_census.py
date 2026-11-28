@@ -76,7 +76,7 @@ class SceneCensus(unittest.TestCase):
 
     def test_hooks_are_in_the_scene_begin_paths_and_the_swap(self):
         self.assertEqual(GXM.count("scn_begin(gxm_render_target, 1);"), 1)
-        self.assertEqual(GXM.count("scn_begin(active_write_fb->target, 0);"), 1)
+        self.assertEqual(GXM.count("scn_begin(scene_rt, 0);"), 1)
         self.assertEqual(GXM.count("scn_frame_end();"), 1)
 
 

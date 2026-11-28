@@ -373,12 +373,13 @@ extern "C" void NpTouchSetViewport(float x, float y, float width, float height, 
 namespace NpTouch {
 
 bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint32_t epoch, uint32_t nowMs, bool menu) {
-    // Real HID remotes never contain the synthetic GameCube tag. The Vita owns only physical channel zero; no touch may
-    // leak to another or a disconnected pad.
-    const bool emulated = chan == 0 && ((*hold & 0x80u) != 0) && (((*hold >> 5) & 3u) == (uint32_t)chan);
+    // Real HID remotes never contain the synthetic GameCube tag. On PS TV / MiniVitaTV (2.0.1), players 2-4
+    // also run emulated channels (1..3) so their Mega Save aiming and R-button punch work; front/rear touch
+    // panels remain strictly on channel 0.
+    const bool emulated = chan >= 0 && chan < 4 && ((*hold & 0x80u) != 0) && (((*hold >> 5) & 3u) == (uint32_t)chan);
     if (chan < 0 || chan >= 4) return false;
     Channel& t = s_touch[chan];
-    if (raw.source == NP_RAW_BLOCKED && NpControls::RearSaveEnabled()) {
+    if (chan == 0 && raw.source == NP_RAW_BLOCKED && NpControls::RearSaveEnabled()) {
         t = Channel();
         return false;
     }
@@ -404,7 +405,7 @@ bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint3
             return false;
         }
     }
-    const bool rear = t.gate.mode == Mode::Save && raw.source == NP_RAW_LIVE && NpControls::RearSaveEnabled() &&
+    const bool rear = chan == 0 && t.gate.mode == Mode::Save && raw.source == NP_RAW_LIVE && NpControls::RearSaveEnabled() &&
                       NpControls::PhysicalMegaControlsAllowed();
     if (rear && menu) {
         t = Channel();
@@ -418,7 +419,7 @@ bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint3
     t.lastRearMs = nowMs;
     Frame frame;
     Viewport viewport = g_viewport;
-    const bool panel = touch_enabled() && mode_touch_enabled(t.gate.mode);
+    const bool panel = chan == 0 && touch_enabled() && mode_touch_enabled(t.gate.mode);
     if (rear) {
         // A grip or unavailable sample cannot arm a new gesture. An acquired finger may slide to an edge.
         frame.valid = raw.rear_count >= 0 && raw.rear_count <= 1;
@@ -473,8 +474,8 @@ bool Apply(int chan, const NpRawPad& raw, uint32_t* hold, float cursor[2], uint3
 bool PreserveWii(const DetInput* det, int channel) {
     // Called only for the tagged emulated input. Eligibility lasts throughout the defender's substates 0..9, independently
     // of contact, so it cannot oscillate.
-    if (channel != 0) return false;
-    const Gate g = query_gate(0);
+    if (channel < 0 || channel >= 4) return false;
+    const Gate g = query_gate(channel);
     return g.mode == Mode::Save && g.det == det;
 }
 
@@ -488,8 +489,8 @@ bool ConsumeShake(const DetInput* det) {
 }
 
 bool SelectSavePointerAxes(int chan, float rightX, float rightY, float* x, float* y) {
-    if (chan != 0) return false;
-    if (query_gate(0).mode != Mode::Save) return false;
+    if (chan < 0 || chan >= 4) return false;
+    if (query_gate(chan).mode != Mode::Save) return false;
     // Wave 6 (np_feel.h): with the hand's own curve the right stick drives the hand from its first unit of deflection, not from 0.2 (below that the
     // left stick took over and a light push of the right one did nothing); scripts keep the old threshold.
     // (the right stick takes the hand only past the hand's own dead zone, so a thumb resting just off centre does not take it from the left stick)

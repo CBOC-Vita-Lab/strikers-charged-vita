@@ -202,6 +202,10 @@ extern "C" void VgxPacedSceneHint(int) {}
 extern "C" int VgxDynResGrace() { return 0; }
 extern "C" int VgxDynResRoom() { return 0; }
 bool NpLanActive() { return g_lan; }
+extern "C" int g_npGsOn = 0;
+extern "C" int NpGsEnter(int) { return -1; }
+extern "C" void NpGsLeave(int) {}
+namespace VitaThreads { bool g_core3HeldNow() { return false; } }
 extern "C" int sceKernelGetThreadInfo(SceUID id, SceKernelThreadInfo* out) {
     if (!kernelAvailable || id != 1) return -1;
     out->runClocks = kernelClocks;

@@ -10,10 +10,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install 32-bit build tools and pytest
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib clang libclang-rt-18-dev
+          python3 -m pip install --quiet pytest
       - name: Release, installer-helper and setup tests
-        run: python3 -m unittest discover -s tests -v
-      - name: Install 32-bit build tools
-        run: sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib clang libclang-rt-18-dev
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 -m pytest tests/test_tools15.py -v
       - name: Impostor capture lifecycle regression (host32)
         run: bash native/tools/crowd/run_capture_lifecycle_test.sh "$RUNNER_TEMP/capture-lifecycle"
       - name: GPU timing sample validity regression (host contract)

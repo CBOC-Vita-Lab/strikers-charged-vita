@@ -32,8 +32,8 @@ int Finish() {
     CHECK(false); return -1;
 }
 bool g_beta = false;   // (mpbeta27) the beta cases ("beta-*") run with MSC_MP_BETA on; the 1.3.0 cases with MSC_MP_BETA=0 (the switch's off path is the old screens)
-void Begin() { CHECK(NpMenuWanted() == 1); NpMenuBegin(); Popup(g_beta ? "ONLINE BETA" : "ONLINE"); }
-void Local() { Begin(); Press(1); Popup(g_beta ? "NEARBY BETA" : "NEARBY"); }
+void Begin() { CHECK(NpMenuWanted() == 1); NpMenuBegin(); Popup("ONLINE"); }
+void Local() { Begin(); Press(1); Popup("NEARBY"); }
 bool FileThere(const char* p) { struct stat st; return stat(p, &st) == 0; }
 bool Env(const char* key, const char* value) { const char* actual = std::getenv(key); return actual && !std::strcmp(actual, value); }
 // A stored account (the format of np_menu_flow.cpp: online.dat v2), so that the flow reaches the transport.
@@ -107,24 +107,24 @@ int main(int argc, char** argv) {
     unsetenv("MSC_INPUT_SCRIPT");
     remove("mp-beta-seen.txt"); remove("mp-session.txt"); remove("mp-report.txt"); remove("online.dat"); remove("online_name.txt");
     if (which == "beta-notice") {
-        // the first visit: the notice with OK, then the mode choice with the tags and REPORT A PROBLEM; the second visit: no notice
+        // the first visit: the notice with OK, then the mode choice with clean labels and REPORT A PROBLEM; the second visit: no notice
         unsetenv("MSC_MP_BETA_NOTICE");
         NpMenuBegin(); Popup("OK"); CHECK(shownText == NpMpBeta::NoticeText()); CHECK(buttons[1].empty());
         CHECK(FileThere("mp-beta-seen.txt"));
-        Press(0); Popup("ONLINE BETA"); CHECK(buttons[1] == "LOCAL BETA"); CHECK(buttons[2] == "REPORT A PROBLEM");
-        Press(1); Popup("NEARBY BETA"); CHECK(buttons[1] == "SAME WI-FI BETA"); CHECK(buttons[2] == "BACK");
-        Back(); Popup("ONLINE BETA"); Back(); CHECK(Finish() == kNpMenuDone);
-        NpMenuBegin(); Popup("ONLINE BETA"); Back(); CHECK(Finish() == kNpMenuDone);   // seen: never again
+        Press(0); Popup("ONLINE"); CHECK(buttons[1] == "LOCAL"); CHECK(buttons[2] == "REPORT A PROBLEM");
+        Press(1); Popup("NEARBY"); CHECK(buttons[1] == "SAME WI-FI"); CHECK(buttons[2] == "BACK");
+        Back(); Popup("ONLINE"); Back(); CHECK(Finish() == kNpMenuDone);
+        NpMenuBegin(); Popup("ONLINE"); Back(); CHECK(Finish() == kNpMenuDone);   // seen: never again
         setenv("MSC_MP_BETA_NOTICE", "always", 1);
-        NpMenuBegin(); Popup("OK"); Press(0); Popup("ONLINE BETA"); Back(); CHECK(Finish() == kNpMenuDone);
-        CHECK(NpMpBeta::Count().notice == 2 && NpMpBeta::Count().reportEntry >= 4 && NpMpBeta::Count().tags >= 8);
+        NpMenuBegin(); Popup("OK"); Press(0); Popup("ONLINE"); Back(); CHECK(Finish() == kNpMenuDone);
+        CHECK(NpMpBeta::Count().notice == 2 && NpMpBeta::Count().reportEntry >= 4);
     } else if (which == "beta-scripted") {
         // a scripted run (harness, pair rig, kit route) walks straight into the mode choice unless it asks for the notice
         unsetenv("MSC_MP_BETA_NOTICE"); setenv("MSC_INPUT_SCRIPT", "route.txt", 1);
         Begin(); Back(); CHECK(Finish() == kNpMenuDone); CHECK(!FileThere("mp-beta-seen.txt"));
     } else if (which == "beta-online") {
         setenv("MSC_ONLINE_FRIENDS", "1", 1);
-        Begin(); Press(0); Popup("FRIENDS BETA"); CHECK(buttons[1] == "PLAY WITH ANYONE BETA");
+        Begin(); Press(0); Popup("FRIENDS"); CHECK(buttons[1] == "PLAY WITH ANYONE");
         Press(1); CHECK(Finish() == kNpMenuQuick);
         CHECK(NpMpDiag::CurrentTrail().link == NpMpDiag::kLinkOnline && NpMpDiag::CurrentTrail().play == NpMpDiag::kPlayQuick);
         unsetenv("MSC_ONLINE_FRIENDS");
@@ -135,22 +135,22 @@ int main(int argc, char** argv) {
     } else if (which == "beta-report-noaccount") {
         // REPORT A PROBLEM without an online account: the report is saved to a file and the player is told where; nothing is sent
         Begin(); Press(2); Popup("OK"); CHECK(shownText == NpMpBeta::SavedInstead()); CHECK(FileThere("mp-report.txt"));
-        Press(0); Popup("ONLINE BETA"); Back(); CHECK(Finish() == kNpMenuDone);
+        Press(0); Popup("ONLINE"); Back(); CHECK(Finish() == kNpMenuDone);
     } else if (which == "beta-report-account") {
         // with an account: the consent popup (CANCEL lit first); CANCEL sends nothing and goes back to the mode choice
         NpMpReport::Env e;
         e.account = [](NpMpReport::Account* a) { std::snprintf(a->name, sizeof a->name, "Tester"); std::snprintf(a->token, sizeof a->token, "t"); std::snprintf(a->urls, sizeof a->urls, "https://service.invalid"); return true; };
         NpMpReport::SetEnv(e);   // (UseNetwork is a no-op in this test: the account comes from here; start is null, so nothing could be sent)
         Begin(); Press(2); Popup("SEND"); CHECK(buttons[1] == "CANCEL"); CHECK(highlight == 1); CHECK(shownText == NpMpReport::ConsentText());
-        Press(1); Popup("ONLINE BETA"); Back(); CHECK(Finish() == kNpMenuDone);
+        Press(1); Popup("ONLINE"); Back(); CHECK(Finish() == kNpMenuDone);
     } else if (which == "beta-offer-crash") {
         // the last run closed inside a session (the marker is still there): the offer comes once, with its reason, before the mode choice
         FILE* f = std::fopen("mp-session.txt", "wb"); CHECK(f != 0); if (f) { std::fputs("lobby\n", f); std::fclose(f); }
         NpMenuBegin(); Popup("SEND A REPORT"); CHECK(buttons[1] == "NOT NOW");
         CHECK(shownText.compare(0, std::strlen(NpMpBeta::OfferLead(true, false)), NpMpBeta::OfferLead(true, false)) == 0);
         CHECK(!FileThere("mp-session.txt"));
-        Press(1); Popup("ONLINE BETA"); Back(); CHECK(Finish() == kNpMenuDone);
-        NpMenuBegin(); Popup("ONLINE BETA"); Back(); CHECK(Finish() == kNpMenuDone);   // once
+        Press(1); Popup("ONLINE"); Back(); CHECK(Finish() == kNpMenuDone);
+        NpMenuBegin(); Popup("ONLINE"); Back(); CHECK(Finish() == kNpMenuDone);   // once
     } else if (which == "beta-off-entry") {
         setenv("MSC_MP_REPORT_ENTRY", "0", 1);
         Begin(); CHECK(buttons[2] == "CANCEL"); Press(2); CHECK(Finish() == kNpMenuDone);

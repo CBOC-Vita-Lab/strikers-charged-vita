@@ -411,6 +411,7 @@ void ForgetChannel(int chan) {
     set_hand_visible(chan, true);
     s_state[chan] = State();
     s_hasSelected[chan] = false;
+    s_engaged[chan] = (chan == 0);
 }
 
 Result Update(int chan, uint32_t dir, NpPoint stick, bool backButton, int pageInput, float cursor[2], float dt) {

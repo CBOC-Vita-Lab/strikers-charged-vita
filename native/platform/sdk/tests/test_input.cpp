@@ -22,13 +22,14 @@ static int g_fail = 0;
 
 static NpRawPad fake;
 static int fake_present = 1;
+static int fake_present2 = 0;
 static int src(int pad, NpRawPad* out) {
-    if (pad != 0 || !fake_present) return 0;
-    *out = fake;
-    return 1;
+    if (pad == 0 && fake_present) { *out = fake; return 1; }
+    if (pad == 1 && fake_present2) { *out = fake; return 1; }
+    return 0;
 }
 static int connected[4];
-static void on_connect(WPADChannel chan, WPADResult r) { if (r == WPAD_ERR_OK) connected[chan] = 1; }
+static void on_connect(WPADChannel chan, WPADResult r) { if (r == WPAD_ERR_OK) connected[chan]++; }
 static void* alloc(u32 n) { return 0; }
 static BOOL freefn(void*) { return TRUE; }
 static int rumble_calls = 0, rumble_on = 0;
@@ -142,6 +143,21 @@ int main() {
     CHECK(pads[0].err == PAD_ERR_NONE && (pads[0].button & PAD_BUTTON_B) && (pads[0].button & PAD_TRIGGER_R) && (pads[0].button & PAD_BUTTON_UP));
     CHECK(pads[0].triggerRight == 255 && pads[0].stickX == -72);
     CHECK(pads[1].err == PAD_ERR_NO_CONTROLLER);
+
+    // hot-plug and reconnect of controller 2 (PS TV local multiplayer)
+    fake_present2 = 1;
+    settle();
+    CHECK(WPADProbe(0, &dev) == WPAD_ERR_OK);
+    CHECK(connected[1] == 1);
+    CHECK(WPADProbe(1, &dev) == WPAD_ERR_OK && dev == WPAD_DEV_FREESTYLE);
+    fake_present2 = 0;
+    settle();
+    CHECK(WPADProbe(1, &dev) == WPAD_ERR_NO_CONTROLLER);
+    fake_present2 = 1;
+    settle();
+    CHECK(WPADProbe(0, &dev) == WPAD_ERR_OK);
+    CHECK(connected[1] == 2);
+    fake_present2 = 0;
 
     // unplugged
     fake_present = 0;

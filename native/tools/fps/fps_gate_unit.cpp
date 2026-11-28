@@ -9,6 +9,10 @@
 #include <deque>
 #include "../../platform/compat/np_fps.cpp"
 
+extern "C" int g_npGsOn = 0;
+extern "C" int NpGsEnter(int) { return -1; }
+extern "C" void NpGsLeave(int) {}
+
 namespace {
 double ticks;
 uint64_t sent, shown;
@@ -44,6 +48,7 @@ void Reset(int depth) {
     g_fifCalls = g_fifRetryAt = g_fifStrikes = 0;
     g_fifRetry = -1;
     g_lateAnchorMode = -1;
+    setenv("MSC_LAT_BP", "0", 1);   // wave 11 made back-pressure default ON; this unit tests the frames-in-flight gate (MSC_LAT_DEPTH)
     setenv("MSC_LAT_ANCHOR", anchorMode ? "1" : "0", 1);
     setenv("MSC_LAT_RETRY", retryMode ? "1" : "0", 1);
     g.policy = npfps::kPolicy30;

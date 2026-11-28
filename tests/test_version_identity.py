@@ -15,7 +15,7 @@ def read(path):
 
 def dotted(app_ver):
     major, minor = app_ver.split(".")
-    return "%d.%d.0" % (int(major), int(minor) // 10) if int(minor) % 10 == 0 else "%d.%d" % (int(major), int(minor))
+    return "%d.%d.%d" % (int(major), int(minor) // 10, int(minor) % 10)
 
 
 class VersionIdentity(unittest.TestCase):
@@ -23,7 +23,7 @@ class VersionIdentity(unittest.TestCase):
         self.app_ver = re.search(r"^NP_APP_VER\s*\?=\s*([0-9]{2}\.[0-9]{2})", read("native/platform/vita/vita.mk"), re.M).group(1)
 
     def test_sfo_version_is_the_game_version(self):
-        self.assertEqual(self.app_ver, "02.00")
+        self.assertEqual(self.app_ver, "02.01")
         built = re.search(r'return AppVersionValid\(NP_ONLINE_APP_VERSION\) \? NP_ONLINE_APP_VERSION : "([0-9.]+)"', read("native/platform/sdk/net/online/np_app_version.h")).group(1)
         self.assertEqual(built, dotted(self.app_ver))
         fallback = re.search(r"#else\s+return \"([0-9.]+)\";", read("native/platform/sdk/net/online/np_app_version.h")).group(1)
@@ -31,7 +31,9 @@ class VersionIdentity(unittest.TestCase):
 
     def test_release_files_agree(self):
         release = json.loads(read("cboc-release.json"))
-        self.assertEqual(release["version"], dotted(self.app_ver).rsplit(".", 1)[0])
+        ver = dotted(self.app_ver)
+        expected = ver.rsplit(".", 1)[0] if ver.endswith(".0") else ver
+        self.assertEqual(release["version"], expected)
         text = read("docs/RELEASE.json")
         self.assertIn("--app-version " + self.app_ver, text)
 

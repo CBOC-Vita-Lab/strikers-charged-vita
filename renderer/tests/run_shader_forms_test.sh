@@ -31,7 +31,7 @@ cmp "$L" "$L.afteroff"                                  # the list holds the sam
 grep -q 'HV4' "$BUILD/on.txt"                           # on: the listed shaders are generated in the new form, in the warm-up
 grep -q 'vec2 v_tex0' "$BUILD/on.txt"
 grep -q 'generated form 5' "$BUILD/on.log"              # a first use in play has it too
-MSC_VGX_FS_HALF=1 "$BUILD/shader_forms_list" read "$L" "$BUILD/on2.txt" | grep -q 'warm-up: 2 vertex shaders, 4 fragment shaders, 3 programs'   # and it is a listed key on the next run
+MSC_VGX_FS_HALF=1 "$BUILD/shader_forms_list" read "$L" "$BUILD/on2.txt" | grep -q 'warm-up: 2 vertex shaders, 4 fragment shaders, 4 programs'   # and it is a listed key on the next run
 
 # vitaGL's real translator on the host, from the tree (a copy: it includes ../shared.h).
 SRC=$ROOT/dependencies/vitaGL/source

@@ -144,11 +144,14 @@ $(LIB): $(ALL_OBJS)
 	$(if $(filter vita,$(T)),$(VITASDK)/bin/arm-vita-eabi-ar,$(if $(filter armhf,$(T)),arm-linux-gnueabihf-ar,ar)) rcs $@ $^
 
 # ---- unit tests (host32 / armhf) ---------------------------------------------------------------
-TESTS := $(basename $(notdir $(wildcard $(HERE)/tests/test_*.cpp)))
+# Standalone cut/net/report harnesses with custom --wrap or mock-SDK link lines run from tests/test_*.py.
+STANDALONE_TESTS := test_safe_file test_nand_save_cut test_nand_nosave test_save_import \
+                    test_mpbeta test_mpdiag test_mpreport test_conntest test_thp_fallback
+TESTS := $(filter-out $(STANDALONE_TESTS),$(basename $(notdir $(wildcard $(HERE)/tests/test_*.cpp))))
 TEST_BINS := $(patsubst %,$(B)/tests/%,$(TESTS))
 $(B)/tests/%: $(HERE)/tests/%.cpp $(LIB) $(SDKINC)/.stamp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $< -o $@.o -c
+	$(CXX) $(CXX17FLAGS) -I$(NP) $< -o $@.o -c
 	$(LD) $(ARCH) $@.o $(LIB) $(LIBS) -o $@
 $(B)/tests/test_disc_error $(B)/tests/test_disc_error_no_hooks: $(B)/tests/%: $(HERE)/tests/%.cpp $(NP)/platform/compat/np_disc_error.cpp $(LIB) $(SDKINC)/.stamp
 	@mkdir -p $(dir $@)

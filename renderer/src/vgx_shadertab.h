@@ -31,6 +31,7 @@ public:
         return SlowConst(i);
     }
     template <class F> void each(F f) const { for (const T& x : lo_) f(x); for (const T& x : hi_) f(x); }
+    void clear() { lo_.clear(); hi_.clear(); }
     size_t stored() const { return lo_.size() + hi_.size(); }
 private:
     size_t ResolveSplit() {

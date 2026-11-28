@@ -6,12 +6,18 @@ This isn't emulation and it isn't streaming. The full Wii game has been rebuilt 
 
 ![Gameplay on a PS Vita](store/screenshots/gameplay-vita.png)
 
-**[Download Version 2.0](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest)** ·
+**[Download Version 2.0.1](https://github.com/CBOC-Vita-Lab/strikers-charged-vita/releases/latest)** ·
 [Easy Install](EASY-INSTALL.md) · [Manual Install](MANUAL-INSTALL.md) · [Controls](CONTROLS.md) · [Live Leaderboard](https://strikers.psvita.dev/leaderboard) · [Full Release Notes](CHANGELOG.md)
 
 > Bring your own Wii USA (Rev 1) disc copy of *Mario Strikers Charged*. No Nintendo game data or artwork is bundled in this repository or VPK.
 
 ---
+
+## What's New In Version 2.0.1
+
+- **2–4 player same-console local multiplayer** on **PlayStation TV (PSTV)** and **handheld PS Vita** with extra paired Bluetooth controllers (e.g. `MiniVitaTV`), with **live hot-plugging and reconnection** — no restart needed.
+- **DualShock 3 / DualShock 4 `L2`/`R2` triggers & per-player rumble** (`L2` = Cycle Item / Shakedown, `R2` = Chip & Run / Mega Save block, independent vibration per controller; handheld + `ds34vita` supported with no ghost Player 2).
+- **100% Online & Local cross-compatible with 2.0** — update seamlessly over 2.0 without losing saves, settings, or matchmaking compatibility.
 
 ## Highlights — What's New In Version 2.0
 
@@ -48,7 +54,7 @@ See the [full Version 2.0 changelog](CHANGELOG.md) for the complete breakdown, i
 | **Multiplayer *(Beta)*** | First-ever **Online** (Friend Room Codes, Quick Play, Ranked [Leaderboard](https://strikers.psvita.dev/leaderboard)) and **Local** (Same Wi-Fi & Nearby) play on PS Vita |
 | **Mega Strikes & Mega Saves** | Smooth, steady Mega Strikes with zero mid-scene resolution jumps; Mega Save gloves and balls sharp at full **960×544** |
 | **Loading & Stutters** | 4,281 prebuilt Vita shaders included (~1.2 s warm-up), virtually eliminating mid-match shader compile freezes |
-| **Controls** | Snappy Modern & Classic layouts, tuned Mega Save aiming, plus optional touch and rear-touch support |
+| **Controls** | Snappy Modern & Classic layouts, 2–4P same-console PS TV / external controllers with DualShock 3/4 `L2`/`R2`, rumble & hot-plug, tuned Mega Save aiming, plus optional touch and rear-touch support |
 | **Artwork & Languages** | Auto-generated loading screen, LiveArea & Home bubble from your own disc; full English, Spanish, and French UI |
 | **Saves & Updates** | Crash-safe atomic saves with backup; updates cleanly right over 1.0/1.1 without touching your saves or game files |
 

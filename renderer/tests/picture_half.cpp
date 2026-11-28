@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
             Check(shaders.at(id).source.find("varying vec4 v_col0") != std::string::npos, "with float varyings");
         }
         Check(halfRefusals == 3, "three refusals, then no more half attempts");
-        for (GLuint id : g_fs) if (id) TestDeleteShader(id);
+        g_fs.each([](GLuint id) { if (id) TestDeleteShader(id); });
         g_fs.clear(); g_fsSrc.clear(); g_fsAttempts.clear();
         refuseHalfText = false;
     }
@@ -251,7 +251,7 @@ int main(int argc, char** argv) {
         Check(CompileShaderSlot(src[2], true) != 0, "after the warm-up a new key is not held back");
         g_serial = serial;
         fakeHeapKiB = 0;
-        for (GLuint id : g_fs) if (id) TestDeleteShader(id);
+        g_fs.each([](GLuint id) { if (id) TestDeleteShader(id); });
         g_fs.clear(); g_fsSrc.clear(); g_fsAttempts.clear();
     }
     Reset();

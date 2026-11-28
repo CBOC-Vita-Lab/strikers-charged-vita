@@ -6,7 +6,7 @@
 #include "../../sdk/net/online/np_app_version.h"
 
 namespace NpBuildIdentity {
-inline const char* Version() { return NpNet::BuiltAppVersion(); }   // "2.0.0"
+inline const char* Version() { return NpNet::BuiltAppVersion(); }   // "2.0.1"
 inline const char* BuildId() {
 #ifdef NP_BUILD_ID
     return NP_BUILD_ID;

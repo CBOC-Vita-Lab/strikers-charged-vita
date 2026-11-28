@@ -67,7 +67,8 @@ def defined_in(dirs, name):
     pat = re.compile(r'^[A-Za-z_][^;\n]*?[\s\*&]' + re.escape(name) + r'\s*\(')
     for p in sources(dirs):
         for line in p.read_text(errors="replace").splitlines():
-            if pat.search(line) and "weak" not in line and not line.rstrip().endswith(";") and not line.lstrip().startswith("//"):
+            m = pat.search(line)
+            if m and "weak" not in line and not line.rstrip().endswith(";") and not line.lstrip().startswith("//") and not re.search(r'\)\s*\{', line[:m.end()]):
                 return str(p.relative_to(ROOT))
     return None
 

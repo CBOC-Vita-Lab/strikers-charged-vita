@@ -75,6 +75,15 @@ players when defending and never passes while attacking.
 - **Menus:** Cross confirms; Circle goes back in Modern, Square in Classic.
   D-pad/sticks move and L/R changes page. Front-pointer touch is optional.
 
+## Local Same-Console Multiplayer (PS TV & External Controllers)
+
+Version 2.0.1 supports **2 to 4 players on one console** — both on **PlayStation TV (PSTV)** with paired DualShock 3 / DualShock 4 controllers and on a **handheld PS Vita** using extra paired Bluetooth controllers (such as via `MiniVitaTV`).
+
+- **Plug-and-play hot-plugging:** Controllers can be turned on, paired, disconnected, or reconnected at any time (including on the Choose Sides screen) without restarting the game.
+- **DualShock 3 / DualShock 4 triggers:** `L1` / `R1` act as Vita `L` / `R`, **`L2`** acts as `Select` (Cycle Item / Shakedown), and **`R2`** acts as `R` (Chip & Run / Mega Save block). On handheld Vita with `ds34vita`, your mirrored DualShock 3/4 also gets working `L2`/`R2` triggers and vibration with no duplicate Player 2.
+- **Per-player rumble:** DualShock 3 and DualShock 4 controllers vibrate independently for each player's tackles, hits, and Mega Strikes. Add `MSC_RUMBLE=0` to `ux0:data/mscharged/np-player.txt` to disable vibration.
+- **Online / LAN safety:** Extra local controllers are automatically paused while an Online or Vita-to-Vita LAN session is active so lockstep stays clean (`MSC_MULTIPAD=0` disables local multi-controller mode altogether).
+
 ## Camera
 
 Go to **Options > Visual**. Select level 5, then press its button again to
@@ -83,8 +92,6 @@ still moves the camera with play. Levels 6 and 7 are closer views; the
 computer team's visibility is widened so the closer camera does not simply
 hide passing and item opportunities from it.
 
-Existing saves keep their camera choice until changed. The Options cycle,
-level 6 gameplay, rear touch and final-package settings persistence still
-need current Vita acceptance. The touch mappings above are source-backed;
-their complete hardware checks, motion, PS TV and external-controller
-behavior remain unverified.
+Existing saves keep their camera choice until changed. The touch, PS TV, and
+multi-controller mappings above are backed by automated host tests; community
+testing across additional DualShock 3/4 and PS TV setups is welcome.

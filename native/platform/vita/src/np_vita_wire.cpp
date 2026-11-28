@@ -49,6 +49,7 @@ typedef int (*NpInputSourceFn)(int pad, NpRawPad* out);
 typedef void (*NpRumbleFn)(int pad, int on);
 void NpSdk_SetAudioSink(const NpAudioSink* sink) __attribute__((weak));
 void NpSdk_SetInputSource(NpInputSourceFn fn) __attribute__((weak));
+void NpSdk_SetRumbleSink(NpRumbleFn fn) __attribute__((weak));
 void NpSdk_SetQuitHook(void (*hook)(int reason)) __attribute__((weak));
 void NpSdk_SetInputBlocked(int blocked) __attribute__((weak));   // NPS2: 1 = the platform owns the display (the controller reads neutral)
 
@@ -91,6 +92,12 @@ struct np_gx_config {
 };
 int np_gx_start(const np_gx_config* config) __attribute__((weak));
 }
+
+// Weak C++ hooks from platform/sdk/net & dwc (same linkage as np_vita_platform.cpp):
+// gate local extra pads (P2-P4) off while an online or LAN session/menu flow is active.
+bool NpLanActive() __attribute__((weak));
+bool NpOnlineFlowActive() __attribute__((weak));
+bool NpLanEntryActive() __attribute__((weak));
 
 namespace {
 std::atomic<bool> g_settingsActive{false};
@@ -173,15 +180,32 @@ void ScriptStick(int sx, int sy, uint8_t* ox, uint8_t* oy) {
     *oy = static_cast<uint8_t>(ry < 0 ? 0 : ry > 255 ? 255 : std::lround(ry));
 }
 
+bool MultiPadAllowedNow() {
+    static const int mode = [] {
+        const char* e = std::getenv("MSC_MULTIPAD");
+        if (!e || !*e) return 1;                 // default: local multi-controller enabled, gated off during online/LAN
+        if (std::strcmp(e, "0") == 0) return 0;  // off
+        if (std::strcmp(e, "online") == 0) return 2;
+        return 1;
+    }();
+    if (mode == 0) return false;
+    if (mode == 2) return true;
+    const bool netBusy = (NpLanActive && NpLanActive()) ||
+                         (NpOnlineFlowActive && NpOnlineFlowActive()) ||
+                         (NpLanEntryActive && NpLanEntryActive());
+    return !netBusy;
+}
+
 int InputSource(int pad, NpRawPad* out) {
-    if (pad != 0 || !out) return 0;                            // one controller: the console's own
+    if (pad < 0 || pad >= 4 || !out) return 0;
     std::memset(out, 0, sizeof(*out));
     out->lx = out->ly = out->rx = out->ry = 128;
     out->rear_count = -1;
     if (NpHarnessActive()) {
         const bool ownsPad = NpHarnessOwnsPad() != 0;
-        g_harnessKeepAwake.store(ownsPad || HasMaxFramesEnv(), std::memory_order_relaxed);
+        if (pad == 0) g_harnessKeepAwake.store(ownsPad || HasMaxFramesEnv(), std::memory_order_relaxed);
         if (ownsPad) {   // a script plays; logging alone (MSC_WATCH, MSC_FRAME_TIMING) keeps the real pad
+            if (pad > 0) return 0;
             NpPadState st;
             std::memset(&st, 0, sizeof(st));
             if (NpHarnessFillPad(&st)) {
@@ -197,33 +221,44 @@ int InputSource(int pad, NpRawPad* out) {
             return 1;                                              // a script owns the pad: untouched controller between its commands
         }
     }
+    if (pad > 0 && !MultiPadAllowedNow()) return 0;
     NpVitaInput in;
-    if (!NpVitaReadInput(&in)) { out->source = 3; return 1; } // NP_RAW_BLOCKED, SDK ABI declaration above
-    // Suppress only still-held UI buttons. Touch, sticks and unrelated buttons
+    if (!NpVitaReadPad(pad, &in)) {
+        if (pad == 0) { out->source = 3; return 1; }               // NP_RAW_BLOCKED: Player 1 stays present neutral
+        return 0;                                                  // Players 2..4 report disconnected
+    }
+    // Suppress only still-held UI buttons on Player 1 after leaving Settings. Touch, sticks and unrelated buttons
     // remain live, including a finger resting on the rear panel.
-    in.buttons &= ~g_settingsReleaseButtons.fetch_and(in.buttons, std::memory_order_relaxed);
+    if (pad == 0) in.buttons &= ~g_settingsReleaseButtons.fetch_and(in.buttons, std::memory_order_relaxed);
     out->buttons = in.buttons;
     out->lx = in.lx; out->ly = in.ly; out->rx = in.rx; out->ry = in.ry;
-    int n = in.touchCount;
-    if (n > 6) n = 6;
-    out->touch_count = n;
-    for (int i = 0; i < n; ++i) {
-        out->touch[i].id = in.touch[i].id;
-        out->touch[i].x = in.touch[i].x;
-        out->touch[i].y = in.touch[i].y;
-    }
-    n = in.rearCount;
-    if (n > 6) n = 6;
-    out->rear_count = n;
-    for (int i = 0; i < n; ++i) {
-        out->rear[i].id = in.rear[i].id;
-        out->rear[i].x = in.rear[i].x;
-        out->rear[i].y = in.rear[i].y;
+    if (pad == 0) {
+        int n = in.touchCount;
+        if (n > 6) n = 6;
+        out->touch_count = n;
+        for (int i = 0; i < n; ++i) {
+            out->touch[i].id = in.touch[i].id;
+            out->touch[i].x = in.touch[i].x;
+            out->touch[i].y = in.touch[i].y;
+        }
+        n = in.rearCount;
+        if (n > 6) n = 6;
+        out->rear_count = n;
+        for (int i = 0; i < n; ++i) {
+            out->rear[i].id = in.rear[i].id;
+            out->rear[i].x = in.rear[i].x;
+            out->rear[i].y = in.rear[i].y;
+        }
     }
     return 1;
 }
 
+void RumbleSink(int pad, int on) {
+    NpVitaSetRumble(pad, on);
+}
+
 void QuitHook(int reason) {
+    NpVitaStopAllRumble();
     std::fprintf(stderr, "[vita] the game asked to leave (OS_SHUTDOWN reason %d)\n", reason);
     VitaPlan::Heartbeat(VitaPlatform::FrameCount() >= 120 ? 900 : 0);   // (a clean leave after 4 s of play counts as a start that worked)
     VitaPlan::LaunchClean("the game's quit");   // stab13 MSC_LAUNCH_GUARD
@@ -360,6 +395,7 @@ int StallWatch(SceSize, void*) {
 extern "C" unsigned np_vita_wake_epoch(void) { return g_wakeEpoch.load(std::memory_order_relaxed); }   // (wave 14: the disc layer's longer retry window after a resume, dvd_native.cpp)
 static int PowerCallback(int, int, int powerInfo, void*) {
     if (powerInfo & (SCE_POWER_CB_APP_SUSPEND | SCE_POWER_CB_SYSTEM_SUSPEND | SCE_POWER_CB_THERMAL_SUSPEND | SCE_POWER_CB_LOW_BATTERY_SUSPEND)) {
+        NpVitaStopAllRumble();
         std::fprintf(stderr, "[vita] power suspend (0x%08X)\n", static_cast<unsigned>(powerInfo));
     }
     if (powerInfo & (SCE_POWER_CB_APP_RESUME | SCE_POWER_CB_APP_RESUMING | SCE_POWER_CB_SYSTEM_RESUME | SCE_POWER_CB_SYSTEM_RESUMING | SCE_POWER_CB_AFTER_SYSTEM_RESUME)) {
@@ -416,6 +452,7 @@ bool BeginSettings() {
         return false;
     }
     g_settingsActive.store(true, std::memory_order_release);
+    NpVitaStopAllRumble();
     std::fprintf(stderr, "[settings] game paused at frame %llu\n", static_cast<unsigned long long>(FrameCount()));
     return true;
 }
@@ -440,6 +477,7 @@ int WireSdkAndRenderer() {
         ++wired;
     }
     if (NpSdk_SetInputSource) { NpSdk_SetInputSource(InputSource); ++wired; }
+    if (NpSdk_SetRumbleSink) { NpSdk_SetRumbleSink(RumbleSink); }
     if (NpSdk_SetQuitHook) { NpSdk_SetQuitHook(QuitHook); ++wired; }
     if (np_plat_set_thread_hook) np_plat_set_thread_hook(ThreadHook);
     if (vgxn_vita_set_services) {
@@ -495,9 +533,10 @@ int WireSdkAndRenderer() {
         if (r < 0) std::fprintf(stderr, "[vita] the stall watch thread did not start (0x%08X): no stall report, and the core plan's guard is not cleared\n", static_cast<unsigned>(r));
     }
     VitaSampler::Start();   // diag13: MSC_SAMPLER=1 (default off), the on-console pc sampler; this is the game thread
-    std::fprintf(stderr, "[vita] wiring: SDK audio sink %s, input source %s, quit hook %s, renderer services %s\n",
+    std::fprintf(stderr, "[vita] wiring: SDK audio sink %s, input source %s, rumble sink %s, quit hook %s, renderer services %s\n",
                  NpSdk_SetAudioSink ? "set" : "(SDK layer not linked)", NpSdk_SetInputSource ? "set" : "-",
-                 NpSdk_SetQuitHook ? "set" : "-", vgxn_vita_set_services ? "set" : "(renderer not linked)");
+                 NpSdk_SetRumbleSink ? "set" : "-", NpSdk_SetQuitHook ? "set" : "-",
+                 vgxn_vita_set_services ? "set" : "(renderer not linked)");
     return wired;
 }
 

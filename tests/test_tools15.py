@@ -8,7 +8,11 @@ import sys
 import tempfile
 import zipfile
 
-import pytest
+try:
+    import pytest
+except ModuleNotFoundError:
+    import unittest
+    raise unittest.SkipTest("pytest not installed (run with pytest)")
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PY = [sys.executable, "-I"]

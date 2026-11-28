@@ -26,9 +26,9 @@ inline bool AppVersionValid(const char* v) {
 // part of the multiplayer fingerprint (so_net.cpp NpLanFingerprint). No environment switch reaches this one.
 inline const char* BuiltAppVersion() {
 #ifdef NP_ONLINE_APP_VERSION
-    return AppVersionValid(NP_ONLINE_APP_VERSION) ? NP_ONLINE_APP_VERSION : "2.0.0";
+    return AppVersionValid(NP_ONLINE_APP_VERSION) ? NP_ONLINE_APP_VERSION : "2.0.1";
 #else
-    return "2.0.0";
+    return "2.0.1";
 #endif
 }
 

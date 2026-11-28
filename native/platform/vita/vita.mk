@@ -80,9 +80,9 @@ else
 NP_TITLE_ID ?= MSCN00001
 NP_TITLE    ?= Mario Strikers Charged (native test)
 endif
-# The version in param.sfo (APP_VER, NN.NN): plain release numbers, 02.00 for 2.0 (VitaDB lists the app by it). Raise it with every release,
+# The version in param.sfo (APP_VER, NN.NN): plain release numbers, 02.01 for 2.0.1 (VitaDB lists the app by it). Raise it with every release,
 # with cboc-release.json's "version" and NP_ONLINE_APP_VERSION (platform/sdk/net/online/np_app_version.h).
-NP_APP_VER  ?= 02.00
+NP_APP_VER  ?= 02.01
 
 # Lab mode (lab/vitalab.py over Wi-Fi: upload builds, start runs, fetch logs; see lab/README.md):
 # on for test titles, off for the release build.

@@ -1,5 +1,20 @@
 # What's New
 
+## Version 2.0.1 — November 27, 2026
+
+**PlayStation TV & local multi-controller update — adding 2–4 player same-console multiplayer, DualShock 3/4 L2/R2 trigger bindings, per-player rumble, and live controller hot-plugging, while staying 100% Online & LAN compatible with 2.0.**
+
+### 2–4 Player Same-Console Multiplayer (PS TV & Handheld)
+- **Full 2–4 player local multiplayer on one console.** Play head-to-head or co-op on **PlayStation TV (PSTV)** with up to 4 paired DualShock 3 / DualShock 4 controllers — or on a **handheld PS Vita** with extra paired Bluetooth controllers (e.g. `MiniVitaTV`) — across Choose Sides, menus, matches, and Mega Saves.
+- **Live controller hot-plugging & reconnection.** Turn on, pair, disconnect, or reconnect DualShock controllers 2–4 at any time (including mid-menu or on Choose Sides) and the game picks them up immediately without needing a restart.
+- **DualShock 3 / DualShock 4 `L2`/`R2` trigger bindings & per-player rumble.** Maps `L1`/`R1` to Vita `L`/`R`, `L2` to `Select` (Cycle Item / Shakedown), and `R2` to `R` (Chip & Run / Mega Save block), with independent per-player DualShock 3/4 vibration (`sceCtrlSetActuator`; disable anytime with `MSC_RUMBLE=0`). Handheld Vita players using `ds34vita` also get `L2`/`R2` triggers and vibration on Player 1 with zero duplicate ghost Player 2.
+- **Zero regressions for handheld Vita & Online/LAN.** Handheld Player 1 keeps the exact same input path (full compatibility with remap plugins like `reVita`), and extra local controllers automatically pause during Vita-to-Vita Online and LAN sessions so lockstep stays clean (`MSC_MULTIPAD=0` disables multi-controller mode).
+
+### Maintenance & Compatibility
+- **Full `2.0 ↔ 2.0.1` Online & Local cross-compatibility.** Keeps the exact same simulation and link fingerprint as 2.0, so 2.0 and 2.0.1 consoles connect seamlessly online and over local Wi-Fi / Nearby play.
+- **CI & automated test suite fixes.** Resolved all automated host and 32-bit test suite regressions and added dedicated C++ unit tests for slot routing, `ds34vita` deduplication, `L2`/`R2` mapping, rumble gating, and controller hot-plugging.
+- **Clean `2.0.1` version reporting.** Displays `02.01` (`2.0.1`) in LiveArea / VitaDB and installs cleanly right over 2.0 without touching your game files, saves, or settings.
+
 ## Version 2.0 — November 27, 2026
 
 **Our biggest update yet — bringing smooth 60 fps gameplay with crisp dynamic resolution, the first-ever local and online multiplayer for Mario Strikers Charged on PS Vita, a complete stutter-free shader pack, automatic on-device artwork, Spanish & French support, and redesigned in-game settings.** *(Version 1.2 was shared briefly and withdrawn, so 2.0 includes every improvement from 1.2 along with months of new speed, visual, and stability work.)*
